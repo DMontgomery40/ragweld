@@ -1,6 +1,12 @@
 import { useCallback, useState } from 'react';
 import { useAPI } from './useAPI';
-import type { IndexRequest, IndexStats, IndexStatus, IndexRunConflictResponse } from '@/types/generated';
+import type {
+  IndexRequest,
+  IndexStats,
+  IndexStatus,
+  IndexRunConflictResponse,
+  PersistedStateCorruptDetail,
+} from '@/types/generated';
 import { TerminalService } from '@/services/TerminalService';
 
 type UseIndexingState = {
@@ -49,7 +55,11 @@ function describeIndexStartFailure(status: number, body: string): string {
     if (d?.code === 'index_fence_corrupt') {
       return `${d.message} ${d.operator_hint}`;
     }
-    return 'Index request conflicted (409) but the response was not the typed fence envelope; check the API contract.';
+    const corrupt = parsed?.detail as PersistedStateCorruptDetail | undefined;
+    if (corrupt?.code === 'persisted_state_corrupt') {
+      return `${corrupt.message} ${corrupt.operator_hint}`;
+    }
+    return 'Index request conflicted (409) but the response was not a typed envelope; check the API contract.';
   }
   return body || `Index request failed (${status})`;
 }

@@ -53,6 +53,7 @@ logger = logging.getLogger(__name__)
 GENERATION_META_KEY = "generation"
 INDEX_FENCE_META_KEY = "index_run"
 INDEX_TOMBSTONE_META_KEY = "index_tombstone"
+RECLAIM_BACKLOG_META_KEY = "reclaim_backlog"
 
 
 class RetiredGeneration(BaseModel):
@@ -213,7 +214,7 @@ class DeletionTombstone(BaseModel):
     graph_repo_ids: list[str] = Field(default_factory=list)
     created_at: datetime
     revision: str = Field(
-        default_factory=lambda: uuid.uuid4().hex,
+        min_length=8,
         description="Minted on every write; the cleanup that clears the tombstone must hold this exact revision.",
     )
     intent: Literal["deindex", "delete_corpus"] = Field(
@@ -238,6 +239,29 @@ class DeletionTombstone(BaseModel):
             revision=uuid.uuid4().hex,
             intent="delete_corpus" if "delete_corpus" in (self.intent, other.intent) else "deindex",
         )
+
+
+class ReclaimEntry(BaseModel):
+    """Staged inventory of a dead run, kept on the corpus row until its cleanup is confirmed."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: str = Field(min_length=1)
+    staged_qdrant_collection: str | None = None
+    staged_graph_repo_id: str | None = None
+    recorded_at: datetime
+
+
+def reclaim_backlog_from_meta(
+    meta: dict[str, Any] | None, *, repo_id: str = ""
+) -> list[ReclaimEntry]:
+    raw = meta.get(RECLAIM_BACKLOG_META_KEY) if isinstance(meta, dict) else None
+    if raw is None:
+        return []
+    try:
+        return [ReclaimEntry.model_validate(item) for item in raw]
+    except Exception as exc:
+        raise PersistedStateCorruptError(repo_id, RECLAIM_BACKLOG_META_KEY, raw) from exc
 
 
 class IndexFenceHeldError(RuntimeError):
@@ -430,6 +454,7 @@ def build_tombstone(
         qdrant_collections=generation.all_qdrant_collections() if generation else [],
         graph_repo_ids=generation.all_graph_repo_ids() if generation else [],
         created_at=now or datetime.now(UTC),
+        revision=uuid.uuid4().hex,
         intent=intent,
     )
 
@@ -476,22 +501,30 @@ async def drop_tombstoned_stores(
     return int(removed or 0)
 
 
-async def reclaim_stale_run(config: TriBridConfig, repo_id: str, fence: IndexRunFence) -> None:
-    """Best-effort exact cleanup of a dead run's staged resources (its fence was taken over)."""
+async def reclaim_stale_run(config: TriBridConfig, repo_id: str, entry: ReclaimEntry) -> bool:
+    """Exact cleanup of a dead run's staged resources; True only when every store confirmed it.
+
+    The entry stays on the corpus row's reclaim backlog until this returns
+    True, so a failure here (or a crash right after the takeover) never loses
+    the only record of those ids.
+    """
     from server.db.neo4j import Neo4jClient
+    from server.db.postgres import PostgresClient
     from server.retrieval.qdrant_store import QdrantChunkStore
 
-    if fence.staged_qdrant_collection:
+    ok = True
+    if entry.staged_qdrant_collection:
         try:
-            await QdrantChunkStore(config).drop_generation(fence.staged_qdrant_collection)
+            await QdrantChunkStore(config).drop_generation(entry.staged_qdrant_collection)
         except Exception as exc:
+            ok = False
             logger.warning(
                 "reclaiming staged collection %s of dead run %s failed: %s",
-                fence.staged_qdrant_collection,
-                fence.run_id,
+                entry.staged_qdrant_collection,
+                entry.run_id,
                 exc,
             )
-    if fence.staged_graph_repo_id:
+    if entry.staged_graph_repo_id:
         try:
             neo4j = Neo4jClient(
                 config.graph_storage.neo4j_uri,
@@ -501,16 +534,30 @@ async def reclaim_stale_run(config: TriBridConfig, repo_id: str, fence: IndexRun
             )
             await neo4j.connect()
             try:
-                await neo4j.delete_graph(fence.staged_graph_repo_id)
+                await neo4j.delete_graph(entry.staged_graph_repo_id)
             finally:
                 await neo4j.disconnect()
         except Exception as exc:
+            ok = False
             logger.warning(
                 "reclaiming staged graph %s of dead run %s failed: %s",
-                fence.staged_graph_repo_id,
-                fence.run_id,
+                entry.staged_graph_repo_id,
+                entry.run_id,
                 exc,
             )
+    try:
+        pg = PostgresClient(config.indexing.postgres_url)
+        await pg.connect()
+        try:
+            await pg.delete_corpus_with_data(f"__staging__{repo_id}__{entry.run_id}")
+            if ok:
+                await pg.clear_reclaim_entry(repo_id, entry.run_id)
+        finally:
+            await pg.disconnect()
+    except Exception as exc:
+        ok = False
+        logger.warning("reclaiming staging rows of dead run %s failed: %s", entry.run_id, exc)
+    return ok
 
 
 _PRE_RETENTION_KEYS = ("previous_qdrant_collection", "previous_graph_repo_id")
@@ -587,6 +634,30 @@ async def ensure_generation_manifests(config: TriBridConfig) -> int:
             if not repo_id or repo_id.startswith("__staging__"):
                 continue
             meta = row.get("meta") if isinstance(row.get("meta"), dict) else {}
+            # Every persisted key of the row is validated inside the SAME per-corpus
+            # quarantine boundary: a malformed tombstone, fence or backlog never
+            # gates the other corpora.
+            try:
+                raw_tombstone = meta.get(INDEX_TOMBSTONE_META_KEY)
+                if isinstance(raw_tombstone, dict) and "revision" not in raw_tombstone:
+                    # One-time backfill: tombstones written before revisions existed get
+                    # one here (a revision-less tombstone could never be cleared by CAS).
+                    minted = {**raw_tombstone, "revision": uuid.uuid4().hex}
+                    DeletionTombstone.model_validate(minted)
+                    await pg.update_corpus_meta(repo_id, {INDEX_TOMBSTONE_META_KEY: minted})
+                    meta = {**meta, INDEX_TOMBSTONE_META_KEY: minted}
+                    upgraded += 1
+                tombstone_from_meta(meta, repo_id=repo_id)
+                reclaim_backlog_from_meta(meta, repo_id=repo_id)
+                raw_fence = meta.get(INDEX_FENCE_META_KEY)
+                if raw_fence is not None:
+                    IndexRunFence.model_validate(raw_fence)
+            except Exception as exc:
+                quarantined[repo_id] = f"{type(exc).__name__}: {exc}"
+                logger.error(
+                    "corpus %s quarantined: malformed persisted index state (%s)", repo_id, exc
+                )
+                continue
             raw = meta.get(GENERATION_META_KEY)
             if raw is not None:
                 # Current shape must validate. A corrupt manifest quarantines THAT
@@ -618,7 +689,7 @@ async def ensure_generation_manifests(config: TriBridConfig) -> int:
                         "generation manifest of %s upgraded to the retained-list shape", repo_id
                     )
                 continue
-            if tombstone_from_meta(meta) is not None:
+            if tombstone_from_meta(meta, repo_id=repo_id) is not None:
                 continue
             # A pre-manifest corpus is live iff its Qdrant alias still points at a
             # collection (an indexed corpus, or an incremental one that wrote
@@ -685,6 +756,7 @@ __all__ = [
     "IndexFenceLostError",
     "IndexRunFence",
     "PersistedStateCorruptError",
+    "ReclaimEntry",
     "RetiredGeneration",
     "TombstoneCleanupError",
     "ValidationError",
@@ -700,6 +772,7 @@ __all__ = [
     "manifest_upgrade_blocked",
     "manifest_upgrade_complete",
     "quarantined_corpora",
+    "reclaim_backlog_from_meta",
     "qdrant_collection_of",
     "reclaim_stale_run",
     "tombstone_from_meta",

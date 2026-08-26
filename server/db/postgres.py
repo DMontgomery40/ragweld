@@ -26,6 +26,7 @@ if TYPE_CHECKING:
         FenceClaim,
         GenerationManifest,
         IndexRunFence,
+        ReclaimEntry,
         RetiredGeneration,
     )
 
@@ -109,6 +110,18 @@ def _sanitize_chunk_for_storage(chunk: Chunk) -> Chunk:
 
 
 logger = logging.getLogger(__name__)
+
+
+_HEARTBEAT_SQL = """
+UPDATE corpora
+SET meta = jsonb_set(
+    meta,
+    '{index_run,heartbeat_at}',
+    to_jsonb(to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US') || '+00:00')
+)
+WHERE repo_id = $1 AND meta->'index_run'->>'run_id' = $2
+RETURNING 1;
+"""
 
 
 class PostgresClient:
@@ -1862,6 +1875,8 @@ class PostgresClient:
             IndexFenceCorruptError,
             IndexRunFence,
             PersistedStateCorruptError,
+            ReclaimEntry,
+            reclaim_backlog_from_meta,
             tombstone_from_meta,
         )
 
@@ -1884,7 +1899,20 @@ class PostgresClient:
                 tombstone = tombstone_from_meta(meta, repo_id=repo_id)
                 if tombstone is not None:
                     raise DeletionIncompleteError(repo_id, tombstone)
+                raw_manifest = meta.get("generation")
+                live_manifest = None
+                if raw_manifest is not None:
+                    try:
+                        live_manifest = GenerationManifest.model_validate(raw_manifest)
+                    except Exception as exc:
+                        # Never fence a corpus whose manifest cannot be read: the run
+                        # could only fail at promotion and hold the corpus meanwhile.
+                        raise PersistedStateCorruptError(
+                            repo_id, "generation", raw_manifest
+                        ) from exc
+                reclaim_backlog_from_meta(meta, repo_id=repo_id)
                 existing = meta.get("index_run")
+                backlog_patch: dict[str, Any] | None = None
                 if existing is not None:
                     try:
                         held = IndexRunFence.model_validate(existing)
@@ -1893,17 +1921,6 @@ class PostgresClient:
                     if not held.is_stale(now=db_now, lease_seconds=lease_seconds):
                         return FenceClaim(held_by=held)
                     taken_over = held
-                    # Did the dead run commit before dying? Then its staged resources
-                    # are the live generation: the caller finalizes, never reclaims.
-                    raw_manifest = meta.get("generation")
-                    live_manifest = None
-                    if raw_manifest is not None:
-                        try:
-                            live_manifest = GenerationManifest.model_validate(raw_manifest)
-                        except Exception as exc:
-                            raise PersistedStateCorruptError(
-                                repo_id, "generation", raw_manifest
-                            ) from exc
                     taken_over_committed = live_manifest is not None and (
                         live_manifest.run_id == held.run_id
                         or (
@@ -1922,18 +1939,98 @@ class PostgresClient:
                         if taken_over_committed
                         else "",
                     )
+                    if not taken_over_committed and (
+                        held.staged_qdrant_collection or held.staged_graph_repo_id
+                    ):
+                        # The dead run's staged inventory is preserved durably until its
+                        # cleanup is confirmed (the fence itself is about to be replaced).
+                        backlog = [
+                            e.model_dump(mode="json")
+                            for e in reclaim_backlog_from_meta(meta, repo_id=repo_id)
+                            if e.run_id != held.run_id
+                        ]
+                        backlog.append(
+                            ReclaimEntry(
+                                run_id=held.run_id,
+                                staged_qdrant_collection=held.staged_qdrant_collection,
+                                staged_graph_repo_id=held.staged_graph_repo_id,
+                                recorded_at=db_now,
+                            ).model_dump(mode="json")
+                        )
+                        backlog_patch = {"reclaim_backlog": backlog}
                 fence = IndexRunFence(
                     run_id=run_id,
                     owner=owner,
                     started_at=started_at,
                     heartbeat_at=heartbeat_at or db_now,
                 )
+                patch = {"index_run": fence.model_dump(mode="json"), **(backlog_patch or {})}
                 await conn.execute(
                     "UPDATE corpora SET meta = COALESCE(meta, '{}'::jsonb) || $2::jsonb WHERE repo_id = $1;",
                     repo_id,
-                    _json_dumps_sanitized({"index_run": fence.model_dump(mode="json")}),
+                    _json_dumps_sanitized(patch),
                 )
         return FenceClaim(taken_over=taken_over, taken_over_committed=taken_over_committed)
+
+    async def push_reclaim_entry(self, repo_id: str, entry: ReclaimEntry) -> None:
+        """Record a dead run's staged inventory durably (before its fence is released)."""
+        from server.indexing.generations import reclaim_backlog_from_meta
+
+        await self._require_pool()
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                row = await conn.fetchrow(
+                    "SELECT meta FROM corpora WHERE repo_id = $1 FOR UPDATE;", repo_id
+                )
+                meta = _coerce_jsonb_dict(row["meta"]) if row is not None else {}
+                backlog = [
+                    e.model_dump(mode="json")
+                    for e in reclaim_backlog_from_meta(meta, repo_id=repo_id)
+                    if e.run_id != entry.run_id
+                ]
+                backlog.append(entry.model_dump(mode="json"))
+                await conn.execute(
+                    "UPDATE corpora SET meta = COALESCE(meta, '{}'::jsonb) || $2::jsonb WHERE repo_id = $1;",
+                    repo_id,
+                    _json_dumps_sanitized({"reclaim_backlog": backlog}),
+                )
+
+    async def reclaim_backlog(self, repo_id: str) -> list[ReclaimEntry]:
+        from server.indexing.generations import reclaim_backlog_from_meta
+
+        await self._require_pool()
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT meta FROM corpora WHERE repo_id = $1;", repo_id)
+        if row is None:
+            return []
+        return reclaim_backlog_from_meta(_coerce_jsonb_dict(row["meta"]), repo_id=repo_id)
+
+    async def clear_reclaim_entry(self, repo_id: str, run_id: str) -> None:
+        """The dead run's staged resources are confirmed gone: drop its backlog entry."""
+        from server.indexing.generations import reclaim_backlog_from_meta
+
+        await self._require_pool()
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                row = await conn.fetchrow(
+                    "SELECT meta FROM corpora WHERE repo_id = $1 FOR UPDATE;", repo_id
+                )
+                if row is None:
+                    return
+                meta = _coerce_jsonb_dict(row["meta"])
+                backlog = [
+                    e.model_dump(mode="json")
+                    for e in reclaim_backlog_from_meta(meta, repo_id=repo_id)
+                    if e.run_id != run_id
+                ]
+                await conn.execute(
+                    "UPDATE corpora SET meta = COALESCE(meta, '{}'::jsonb) || $2::jsonb WHERE repo_id = $1;",
+                    repo_id,
+                    _json_dumps_sanitized({"reclaim_backlog": backlog}),
+                )
 
     async def record_fence_staging(
         self,
@@ -1985,25 +2082,26 @@ class PostgresClient:
             )
         return row is not None
 
+    @staticmethod
+    async def heartbeat_index_fence_standalone(dsn: str, repo_id: str, run_id: str) -> bool:
+        """Heartbeat over a DEDICATED connection (for a thread with its own event loop).
+
+        The process-wide pool is bound to the API loop; a heartbeat thread must
+        never touch it.
+        """
+        conn = await asyncpg.connect(PostgresClient._resolve_dsn(dsn))
+        try:
+            row = await conn.fetchrow(_HEARTBEAT_SQL, repo_id, run_id)
+        finally:
+            await conn.close()
+        return row is not None
+
     async def heartbeat_index_fence(self, repo_id: str, run_id: str) -> bool:
         """Refresh the fence's heartbeat; False when this run no longer holds it."""
         await self._require_pool()
         assert self._pool is not None
         async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                """
-                UPDATE corpora
-                SET meta = jsonb_set(
-                    meta,
-                    '{index_run,heartbeat_at}',
-                    to_jsonb(to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US') || '+00:00')
-                )
-                WHERE repo_id = $1 AND meta->'index_run'->>'run_id' = $2
-                RETURNING 1;
-                """,
-                repo_id,
-                run_id,
-            )
+            row = await conn.fetchrow(_HEARTBEAT_SQL, repo_id, run_id)
         return row is not None
 
     async def release_index_fence(self, repo_id: str, run_id: str) -> bool:

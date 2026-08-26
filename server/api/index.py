@@ -40,6 +40,7 @@ from server.indexing.generations import (
     IndexFenceLostError,
     IndexRunFence,
     PersistedStateCorruptError,
+    ReclaimEntry,
     TombstoneCleanupError,
     drop_tombstoned_stores,
     fence_owner,
@@ -66,6 +67,7 @@ from server.models.index import (
     IndexRunSummary,
     IndexStats,
     IndexStatus,
+    PersistedStateCorruptResponse,
 )
 from server.models.tribrid_config_model import (
     CorpusScope,
@@ -114,6 +116,8 @@ _STAGING_REPO_PREFIX = "__staging__"
 
 _ACTIVE_RUNS: dict[str, str] = {}
 _UNKNOWN_COMMITS: dict[str, str] = {}  # runs whose promotion outcome awaits manifest reconciliation
+_STATUS_RUN_ID: dict[str, str] = {}  # the run each process-local terminal status describes
+_CANCELLED_AFTER_COMMIT: dict[str, str] = {}  # runs whose cancellation landed after their commit
 _QUEUE_RUN_CONTEXT: dict[int, tuple[str, str]] = {}
 
 # Index estimate heuristics (intentionally rough).
@@ -577,6 +581,24 @@ async def _cancel_index_run(repo_id: str) -> IndexStatus:
     return _STATUS.get(repo_id) or _idle_status(repo_id)
 
 
+async def _drain_reclaim_backlog(cfg: TriBridConfig, repo_id: str) -> None:
+    """Reclaim every dead run recorded on the corpus row; entries survive until confirmed."""
+    pg = PostgresClient(cfg.indexing.postgres_url)
+    try:
+        await pg.connect()
+        entries = await pg.reclaim_backlog(repo_id)
+    finally:
+        with contextlib.suppress(Exception):
+            await pg.disconnect()
+    for entry in entries:
+        if not await reclaim_stale_run(cfg, repo_id, entry):
+            logger.warning(
+                "reclaim of dead run %s on %s incomplete; it stays on the backlog",
+                entry.run_id,
+                repo_id,
+            )
+
+
 async def _finalize_dead_committed_run(repo_id: str, run_id: str) -> None:
     """A run whose manifest is live but whose summary still says indexing is complete."""
     await _flush_run_events()
@@ -615,13 +637,21 @@ async def _stop_without_local_task(repo_id: str) -> IndexStatus:
                 and fence.staged_qdrant_collection in manifest.all_qdrant_collections()
             )
         )
-        if not committed:
-            # Reclaim the dead run's staged inventory BEFORE the fence (its only
-            # record of those ids) is released.
-            await reclaim_stale_run(cfg, repo_id, fence)
-            with contextlib.suppress(Exception):
-                await pg.delete_corpus_with_data(_build_staging_repo_id(repo_id, fence.run_id))
+        if not committed and (fence.staged_qdrant_collection or fence.staged_graph_repo_id):
+            # The dead run's staged inventory goes to the durable backlog BEFORE the
+            # fence (its only other record of those ids) is released.
+            await pg.push_reclaim_entry(
+                repo_id,
+                ReclaimEntry(
+                    run_id=fence.run_id,
+                    staged_qdrant_collection=fence.staged_qdrant_collection,
+                    staged_graph_repo_id=fence.staged_graph_repo_id,
+                    recorded_at=await pg.database_now(),
+                ),
+            )
         released = await pg.release_index_fence(repo_id, fence.run_id)
+        if not committed:
+            await _drain_reclaim_backlog(cfg, repo_id)
     except IndexFenceCorruptError as exc:
         raise _fence_corrupt_conflict(repo_id, exc) from exc
     except CorpusNotFoundError as exc:
@@ -667,7 +697,12 @@ async def _stop_without_local_task(repo_id: str) -> IndexStatus:
 async def _manifest_is_newer_than_local(
     repo_id: str, cfg: TriBridConfig, local: IndexStatus
 ) -> bool:
-    """Whether another worker promoted this corpus after the run this process remembers."""
+    """Whether durable state moved on from the run this process's terminal status describes.
+
+    Identity, never clocks: the status is stale when the manifest is gone (another
+    worker de-indexed the corpus) or names a run other than the one this status
+    came from.
+    """
     pg = PostgresClient(cfg.indexing.postgres_url)
     try:
         await pg.connect()
@@ -675,12 +710,11 @@ async def _manifest_is_newer_than_local(
     finally:
         with contextlib.suppress(Exception):
             await pg.disconnect()
-    if manifest is None:
-        return False
-    if manifest.run_id == _ACTIVE_RUNS.get(repo_id):
-        return False
-    completed = local.completed_at or local.started_at
-    return completed is None or manifest.promoted_at > completed
+    local_run = _STATUS_RUN_ID.get(repo_id)
+    if local.status == "complete":
+        return manifest is None or manifest.run_id != local_run
+    # error/cancelled: stale once any later run promoted
+    return manifest is not None and manifest.run_id != local_run
 
 
 async def _assert_not_tombstoned(repo_id: str, cfg: TriBridConfig) -> None:
@@ -1925,6 +1959,36 @@ async def _release_fence(repo_id: str, run_id: str) -> bool:
             await pg_release.disconnect()
 
 
+def _classify_commit_outcome(
+    *,
+    promote_done: bool,
+    promote_cancelled: bool,
+    promote_exception: BaseException | None,
+    manifest_names_run: bool | None,
+) -> tuple[bool, bool]:
+    """(committed, unknown) after the promotion await was interrupted.
+
+    - The transaction task still pending: UNKNOWN (nothing read now is definitive).
+    - It returned: committed.
+    - It refused before writing (fence lost, tombstone, corrupt manifest): definitive negative.
+    - Otherwise the manifest decides: True -> committed, False -> negative, None -> unknown.
+    """
+    if not promote_done:
+        return False, True
+    if not promote_cancelled and promote_exception is None:
+        return True, False
+    if isinstance(
+        promote_exception,
+        IndexFenceLostError | DeletionIncompleteError | PersistedStateCorruptError,
+    ):
+        return False, False
+    if manifest_names_run is True:
+        return True, False
+    if manifest_names_run is False:
+        return False, False
+    return False, True
+
+
 class _FenceHeartbeat(threading.Thread):
     """Heartbeats the durable fence from its own thread and event loop.
 
@@ -1965,13 +2029,11 @@ class _FenceHeartbeat(threading.Thread):
                 return
 
     async def _beat(self) -> bool:
-        pg = PostgresClient(self._cfg.indexing.postgres_url)
-        await pg.connect()
-        try:
-            return await pg.heartbeat_index_fence(self._repo_id, self._run_id)
-        finally:
-            with contextlib.suppress(Exception):
-                await pg.disconnect()
+        # The process-wide asyncpg pool belongs to the API loop; this thread's loop
+        # opens its own short-lived connection instead.
+        return await PostgresClient.heartbeat_index_fence_standalone(
+            self._cfg.indexing.postgres_url, self._repo_id, self._run_id
+        )
 
 
 def _publish_commit_unknown(
@@ -1984,6 +2046,7 @@ def _publish_commit_unknown(
         "the run stays non-terminal and is reconciled against the manifest on the next status read."
     )
     prev = _STATUS.get(repo_id)
+    _STATUS_RUN_ID[repo_id] = run_id
     _STATUS[repo_id] = IndexStatus(
         repo_id=repo_id,
         status="indexing",
@@ -2114,6 +2177,7 @@ def _publish_complete(
 ) -> None:
     """The manifest is committed: this run IS the live index, whatever happens afterwards."""
     _STATS[repo_id] = stats
+    _STATUS_RUN_ID[repo_id] = run_id
     _STATUS[repo_id] = IndexStatus(
         repo_id=repo_id,
         status="complete",
@@ -2322,18 +2386,36 @@ async def _background_index_job(
                 if not promote.done():
                     with contextlib.suppress(BaseException):
                         await asyncio.shield(promote)
-                if promote.done() and not promote.cancelled() and promote.exception() is None:
-                    committed = True
-                    commit_unknown = False
-                else:
-                    outcome: bool | None = None
-                    with contextlib.suppress(BaseException):
+                outcome: bool | None = None
+                if promote.done() and (
+                    promote.cancelled()
+                    or (
+                        promote.exception() is not None
+                        and not isinstance(
+                            promote.exception(),
+                            IndexFenceLostError
+                            | DeletionIncompleteError
+                            | PersistedStateCorruptError,
+                        )
+                    )
+                ):
+                    try:
                         outcome = await asyncio.shield(_manifest_names_run(repo_id, run_id))
-                    if outcome is True:
-                        committed = True
-                        commit_unknown = False
-                    elif outcome is False:
-                        commit_unknown = False
+                    except PersistedStateCorruptError:
+                        outcome = False  # promotion refuses a corrupt manifest: nothing was written
+                    except BaseException:
+                        outcome = None
+                committed, commit_unknown = _classify_commit_outcome(
+                    promote_done=promote.done(),
+                    promote_cancelled=promote.done() and promote.cancelled(),
+                    promote_exception=(
+                        promote.exception() if promote.done() and not promote.cancelled() else None
+                    ),
+                    manifest_names_run=outcome,
+                )
+                # A second cancellation interrupted the wait while the transaction is
+                # STILL running: unknown (resources and fence are kept; the fence
+                # expires into a manifest-aware takeover).
                 raise
         finally:
             with contextlib.suppress(Exception):
@@ -2405,6 +2487,7 @@ async def _background_index_job(
             # The manifest already names this run's generation: the index is live
             # and the cancellation only interrupted best-effort retirement. The
             # run's terminal state is complete, whatever the caller wrote.
+            _CANCELLED_AFTER_COMMIT[repo_id] = run_id
             _publish_complete_once()
             _emit_event(
                 queue,
@@ -2823,8 +2906,11 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
     responses={
         404: {"description": "Unknown corpus"},
         409: {
-            "model": IndexRunConflictResponse,
-            "description": "An index run already holds this corpus (durable per-corpus run fence)",
+            "model": IndexRunConflictResponse | PersistedStateCorruptResponse,
+            "description": (
+                "An index run already holds this corpus (durable per-corpus run fence), or its "
+                "persisted index state is malformed (de-index to repair)."
+            ),
         },
         503: {
             "model": DependencyUnavailableResponse | IndexDeletionIncompleteResponse,
@@ -2879,18 +2965,9 @@ async def start_index(request: IndexRequest) -> IndexStatus:
             # never reclaim.
             await _finalize_dead_committed_run(request.repo_id, dead.run_id)
         else:
-            # The previous holder died mid-build: reclaim exactly what its fence
-            # named (best-effort; the staged corpus rows go with it).
-            await reclaim_stale_run(cfg, request.repo_id, dead)
-            with contextlib.suppress(Exception):
-                pg_dead = PostgresClient(cfg.indexing.postgres_url)
-                await pg_dead.connect()
-                try:
-                    await pg_dead.delete_corpus_with_data(
-                        _build_staging_repo_id(request.repo_id, dead.run_id)
-                    )
-                finally:
-                    await pg_dead.disconnect()
+            # The previous holder died mid-build: its staged inventory was moved to
+            # the durable reclaim backlog by the takeover transaction; drain it.
+            await _drain_reclaim_backlog(cfg, request.repo_id)
 
     _STATUS[request.repo_id] = IndexStatus(
         repo_id=request.repo_id,
@@ -3183,6 +3260,7 @@ async def get_index_status(corpus_id: str) -> IndexStatus:
         # durable manifest still belongs to the run it describes.
         if cfg is not None and await _manifest_is_newer_than_local(repo_id, cfg, local):
             _STATUS.pop(repo_id, None)
+            _STATUS_RUN_ID.pop(repo_id, None)
         else:
             return local
     await _flush_run_events()
@@ -3267,7 +3345,7 @@ async def get_index_stats(corpus_id: str) -> IndexStats:
     "/index/{corpus_id}",
     responses={
         409: {
-            "model": IndexRunConflictResponse,
+            "model": IndexRunConflictResponse | PersistedStateCorruptResponse,
             "description": "A live index run holds this corpus; stop it first.",
         },
         503: {
@@ -3313,10 +3391,11 @@ async def delete_index(corpus_id: str) -> dict[str, Any]:
                 exc.dependency, boundary="Index deletion", exc=exc
             ) from exc
         if not await postgres.clear_index_tombstone(repo_id, tombstone):
-            logger.warning(
-                "tombstone of %s changed during cleanup; the newer tombstone stays for the next delete",
-                repo_id,
-            )
+            # A concurrent deletion replaced the tombstone while this cleanup ran:
+            # the corpus is still tombstoned, so this request did not complete it.
+            newer = await postgres.get_index_tombstone(repo_id)
+            if newer is not None:
+                raise DeletionIncompleteError(repo_id, newer)
     finally:
         with contextlib.suppress(Exception):
             await postgres.disconnect()

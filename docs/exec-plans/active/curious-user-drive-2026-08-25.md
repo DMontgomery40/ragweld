@@ -1693,3 +1693,95 @@ Verification (session 14i): live lane 17 passed, full `uv run pytest -q` alone
 the restarted backend, quick gates green. Codex pass 8 launched on the
 committed diff.
 
+### Adversarial review pass 8 (codex exec, high effort) — REFUTED (8 P1 / 5 P2); triaged, valid items fixed, the rest adjudicated by ox-alpha
+
+Session 14j. The operator authorised a second opinion from OpenRouter
+`stealth/ox-alpha` (1M context) for findings that look pedantic; the full
+protocol source, tests, cumulative diff, seven prior reports and this one
+were sent (~360k tokens). Fixed as VALID before the verdict:
+
+1. **Heartbeat from a thread used the API loop's asyncpg pool** (a real defect
+   from session 14i: `_POOLS_BY_DSN` is process-wide, so beats failed, were
+   swallowed, and a live run could expire). `PostgresClient.
+   heartbeat_index_fence_standalone` opens a dedicated connection in the
+   thread's own loop.
+2. **A second cancellation while the promotion task is still pending is not a
+   definitive negative**: the run stays unknown (resources and fence kept)
+   until the transaction task reaches a terminal state; refusals raised by the
+   transaction (`IndexFenceLostError`, `DeletionIncompleteError`,
+   `PersistedStateCorruptError`) are definitive negatives.
+3. **Reclaim backlog**: a taken-over stale fence's staged inventory is moved,
+   in the takeover transaction, to a durable `reclaim_backlog` on the corpus
+   row; the stop route pushes an entry before releasing; entries are removed
+   only when every store confirmed the cleanup (`reclaim_stale_run` returns
+   True).
+4. **Validate before fencing**: `acquire_index_fence` validates the manifest
+   and backlog before writing any fence, so a corrupt corpus answers the typed
+   409 instead of holding a doomed run.
+6. **Per-row quarantine covers every persisted key** (manifest, tombstone,
+   fence, backlog).
+7. **`PersistedStateCorruptResponse` is in the 409 unions** (POST /api/index,
+   status, latest run, delete), parsed by the UI, asserted by the contract
+   test.
+9. **Local terminal status is tied to its run by identity**
+   (`_STATUS_RUN_ID`): it yields when the manifest is gone or names another
+   run — no clock comparison.
+10. **DELETE answers the typed incomplete-deletion 503 when it lost the
+    tombstone CAS** (never `ok`).
+11. **Observability surfaces corruption/outage**: the retrieval component
+    renders it and a critical `retrieval:{corpus}` incident fires ("index
+    state unreadable") instead of "not indexed".
+12. **Tombstone `revision` is required** (every writer mints one).
+
+Sent to ox-alpha for adjudication (implementer's position in brackets): #5
+move the whole indexing pipeline off the event loop [pre-existing
+architecture; the heartbeat thread is the mitigation]; #8 deterministic
+post-commit cancellation barrier [needs a test seam]; #12 model defaults for
+`retired`/`phase` and `_coerce_jsonb_dict` [read-time defaults for optional
+persisted fields]; #13 the same-engine seed oracle [it was the reviewer's own
+pass-6 recommendation]; plus the standing residuals.
+
+**ox-alpha adjudication (OpenRouter `stealth/ox-alpha`, 322k tokens of
+context):** VALID = #1, #2, #3, #4, #6, #7, #9, #10, #11 and the `revision`
+part of #12 (all fixed above); OVERREACH = #5 (loop-blocking indexing is a
+pre-existing QoS limitation, the heartbeat thread is the safety mitigation),
+#13 (the same-engine oracle is the reviewer's own pass-6 recommendation) and
+the `_coerce_jsonb_dict` part of #12; ALREADY-RECORDED = #8 (deterministic
+post-commit barrier needs a seam) and the `retired`/`phase` defaults (part of
+the startup-migration residual). It required regression proof for #1 and #2
+and asked that the revision backfill join the migration — done:
+
+- `tests/unit/test_index_commit_outcome.py`: the commit-outcome decision is a
+  pure function (`_classify_commit_outcome`) — a pending transaction task is
+  always unknown, refusals before writing are definitive negatives, other
+  failures defer to the manifest.
+- `tests/integration/test_fence_heartbeat_live.py`: a `_FenceHeartbeat` keeps
+  the database-stamped heartbeat advancing while the API event loop is
+  blocked for 7.5 s (lease 30 s).
+- `ensure_generation_manifests` backfills a revision on any tombstone written
+  before revisions existed (one-time, on the row).
+- Cheap hardenings it suggested: the committed-cancel handler records the run
+  it handled (`_CANCELLED_AFTER_COMMIT`) and the post-commit stop test asserts
+  it; the chunk-mode hydration test also bounds its hits by the corpus's exact
+  Qdrant top-k.
+
+Its verdict: after these, the slice is shippable for a single-worker
+deployment with #5 and the six residuals documented as known limitations;
+nothing recorded still blocks.
+
+**Final recorded residuals (known limitations):** indexing work can block the
+API loop (QoS: delayed stop/status/SSE, not protocol safety); retention-window
+hydration from the swapped chunk rows (no wrong data, possibly fewer hits
+during the commit window); a fully deterministic post-commit cancellation
+barrier needs a test seam; cross-store atomicity of incremental writes without
+an outbox (orphan points unreachable and idempotently overwritten); the
+pre-existing fake-based codex-ingest bisect unit suite; unbounded run-event
+FIFO; worker-local SSE; the startup storage migration (one-time rewrites of
+pre-manifest, pre-retention and pre-revision shapes).
+
+Verification (session 14j): live lane 18 passed (incl. the blocked-loop
+heartbeat test), full `uv run pytest -q` alone 1161 passed / 92 skipped,
+Playwright `curious_user_p1_fixes` 9 passed against the restarted backend,
+quick gates green, contract bundle carries the corruption 409 union. Codex
+pass 9 (scoped to this diff, adjudicated items marked settled) launched.
+

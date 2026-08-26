@@ -18,7 +18,11 @@ from server.observability.ml_quality import (
     build_prompt_observability_summary,
 )
 from server.observability.status import build_observability_status
-from server.indexing.generations import qdrant_collection_of
+from server.indexing.generations import (
+    DeletionIncompleteError,
+    PersistedStateCorruptError,
+    qdrant_collection_of,
+)
 from server.retrieval.qdrant_store import QdrantChunkStore
 
 _GROUP_DASHBOARDS: dict[str, list[str]] = {
@@ -114,6 +118,7 @@ async def build_observability_incidents(
         # A corpus with chunk rows in Postgres but no live Qdrant generation
         # cannot serve the vector/sparse legs: that is an incident, not a warning.
         chunk_rows = 0
+        state_failure: str | None = None
         try:
             pg = PostgresClient(config.indexing.postgres_url)
             await pg.connect()
@@ -122,8 +127,12 @@ async def build_observability_incidents(
                 vector_collection = qdrant_collection_of(await pg.get_generation(repo_id))
             finally:
                 await pg.disconnect()
-        except Exception:
-            chunk_rows = 0
+        except (PersistedStateCorruptError, DeletionIncompleteError) as error:
+            # Malformed or mid-deletion index state: an incident in its own right.
+            state_failure = f"{type(error).__name__}: {error}"
+            vector_collection = None
+        except Exception as error:
+            state_failure = f"control store unavailable ({type(error).__name__}: {error})"
             vector_collection = None
         vector_status = None
         vector_probe_failed = False
@@ -132,7 +141,40 @@ async def build_observability_incidents(
                 vector_status = await QdrantChunkStore(config).status(repo_id, physical=vector_collection)
             except Exception:
                 vector_probe_failed = True
-        if chunk_rows > 0 and (vector_probe_failed or vector_status is None or vector_status.points <= 0):
+        if state_failure is not None:
+            incidents.append(
+                ObservabilityIncident(
+                    id=f"retrieval:{repo_id}",
+                    title="Retrieval index state unreadable",
+                    summary=(
+                        f"Corpus '{repo_id}': its persisted index state could not be resolved "
+                        f"({state_failure}); retrieval fails closed until it is repaired or the store answers."
+                    ),
+                    source="retrieval",
+                    severity="critical",
+                    status="firing",
+                    started_at=datetime.now(UTC),
+                    owner="retrieval-oncall",
+                    component_ids=["haystack_docling_qdrant"],
+                    dashboard_ids=["retrieval_indexing_graph", "oncall_overview"],
+                    workbench_links=_component_workbench_links(workbench_by_path, "retrieval"),
+                    slo_state="breached",
+                    operator_hint=(
+                        "Malformed state: de-index the corpus (DELETE /api/index/{corpus_id}) and re-index. "
+                        "Mid-deletion: retry the de-index. Store outage: restore Postgres and retry."
+                    ),
+                    change_correlation=[
+                        ObservabilityIncidentChange(
+                            kind="retrieval_lane",
+                            label="Index state",
+                            previous_value="readable",
+                            current_value="unreadable",
+                            detail=state_failure,
+                        )
+                    ],
+                )
+            )
+        elif chunk_rows > 0 and (vector_probe_failed or vector_status is None or vector_status.points <= 0):
             current_value = (
                 "qdrant_unreachable"
                 if vector_probe_failed

@@ -77,8 +77,12 @@ def test_index_start_409_is_the_discriminated_fence_union() -> None:
 
     schema = app.openapi()
     response = schema["paths"]["/api/index"]["post"]["responses"]["409"]
-    ref = response["content"]["application/json"]["schema"]["$ref"].rsplit("/", 1)[-1]
-    assert ref == "IndexRunConflictResponse"
+    body = response["content"]["application/json"]["schema"]
+    refs = [body["$ref"]] if "$ref" in body else [item["$ref"] for item in body.get("anyOf", [])]
+    assert {r.rsplit("/", 1)[-1] for r in refs} == {
+        "IndexRunConflictResponse",
+        "PersistedStateCorruptResponse",
+    }, body
     detail = schema["components"]["schemas"]["IndexRunConflictResponse"]["properties"]["detail"]
     mapping = detail.get("discriminator", {}).get("mapping", {})
     assert set(mapping) == {"index_run_in_progress", "index_fence_corrupt"}, detail

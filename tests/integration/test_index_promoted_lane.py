@@ -431,6 +431,9 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
             and latest_after_stop.json()["status"] == "complete"
         )
         assert latest_after_stop.json()["run_id"] == committed_generation.run_id
+        # The cancellation reached the committed-run handler of THAT run (not the
+        # no-local-task path): the handler recorded it.
+        assert index_api._CANCELLED_AFTER_COMMIT.get(corpus_id) == committed_generation.run_id
         assert (await pg.get_generation(corpus_id)).run_id == committed_generation.run_id
         assert (await qdrant.count_points(committed_generation.qdrant_collection)) == chunk_rows
         await _wait_fence_released(pg, corpus_id)
@@ -695,6 +698,7 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
             qdrant_collections=[f"{regeneration.qdrant_collection}__never_created"],
             graph_repo_ids=[],
             created_at=datetime.now(UTC) - timedelta(seconds=60),
+            revision=uuid.uuid4().hex,
         )
         await pg.update_corpus_meta(
             corpus_id, {"index_tombstone": stale_tombstone.model_dump(mode="json")}

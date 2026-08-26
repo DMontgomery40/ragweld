@@ -33,7 +33,11 @@ def _langfuse_ingestion_detail(config: TriBridConfig) -> str:
         return f"blocked ({'; '.join(blockers)})"
     return langfuse_ingestion_state()
 from server.db.postgres import PostgresClient
-from server.indexing.generations import qdrant_collection_of
+from server.indexing.generations import (
+    DeletionIncompleteError,
+    PersistedStateCorruptError,
+    qdrant_collection_of,
+)
 from server.retrieval.qdrant_store import QdrantChunkStore
 from server.training.control_plane import build_agent_control_plane_status
 
@@ -526,6 +530,7 @@ async def build_observability_status(config: TriBridConfig, *, repo_id: str | No
     )
     corpus_reachable: bool | None = qdrant_reachable
     if repo_id and qdrant_reachable:
+        manifest_failure: str | None = None
         try:
             pg = PostgresClient(config.indexing.postgres_url)
             await pg.connect()
@@ -534,9 +539,19 @@ async def build_observability_status(config: TriBridConfig, *, repo_id: str | No
             finally:
                 await pg.disconnect()
             corpus_status = await qdrant_store.status(repo_id, physical=corpus_collection)
-        except Exception:
+        except (PersistedStateCorruptError, DeletionIncompleteError) as error:
+            # Malformed or mid-deletion index state is an incident of its own,
+            # never rendered as "not indexed".
             corpus_status = None
-        if corpus_status is None:
+            manifest_failure = f"{type(error).__name__}: {error}"
+            corpus_reachable = False
+        except Exception as error:
+            corpus_status = None
+            manifest_failure = f"manifest lookup failed ({type(error).__name__}: {error})"
+            corpus_reachable = False
+        if manifest_failure is not None:
+            qdrant_detail = f"{qdrant_detail} Corpus '{repo_id}': {manifest_failure}."
+        elif corpus_status is None:
             qdrant_detail = f"{qdrant_detail} Corpus '{repo_id}' has no vector generation yet (not indexed)."
             corpus_reachable = None
         elif corpus_status.points <= 0:

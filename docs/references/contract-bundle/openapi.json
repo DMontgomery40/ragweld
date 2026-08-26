@@ -11175,6 +11175,58 @@
         "title": "OkResponse",
         "type": "object"
       },
+      "PersistedStateCorruptDetail": {
+        "description": "Public error detail (HTTP 409) when a corpus's persisted index state does not validate.",
+        "properties": {
+          "code": {
+            "const": "persisted_state_corrupt",
+            "default": "persisted_state_corrupt",
+            "title": "Code",
+            "type": "string"
+          },
+          "corpus_id": {
+            "description": "Corpus whose persisted state is malformed",
+            "title": "Corpus Id",
+            "type": "string"
+          },
+          "key": {
+            "description": "Which persisted key is malformed (generation, index_tombstone, index_run)",
+            "title": "Key",
+            "type": "string"
+          },
+          "message": {
+            "description": "Stable, non-sensitive summary",
+            "title": "Message",
+            "type": "string"
+          },
+          "operator_hint": {
+            "description": "The repair action (de-index the corpus, then re-index)",
+            "title": "Operator Hint",
+            "type": "string"
+          }
+        },
+        "required": [
+          "corpus_id",
+          "key",
+          "message",
+          "operator_hint"
+        ],
+        "title": "PersistedStateCorruptDetail",
+        "type": "object"
+      },
+      "PersistedStateCorruptResponse": {
+        "description": "FastAPI response envelope for a persisted-state corruption detail.",
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/PersistedStateCorruptDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "PersistedStateCorruptResponse",
+        "type": "object"
+      },
       "PromptBudgetExceededDetail": {
         "description": "Public error detail (HTTP 413 / typed stream error) when a request cannot fit the alias's context window.",
         "properties": {
@@ -23376,11 +23428,19 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/IndexRunConflictResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/IndexRunConflictResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PersistedStateCorruptResponse"
+                    }
+                  ],
+                  "title": "Response 409 Start Index Api Index Post"
                 }
               }
             },
-            "description": "An index run already holds this corpus (durable per-corpus run fence)"
+            "description": "An index run already holds this corpus (durable per-corpus run fence), or its persisted index state is malformed (de-index to repair)."
           },
           "422": {
             "content": {
@@ -23654,7 +23714,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/IndexRunConflictResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/IndexRunConflictResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PersistedStateCorruptResponse"
+                    }
+                  ],
+                  "title": "Response 409 Delete Index Api Index  Corpus Id  Delete"
                 }
               }
             },
