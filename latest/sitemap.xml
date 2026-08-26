@@ -2,354 +2,370 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/api/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/api_extra/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/api_graph/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/api_health/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/api_indexing/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/api_models/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/api_models_chat/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/api_models_eval/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/api_models_extra/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/api_models_reranker/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/architecture/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/architecture_extra/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/configuration/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/database/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/deployment/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/dev_workflow/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/eval_guide/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/frontend/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/glossary/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/indexing/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/mcp/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/models/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/observability/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/operations/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/reranking/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/retrieval_extra/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/security/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/testing/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/troubleshooting/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/architecture/health-metrics/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/assets/images/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/dev/acceptance_epstein/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/dev/config_cache_locks/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/dev/config_store/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
+    </url>
+    <url>
+         <loc>https://dmontgomery40.github.io/ragweld/latest/dev/docs-autopilot-ci/</loc>
+         <lastmod>2026-08-26</lastmod>
+    </url>
+    <url>
+         <loc>https://dmontgomery40.github.io/ragweld/latest/dev/docs-autopilot-workflow/</loc>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/dev/docs-autopilot/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/dev/pydantic/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/guides/corpus/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/howto/reranker/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/integrations/mcp/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/manual/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/manual/indexing/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/manual/native_postgres/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/manual/quickstart/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/manual/search/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/manual/troubleshooting/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/manual/ui/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/operations/cancellation/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/operations/codex_exec/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/operations/lifecycle/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/operations/mlx/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/operations/mlx_idle_unload/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/operations/postgres/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/operations/tracing/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/operations/webhooks/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/reference/config/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/reference/config/chat/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/reference/config/chunk_summaries/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/reference/config/chunking/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/reference/config/docker/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/reference/config/embedding/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/reference/config/enrichment/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/reference/config/evaluation/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/reference/config/fusion/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/reference/config/generation/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/reference/config/graph_indexing/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/reference/config/graph_search/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/reference/config/graph_storage/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/reference/config/hydration/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/reference/config/indexing/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/reference/config/keywords/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/reference/config/layer_bonus/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/reference/config/mcp/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
+    </url>
+    <url>
+         <loc>https://dmontgomery40.github.io/ragweld/latest/reference/config/qdrant/</loc>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/reference/config/reranking/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/reference/config/retrieval/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/reference/config/scoring/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/reference/config/semantic_cache/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/reference/config/sparse_search/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
+    </url>
+    <url>
+         <loc>https://dmontgomery40.github.io/ragweld/latest/reference/config/synthetic/</loc>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/reference/config/system_prompts/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/reference/config/tokenization/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/reference/config/tracing/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/reference/config/training/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/reference/config/ui/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/reference/config/vector_search/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/retrieval/fusion/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/retrieval/graph/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/retrieval/overview/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/retrieval/vector-sparse/</loc>
-         <lastmod>2026-03-12</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
 </urlset>
