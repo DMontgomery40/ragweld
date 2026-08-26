@@ -1941,6 +1941,15 @@ Pass 11 (codex, scoped) — REFUTED (5 P1 / 3 P2); all acted on:
 8. `/api/index/{corpus_id}/stats` and both dashboard routes declare the 409
    union; contract bundle regenerated; contract matrix extended.
 
+4. (Found while auditing the incremental writer, pre-existing.) Every chunk /
+   summary writer "ensured" the corpus row with a placeholder identity whose
+   `ON CONFLICT` clause overwrote the operator-given name and description:
+   a recall or Codex-ingest write into a registered corpus renamed it to its id
+   and nulled its description. Writers that only need the row to exist now
+   preserve the existing identity (`preserve_identity=True`); the registry
+   upsert (an explicit rename) is unchanged. The recall live test registers
+   "Aurora buoy notes" with a description and proves both survive two writes.
+
 Not tested by a live flip (structural only): the single-snapshot graph
 decision and the `start_index` release-on-failure guard.
 

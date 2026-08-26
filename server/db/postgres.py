@@ -607,7 +607,9 @@ class PostgresClient:
         assert self._pool is not None
         async with self._pool.acquire() as conn:
             async with conn.transaction():
-                await self._ensure_corpus_row(conn, repo_id, name=repo_id, root_path=".")
+                await self._ensure_corpus_row(
+                    conn, repo_id, name=repo_id, root_path=".", preserve_identity=True
+                )
                 await self._upsert_chunk_rows(conn, repo_id, chunks)
         return len(chunks)
 
@@ -640,7 +642,9 @@ class PostgresClient:
         async with self._pool.acquire() as conn:
             async with conn.transaction():
                 await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1));", repo_id)
-                await self._ensure_corpus_row(conn, repo_id, name=repo_id, root_path=".")
+                await self._ensure_corpus_row(
+                    conn, repo_id, name=repo_id, root_path=".", preserve_identity=True
+                )
                 row = await conn.fetchrow(
                     "SELECT repo_id, meta FROM corpora WHERE repo_id = $1 FOR UPDATE;", repo_id
                 )
@@ -1745,7 +1749,9 @@ class PostgresClient:
         await self._require_pool()
         assert self._pool is not None
         async with self._pool.acquire() as conn:
-            await self._ensure_corpus_row(conn, repo_id, name=repo_id, root_path=".")
+            await self._ensure_corpus_row(
+                conn, repo_id, name=repo_id, root_path=".", preserve_identity=True
+            )
             async with conn.transaction():
                 await conn.execute("DELETE FROM chunk_summaries WHERE repo_id = $1;", repo_id)
 
@@ -2716,20 +2722,40 @@ class PostgresClient:
         root_path: str,
         description: str | None = None,
         meta: dict[str, Any] | None = None,
+        preserve_identity: bool = False,
     ) -> None:
+        """Insert the corpus row or update it.
+
+        ``preserve_identity`` is for writers that only need the row to EXIST
+        (chunk and summary writers): an existing row keeps its operator-given
+        name and description, and the placeholder identity only fills an empty
+        one. The registry upsert (an explicit rename) leaves it False.
+        """
         meta_json = _json_dumps_sanitized(meta or {})
-        await conn.execute(
+        if preserve_identity:
+            identity_sql = """
+              name = CASE
+                WHEN corpora.name IS NULL OR corpora.name = '' THEN EXCLUDED.name
+                ELSE corpora.name
+              END,
+              description = COALESCE(corpora.description, EXCLUDED.description),
             """
+        else:
+            identity_sql = """
+              name = EXCLUDED.name,
+              description = EXCLUDED.description,
+            """
+        await conn.execute(
+            f"""
             INSERT INTO corpora (repo_id, name, root_path, description, meta)
             VALUES ($1, $2, $3, $4, $5::jsonb)
             ON CONFLICT (repo_id) DO UPDATE SET
-              name = EXCLUDED.name,
+              {identity_sql}
               root_path = CASE
                 WHEN EXCLUDED.root_path IS NULL OR EXCLUDED.root_path = '' OR EXCLUDED.root_path = '.'
                   THEN corpora.root_path
                 ELSE EXCLUDED.root_path
               END,
-              description = EXCLUDED.description,
               meta = corpora.meta || EXCLUDED.meta;
             """,
             _sanitize_pg_text(repo_id),

@@ -172,7 +172,9 @@ async def test_incremental_upsert_records_a_manifest_then_appends() -> None:
     pg = PostgresClient(os.environ["POSTGRES_DSN"])
     await pg.connect()
     try:
-        await pg.upsert_corpus(corpus_id, name=corpus_id, root_path=".")
+        await pg.upsert_corpus(
+            corpus_id, name="Aurora buoy notes", root_path=".", description="Operator notes"
+        )
         assert await pg.get_generation(corpus_id) is None
         await store.upsert_chunks(
             corpus_id,
@@ -222,6 +224,11 @@ async def test_incremental_upsert_records_a_manifest_then_appends() -> None:
             corpus_id, [0.0, 1.0], 1, physical=generation.qdrant_collection
         )
         assert [m.chunk_id for m in hits] == ["m2"]
+        # Incremental writes only need the corpus row to exist: the operator-given
+        # name and description are never overwritten by the writer's placeholder.
+        row = await pg.get_corpus(corpus_id)
+        assert row is not None and row["name"] == "Aurora buoy notes", row
+        assert row["description"] == "Operator notes", row
     finally:
         await store.delete_corpus(corpus_id)
         try:
