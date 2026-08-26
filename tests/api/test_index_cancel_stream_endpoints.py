@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Generator
 from datetime import UTC, datetime
-from typing import Generator
 
 import pytest
 from httpx import AsyncClient
@@ -87,33 +87,6 @@ async def test_stop_endpoint_cancels_task_and_cleans_runtime_state(client: Async
 
 
 @pytest.mark.asyncio
-async def test_stop_compat_alias_uses_repo_scope_fields(client: AsyncClient) -> None:
-    repo_id = "cancel-repo-2"
-    queue: asyncio.Queue[dict[str, object]] = asyncio.Queue(maxsize=16)
-    task = asyncio.create_task(_sleep_forever())
-
-    index_api._STATUS[repo_id] = IndexStatus(
-        repo_id=repo_id,
-        status="indexing",
-        progress=0.1,
-        current_file=None,
-        error=None,
-        started_at=datetime.now(UTC),
-        completed_at=None,
-    )
-    index_api._TASKS[repo_id] = task
-    index_api._EVENT_QUEUES[repo_id] = queue
-
-    response = await client.post("/api/index/stop", json={"repo": repo_id})
-    assert response.status_code == 200
-    body = response.json()
-    assert body["status"] == "cancelled"
-    assert body["corpus_id"] == repo_id
-    assert repo_id not in index_api._TASKS
-    assert repo_id not in index_api._EVENT_QUEUES
-
-
-@pytest.mark.asyncio
 async def test_stream_rejects_stale_queue_when_task_is_done(client: AsyncClient) -> None:
     repo_id = "stale-stream-repo"
     queue: asyncio.Queue[dict[str, object]] = asyncio.Queue(maxsize=16)
@@ -159,7 +132,9 @@ async def test_stream_accepts_cancelled_terminal_event(client: AsyncClient) -> N
     index_api._EVENT_QUEUES[repo_id] = queue
 
     try:
-        async with client.stream("GET", "/api/stream/operations/index", params={"corpus_id": repo_id}) as response:
+        async with client.stream(
+            "GET", "/api/stream/operations/index", params={"corpus_id": repo_id}
+        ) as response:
             assert response.status_code == 200
             payload = ""
             async for chunk in response.aiter_text():

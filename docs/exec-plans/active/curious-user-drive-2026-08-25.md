@@ -1377,3 +1377,88 @@ Findings and what changed (session 14d):
   `uv run pytest -q` run alone, Playwright P1 spec against the restarted
   backend — see the session-14d memory note for the exact numbers.
 
+### Adversarial review pass 3 (codex exec, high effort) — REFUTED again (10 P1 / 9 P2); all acted on
+
+What changed (session 14e), by finding:
+
+1. **Commit boundary.** The promotion runs as a shielded future; on any
+   exception or cancellation around it the run first lets the shielded
+   transaction finish, then confirms against the manifest (also shielded).
+   Staged resources are cleaned only when the manifest provably does not name
+   the run; an unreadable manifest ends the run as `error` with a
+   "commit outcome unknown" message and touches nothing.
+2. **Fence lease.** `IndexRunFence` carries `owner` (`host:pid`) and
+   `heartbeat_at`; the job heartbeats every lease/10 s
+   (`indexing.index_run_lease_seconds`, default 600). A fence whose heartbeat
+   is older than the lease is taken over by the next `POST /api/index` and
+   released by `POST /api/index/{id}/stop`; a live foreign fence answers a
+   typed 409 from both. A malformed fence raises (`IndexFenceCorruptError`),
+   never reads as absence; release failures are logged, not suppressed.
+3. **Ownership CAS.** `promote_staging_index` locks the corpus row, takes the
+   per-corpus advisory lock, and refuses to commit unless
+   `meta.index_run.run_id == generation.run_id` (`IndexFenceLostError`); its
+   meta comes from the locked row, never from the caller's snapshot.
+   `delete_index_state` refuses a live foreign fence (409) and clears only a
+   stale one.
+4. **Incremental writers.** First generation is `set_generation_if_absent`
+   under the same advisory lock; a lost race drops the loser's collection and
+   writes into the winner's. Recall and Codex ingest stay Postgres-first but
+   compensate: a failed vector write deletes the rows it just wrote
+   (`delete_chunks_by_ids`), so no chunk ever exists in Postgres only. A full
+   re-index replacing incremental rows is corpus semantics (a full run
+   replaces the corpus by definition; recall/Codex corpora are never
+   full-indexed from a path) and is recorded here rather than papered over.
+5. **Startup upgrade.** Set-if-absent under the row lock; the first attempt
+   runs inline (15 s bound) before requests are served, retries continue in
+   the background. Round-3 manifests (`previous_*` slot) are rewritten to the
+   `retired` list shape, only while the row still carries that shape.
+6. **Retention.** `previous_*` is replaced by a `retired` list with
+   timestamps; entries are dropped by exact id once
+   `indexing.generation_retention_seconds` (default 600) elapsed and pruned
+   from the manifest under `run_id` ownership. The promoted-lane test proves
+   grace 0 (retired at the next commit) and grace 3600 (kept, listed).
+7. **Cancel after commit.** `_cancel_index_run` no longer pre-writes
+   `cancelled`; the task owns terminal publication and re-publishes
+   `complete` when it was committed. A task that ends without any terminal
+   state is reported cancelled by the route.
+8. **Deletion tombstone.** `delete_index_state` records the exact Qdrant
+   collections and Neo4j graph ids (current + retired, merged with an earlier
+   unfinished deletion) as `corpora.meta.index_tombstone` in the same
+   transaction; `drop_tombstoned_stores` drops them; a failure is a typed 503
+   and the tombstone stays for the next attempt; success clears it. Corpus
+   deletion follows the same protocol.
+9. **Fence test.** The process-local 409 check is gone: the durable CAS is the
+   only authority, so the overlapping-run 409 comes from Postgres. The test
+   also writes a foreign fence directly on the row (another worker) and
+   proves start/delete/stop all answer the typed 409 naming that run, that a
+   stale fence is taken over by a new run, and that the stop route releases a
+   stale fence.
+10. Chat with the gateway disabled must be exactly 503 `generation_unavailable`.
+11. Interrupted-run finalisation consults the manifest: a run it names is
+    finalised `complete`, never coerced to `error`.
+12. Typed 409 envelope `IndexRunConflictDetail`/`IndexRunConflictResponse`
+    (registered, generated, in the OpenAPI bundle); `useIndexing` parses it.
+13. Graph gauges never fall back to the corpus id when the manifest has no graph.
+14. Retrieval readiness reports a manifest lookup or Qdrant status failure as
+    `degraded` with the cause (`generation_manifest` / `qdrant_status`), never
+    as "run indexing".
+15. The caller-less `POST /api/index/stop` shim and the never-implemented
+    Neo4j `search` query mode (`graph_storage.neo4j_vector_query_mode`, its env
+    mapping and UI category) are deleted.
+16. Index event persistence goes through a bounded queue and one writer thread;
+    readers flush before reading.
+17. Neo4j driver is disconnected when index initialisation fails.
+18. The graph-hydration seed comparison is now the sound invariant: the graph
+    leg's hits are a prefix of the corpus's exact ranking (the Qdrant dense leg
+    over the corpus-isolated collection), never a chunk outside it; the shared
+    Neo4j index can only shrink the set.
+19. The store test asks a real calibration question over real content.
+
+Verification (session 14e): live lane 16 passed (store contract incl.
+set-if-absent, promoted lane incl. foreign/stale fence, takeover, stop,
+retention grace 0/3600, tombstone; communities; observability; hydration ×3;
+incremental writers), full `uv run pytest -q` alone 1156 passed / 90 skipped,
+Playwright `curious_user_p1_fixes` 9 passed against the restarted backend,
+quick gates green (453 config keys, contract bundle with the typed 409).
+Codex pass 4 launched on the committed diff.
+

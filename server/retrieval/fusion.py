@@ -524,7 +524,9 @@ class TriBridFusion:
             corpus_collection = qdrant_collection_of(corpus_generation)
             corpus_graph_id = graph_repo_id_of(corpus_generation)
             collections_by_corpus[cid] = corpus_collection
-            debug["fusion_generation_run_id"] = corpus_generation.run_id if corpus_generation else ""
+            debug["fusion_generation_run_id"] = (
+                corpus_generation.run_id if corpus_generation else ""
+            )
             stored_backend = str((corpus_meta or {}).get("embedding_backend") or "").strip().lower()
             stored_provider = (
                 str((corpus_meta or {}).get("embedding_provider") or "").strip().lower()
@@ -809,12 +811,6 @@ class TriBridFusion:
                                             or 0
                                         ),
                                         overfetch_multiplier=overfetch,
-                                        query_mode=str(
-                                            getattr(
-                                                cfg.graph_storage, "neo4j_vector_query_mode", "auto"
-                                            )
-                                            or "auto"
-                                        ),
                                     )
                                 except Exception as e:
                                     _raise_neo4j_boundary_error(

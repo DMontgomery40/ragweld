@@ -9,6 +9,7 @@ import asyncio
 import os
 import tempfile
 import uuid
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -66,6 +67,9 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
 
         cfg = load_config()
         cfg.embedding.embedding_backend = "deterministic"
+        # Retire the replaced generation at the very next commit (the retention
+        # grace is proven separately below with a long grace).
+        cfg.indexing.generation_retention_seconds = 0
         cfg.vector_search.enabled = True
         cfg.sparse_search.enabled = True
         cfg.graph_search.enabled = True
@@ -92,20 +96,93 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         )
         assert started.status_code == 200, started.text
         # Durable per-corpus fence: a second run on the same corpus is refused while
-        # the first is building (409 names the running run), and the fence lives on
-        # the corpus row, not in this process.
+        # the first is building; the typed 409 names the running run and its owner,
+        # both read from the corpus row (the fence has a heartbeat, not a task map).
         overlapping = await client.post(
             "/api/index",
             json={"corpus_id": corpus_id, "repo_path": str(_CORPUS_PATH), "force_reindex": True},
         )
         assert overlapping.status_code == 409, overlapping.text
-        fenced_row = await pg.get_corpus(corpus_id)
-        assert (fenced_row["meta"].get("index_run") or {}).get("run_id"), fenced_row["meta"]
+        conflict = overlapping.json()["detail"]
+        live_fence = await pg.get_index_fence(corpus_id)
+        assert live_fence is not None and conflict["code"] == "index_run_in_progress"
+        assert conflict["run_id"] == live_fence.run_id and conflict["owner"] == live_fence.owner
+        assert conflict["corpus_id"] == corpus_id and conflict["operator_hint"]
         final = await _wait_for_index(client, corpus_id)
         assert final["status"] == "complete", final
-        assert "index_run" not in (await pg.get_corpus(corpus_id))["meta"], (
-            "the fence is released with the run"
+        assert await pg.get_index_fence(corpus_id) is None, "the fence is released with the run"
+
+        # The fence is durable, not process-local: a fence written by ANOTHER worker
+        # (nothing in this process's task map) refuses both a new run and a
+        # de-index with the same typed 409 ...
+        foreign_started = datetime.now(UTC)
+        assert (
+            await pg.acquire_index_fence(
+                corpus_id,
+                "foreign-run-1",
+                started_at=foreign_started,
+                owner="other-worker:1",
+                lease_seconds=cfg.indexing.index_run_lease_seconds,
+            )
+            is None
         )
+        refused = await client.post(
+            "/api/index",
+            json={"corpus_id": corpus_id, "repo_path": str(_CORPUS_PATH), "force_reindex": True},
+        )
+        assert refused.status_code == 409, refused.text
+        assert refused.json()["detail"]["run_id"] == "foreign-run-1"
+        assert refused.json()["detail"]["owner"] == "other-worker:1"
+        refused_delete = await client.delete(f"/api/index/{corpus_id}")
+        assert refused_delete.status_code == 409, refused_delete.text
+        assert refused_delete.json()["detail"]["run_id"] == "foreign-run-1"
+        # ... stopping it from here is refused too (it belongs to the other worker) ...
+        refused_stop = await client.post(f"/api/index/{corpus_id}/stop")
+        assert refused_stop.status_code == 409, refused_stop.text
+        # ... and the fence stays exactly as written (nothing here touched it).
+        assert await pg.release_index_fence(corpus_id, "foreign-run-1") is True
+        assert await pg.get_index_fence(corpus_id) is None
+        # A crashed worker's fence (heartbeat older than the lease) is taken over by
+        # a new run instead of bricking the corpus, and the new run completes.
+        stale_beat = datetime.now(UTC) - timedelta(seconds=cfg.indexing.index_run_lease_seconds + 5)
+        assert (
+            await pg.acquire_index_fence(
+                corpus_id,
+                "crashed-run",
+                started_at=stale_beat,
+                owner="dead-worker:2",
+                lease_seconds=cfg.indexing.index_run_lease_seconds,
+                heartbeat_at=stale_beat,
+            )
+            is None
+        )
+        takeover = await client.post(
+            "/api/index",
+            json={"corpus_id": corpus_id, "repo_path": str(_CORPUS_PATH), "force_reindex": False},
+        )
+        assert takeover.status_code == 200, takeover.text
+        taken = await pg.get_index_fence(corpus_id)
+        assert taken is None or taken.run_id != "crashed-run", taken
+        assert (await _wait_for_index(client, corpus_id))["status"] == "complete"
+        assert await pg.get_index_fence(corpus_id) is None
+        # A stale fence with no run behind it is released by the stop route.
+        assert (
+            await pg.acquire_index_fence(
+                corpus_id,
+                "crashed-run-2",
+                started_at=stale_beat,
+                owner="dead-worker:3",
+                lease_seconds=cfg.indexing.index_run_lease_seconds,
+                heartbeat_at=stale_beat,
+            )
+            is None
+        )
+        stopped = await client.post(f"/api/index/{corpus_id}/stop")
+        assert stopped.status_code == 200, stopped.text
+        assert stopped.json()["status"] == "cancelled" and "crashed-run-2" in str(
+            stopped.json()["error"]
+        )
+        assert await pg.get_index_fence(corpus_id) is None
 
         # Postgres holds the chunk rows + contracts; Qdrant holds a promoted generation with one point per chunk.
         corpus = await pg.get_corpus(corpus_id)
@@ -121,15 +198,16 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         assert status.points == chunk_rows
         assert status.dense_points == chunk_rows
         assert status.dense_dimensions == int(cfg.embedding.embedding_dim)
-        # A real index run increments the index metrics and sets the chunk gauge to the promoted count.
+        # Two real index runs so far (the first build and the takeover of the stale
+        # fence) increment the index metrics; the chunk gauge is the promoted count.
         metrics_after = await client.get("/metrics")
         assert metrics_after.status_code == 200
         assert _metric_value(metrics_after.text, "tribrid_index_runs_total") == pytest.approx(
-            runs_before + 1.0
+            runs_before + 2.0
         )
         assert _metric_value(
             metrics_after.text, "tribrid_index_duration_seconds_count"
-        ) == pytest.approx(duration_count_before + 1.0)
+        ) == pytest.approx(duration_count_before + 2.0)
         assert _metric_value(metrics_after.text, "tribrid_chunks_indexed_current") == pytest.approx(
             float(chunk_rows)
         )
@@ -189,16 +267,19 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         assert regeneration and regeneration.run_id != generation.run_id, regeneration
         restatus = await qdrant.status(corpus_id, physical=regeneration.qdrant_collection)
         assert restatus is not None and restatus.points == chunk_rows
-        # Retention is current + previous: the replaced generation is still readable
-        # (an in-flight reader that resolved the old manifest keeps working) and the
-        # new manifest records it as previous.
-        assert regeneration.previous_qdrant_collection == generation.qdrant_collection
-        assert regeneration.previous_graph_repo_id == generation.graph_repo_id
-        kept = await qdrant.status(corpus_id, physical=generation.qdrant_collection)
-        assert kept is not None and kept.physical_collection == generation.qdrant_collection
+        # generation_retention_seconds = 0: the replaced generation was retired at
+        # this commit, by exact id, and pruned from the manifest.
+        assert regeneration.retired == [], regeneration
+        gone = await qdrant.status(corpus_id, physical=generation.qdrant_collection)
+        assert gone is not None and gone.physical_collection is None, gone
         assert (await qdrant.count_points(regeneration.qdrant_collection)) == chunk_rows
-        # The fence was released with the run: a third run starts, and the generation
-        # before the previous one is retired by exact id after its commit.
+        # With a long grace the replaced generation stays readable (an in-flight
+        # reader that resolved the old manifest keeps working) and the manifest
+        # records it as retired with the exact ids to drop later.
+        scoped = await config_store.get_config(repo_id=corpus_id)
+        scoped.indexing.generation_retention_seconds = 3600
+        await pg.upsert_corpus_config_json(corpus_id, scoped.model_dump(mode="serialization"))
+        config_store._store = None
         third = await client.post(
             "/api/index",
             json={"corpus_id": corpus_id, "repo_path": str(_CORPUS_PATH), "force_reindex": False},
@@ -206,17 +287,16 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         assert third.status_code == 200, third.text
         assert (await _wait_for_index(client, corpus_id))["status"] == "complete"
         third_generation = await pg.get_generation(corpus_id)
-        assert (
-            third_generation
-            and third_generation.previous_qdrant_collection == regeneration.qdrant_collection
-        )
-        retired = await qdrant.status(corpus_id, physical=generation.qdrant_collection)
-        assert retired is not None and retired.physical_collection is None, (
-            "the generation before previous is retired"
-        )
-        assert (
-            await qdrant.status(corpus_id, physical=regeneration.qdrant_collection)
-        ).points == chunk_rows
+        assert third_generation and third_generation.run_id != regeneration.run_id
+        assert [r.qdrant_collection for r in third_generation.retired] == [
+            regeneration.qdrant_collection
+        ], third_generation
+        assert [r.graph_repo_id for r in third_generation.retired] == [regeneration.graph_repo_id]
+        kept = await qdrant.status(corpus_id, physical=regeneration.qdrant_collection)
+        assert kept is not None and kept.physical_collection == regeneration.qdrant_collection
+        assert kept.points == chunk_rows
+        assert (await qdrant.count_points(third_generation.qdrant_collection)) == chunk_rows
+        regeneration = third_generation
         latest_run = await client.get(f"/api/index/{corpus_id}/runs/latest")
         assert latest_run.status_code == 200, latest_run.text
         assert latest_run.json()["status"] == "complete", latest_run.json()
@@ -318,7 +398,8 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         )
         # LiteLLM is disabled in this corpus config, so generation fails closed with
         # the typed 503 -- after retrieval ran on the fusion lane.
-        assert chat.status_code in (200, 503), chat.text
+        assert chat.status_code == 503, chat.text
+        assert chat.json()["detail"]["code"] == "generation_unavailable", chat.text
         m1 = await client.get("/metrics")
         assert _metric_value(m1.text, "tribrid_search_requests_total") == pytest.approx(reqs0 + 2.0)
         assert _metric_value(m1.text, "tribrid_search_latency_seconds_count") == pytest.approx(
@@ -349,12 +430,21 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         assert dashboard["metadata"]["current_repo"] == corpus_id
         assert int(dashboard["metadata"]["total_storage"]) == int(storage["total_storage_bytes"])
 
-        # Deleting the index removes the Qdrant generation; the legs then fail closed (chunk rows are gone too).
+        # Deleting the index drops the live AND the retained generation (the exact ids
+        # the tombstone recorded), clears the tombstone, and the legs then fail
+        # closed (chunk rows are gone too).
+        retained_collection = regeneration.retired[0].qdrant_collection
         deleted = await client.delete(f"/api/index/{corpus_id}")
         assert deleted.status_code == 200, deleted.text
         assert deleted.json()["deleted_chunks"] == chunk_rows
         assert deleted.json()["deleted_vector_collections"] >= 1
         assert await pg.get_generation(corpus_id) is None
+        assert await pg.get_index_tombstone(corpus_id) is None, (
+            "cleanup succeeded: no tombstone left"
+        )
+        for collection in (regeneration.qdrant_collection, retained_collection):
+            wiped = await qdrant.status(corpus_id, physical=collection)
+            assert wiped is not None and wiped.physical_collection is None, collection
         cleared = await pg.get_corpus(corpus_id)
         assert (
             cleared is not None

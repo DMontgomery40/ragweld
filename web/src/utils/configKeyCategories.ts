@@ -31,7 +31,7 @@ const RULES: Array<{ test: RegExp; category: string; tier: ConfigKeyTier }> = [
 
   // --- Response-affecting ---
   { test: /^BM25_/, category: 'Sparse (BM25)', tier: 'response' },
-  { test: /^(GRAPH_|NEO4J_VECTOR_QUERY_MODE$)/, category: 'Graph Search', tier: 'response' },
+  { test: /^GRAPH_/, category: 'Graph Search', tier: 'response' },
   { test: /^(EMBEDDING_|VOYAGE_MODEL$)/, category: 'Embedding', tier: 'response' },
   { test: /^(RERANKER_|RERANK_|TRIBRID_RERANKER_)/, category: 'Reranking', tier: 'response' },
   { test: /^(CHUNKING_|CHUNK_SIZE$|CHUNK_OVERLAP$|MAX_CHUNK_TOKENS$|MIN_CHUNK_CHARS$|AST_OVERLAP_LINES$|PRESERVE_IMPORTS$|INDEXING_|INDEX_|MAX_INDEXABLE_FILE_SIZE$|PARQUET_|ENRICH_|CHUNK_SUMMARIES_)/, category: 'Chunking & Indexing', tier: 'response' },

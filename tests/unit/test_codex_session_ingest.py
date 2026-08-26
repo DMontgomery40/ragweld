@@ -9,13 +9,13 @@ from server.codex_session_ingest import (
     CorpusWriter,
     JsonLogger,
     MetricsRegistry,
+    RunConfig,
     SessionFileContext,
     SessionNormalizer,
-    RunConfig,
     build_dashboard,
     current_dead_letter_count,
-    extract_prometheus_config_text,
     extract_exit_code,
+    extract_prometheus_config_text,
     parse_verify_query,
     sanitize_chunk_for_storage,
     split_text_windows,
@@ -263,6 +263,10 @@ class _FakeArtifactPg:
             raise RuntimeError("poison chunk")
         self.successful_writes.append([chunk.chunk_id for chunk in chunks])
         return len(chunks)
+
+    async def delete_chunks_by_ids(self, _repo_id: str, chunk_ids: list[str]) -> int:
+        self.compensated = [*getattr(self, "compensated", []), list(chunk_ids)]
+        return len(chunk_ids)
 
 
 class _FakeArtifactQdrant:

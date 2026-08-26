@@ -6,10 +6,14 @@ This file re-exports them for backwards compatibility.
 from server.models.tribrid_config_model import (
     Chunk,
     IndexRequest,
+    IndexRunConflictDetail,
+    IndexRunConflictResponse,
     IndexRunEvent,
     IndexRunSummary,
     IndexStats,
     IndexStatus,
 )
 
-__all__ = ["Chunk", "IndexRequest", "IndexStats", "IndexStatus", "IndexRunSummary", "IndexRunEvent"]
+__all__ = [
+    "IndexRunConflictDetail",
+    "IndexRunConflictResponse","Chunk", "IndexRequest", "IndexStats", "IndexStatus", "IndexRunSummary", "IndexRunEvent"]

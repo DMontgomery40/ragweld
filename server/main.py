@@ -205,11 +205,24 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             "generation gateway catalog not loaded at startup (generation fails closed): %s", error
         )
     await asyncio.to_thread(_recover_artifact_stores)
-    from server.indexing.generations import ensure_generation_manifests_until_done
-
-    manifest_upgrade_task = asyncio.create_task(
-        ensure_generation_manifests_until_done(_global_cfg), name="generation-manifest-upgrade"
+    from server.indexing.generations import (
+        ensure_generation_manifests,
+        ensure_generation_manifests_until_done,
     )
+
+    # Manifest shape upgrades run before requests are served when Postgres answers
+    # promptly (no request reads a pre-upgrade shape); otherwise they retry in the
+    # background until they succeed once, never blocking liveness.
+    manifest_upgrade_task: asyncio.Task[None] | None = None
+    try:
+        upgraded = await asyncio.wait_for(ensure_generation_manifests(_global_cfg), timeout=15.0)
+        if upgraded:
+            logger.info("upgraded generation manifests for %d corpora", upgraded)
+    except Exception as error:
+        logger.warning("generation manifest upgrade deferred to the background: %s", error)
+        manifest_upgrade_task = asyncio.create_task(
+            ensure_generation_manifests_until_done(_global_cfg), name="generation-manifest-upgrade"
+        )
     from server.observability.profiling import start_profiling
 
     await asyncio.to_thread(start_profiling, _global_cfg)
@@ -224,8 +237,11 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         catalog_refresh_task.cancel()
-        manifest_upgrade_task.cancel()
+        if manifest_upgrade_task is not None:
+            manifest_upgrade_task.cancel()
         for task in (catalog_refresh_task, manifest_upgrade_task):
+            if task is None:
+                continue
             try:
                 await task
             except (asyncio.CancelledError, Exception):

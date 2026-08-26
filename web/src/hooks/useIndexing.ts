@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import { useAPI } from './useAPI';
-import type { IndexRequest, IndexStats, IndexStatus } from '@/types/generated';
+import type { IndexRequest, IndexStats, IndexStatus, IndexRunConflictResponse } from '@/types/generated';
 import { TerminalService } from '@/services/TerminalService';
 
 type UseIndexingState = {
@@ -31,6 +31,21 @@ type StopOptions = {
 /**
  * Shared indexing orchestration used by Dashboard + RAG tabs.
  */
+function describeIndexStartFailure(status: number, body: string): string {
+  if (status === 409) {
+    try {
+      const parsed = JSON.parse(body) as IndexRunConflictResponse;
+      const d = parsed.detail;
+      if (d && d.code === 'index_run_in_progress') {
+        return `${d.message} Run ${d.run_id} on ${d.owner} started ${new Date(d.started_at).toLocaleTimeString()} (last heartbeat ${new Date(d.heartbeat_at).toLocaleTimeString()}). ${d.operator_hint}`;
+      }
+    } catch {
+      /* not the typed envelope: fall through to the raw text */
+    }
+  }
+  return body || `Index request failed (${status})`;
+}
+
 export function useIndexing() {
   const { api } = useAPI();
 
@@ -101,7 +116,10 @@ export function useIndexing() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(req),
         });
-        if (!r.ok) throw new Error((await r.text().catch(() => '')) || `Index request failed (${r.status})`);
+        if (!r.ok) {
+          const text = await r.text().catch(() => '');
+          throw new Error(describeIndexStartFailure(r.status, text));
+        }
         const data: IndexStatus = await r.json();
         setState((s) => ({ ...s, status: data, loading: false }));
         return data;

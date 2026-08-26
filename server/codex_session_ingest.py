@@ -1357,9 +1357,16 @@ class CorpusWriter:
                 await self.pg.upsert_chunks(self.config.semantic_repo_id, chunks)
                 self.metrics.db_writes_total.labels("semantic_chunks").inc()
             with self.metrics.phase_seconds.labels("qdrant_upsert_semantic").time():
-                await self.qdrant.upsert_chunks(
-                    self.config.semantic_repo_id, chunks, embedding_dim=self.config.embedding_dimensions, pg=self.pg
-                )
+                try:
+                    await self.qdrant.upsert_chunks(
+                        self.config.semantic_repo_id, chunks, embedding_dim=self.config.embedding_dimensions, pg=self.pg
+                    )
+                except Exception:
+                    # The rows above are visible but their vectors are not: take the
+                    # rows back so no chunk ever exists in Postgres only, then let the
+                    # batch bisect/dead-letter as usual.
+                    await self.pg.delete_chunks_by_ids(self.config.semantic_repo_id, [c.chunk_id for c in chunks])
+                    raise
                 self.metrics.db_writes_total.labels("semantic_vectors").inc()
             self.metrics.chunks_written_total.labels("semantic").inc(len(chunks))
             return len(chunks)
@@ -1390,9 +1397,16 @@ class CorpusWriter:
                 self.metrics.db_writes_total.labels("artifact_chunks").inc()
             with self.metrics.phase_seconds.labels("qdrant_upsert_artifact").time():
                 # Artifact chunks carry no dense embedding: sparse-only points.
-                await self.qdrant.upsert_chunks(
-                    self.config.artifact_repo_id, chunks, embedding_dim=self.config.embedding_dimensions, pg=self.pg
-                )
+                try:
+                    await self.qdrant.upsert_chunks(
+                        self.config.artifact_repo_id, chunks, embedding_dim=self.config.embedding_dimensions, pg=self.pg
+                    )
+                except Exception:
+                    # The rows above are visible but their vectors are not: take the
+                    # rows back so no chunk ever exists in Postgres only, then let the
+                    # batch bisect/dead-letter as usual.
+                    await self.pg.delete_chunks_by_ids(self.config.artifact_repo_id, [c.chunk_id for c in chunks])
+                    raise
                 self.metrics.db_writes_total.labels("artifact_vectors").inc()
             self.metrics.chunks_written_total.labels("artifact").inc(len(chunks))
             return len(chunks)

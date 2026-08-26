@@ -46,15 +46,27 @@ Postgres pgvector/FTS legs were removed when this lane was promoted.
    the physical Qdrant collection and the Neo4j graph id from that manifest,
    so there is no per-store swap (no alias switch, no Neo4j relabel) and no
    window in which new chunk rows pair with old vectors or an old graph.
-   Retention is current + previous: the generation being replaced stays alive
-   until the next commit (a reader that resolved the manifest just before the
-   commit still finds its collection and graph), and the generation before it
-   is retired after the commit by exact id, best-effort (a failure there leaves
-   an orphan to sweep, never an inconsistent index). A durable per-corpus run
-   fence on the corpus row (`corpora.meta.index_run`, compare-and-set) rejects
-   a second run with 409 while one is building. Cancelled or failed runs drop
-   their staged resources only while nothing has been committed; once the
+   Retention: the generation being replaced joins the manifest's `retired`
+   list and stays readable for `indexing.generation_retention_seconds` (a
+   reader that resolved the manifest before the commit keeps finding its
+   collection and graph); a later commit drops the entries whose grace elapsed,
+   by exact id, and prunes them from the manifest (best-effort: a failure
+   leaves the entry for the next commit to retry, never an inconsistent index).
+   A durable per-corpus run fence on the corpus row (`corpora.meta.index_run`:
+   run id, owner `host:pid`, heartbeat, compare-and-set) rejects a second run
+   or a de-index with a typed 409 (`index_run_in_progress`) while one is
+   building; the run heartbeats it, a fence whose heartbeat is older than
+   `indexing.index_run_lease_seconds` belongs to a crashed worker and is taken
+   over by the next run (or released by the stop route), and the promotion
+   transaction re-checks ownership under the row lock and a per-corpus
+   advisory lock shared with the incremental writers (first generation is
+   set-if-absent). Cancelled or failed runs drop their staged resources only
+   after proving, against the manifest, that nothing was committed; once the
    manifest is written the run is complete whatever happens afterwards.
+   De-indexing records the exact collections and graph ids to drop as a
+   tombstone (`corpora.meta.index_tombstone`) in the same transaction that
+   clears the rows and the manifest, answers a typed 503 until every external
+   cleanup succeeded, and only then clears the tombstone.
 4. `indexing.skip_dense=true` writes sparse-only points (no dense vectors);
    the vector leg returns nothing for such corpora and the corpus records
    `embedding_dimensions = 0`.

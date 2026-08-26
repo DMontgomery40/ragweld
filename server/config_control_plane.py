@@ -1264,12 +1264,16 @@ async def _build_retrieval_integration_readiness(
     # The readiness probe reads the corpus' live generation from its manifest
     # (Postgres), exactly as the retrieval lane resolves it.
     physical: str | None = None
+    manifest_error: str | None = None
     if scope_id:
         pg_manifest = PostgresClient(config.indexing.postgres_url)
         try:
             await pg_manifest.connect()
             physical = qdrant_collection_of(await pg_manifest.get_generation(scope_id))
         except Exception as error:
+            # A Postgres outage or a malformed manifest is a failure of this lane,
+            # never an "unindexed corpus": report it as such below.
+            manifest_error = f"{type(error).__name__}: {error}"
             logger.warning("generation manifest lookup for %s failed: %s", scope_id, error)
         finally:
             with contextlib.suppress(Exception):
@@ -1285,6 +1289,18 @@ async def _build_retrieval_integration_readiness(
             detail="Qdrant collections dashboard",
         )
     ]
+    if manifest_error is not None:
+        return _build_integration_readiness(
+            contract,
+            state="degraded",
+            enabled=True,
+            links=links,
+            failing_checks=[*failing_checks, "generation_manifest"],
+            operator_hint=(
+                f"The generation manifest of corpus {scope_id} could not be read ({manifest_error}); "
+                "retrieval cannot resolve its Qdrant collection until Postgres answers and the manifest is valid."
+            ),
+        )
     if missing_packages or not qdrant_ok:
         return _build_integration_readiness(
             contract,
@@ -1313,8 +1329,18 @@ async def _build_retrieval_integration_readiness(
         )
     try:
         status = await store.status(scope_id, physical=physical)
-    except Exception:
-        status = None
+    except Exception as error:
+        return _build_integration_readiness(
+            contract,
+            state="degraded",
+            enabled=True,
+            links=links,
+            failing_checks=[*failing_checks, "qdrant_status"],
+            operator_hint=(
+                f"Qdrant answered the probe but the status of corpus {scope_id}'s generation failed "
+                f"({type(error).__name__}: {error}); check the collection and the Qdrant service."
+            ),
+        )
     if status is None or status.points <= 0:
         return _build_integration_readiness(
             contract,

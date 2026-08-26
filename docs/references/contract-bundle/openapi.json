@@ -7532,17 +7532,6 @@
             "title": "Neo4J User",
             "type": "string"
           },
-          "neo4j_vector_query_mode": {
-            "default": "auto",
-            "description": "Neo4j chunk-vector query mode. 'auto' prefers runtime-safe defaults and only uses SEARCH where supported.",
-            "enum": [
-              "auto",
-              "procedure",
-              "search"
-            ],
-            "title": "Neo4J Vector Query Mode",
-            "type": "string"
-          },
           "relationship_types": {
             "default": [
               "calls",
@@ -7952,6 +7941,78 @@
         "title": "IndexRequest",
         "type": "object"
       },
+      "IndexRunConflictDetail": {
+        "description": "Public error detail returned (HTTP 409) when a corpus is fenced by a running index run.",
+        "properties": {
+          "code": {
+            "const": "index_run_in_progress",
+            "default": "index_run_in_progress",
+            "title": "Code",
+            "type": "string"
+          },
+          "corpus_id": {
+            "description": "Corpus whose index-run fence is held",
+            "title": "Corpus Id",
+            "type": "string"
+          },
+          "heartbeat_at": {
+            "description": "Last heartbeat of the holding run",
+            "format": "date-time",
+            "title": "Heartbeat At",
+            "type": "string"
+          },
+          "message": {
+            "description": "Stable, non-sensitive conflict summary",
+            "title": "Message",
+            "type": "string"
+          },
+          "operator_hint": {
+            "description": "What the operator can do next",
+            "title": "Operator Hint",
+            "type": "string"
+          },
+          "owner": {
+            "description": "Worker that holds the fence (host:pid)",
+            "title": "Owner",
+            "type": "string"
+          },
+          "run_id": {
+            "description": "Index run that holds the fence",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "started_at": {
+            "description": "When the holding run started",
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "corpus_id",
+          "run_id",
+          "owner",
+          "started_at",
+          "heartbeat_at",
+          "message",
+          "operator_hint"
+        ],
+        "title": "IndexRunConflictDetail",
+        "type": "object"
+      },
+      "IndexRunConflictResponse": {
+        "description": "FastAPI response envelope for an index-run conflict detail.",
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/IndexRunConflictDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "IndexRunConflictResponse",
+        "type": "object"
+      },
       "IndexRunEvent": {
         "description": "Persisted index terminal event for replay.",
         "properties": {
@@ -8343,6 +8404,14 @@
             "description": "Optional local embedding throughput override for index-time estimates (tokens/sec).",
             "title": "Estimated Tokens Per Second Local"
           },
+          "generation_retention_seconds": {
+            "default": 600,
+            "description": "How long a replaced index generation (its Qdrant collection and Neo4j graph) stays readable after a promotion before it is retired. Must cover the longest request that can still hold the old manifest; 0 retires it at the next commit.",
+            "maximum": 86400.0,
+            "minimum": 0.0,
+            "title": "Generation Retention Seconds",
+            "type": "integer"
+          },
           "index_excluded_exts": {
             "default": ".png,.jpg,.gif,.ico,.svg,.woff,.ttf",
             "description": "Excluded file extensions (comma-separated)",
@@ -8355,6 +8424,14 @@
             "maximum": 1024.0,
             "minimum": 1.0,
             "title": "Index Max File Size Mb",
+            "type": "integer"
+          },
+          "index_run_lease_seconds": {
+            "default": 600,
+            "description": "Lease on the per-corpus index-run fence. A running index heartbeats the fence; a fence whose last heartbeat is older than this is treated as a crashed worker and may be taken over by a new run.",
+            "maximum": 86400.0,
+            "minimum": 30.0,
+            "title": "Index Run Lease Seconds",
             "type": "integer"
           },
           "indexing_batch_size": {
@@ -23083,6 +23160,13 @@
             "description": "Unknown corpus"
           },
           "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IndexRunConflictResponse"
+                }
+              }
+            },
             "description": "An index run already holds this corpus (durable per-corpus run fence)"
           },
           "422": {
@@ -23303,106 +23387,6 @@
           }
         },
         "summary": "Get Dashboard Index Status",
-        "tags": [
-          "index"
-        ]
-      }
-    },
-    "/api/index/stop": {
-      "post": {
-        "description": "Legacy-compatible stop endpoint for dashboard callers.",
-        "operationId": "stop_index_compat_api_index_stop_post",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "corpus_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Corpus Id"
-            }
-          },
-          {
-            "in": "query",
-            "name": "repo_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Repo Id"
-            }
-          },
-          {
-            "in": "query",
-            "name": "repo",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Repo"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "anyOf": [
-                  {
-                    "additionalProperties": true,
-                    "type": "object"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "title": "Payload"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IndexStatus"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Stop Index Compat",
         "tags": [
           "index"
         ]

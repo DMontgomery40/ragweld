@@ -20,7 +20,12 @@ from server.config import load_config
 from server.db.neo4j import Neo4jClient
 from server.db.postgres import PostgresClient
 from server.dependency_errors import DependencyUnavailableError
-from server.indexing.generations import graph_repo_id_of
+from server.indexing.generations import (
+    IndexFenceHeldError,
+    TombstoneCleanupError,
+    drop_tombstoned_stores,
+    graph_repo_id_of,
+)
 from server.indexing.loader import FileLoader
 from server.lineage.registry import delete_repo_lineage
 from server.models.index import IndexStats
@@ -31,7 +36,6 @@ from server.models.tribrid_config_model import (
     CorpusUpdateRequest,
     GraphStats,
 )
-from server.retrieval.qdrant_store import QdrantChunkStore
 
 logger = logging.getLogger(__name__)
 
@@ -337,41 +341,40 @@ async def delete_repo(corpus_id: str) -> dict[str, Any]:
     if row is None:
         raise HTTPException(status_code=404, detail=f"Corpus not found: {repo_id}")
 
-    # Postgres first, in one transaction: the manifest and chunk rows go before
-    # any external store is touched, so a failure below leaves a corpus that reads
-    # as never indexed (retry finishes the external cleanup), never a manifest
-    # naming a dropped collection or graph.
-    generation = await pg.get_generation(repo_id)
+    # Postgres first, in one transaction: chunk rows, manifest and contracts go
+    # before any external store is touched, and the exact Qdrant/Neo4j targets are
+    # recorded as a tombstone so a failure below leaves a corpus that reads as
+    # never indexed plus a retryable cleanup list. A corpus fenced by a live index
+    # run is refused (409): stop that run first.
+    cfg = load_config()
     try:
-        await pg.delete_index_state(repo_id)
+        _, tombstone = await pg.delete_index_state(
+            repo_id, lease_seconds=cfg.indexing.index_run_lease_seconds
+        )
+    except IndexFenceHeldError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "index_run_in_progress",
+                "corpus_id": repo_id,
+                "run_id": exc.fence.run_id,
+                "owner": exc.fence.owner,
+                "started_at": exc.fence.started_at.isoformat(),
+                "heartbeat_at": exc.fence.heartbeat_at.isoformat(),
+                "message": f"Corpus {repo_id} is fenced by index run {exc.fence.run_id}.",
+                "operator_hint": "Stop that index run (or wait for its lease to expire) before deleting the corpus.",
+            },
+        ) from exc
     except Exception as exc:
         raise_postgres_unavailable_if_applicable(exc, boundary="Corpus deletion API")
         raise
     try:
-        await QdrantChunkStore(load_config()).delete_corpus(repo_id)
-    except DependencyUnavailableError as exc:
+        await drop_tombstoned_stores(cfg, repo_id, tombstone)
+    except TombstoneCleanupError as exc:
         raise dependency_unavailable_http_exception(
             exc.dependency, boundary="Corpus deletion API", exc=exc
         ) from exc
-
-    neo4j = await _get_neo4j(repo_id)
-    try:
-        for gid in {
-            g
-            for g in (
-                graph_repo_id_of(generation),
-                generation.previous_graph_repo_id if generation else None,
-            )
-            if g
-        }:
-            await neo4j.delete_graph(gid)
-        await neo4j.delete_staged_graphs(repo_id)
-        await neo4j.delete_graph(repo_id)
-    except Exception as exc:
-        raise_neo4j_unavailable_if_applicable(exc, boundary="Corpus deletion API")
-        raise
-    finally:
-        await neo4j.disconnect()
+    await pg.clear_index_tombstone(repo_id)
 
     # Corpus-scoped lineage (aliases, bundles) goes with the corpus. It runs before
     # the registry row is removed so a failed removal answers a typed, retryable 503

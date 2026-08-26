@@ -1066,8 +1066,6 @@ export interface GraphStorageConfig {
   neo4j_database_prefix?: string; // default: "tribrid_"
   /** Automatically create per-corpus Neo4j databases when missing (Enterprise). */
   neo4j_auto_create_databases?: boolean; // default: True
-  /** Neo4j chunk-vector query mode. 'auto' prefers runtime-safe defaults and only uses SEARCH where supported. */
-  neo4j_vector_query_mode?: "auto" | "procedure" | "search"; // default: "auto"
   /** Maximum traversal hops for graph search */
   max_hops?: number; // default: 2
   /** Include community detection in graph analysis */
@@ -1122,6 +1120,25 @@ export interface ImageGenConfig {
   default_resolution?: string; // default: "1024x1024"
 }
 
+/** Public error detail returned (HTTP 409) when a corpus is fenced by a running index run. */
+export interface IndexRunConflictDetail {
+  code?: "index_run_in_progress"; // default: "index_run_in_progress"
+  /** Corpus whose index-run fence is held */
+  corpus_id: string;
+  /** Index run that holds the fence */
+  run_id: string;
+  /** Worker that holds the fence (host:pid) */
+  owner: string;
+  /** When the holding run started */
+  started_at: string;
+  /** Last heartbeat of the holding run */
+  heartbeat_at: string;
+  /** Stable, non-sensitive conflict summary */
+  message: string;
+  /** What the operator can do next */
+  operator_hint: string;
+}
+
 /** Statistics about an indexed repository. */
 export interface IndexStats {
   /** Corpus identifier */
@@ -1150,6 +1167,10 @@ export interface IndexingConfig {
   postgres_url?: string; // default: "postgresql://postgres:postgres@localhost:5432/t..."
   /** Batch size for indexing */
   indexing_batch_size?: number; // default: 100
+  /** How long a replaced index generation (its Qdrant collection and Neo4j graph) stays readable after a promotion before it is retired. Must cover the longest request that can still hold the old manifest; 0 retires it at the next commit. */
+  generation_retention_seconds?: number; // default: 600
+  /** Lease on the per-corpus index-run fence. A running index heartbeats the fence; a fence whose last heartbeat is older than this is treated as a crashed worker and may be taken over by a new run. */
+  index_run_lease_seconds?: number; // default: 600
   /** Parallel workers for indexing */
   indexing_workers?: number; // default: 4
   /** Sparse (Qdrant/bm25) tokenization: 'stemmer' applies the Snowball stemmer for bm25_stemmer_lang; 'lowercase' and 'whitespace' disable stemming. Part of the sparse index contract (re-index on change). */
@@ -3595,6 +3616,11 @@ export interface IndexRequest {
   repo_path: string;
   /** Force full reindex even if up-to-date */
   force_reindex?: boolean;
+}
+
+/** FastAPI response envelope for an index-run conflict detail. */
+export interface IndexRunConflictResponse {
+  detail: IndexRunConflictDetail;
 }
 
 /** Persisted index terminal event for replay. */

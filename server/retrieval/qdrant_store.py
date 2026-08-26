@@ -24,6 +24,7 @@ missing instead of being silently auto-created.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import logging
 import re
@@ -396,17 +397,21 @@ class QdrantChunkStore:
             )
             raise
 
-    async def drop_generation(self, physical: str) -> None:
-        def _drop() -> None:
+    async def drop_generation(self, physical: str) -> bool:
+        """Drop one physical collection; True when it existed (idempotent otherwise)."""
+
+        def _drop() -> bool:
             client = self._client()
             try:
                 if client.collection_exists(physical):
                     client.delete_collection(physical)
+                    return True
+                return False
             finally:
                 client.close()
 
         try:
-            await asyncio.to_thread(_drop)
+            return await asyncio.to_thread(_drop)
         except Exception as exc:
             if is_qdrant_unavailable(exc):
                 raise DependencyUnavailableError("qdrant", "Qdrant generation drop") from exc
@@ -479,7 +484,7 @@ class QdrantChunkStore:
             written = await self.write_chunks(
                 corpus_id, physical, chunks, embedding_dim=embedding_dim
             )
-            await pg.set_generation(
+            recorded = await pg.set_generation_if_absent(
                 corpus_id,
                 build_generation(
                     run_id=f"incremental-{uuid.uuid4().hex[:10]}",
@@ -487,7 +492,19 @@ class QdrantChunkStore:
                     graph_repo_id=None,
                 ),
             )
-            return written
+            if recorded:
+                return written
+            # Another process (a full promotion, or a sibling incremental writer)
+            # recorded the corpus's first generation meanwhile: that manifest wins.
+            # Our collection is dropped and the chunks land in the live generation.
+            with contextlib.suppress(Exception):
+                await self.drop_generation(physical)
+            winner = qdrant_collection_of(await pg.get_generation(corpus_id))
+            if winner is None:
+                raise RuntimeError(
+                    f"corpus {corpus_id}: first-generation race lost but no manifest is readable"
+                )
+            return await self.write_chunks(corpus_id, winner, chunks, embedding_dim=embedding_dim)
 
     # ------------------------------------------------------------------
     # Reads

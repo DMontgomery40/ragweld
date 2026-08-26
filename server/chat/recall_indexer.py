@@ -177,6 +177,11 @@ async def index_recall_conversation(
     embedded_chunks = await embedder.embed_chunks(chunks)
 
     await pg.upsert_chunks(config.default_corpus_id, embedded_chunks)
-    await qdrant.upsert_chunks(config.default_corpus_id, embedded_chunks, embedding_dim=int(embedder.dim), pg=pg)
+    try:
+        await qdrant.upsert_chunks(config.default_corpus_id, embedded_chunks, embedding_dim=int(embedder.dim), pg=pg)
+    except Exception:
+        # Rows without vectors would read as a wiped corpus: take them back before failing.
+        await pg.delete_chunks_by_ids(config.default_corpus_id, [c.chunk_id for c in embedded_chunks])
+        raise
 
     return len(chunks)

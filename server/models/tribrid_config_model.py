@@ -736,6 +736,25 @@ class DependencyUnavailableResponse(BaseModel):
     detail: DependencyUnavailableDetail
 
 
+class IndexRunConflictDetail(BaseModel):
+    """Public error detail returned (HTTP 409) when a corpus is fenced by a running index run."""
+
+    code: Literal["index_run_in_progress"] = "index_run_in_progress"
+    corpus_id: str = Field(description="Corpus whose index-run fence is held")
+    run_id: str = Field(description="Index run that holds the fence")
+    owner: str = Field(description="Worker that holds the fence (host:pid)")
+    started_at: datetime = Field(description="When the holding run started")
+    heartbeat_at: datetime = Field(description="Last heartbeat of the holding run")
+    message: str = Field(description="Stable, non-sensitive conflict summary")
+    operator_hint: str = Field(description="What the operator can do next")
+
+
+class IndexRunConflictResponse(BaseModel):
+    """FastAPI response envelope for an index-run conflict detail."""
+
+    detail: IndexRunConflictDetail
+
+
 class RequiredRetrievalLegFailureDetail(BaseModel):
     """Public error detail returned when a requested retrieval leg fails."""
 
@@ -4495,6 +4514,25 @@ class IndexingConfig(BaseModel):
         le=1000,
         description="Batch size for indexing"
     )
+    generation_retention_seconds: int = Field(
+        default=600,
+        ge=0,
+        le=86400,
+        description=(
+            "How long a replaced index generation (its Qdrant collection and Neo4j graph) stays readable after a "
+            "promotion before it is retired. Must cover the longest request that can still hold the old manifest; "
+            "0 retires it at the next commit."
+        ),
+    )
+    index_run_lease_seconds: int = Field(
+        default=600,
+        ge=30,
+        le=86400,
+        description=(
+            "Lease on the per-corpus index-run fence. A running index heartbeats the fence; a fence whose last "
+            "heartbeat is older than this is treated as a crashed worker and may be taken over by a new run."
+        ),
+    )
     indexing_workers: int = Field(
         default=4,
         ge=1,
@@ -4608,11 +4646,6 @@ class GraphStorageConfig(BaseModel):
     neo4j_auto_create_databases: bool = Field(
         default=True,
         description="Automatically create per-corpus Neo4j databases when missing (Enterprise).",
-    )
-
-    neo4j_vector_query_mode: Literal["auto", "procedure", "search"] = Field(
-        default="auto",
-        description="Neo4j chunk-vector query mode. 'auto' prefers runtime-safe defaults and only uses SEARCH where supported.",
     )
 
     max_hops: int = Field(
@@ -6803,6 +6836,8 @@ class TriBridConfig(BaseModel):
             # Indexing params (9 new)
             'POSTGRES_URL': self.indexing.postgres_url,
             'INDEXING_BATCH_SIZE': self.indexing.indexing_batch_size,
+            'GENERATION_RETENTION_SECONDS': self.indexing.generation_retention_seconds,
+            'INDEX_RUN_LEASE_SECONDS': self.indexing.index_run_lease_seconds,
             'INDEXING_WORKERS': self.indexing.indexing_workers,
             'BM25_TOKENIZER': self.indexing.bm25_tokenizer,
             'BM25_STEMMER_LANG': self.indexing.bm25_stemmer_lang,
@@ -6819,7 +6854,6 @@ class TriBridConfig(BaseModel):
             'NEO4J_URI': self.graph_storage.neo4j_uri,
             'NEO4J_USER': self.graph_storage.neo4j_user,
             'NEO4J_DATABASE': self.graph_storage.neo4j_database,
-            'NEO4J_VECTOR_QUERY_MODE': self.graph_storage.neo4j_vector_query_mode,
             'GRAPH_MAX_HOPS': self.graph_storage.max_hops,
             'GRAPH_INCLUDE_COMMUNITIES': self.graph_storage.include_communities,
             'GRAPH_COMMUNITY_ALGORITHM': self.graph_storage.community_algorithm,
@@ -7172,6 +7206,8 @@ class TriBridConfig(BaseModel):
             indexing=IndexingConfig(
                 postgres_url=data.get('POSTGRES_URL', 'postgresql://postgres:postgres@localhost:5432/tribrid_rag'),
                 indexing_batch_size=data.get('INDEXING_BATCH_SIZE', 100),
+                generation_retention_seconds=data.get('GENERATION_RETENTION_SECONDS', 600),
+                index_run_lease_seconds=data.get('INDEX_RUN_LEASE_SECONDS', 600),
                 indexing_workers=data.get('INDEXING_WORKERS', 4),
                 bm25_tokenizer=data.get('BM25_TOKENIZER', 'stemmer'),
                 bm25_stemmer_lang=data.get('BM25_STEMMER_LANG', 'english'),
@@ -7189,7 +7225,6 @@ class TriBridConfig(BaseModel):
                 neo4j_uri=data.get('NEO4J_URI', 'bolt://localhost:7687'),
                 neo4j_user=data.get('NEO4J_USER', 'neo4j'),
                 neo4j_database=data.get('NEO4J_DATABASE', 'neo4j'),
-                neo4j_vector_query_mode=data.get('NEO4J_VECTOR_QUERY_MODE', 'auto'),
                 max_hops=data.get('GRAPH_MAX_HOPS', 2),
                 include_communities=data.get('GRAPH_INCLUDE_COMMUNITIES', True),
                 community_algorithm=data.get('GRAPH_COMMUNITY_ALGORITHM', 'louvain'),

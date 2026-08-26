@@ -199,26 +199,6 @@ class Neo4jClient:
             self._server_version = ""
         return self._server_version or ""
 
-    async def _supports_search_clause_vector(self) -> bool:
-        """Best-effort capability gate for SEARCH-clause vector querying."""
-        version = await self._get_server_version()
-        if not version:
-            return False
-        # Current runtime pin is 5.x; SEARCH support is expected in newer tracks.
-        if version.startswith("2026.") or version.startswith("6."):
-            return True
-        return False
-
-    async def _resolve_vector_query_mode(self, mode: str) -> str:
-        normalized = str(mode or "auto").strip().lower()
-        if normalized == "auto":
-            if await self._supports_search_clause_vector():
-                return "search"
-            return "procedure"
-        if normalized in {"procedure", "search"}:
-            return normalized
-        return "procedure"
-
     # ------------------------------------------------------------------
     # Lexical chunk graph (Document/Chunk) + vector index
     # ------------------------------------------------------------------
@@ -483,20 +463,14 @@ class Neo4jClient:
         top_k: int,
         neighbor_window: int = 0,
         overfetch_multiplier: int = 1,
-        query_mode: str = "auto",
     ) -> list[tuple[str, float]]:
         """Vector search over Chunk nodes in Neo4j; returns (chunk_id, score)."""
         if not embedding or top_k <= 0:
             return []
 
         driver = self._require_driver()
-        resolved_mode = await self._resolve_vector_query_mode(query_mode)
         seed_k = max(1, int(top_k) * max(1, int(overfetch_multiplier)))
         window = max(0, int(neighbor_window))
-
-        # On the pinned runtime, procedure mode is the authoritative implementation.
-        # SEARCH mode is version-gated and currently falls back to procedure querying.
-        _ = resolved_mode
 
         # Neo4j does not allow parameterized variable-length patterns (e.g., *0..$window),
         # so we safely inline the integer window (validated + clamped above).

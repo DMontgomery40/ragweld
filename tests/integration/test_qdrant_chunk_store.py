@@ -13,6 +13,7 @@ import pytest
 
 from server.config import load_config
 from server.db.postgres import PostgresClient
+from server.indexing.generations import build_generation
 from server.models.index import Chunk
 from server.retrieval.qdrant_store import (
     QdrantChunkStore,
@@ -188,6 +189,19 @@ async def test_incremental_upsert_records_a_manifest_then_appends() -> None:
         generation = await pg.get_generation(corpus_id)
         # Incremental writers build no graph: the manifest is honest about it.
         assert generation and generation.qdrant_collection and generation.graph_repo_id is None
+        # The first generation is set-if-absent under the corpus lock: a competing
+        # first write (another process, or the startup upgrade racing a promotion)
+        # cannot overwrite an existing manifest.
+        assert (
+            await pg.set_generation_if_absent(
+                corpus_id,
+                build_generation(
+                    run_id="competing", qdrant_collection="ragweld_chunks_never", graph_repo_id=None
+                ),
+            )
+            is False
+        )
+        assert await pg.get_generation(corpus_id) == generation
         await store.upsert_chunks(
             corpus_id,
             [
@@ -223,7 +237,14 @@ async def test_wiped_physical_generation_reads_as_missing() -> None:
         await store.write_chunks(
             corpus_id,
             generation,
-            [_chunk("w", "wiped soon", embedding=[1.0, 0.0], ordinal=0)],
+            [
+                _chunk(
+                    "w",
+                    "The salinity sensor is calibrated every two weeks against a reference brine.",
+                    embedding=[1.0, 0.0],
+                    ordinal=0,
+                )
+            ],
             embedding_dim=2,
         )
         await store.drop_generation(generation)
@@ -231,7 +252,9 @@ async def test_wiped_physical_generation_reads_as_missing() -> None:
         wiped = await store.status(corpus_id, physical=generation)
         assert wiped is not None and wiped.physical_collection is None and wiped.points == 0
         with pytest.raises(QdrantCollectionMissingError):
-            await store.sparse_search(corpus_id, "wiped", 3, physical=generation)
+            await store.sparse_search(
+                corpus_id, "How often is the salinity sensor calibrated?", 3, physical=generation
+            )
         with pytest.raises(QdrantCollectionMissingError):
             await store.vector_search(corpus_id, [1.0, 0.0], 3, physical=generation)
     finally:
@@ -358,11 +381,7 @@ async def test_startup_upgrade_records_manifests_for_pre_manifest_corpora() -> N
 
         assert await ensure_generation_manifests(cfg) >= 1
         legacy = await pg.get_generation(legacy_id)
-        assert (
-            legacy
-            and legacy.qdrant_collection == physical
-            and legacy.graph_repo_id == legacy_id
-        )
+        assert legacy and legacy.qdrant_collection == physical and legacy.graph_repo_id == legacy_id
         assert await pg.get_generation(fresh_id) is None, (
             "a corpus with nothing to point at stays unpromoted"
         )

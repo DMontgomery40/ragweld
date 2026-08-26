@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import time
 from collections import defaultdict
@@ -18,7 +19,12 @@ from server.models.tribrid_config_model import (
 )
 
 if TYPE_CHECKING:
-    from server.indexing.generations import GenerationManifest, IndexRunFence
+    from server.indexing.generations import (
+        DeletionTombstone,
+        GenerationManifest,
+        IndexRunFence,
+        RetiredGeneration,
+    )
 
 # -----------------------------------------------------------------------------
 # Shared asyncpg pool caching (process-wide)
@@ -97,6 +103,9 @@ def _sanitize_chunk_for_storage(chunk: Chunk) -> Chunk:
             "metadata": _sanitize_json_value(chunk.metadata or {}),
         }
     )
+
+
+logger = logging.getLogger(__name__)
 
 
 class PostgresClient:
@@ -1730,34 +1739,75 @@ class PostgresClient:
         """Point a corpus at a generation outside a full index run (incremental corpora, upgrades)."""
         await self.update_corpus_meta(repo_id, {"generation": generation.model_dump(mode="json")})
 
-    async def acquire_index_fence(
-        self, repo_id: str, run_id: str, *, started_at: datetime
-    ) -> IndexRunFence | None:
-        """Durably claim the single index-run slot of a corpus (compare-and-set on the corpus row).
-
-        Returns None when the claim succeeded, otherwise the fence held by another
-        run. Process-local task maps are not enough: a second worker/process
-        could otherwise build and retire against the same corpus.
-        """
-        from server.indexing.generations import IndexRunFence
+    async def get_index_fence(self, repo_id: str) -> IndexRunFence | None:
+        """The durable fence on the corpus row, validated; a malformed fence raises."""
+        from server.indexing.generations import IndexFenceCorruptError, IndexRunFence
 
         await self._require_pool()
         assert self._pool is not None
-        fence = IndexRunFence(run_id=run_id, started_at=started_at)
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT meta FROM corpora WHERE repo_id = $1;", repo_id)
+        if row is None:
+            return None
+        raw = _coerce_jsonb_dict(row["meta"]).get("index_run")
+        if raw is None:
+            return None
+        try:
+            return IndexRunFence.model_validate(raw)
+        except Exception as exc:
+            raise IndexFenceCorruptError(repo_id, raw) from exc
+
+    async def acquire_index_fence(
+        self,
+        repo_id: str,
+        run_id: str,
+        *,
+        started_at: datetime,
+        owner: str,
+        lease_seconds: int,
+        heartbeat_at: datetime | None = None,
+    ) -> IndexRunFence | None:
+        """Durably claim the single index-run slot of a corpus (compare-and-set on the corpus row).
+
+        Returns None when the claim succeeded, otherwise the live fence held by
+        another run. A fence whose last heartbeat is older than ``lease_seconds``
+        belongs to a crashed worker and is taken over. A present-but-malformed
+        fence raises (it is never read as absence). Process-local task maps are
+        not enough: a second worker/process could otherwise build and retire
+        against the same corpus.
+        """
+        from server.indexing.generations import IndexFenceCorruptError, IndexRunFence
+
+        await self._require_pool()
+        assert self._pool is not None
+        now = datetime.now(UTC)
+        fence = IndexRunFence(
+            run_id=run_id, owner=owner, started_at=started_at, heartbeat_at=heartbeat_at or now
+        )
         async with self._pool.acquire() as conn:
             async with conn.transaction():
                 row = await conn.fetchrow(
-                    "SELECT meta FROM corpora WHERE repo_id = $1 FOR UPDATE;",
-                    repo_id,
+                    "SELECT meta FROM corpora WHERE repo_id = $1 FOR UPDATE;", repo_id
                 )
                 if row is None:
                     from server.services.config_store import CorpusNotFoundError
 
                     raise CorpusNotFoundError(f"Corpus not found: {repo_id}")
-                meta = _coerce_jsonb_dict(row["meta"])
-                existing = meta.get("index_run")
-                if isinstance(existing, dict) and str(existing.get("run_id") or "").strip():
-                    return IndexRunFence.model_validate(existing)
+                existing = _coerce_jsonb_dict(row["meta"]).get("index_run")
+                if existing is not None:
+                    try:
+                        held = IndexRunFence.model_validate(existing)
+                    except Exception as exc:
+                        raise IndexFenceCorruptError(repo_id, existing) from exc
+                    if not held.is_stale(now=now, lease_seconds=lease_seconds):
+                        return held
+                    logger.warning(
+                        "taking over stale index-run fence on %s: run %s (owner %s) last heartbeat %s",
+                        repo_id,
+                        held.run_id,
+                        held.owner,
+                        held.heartbeat_at.isoformat(),
+                    )
                 await conn.execute(
                     "UPDATE corpora SET meta = COALESCE(meta, '{}'::jsonb) || $2::jsonb WHERE repo_id = $1;",
                     repo_id,
@@ -1765,32 +1815,223 @@ class PostgresClient:
                 )
         return None
 
-    async def release_index_fence(self, repo_id: str, run_id: str) -> None:
-        """Release the run slot, but only if this run still owns it."""
+    async def heartbeat_index_fence(self, repo_id: str, run_id: str) -> bool:
+        """Refresh the fence's heartbeat; False when this run no longer holds it."""
         await self._require_pool()
         assert self._pool is not None
         async with self._pool.acquire() as conn:
-            await conn.execute(
+            row = await conn.fetchrow(
+                """
+                UPDATE corpora
+                SET meta = jsonb_set(meta, '{index_run,heartbeat_at}', to_jsonb($3::text))
+                WHERE repo_id = $1 AND meta->'index_run'->>'run_id' = $2
+                RETURNING 1;
+                """,
+                repo_id,
+                run_id,
+                datetime.now(UTC).isoformat(),
+            )
+        return row is not None
+
+    async def release_index_fence(self, repo_id: str, run_id: str) -> bool:
+        """Release the run slot, but only if this run still owns it; False when it did not."""
+        await self._require_pool()
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
                 """
                 UPDATE corpora
                 SET meta = COALESCE(meta, '{}'::jsonb) - 'index_run'
-                WHERE repo_id = $1 AND meta->'index_run'->>'run_id' = $2;
+                WHERE repo_id = $1 AND meta->'index_run'->>'run_id' = $2
+                RETURNING 1;
                 """,
                 repo_id,
                 run_id,
             )
+        return row is not None
 
-    async def delete_index_state(self, repo_id: str) -> int:
-        """De-index a corpus in Postgres in ONE transaction: chunk rows gone, manifest and contracts cleared.
+    async def set_generation_if_absent(self, repo_id: str, generation: GenerationManifest) -> bool:
+        """Record a corpus's FIRST generation, under the per-corpus lock; False when one already exists.
 
-        Runs before the external stores are touched so a failure there leaves a
-        corpus that reads as never indexed (no manifest naming a dropped
-        collection), never chunk rows paired with missing vectors.
+        Used by incremental writers and the startup upgrade so two processes can
+        never create competing first generations, and so an upgrade can never
+        overwrite a manifest a promotion wrote meanwhile.
         """
         await self._require_pool()
         assert self._pool is not None
         async with self._pool.acquire() as conn:
             async with conn.transaction():
+                await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1));", repo_id)
+                row = await conn.fetchrow(
+                    """
+                    UPDATE corpora
+                    SET meta = COALESCE(meta, '{}'::jsonb) || $2::jsonb
+                    WHERE repo_id = $1 AND (meta->'generation') IS NULL
+                    RETURNING 1;
+                    """,
+                    repo_id,
+                    _json_dumps_sanitized({"generation": generation.model_dump(mode="json")}),
+                )
+        return row is not None
+
+    async def replace_generation_if_shape(
+        self, repo_id: str, generation: GenerationManifest, *, expected_keys: tuple[str, ...]
+    ) -> bool:
+        """Rewrite a manifest only while it still carries one of ``expected_keys`` (a shape upgrade)."""
+        await self._require_pool()
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1));", repo_id)
+                row = await conn.fetchrow(
+                    "SELECT meta FROM corpora WHERE repo_id = $1 FOR UPDATE;", repo_id
+                )
+                if row is None:
+                    return False
+                raw = _coerce_jsonb_dict(row["meta"]).get("generation")
+                if not isinstance(raw, dict) or not any(k in raw for k in expected_keys):
+                    return False
+                await conn.execute(
+                    "UPDATE corpora SET meta = COALESCE(meta, '{}'::jsonb) || $2::jsonb WHERE repo_id = $1;",
+                    repo_id,
+                    _json_dumps_sanitized({"generation": generation.model_dump(mode="json")}),
+                )
+        return True
+
+    async def prune_retired_generations(
+        self, repo_id: str, run_id: str, *, dropped: list[RetiredGeneration]
+    ) -> bool:
+        """Remove retired entries from the manifest after their stores were dropped.
+
+        Only while the manifest still belongs to ``run_id`` (a newer commit owns
+        its own retired list); False otherwise.
+        """
+        from server.indexing.generations import GenerationManifest as _Manifest
+
+        await self._require_pool()
+        assert self._pool is not None
+        gone = {(d.qdrant_collection, d.graph_repo_id) for d in dropped}
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                row = await conn.fetchrow(
+                    "SELECT meta FROM corpora WHERE repo_id = $1 FOR UPDATE;", repo_id
+                )
+                if row is None:
+                    return False
+                raw = _coerce_jsonb_dict(row["meta"]).get("generation")
+                if not isinstance(raw, dict):
+                    return False
+                manifest = _Manifest.model_validate(raw)
+                if manifest.run_id != run_id:
+                    return False
+                manifest.retired = [
+                    r
+                    for r in manifest.retired
+                    if (r.qdrant_collection, r.graph_repo_id) not in gone
+                ]
+                await conn.execute(
+                    "UPDATE corpora SET meta = COALESCE(meta, '{}'::jsonb) || $2::jsonb WHERE repo_id = $1;",
+                    repo_id,
+                    _json_dumps_sanitized({"generation": manifest.model_dump(mode="json")}),
+                )
+        return True
+
+    async def get_index_tombstone(self, repo_id: str) -> DeletionTombstone | None:
+        from server.indexing.generations import DeletionTombstone
+
+        await self._require_pool()
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT meta FROM corpora WHERE repo_id = $1;", repo_id)
+        if row is None:
+            return None
+        raw = _coerce_jsonb_dict(row["meta"]).get("index_tombstone")
+        return DeletionTombstone.model_validate(raw) if isinstance(raw, dict) else None
+
+    async def clear_index_tombstone(self, repo_id: str) -> None:
+        """Every external cleanup named by the tombstone succeeded."""
+        await self._require_pool()
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE corpora SET meta = COALESCE(meta, '{}'::jsonb) - 'index_tombstone' WHERE repo_id = $1;",
+                repo_id,
+            )
+
+    async def delete_chunks_by_ids(self, repo_id: str, chunk_ids: list[str]) -> int:
+        """Remove specific chunk rows of a corpus (compensation when their vectors could not be written)."""
+        if not chunk_ids:
+            return 0
+        await self._require_pool()
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            deleted = await conn.fetchval(
+                "WITH d AS (DELETE FROM chunks WHERE repo_id = $1 AND chunk_id = ANY($2::text[]) RETURNING 1) "
+                "SELECT count(*) FROM d;",
+                repo_id,
+                [str(c) for c in chunk_ids],
+            )
+        return int(deleted or 0)
+
+    async def delete_index_state(
+        self, repo_id: str, *, allow_fence_run_id: str | None = None, lease_seconds: int
+    ) -> tuple[int, DeletionTombstone]:
+        """De-index a corpus in Postgres in ONE transaction: chunk rows gone, manifest and contracts cleared.
+
+        Runs before the external stores are touched so a failure there leaves a
+        corpus that reads as never indexed (no manifest naming a dropped
+        collection), never chunk rows paired with missing vectors. The exact
+        Qdrant collections and Neo4j graph ids the manifest named (current and
+        retired, merged with any earlier unfinished deletion) are recorded as a
+        tombstone on the row so the external cleanup can be retried until it
+        succeeds. A corpus fenced by a live run that is not ``allow_fence_run_id``
+        is refused (``IndexFenceHeldError``); a stale fence is cleared.
+        """
+        from server.indexing.generations import (
+            DeletionTombstone,
+            IndexFenceCorruptError,
+            IndexFenceHeldError,
+            IndexRunFence,
+            build_tombstone,
+        )
+        from server.indexing.generations import (
+            GenerationManifest as _Manifest,
+        )
+
+        await self._require_pool()
+        assert self._pool is not None
+        now = datetime.now(UTC)
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1));", repo_id)
+                row = await conn.fetchrow(
+                    "SELECT meta FROM corpora WHERE repo_id = $1 FOR UPDATE;", repo_id
+                )
+                meta = _coerce_jsonb_dict(row["meta"]) if row is not None else {}
+                raw_fence = meta.get("index_run")
+                if raw_fence is not None:
+                    try:
+                        fence = IndexRunFence.model_validate(raw_fence)
+                    except Exception as exc:
+                        raise IndexFenceCorruptError(repo_id, raw_fence) from exc
+                    if fence.run_id != allow_fence_run_id and not fence.is_stale(
+                        now=now, lease_seconds=lease_seconds
+                    ):
+                        raise IndexFenceHeldError(repo_id, fence)
+                raw_generation = meta.get("generation")
+                generation = (
+                    _Manifest.model_validate(raw_generation)
+                    if isinstance(raw_generation, dict)
+                    else None
+                )
+                raw_tombstone = meta.get("index_tombstone")
+                earlier = (
+                    DeletionTombstone.model_validate(raw_tombstone)
+                    if isinstance(raw_tombstone, dict)
+                    else None
+                )
+                tombstone = build_tombstone(generation).merged(earlier)
+
                 deleted = await conn.fetchval(
                     "WITH d AS (DELETE FROM chunks WHERE repo_id = $1 RETURNING 1) SELECT count(*) FROM d;",
                     repo_id,
@@ -1799,21 +2040,25 @@ class PostgresClient:
                 await conn.execute(
                     "DELETE FROM chunk_summaries_last_build WHERE repo_id = $1;", repo_id
                 )
-                await conn.execute(
-                    """
-                    UPDATE corpora
-                    SET last_indexed = NULL,
-                        embedding_backend = NULL,
-                        embedding_provider = NULL,
-                        embedding_model = NULL,
-                        embedding_dimensions = NULL,
-                        sparse_contract = NULL,
-                        meta = ((COALESCE(meta, '{}'::jsonb) - 'embedding_backend') - 'generation') - 'index_run'
-                    WHERE repo_id = $1;
-                    """,
-                    repo_id,
-                )
-        return int(deleted or 0)
+                if row is not None:
+                    await conn.execute(
+                        """
+                        UPDATE corpora
+                        SET last_indexed = NULL,
+                            embedding_backend = NULL,
+                            embedding_provider = NULL,
+                            embedding_model = NULL,
+                            embedding_dimensions = NULL,
+                            sparse_contract = NULL,
+                            meta = (COALESCE(meta, '{}'::jsonb) - 'generation' - 'index_run') || $2::jsonb
+                        WHERE repo_id = $1;
+                        """,
+                        repo_id,
+                        _json_dumps_sanitized(
+                            {"index_tombstone": tombstone.model_dump(mode="json")}
+                        ),
+                    )
+        return int(deleted or 0), tombstone
 
     async def update_corpus_meta(self, repo_id: str, meta: dict[str, Any]) -> None:
         await self._require_pool()
@@ -1910,7 +2155,6 @@ class PostgresClient:
         active_name: str,
         active_root_path: str,
         active_description: str | None = None,
-        active_meta: dict[str, Any] | None = None,
         generation: GenerationManifest,
     ) -> GenerationManifest | None:
         """Atomically promote staged chunks/stats into the active corpus id.
@@ -1938,11 +2182,15 @@ class PostgresClient:
                 if not staging:
                     raise RuntimeError(f"Staging corpus not found: {staging_repo_id}")
 
+                # The corpus row is locked for the whole commit and the per-corpus
+                # advisory lock serialises this commit with incremental writers.
+                await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1));", active_repo_id)
                 active = await conn.fetchrow(
                     """
                     SELECT repo_id, name, root_path, description, meta
                     FROM corpora
-                    WHERE repo_id = $1;
+                    WHERE repo_id = $1
+                    FOR UPDATE;
                     """,
                     active_repo_id,
                 )
@@ -1956,21 +2204,27 @@ class PostgresClient:
                         description=active_description
                         if active_description is not None
                         else str(staging["description"] or ""),
-                        meta=active_meta or _coerce_jsonb_dict(staging["meta"]),
+                        meta=_coerce_jsonb_dict(staging["meta"]),
                     )
 
+                # Meta comes from the LOCKED row, never from a snapshot the caller
+                # took earlier: the fence and any concurrent heartbeat live there.
                 merged_meta = (
                     _coerce_jsonb_dict(active["meta"])
                     if active is not None
-                    else (
-                        _coerce_jsonb_dict(staging["meta"])
-                        if active_meta is None
-                        else dict(active_meta)
-                    )
+                    else _coerce_jsonb_dict(staging["meta"])
                 )
-                if active_meta:
-                    merged_meta = {**merged_meta, **active_meta}
                 from server.indexing.generations import GenerationManifest as _Manifest
+                from server.indexing.generations import IndexFenceLostError, IndexRunFence
+
+                raw_fence = merged_meta.get("index_run")
+                holder = (
+                    IndexRunFence.model_validate(raw_fence) if isinstance(raw_fence, dict) else None
+                )
+                if holder is None or holder.run_id != generation.run_id:
+                    # Released, taken over after a stale heartbeat, or cleared by a
+                    # deletion: this run must not commit over someone else's corpus.
+                    raise IndexFenceLostError(active_repo_id, generation.run_id, holder)
 
                 raw_previous = merged_meta.get("generation")
                 previous_generation = (
