@@ -26,7 +26,7 @@
 [Config API & workflow](../../configuration.md){ .md-button }
 [Glossary](../../glossary.md){ .md-button }
 
-**Total parameters**: 36
+**Total parameters**: 45
 
 ??? info "Group index"
     - `(root)`
@@ -35,7 +35,7 @@
 
 | JSON key | Env key(s) | Type | Default | Constraints | Summary |
 |---------|------------|------|---------|-------------|---------|
-| `training.learning_reranker_backend` | `LEARNING_RERANKER_BACKEND` | `Literal["auto", "mlx_qwen3"]` | `"auto"` | allowed="auto", "mlx_qwen3" | Learning reranker backend: auto (prefer MLX Qwen3 on Apple Silicon), mlx_qwen3 (force). Legacy values 'transformers'/'hf' normalize to 'auto'. |
+| `training.learning_reranker_backend` | `LEARNING_RERANKER_BACKEND` | `Literal["auto", "mlx_qwen3"]` | `"auto"` | allowed="auto", "mlx_qwen3" | Learning reranker backend: auto (prefer MLX Qwen3 on Apple Silicon), mlx_qwen3 (force). Stale values such as 'transformers'/'hf'/'mlx' fail validation and must be migrated. |
 | `training.learning_reranker_base_model` | `LEARNING_RERANKER_BASE_MODEL` | `str` | `"Qwen/Qwen3-Reranker-0.6B"` | — | Base model to fine-tune for MLX Qwen3 learning reranker |
 | `training.learning_reranker_grad_accum_steps` | `LEARNING_RERANKER_GRAD_ACCUM_STEPS` | `int` | `8` | ≥ 1, ≤ 128 | Gradient accumulation steps per optimizer update for MLX Qwen3 learning reranker training |
 | `training.learning_reranker_lora_alpha` | `LEARNING_RERANKER_LORA_ALPHA` | `float` | `32.0` | > 0.0, ≤ 512.0 | LoRA alpha for MLX Qwen3 learning reranker |
@@ -44,31 +44,40 @@
 | `training.learning_reranker_lora_target_modules` | — | `list[str]` | `["q_proj", "k_proj", "v_proj", "o_proj"]` | min_length=1 | Module name suffixes to apply LoRA to (MLX Qwen3) |
 | `training.learning_reranker_negative_ratio` | `LEARNING_RERANKER_NEGATIVE_RATIO` | `int` | `5` | ≥ 1, ≤ 20 | Negative pairs per positive during learning reranker training |
 | `training.learning_reranker_promote_epsilon` | `LEARNING_RERANKER_PROMOTE_EPSILON` | `float` | `0.0` | ≥ 0.0, ≤ 1.0 | Minimum improvement required to auto-promote (primary metric delta) |
-| `training.learning_reranker_promote_if_improves` | `LEARNING_RERANKER_PROMOTE_IF_IMPROVES` | `int` | `1` | ≥ 0, ≤ 1 | Promote trained learning artifact to active path only if primary metric improves |
+| `training.learning_reranker_promote_if_improves` | `LEARNING_RERANKER_PROMOTE_IF_IMPROVES` | `bool` | `true` | — | Promote trained learning artifact to active path only if primary metric improves |
 | `training.learning_reranker_telemetry_interval_steps` | `LEARNING_RERANKER_TELEMETRY_INTERVAL_STEPS` | `int` | `2` | ≥ 1, ≤ 20 | Emit trainer telemetry every N optimizer steps (plus first/final) |
 | `training.learning_reranker_unload_after_sec` | `LEARNING_RERANKER_UNLOAD_AFTER_SEC` | `int` | `0` | ≥ 0, ≤ 86400 | Unload MLX learning reranker model after idle seconds (0 = never) |
-| `training.ragweld_agent_backend` | `RAGWELD_AGENT_BACKEND` | `str` | `"mlx_qwen3"` | — | Ragweld agent backend (in-process chat model). Currently: mlx_qwen3 |
-| `training.ragweld_agent_base_model` | `RAGWELD_AGENT_BASE_MODEL` | `str` | `"mlx-community/Qwen3-1.7B-4bit"` | — | Shipped base model for the ragweld agent (MLX). |
+| `training.ragweld_agent_backend` | `RAGWELD_AGENT_BACKEND` | `str` | `"mlx_qwen3"` | — | Learning Agent LoRA training backend (training-only artifact; chat generation is served through LiteLLM). Currently: mlx_qwen3 |
+| `training.ragweld_agent_base_model` | `RAGWELD_AGENT_BASE_MODEL` | `str` | `"mlx-community/Qwen3-4B-Instruct-2507-4bit"` | — | MLX base model the Learning Agent LoRA adapters are trained on. Artifacts trained for another base are not promotable. |
+| `training.ragweld_agent_flyte_admin_base_url` | `RAGWELD_AGENT_FLYTE_ADMIN_BASE_URL` | `str` | `""` | — | Base URL for Flyte Admin HTTP access (used for readiness checks and operator links). |
+| `training.ragweld_agent_flyte_callback_base_url` | `RAGWELD_AGENT_FLYTE_CALLBACK_BASE_URL` | `str` | `""` | — | Base URL of this Ragweld API as reachable from Flyte task pods (the workflow task hands the run to this API's execute boundary and tracks it). On Colima the host is the VM gateway, for example http://192.168.5.2:58012. |
+| `training.ragweld_agent_flyte_console_base_url` | `RAGWELD_AGENT_FLYTE_CONSOLE_BASE_URL` | `str` | `""` | — | Base URL for Flyte Console (used for operator deep links). |
+| `training.ragweld_agent_flyte_domain` | `RAGWELD_AGENT_FLYTE_DOMAIN` | `str` | `"development"` | — | Flyte domain/environment that owns Learning Agent executions. |
+| `training.ragweld_agent_flyte_launchplan` | `RAGWELD_AGENT_FLYTE_LAUNCHPLAN` | `str` | `""` | — | Flyte launch plan name for the Learning Agent workflow lane. |
+| `training.ragweld_agent_flyte_project` | `RAGWELD_AGENT_FLYTE_PROJECT` | `str` | `"ragweld"` | — | Flyte project that owns Learning Agent executions. |
 | `training.ragweld_agent_grad_accum_steps` | `RAGWELD_AGENT_GRAD_ACCUM_STEPS` | `int` | `8` | ≥ 1, ≤ 128 | Gradient accumulation steps per optimizer update for ragweld agent training. |
 | `training.ragweld_agent_lora_alpha` | `RAGWELD_AGENT_LORA_ALPHA` | `float` | `32.0` | > 0.0, ≤ 512.0 | LoRA alpha for ragweld agent MLX fine-tuning. |
 | `training.ragweld_agent_lora_dropout` | `RAGWELD_AGENT_LORA_DROPOUT` | `float` | `0.05` | ≥ 0.0, ≤ 0.5 | LoRA dropout for ragweld agent MLX fine-tuning. |
 | `training.ragweld_agent_lora_rank` | `RAGWELD_AGENT_LORA_RANK` | `int` | `16` | ≥ 1, ≤ 128 | LoRA rank for ragweld agent MLX fine-tuning. |
 | `training.ragweld_agent_lora_target_modules` | — | `list[str]` | `["q_proj", "k_proj", "v_proj", "o_proj"]` | min_length=1 | Module name suffixes to apply LoRA to (ragweld agent; MLX Qwen3). |
-| `training.ragweld_agent_model_path` | `RAGWELD_AGENT_MODEL_PATH` | `str` | `"models/learning-agent-epstein-files-1"` | — | Active ragweld agent adapter artifact path (directory containing adapter.npz + adapter_config.json). |
+| `training.ragweld_agent_mlflow_experiment_name` | `RAGWELD_AGENT_MLFLOW_EXPERIMENT_NAME` | `str` | `"ragweld-learning-agent"` | — | MLflow experiment name for Learning Agent runs. |
+| `training.ragweld_agent_mlflow_tracking_url` | `RAGWELD_AGENT_MLFLOW_TRACKING_URL` | `str` | `"http://127.0.0.1:55500"` | — | Base URL of the Compose-owned MLflow Tracking server used by Learning Agent runs. |
+| `training.ragweld_agent_model_path` | `RAGWELD_AGENT_MODEL_PATH` | `str` | `"models/learning-agent-active"` | — | Root of the Learning Agent's versioned adapter store (versions/ + ACTIVE.json pointer); each version holds adapter.npz + adapter_config.json + manifest.json. Training-only: the baseline for later runs and lineage; never served by the chat gateway. |
 | `training.ragweld_agent_promote_epsilon` | `RAGWELD_AGENT_PROMOTE_EPSILON` | `float` | `0.0` | ≥ 0.0, ≤ 10.0 | Minimum eval_loss improvement required to auto-promote (baseline_loss - new_loss >= epsilon). |
-| `training.ragweld_agent_promote_if_improves` | `RAGWELD_AGENT_PROMOTE_IF_IMPROVES` | `int` | `1` | ≥ 0, ≤ 1 | Auto-promote trained ragweld agent adapter only if eval_loss improves. |
-| `training.ragweld_agent_reload_period_sec` | `RAGWELD_AGENT_RELOAD_PERIOD_SEC` | `int` | `60` | ≥ 0, ≤ 600 | Adapter reload check period (seconds). 0 = check every request. |
+| `training.ragweld_agent_promote_if_improves` | `RAGWELD_AGENT_PROMOTE_IF_IMPROVES` | `bool` | `true` | — | Auto-promote trained ragweld agent adapter only if eval_loss improves. |
 | `training.ragweld_agent_telemetry_interval_steps` | `RAGWELD_AGENT_TELEMETRY_INTERVAL_STEPS` | `int` | `2` | ≥ 1, ≤ 20 | Emit ragweld agent trainer telemetry every N optimizer steps (plus first/final). |
+| `training.ragweld_agent_tracking_backend` | `RAGWELD_AGENT_TRACKING_BACKEND` | `Literal["local", "mlflow"]` | `"local"` | allowed="local", "mlflow" | Run/artifact tracking backend for Learning Agent runs. |
 | `training.ragweld_agent_train_dataset_path` | `RAGWELD_AGENT_TRAIN_DATASET_PATH` | `str` | `""` | — | Training dataset path for the ragweld agent (empty = use evaluation.eval_dataset_path). |
-| `training.ragweld_agent_unload_after_sec` | `RAGWELD_AGENT_UNLOAD_AFTER_SEC` | `int` | `0` | ≥ 0, ≤ 86400 | Unload ragweld agent model after idle seconds (0 = never). |
+| `training.ragweld_agent_unsloth_image` | `RAGWELD_AGENT_UNSLOTH_IMAGE` | `str` | `""` | — | Container image or artifact reference used by the Flyte task to run Unsloth training. |
+| `training.ragweld_agent_workflow_backend` | `RAGWELD_AGENT_WORKFLOW_BACKEND` | `Literal["local", "flyte"]` | `"local"` | allowed="local", "flyte" | Workflow/orchestration backend for Learning Agent runs. |
 | `training.reranker_train_batch` | `RERANKER_TRAIN_BATCH` | `int` | `16` | ≥ 1, ≤ 128 | Training batch size |
 | `training.reranker_train_epochs` | `RERANKER_TRAIN_EPOCHS` | `int` | `2` | ≥ 1, ≤ 20 | Training epochs for reranker |
 | `training.reranker_train_lr` | `RERANKER_TRAIN_LR` | `float` | `2e-05` | ≥ 1e-06, ≤ 0.001 | Learning rate |
 | `training.reranker_warmup_ratio` | `RERANKER_WARMUP_RATIO` | `float` | `0.1` | ≥ 0.0, ≤ 0.5 | Warmup steps ratio |
 | `training.tribrid_reranker_mine_mode` | `TRIBRID_RERANKER_MINE_MODE` | `str` | `"replace"` | pattern=^(replace\|append)$ | Triplet mining mode |
-| `training.tribrid_reranker_mine_reset` | `TRIBRID_RERANKER_MINE_RESET` | `int` | `0` | ≥ 0, ≤ 1 | Reset triplets file before mining |
-| `training.tribrid_reranker_model_path` | `TRIBRID_RERANKER_MODEL_PATH` | `str` | `"models/learning-reranker-epstein-files-1"` | — | Active learning reranker artifact path (MLX adapter directory). |
-| `training.tribrid_triplets_path` | `TRIBRID_TRIPLETS_PATH` | `str` | `"data/training/triplets__epstein-files-1.jsonl"` | — | Training triplets file path |
+| `training.tribrid_reranker_mine_reset` | `TRIBRID_RERANKER_MINE_RESET` | `bool` | `false` | — | Reset triplets file before mining |
+| `training.tribrid_reranker_model_path` | `TRIBRID_RERANKER_MODEL_PATH` | `str` | `"models/learning-reranker-active"` | — | Root of the learning reranker's versioned artifact store (versions/ + ACTIVE.json pointer). Readers resolve the pointer to the active immutable MLX adapter version; promotions switch it atomically. |
+| `training.tribrid_triplets_path` | `TRIBRID_TRIPLETS_PATH` | `str` | `"data/training/triplets.jsonl"` | — | Training triplets file path |
 | `training.triplets_min_count` | `TRIPLETS_MIN_COUNT` | `int` | `100` | ≥ 10, ≤ 10000 | Min triplets for training |
 | `training.triplets_mine_mode` | `TRIPLETS_MINE_MODE` | `str` | `"replace"` | pattern=^(replace\|append)$ | Triplet mining mode |
 
@@ -189,7 +198,7 @@
 ??? info "`training.learning_reranker_promote_if_improves` (`LEARNING_RERANKER_PROMOTE_IF_IMPROVES`) — Learning Reranker Promotion Gate"
     **Category**: `reranking`
 
-    `LEARNING_RERANKER_PROMOTE_IF_IMPROVES` is the hard promotion gate for learning-reranker training. When set to `1` (default), a successful training job promotes the candidate artifact only if the primary dev metric exceeds the current baseline by at least `LEARNING_RERANKER_PROMOTE_EPSILON`; when set to `0`, every successful run can overwrite the active path. Keeping this enabled is safer in continuous-training loops because it preserves model stability during noisy data windows and imperfect labeling periods. Disable it only for controlled experiments with manual review and explicit rollback procedures.
+    `LEARNING_RERANKER_PROMOTE_IF_IMPROVES` is the hard promotion gate for learning-reranker training. When enabled (default), a successful training job promotes the candidate artifact only if the primary dev metric exceeds the current baseline by at least `LEARNING_RERANKER_PROMOTE_EPSILON`; when disabled, every successful run can overwrite the active path. Keeping this enabled is safer in continuous-training loops because it preserves model stability during noisy data windows and imperfect labeling periods. Disable it only for controlled experiments with manual review and explicit rollback procedures.
 
     **Badges**:
     - Safety
@@ -295,7 +304,7 @@
 ??? info "`training.ragweld_agent_model_path` (`RAGWELD_AGENT_MODEL_PATH`) — RAGWELD_AGENT_MODEL_PATH"
     **Category**: `general`
 
-    Points to the model artifact location used by the agent pipeline (local directory, checkpoint file, or hub identifier). This path determines what tokenizer/config/weights are loaded and where resumed training continues from. Use immutable, versioned paths for reproducibility and avoid ambiguous symlinks in production pipelines. For LoRA workflows, clearly separate base-model path from adapter output path so promotion and rollback do not accidentally mix incompatible artifacts.
+    Root directory of the Learning Agent's versioned adapter store. Promotions publish each trained LoRA adapter as an immutable version under `versions/<run_id>/` and switch a fsynced `ACTIVE.json` pointer atomically, so readers resolve the pointer once and never observe a half-written or missing artifact; a crashed promotion is repaired at startup. The store retains the current version plus the one it just retired, and the full history stays in each run's artifact directory. Training-only: it provides the baseline for later runs and lineage capture, and is never served by the chat gateway.
 
     **Links**:
     - [LLMTailor: Fine-Tuning LLMs by Checking Components and LoRA (arXiv 2026)](https://arxiv.org/abs/2602.22158)
@@ -436,7 +445,7 @@
 ??? info "`training.tribrid_reranker_model_path` (`TRIBRID_RERANKER_MODEL_PATH`) — Reranker Model Path"
     **Category**: `general`
 
-    Filesystem location of the active reranker checkpoint or adapter bundle used at inference time. This path is effectively a deployment control: whichever artifact is loaded here defines live ranking behavior. Use stable, versioned directories and atomically swap symlinks or folder names to avoid partial reads during update windows. In adapter-based pipelines, keep base model version and adapter metadata aligned so path changes do not silently load incompatible weights.
+    Root directory of the learning reranker's versioned artifact store, and effectively a deployment control: inference resolves the store's fsynced `ACTIVE.json` pointer to an immutable version directory under `versions/<run_id>/`, so whichever version the pointer names defines live ranking behavior. Promotions publish a new version and switch the pointer atomically (no partial reads during update windows), a crashed promotion is repaired at startup, and the adapter's manifest keeps base-model metadata aligned so a pointer switch cannot silently load incompatible weights.
 
     **Links**:
     - [RRRA: Resampling and Reranking through a Retriever Adapter (arXiv 2025)](https://arxiv.org/abs/2508.11670)

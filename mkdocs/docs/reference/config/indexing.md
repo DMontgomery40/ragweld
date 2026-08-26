@@ -26,7 +26,7 @@
 [Config API & workflow](../../configuration.md){ .md-button }
 [Glossary](../../glossary.md){ .md-button }
 
-**Total parameters**: 17
+**Total parameters**: 18
 
 ??? info "Group index"
     - `(root)`
@@ -35,30 +35,31 @@
 
 | JSON key | Env key(s) | Type | Default | Constraints | Summary |
 |---------|------------|------|---------|-------------|---------|
-| `indexing.auto_prepare_dense_retrieval` | `AUTO_PREPARE_DENSE_RETRIEVAL` | `bool` | `true` | — | After a dense indexing run completes, automatically build the per-corpus pgvector HNSW index and warm representative query embeddings so first retrievals are not cold. |
-| `indexing.bm25_stemmer_lang` | `BM25_STEMMER_LANG` | `str` | `"english"` | — | Stemmer language |
-| `indexing.bm25_tokenizer` | `BM25_TOKENIZER` | `str` | `"stemmer"` | pattern=^(stemmer\|lowercase\|whitespace)$ | BM25 tokenizer type |
+| `indexing.bm25_stemmer_lang` | `BM25_STEMMER_LANG` | `str` | `"english"` | — | Snowball stemmer language for the sparse (Qdrant/bm25) index. Part of the sparse index contract. |
+| `indexing.bm25_tokenizer` | `BM25_TOKENIZER` | `str` | `"stemmer"` | pattern=^(stemmer\|lowercase\|whitespace)$ | Sparse (Qdrant/bm25) tokenization: 'stemmer' applies the Snowball stemmer for bm25_stemmer_lang; 'lowercase' and 'whitespace' disable stemming. Part of the sparse index contract (re-index on change). |
 | `indexing.estimated_tokens_per_second_local` | `ESTIMATED_TOKENS_PER_SECOND_LOCAL` | `int \| None` | `null` | ≥ 100, ≤ 500000 | Optional local embedding throughput override for index-time estimates (tokens/sec). |
+| `indexing.generation_retention_seconds` | `GENERATION_RETENTION_SECONDS` | `int` | `600` | ≥ 0, ≤ 86400 | How long a replaced index generation (its Qdrant collection and Neo4j graph) stays readable after a promotion before it is retired. Must cover the longest request that can still hold the old manifest; 0 retires it at the next commit. |
 | `indexing.index_excluded_exts` | `INDEX_EXCLUDED_EXTS` | `str` | `".png,.jpg,.gif,.ico,.svg,.woff,.ttf"` | — | Excluded file extensions (comma-separated) |
 | `indexing.index_max_file_size_mb` | `INDEX_MAX_FILE_SIZE_MB` | `int` | `250` | ≥ 1, ≤ 1024 | Max file size to index (MB) |
+| `indexing.index_run_lease_seconds` | `INDEX_RUN_LEASE_SECONDS` | `int` | `600` | ≥ 30, ≤ 86400 | Lease on the per-corpus index-run fence. A running index heartbeats the fence; a fence whose last heartbeat is older than this is treated as a crashed worker and may be taken over by a new run. |
 | `indexing.indexing_batch_size` | `INDEXING_BATCH_SIZE` | `int` | `100` | ≥ 10, ≤ 1000 | Batch size for indexing |
 | `indexing.indexing_workers` | `INDEXING_WORKERS` | `int` | `4` | ≥ 1, ≤ 16 | Parallel workers for indexing |
 | `indexing.large_file_mode` | — | `Literal["read_all", "stream"]` | `"stream"` | allowed="read_all", "stream" | How to ingest very large text files. 'stream' avoids loading entire files into memory. |
 | `indexing.large_file_stream_chunk_chars` | — | `int` | `2000000` | ≥ 100000, ≤ 50000000 | When large_file_mode='stream', read text files in bounded char blocks (best-effort). |
-| `indexing.parquet_extract_include_column_names` | `PARQUET_EXTRACT_INCLUDE_COLUMN_NAMES` | `int` | `1` | ≥ 0, ≤ 1 | Include column headers when extracting Parquet text |
+| `indexing.parquet_extract_include_column_names` | `PARQUET_EXTRACT_INCLUDE_COLUMN_NAMES` | `bool` | `true` | — | Include column headers when extracting Parquet text |
 | `indexing.parquet_extract_max_cell_chars` | `PARQUET_EXTRACT_MAX_CELL_CHARS` | `int` | `20000` | ≥ 100, ≤ 200000 | Max characters per extracted Parquet cell (best-effort) |
 | `indexing.parquet_extract_max_chars` | `PARQUET_EXTRACT_MAX_CHARS` | `int` | `2000000` | ≥ 10000, ≤ 50000000 | Max characters to extract from a single Parquet file during indexing (best-effort) |
 | `indexing.parquet_extract_max_rows` | `PARQUET_EXTRACT_MAX_ROWS` | `int` | `5000` | ≥ 1, ≤ 200000 | Max rows to extract from a single Parquet file during indexing (best-effort) |
-| `indexing.parquet_extract_text_columns_only` | `PARQUET_EXTRACT_TEXT_COLUMNS_ONLY` | `int` | `1` | ≥ 0, ≤ 1 | Extract only text/string-like columns from Parquet files when possible |
-| `indexing.postgres_url` | `POSTGRES_URL` | `str` | `"postgresql://postgres:postgres@localhost:5432/tribrid_rag"` | — | PostgreSQL connection string (DSN) for pgvector + FTS storage |
-| `indexing.skip_dense` | `SKIP_DENSE` | `int` | `0` | ≥ 0, ≤ 1 | Skip dense vector indexing |
+| `indexing.parquet_extract_text_columns_only` | `PARQUET_EXTRACT_TEXT_COLUMNS_ONLY` | `bool` | `true` | — | Extract only text/string-like columns from Parquet files when possible |
+| `indexing.postgres_url` | `POSTGRES_URL` | `str` | `"postgresql://postgres:postgres@localhost:5432/tribrid_rag"` | — | PostgreSQL connection string (DSN) for corpus control/state storage (chunk rows, summaries, caches) |
+| `indexing.skip_dense` | `SKIP_DENSE` | `bool` | `false` | — | Skip dense vector indexing |
 
 ### Details (glossary)
 
 ??? info "`indexing.bm25_stemmer_lang` (`BM25_STEMMER_LANG`) — BM25 Stemmer Language"
     **Category**: `retrieval`
 
-    BM25_STEMMER_LANG chooses the stemming or morphological normalization profile applied before sparse indexing. Correct language normalization improves recall by unifying inflected word forms, while incorrect stemming can collapse distinct technical terms and reduce precision. Multilingual corpora often need language-aware analyzers by field rather than one global stemmer, especially when prose and code identifiers coexist. Any change here requires reindexing and targeted multilingual relevance checks because token statistics and BM25 behavior shift across the entire corpus.
+    BM25_STEMMER_LANG is the Snowball stemmer language applied when BM25_TOKENIZER is `stemmer`, for example `english` or `german`; fastembed's `Qdrant/bm25` model uses it to normalize inflected forms before building sparse vectors. It is part of the corpus sparse contract: the language used at index time must match the language used at query time, so changing it requires a re-index. Unsupported language names fail the sparse leg with an explicit error rather than silently falling back.
 
     **Badges**:
     - Linguistics
@@ -72,7 +73,7 @@
 ??? info "`indexing.bm25_tokenizer` (`BM25_TOKENIZER`) — BM25 Tokenizer"
     **Category**: `retrieval`
 
-    BM25_TOKENIZER determines how text is split into sparse terms, and this often has a larger impact than small parameter tweaks. Conservative tokenization preserves exact symbols and identifier fragments useful for code retrieval, while aggressive normalization helps natural-language matching. The right choice depends on corpus composition: APIs and filenames benefit from symbol-aware token boundaries, whereas narrative documents benefit from linguistic normalization. Because tokenizer behavior changes term frequencies and document lengths, retune BM25 parameters after tokenizer changes instead of carrying old values forward.
+    BM25_TOKENIZER chooses whether the sparse `Qdrant/bm25` vectors are built with Snowball stemming (`stemmer`, using BM25_STEMMER_LANG) or without stemming (`lowercase` and `whitespace` both disable the stemmer and keep exact tokens). Stemming helps narrative prose match inflected forms; exact tokens preserve identifiers, filenames, and error codes for code-heavy corpora. The choice is recorded in the corpus sparse contract, so changing it requires a re-index and is otherwise refused.
 
     **Badges**:
     - Tokenization
@@ -82,6 +83,9 @@
     - [Elasticsearch Tokenizers](https://www.elastic.co/guide/en/elasticsearch/reference/current/analysis-tokenizers.html)
     - [Hugging Face Tokenizers](https://huggingface.co/docs/tokenizers/index)
     - [Lucene WhitespaceTokenizer](https://lucene.apache.org/core/10_3_1/analysis/common/org/apache/lucene/analysis/core/WhitespaceTokenizer.html)
+
+??? info "`indexing.generation_retention_seconds` (`GENERATION_RETENTION_SECONDS`) — Generation Retention Seconds"
+    GENERATION_RETENTION_SECONDS is how long a replaced index generation (its Qdrant collection and Neo4j graph) stays readable after a promotion before the next commit retires it. Promotion writes a new generation manifest in one Postgres transaction; a request that resolved the old manifest just before that commit still queries the old stores, so the grace must cover the longest request lifetime. A value of 0 retires the replaced generation at the very next commit. Retired generations are dropped by exact id, never by name prefix.
 
 ??? info "`indexing.index_excluded_exts` (`INDEX_EXCLUDED_EXTS`) — Excluded Extensions"
     **Category**: `infrastructure`
@@ -110,6 +114,9 @@
     - [Azure AI Search: Chunk Large Documents](https://learn.microsoft.com/en-us/azure/search/vector-search-how-to-chunk-documents)
     - [Unstructured Open Source Overview](https://docs.unstructured.io/open-source/introduction/overview)
     - [Weaviate Data Import](https://docs.weaviate.io/weaviate/manage-objects/import)
+
+??? info "`indexing.index_run_lease_seconds` (`INDEX_RUN_LEASE_SECONDS`) — Index Run Lease Seconds"
+    INDEX_RUN_LEASE_SECONDS is the lease on the durable per-corpus index-run fence stored on the corpus row. A running index heartbeats the fence at a tenth of the lease; a second run on the same corpus is refused with a typed 409 while the fence is fresh. A fence whose last heartbeat is older than the lease is treated as a crashed worker: a new run may take it over, and stopping the corpus releases it. Set it longer than the longest pause a run can have without heartbeating.
 
 ??? info "`indexing.indexing_batch_size` (`INDEXING_BATCH_SIZE`) — Indexing Batch Size"
     **Category**: `embedding`
@@ -194,10 +201,10 @@
     - [DuckDB Parquet Integration Overview](https://duckdb.org/docs/stable/data/parquet/overview)
     - [pandas read_parquet Reference](https://pandas.pydata.org/docs/reference/api/pandas.read_parquet.html)
 
-??? info "`indexing.postgres_url` (`POSTGRES_URL`) — PostgreSQL pgvector URL"
+??? info "`indexing.postgres_url` (`POSTGRES_URL`) — PostgreSQL URL"
     **Category**: `infrastructure`
 
-    Connection DSN used to reach PostgreSQL for relational storage and pgvector-backed similarity retrieval. This single string determines host, port, database, credentials, SSL behavior, and optional connection parameters, so parsing mistakes or stale credentials can break indexing and retrieval simultaneously. Keep secrets out of committed config and inject this value at runtime via environment management; then validate connectivity and extension availability (`pgvector`) during startup checks. If you operate multiple environments, treat DSN changes as deploy-time infrastructure changes with explicit migration and rollback plans.
+    Connection DSN for the PostgreSQL control/state store: the corpus registry and per-corpus config, chunk rows with provenance, chunk summaries, and the semantic/embedding caches. Chunk rows carry no vectors; dense and sparse vectors live in Qdrant and Postgres records the dense and sparse contracts they were built under. Retrieval hydrates graph hits and neighbor chunks from these rows, so Postgres must stay reachable for every leg even though it no longer executes vector or full-text search.
 
     **Links**:
     - [Text2VectorSQL: Bridging SQL and Vector Retrieval (arXiv 2025)](https://arxiv.org/abs/2506.23071)
@@ -208,7 +215,7 @@
 ??? info "`indexing.skip_dense` (`SKIP_DENSE`) — Skip Dense Embeddings"
     **Category**: `retrieval`
 
-    When enabled, indexing skips dense embedding generation and vector-store writes, leaving retrieval fully lexical (BM25/FTS). This is useful for fast local iteration, constrained CI environments, or deployments where vector infrastructure is unavailable. The tradeoff is predictable: lower indexing cost and simpler ops, but weaker semantic recall for paraphrases and concept-level matches. Use this mode when exact term matching dominates your workload (file names, identifiers, error strings), and disable it for natural-language-heavy corpora where semantic expansion materially improves first-pass recall.
+    When enabled, indexing skips dense embedding generation and writes sparse-only points to the corpus Qdrant generation, leaving the vector leg empty for that corpus while sparse and graph retrieval still work. Use it for corpora where lexical matching is sufficient or when the embedding runtime is unavailable; the corpus records `embedding_dimensions = 0` so a later dense run must be a full re-index. Neo4j chunk vectors are also skipped, so chunk-mode graph search needs a dense run.
 
     **Badges**:
     - Much faster

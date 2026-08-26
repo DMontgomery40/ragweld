@@ -48,7 +48,7 @@
 | `chunking.max_indexable_file_size` | `MAX_INDEXABLE_FILE_SIZE` | `int` | `250000000` | ≥ 10000, ≤ 2000000000 | Max file size to index (bytes) - files larger than this are skipped |
 | `chunking.min_chunk_chars` | `MIN_CHUNK_CHARS` | `int` | `50` | ≥ 10, ≤ 500 | Minimum chunk size |
 | `chunking.overlap_tokens` | — | `int` | `64` | ≥ 0, ≤ 2048 | Token overlap between chunks (token-based strategies) |
-| `chunking.preserve_imports` | `PRESERVE_IMPORTS` | `int` | `1` | ≥ 0, ≤ 1 | Include imports in chunks |
+| `chunking.preserve_imports` | `PRESERVE_IMPORTS` | `bool` | `true` | — | Include imports in chunks |
 | `chunking.recursive_max_depth` | — | `int` | `10` | ≥ 1, ≤ 50 | Max recursion depth for recursive chunking. |
 | `chunking.separator_keep` | — | `Literal["none", "prefix", "suffix"]` | `"suffix"` | allowed="none", "prefix", "suffix" | Whether to keep separators when splitting (recursive strategy). |
 | `chunking.separators` | — | `list[str]` | `["\n\n", "\n", ". ", " ", ""]` | — | Separators for recursive chunking, in priority order. |

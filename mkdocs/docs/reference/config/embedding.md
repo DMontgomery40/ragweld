@@ -41,11 +41,11 @@
 | `embedding.embed_text_suffix` | — | `str` | `""` | — | Suffix added after chunk text prior to embedding. |
 | `embedding.embedding_backend` | — | `Literal["deterministic", "provider"]` | `"deterministic"` | allowed="deterministic", "provider" | Embedding execution backend. 'deterministic' is offline/test-friendly; 'provider' calls real providers. |
 | `embedding.embedding_batch_size` | `EMBEDDING_BATCH_SIZE` | `int` | `64` | ≥ 1, ≤ 256 | Batch size for embedding generation |
-| `embedding.embedding_cache_enabled` | `EMBEDDING_CACHE_ENABLED` | `int` | `1` | ≥ 0, ≤ 1 | Enable embedding cache |
+| `embedding.embedding_cache_enabled` | `EMBEDDING_CACHE_ENABLED` | `bool` | `true` | — | Enable embedding cache |
 | `embedding.embedding_dim` | `EMBEDDING_DIM` | `int` | `3072` | ≥ 128, ≤ 4096 | Embedding dimensions |
 | `embedding.embedding_max_tokens` | `EMBEDDING_MAX_TOKENS` | `int` | `8000` | ≥ 512, ≤ 8192 | Max tokens per embedding chunk |
 | `embedding.embedding_model` | `EMBEDDING_MODEL` | `str` | `"text-embedding-3-large"` | — | OpenAI embedding model |
-| `embedding.embedding_model_local` | `EMBEDDING_MODEL_LOCAL` | `str` | `"all-MiniLM-L6-v2"` | — | Local SentenceTransformer model |
+| `embedding.embedding_model_local` | `EMBEDDING_MODEL_LOCAL` | `str` | `"BAAI/bge-small-en-v1.5"` | — | Local SentenceTransformer model |
 | `embedding.embedding_model_mlx` | `EMBEDDING_MODEL_MLX` | `str` | `"mlx-community/all-MiniLM-L6-v2-4bit"` | — | MLX-optimized embedding model (used when embedding_type=mlx) |
 | `embedding.embedding_retry_max` | `EMBEDDING_RETRY_MAX` | `int` | `3` | ≥ 1, ≤ 5 | Max retries for embedding API |
 | `embedding.embedding_timeout` | `EMBEDDING_TIMEOUT` | `int` | `30` | ≥ 5, ≤ 120 | Embedding API timeout (seconds) |

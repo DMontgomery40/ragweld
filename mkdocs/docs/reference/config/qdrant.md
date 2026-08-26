@@ -1,4 +1,4 @@
-# Config reference: `sparse_search`
+# Config reference: `qdrant`
 
 <div class="grid chunk_summaries" markdown>
 
@@ -26,7 +26,7 @@
 [Config API & workflow](../../configuration.md){ .md-button }
 [Glossary](../../glossary.md){ .md-button }
 
-**Total parameters**: 4
+**Total parameters**: 1
 
 ??? info "Group index"
     - `(root)`
@@ -35,7 +35,4 @@
 
 | JSON key | Env key(s) | Type | Default | Constraints | Summary |
 |---------|------------|------|---------|-------------|---------|
-| `sparse_search.bm25_b` | — | `float` | `0.4` | ≥ 0.0, ≤ 1.0 | BM25 length normalization for the Qdrant/bm25 sparse vectors (0 = no penalty, 1 = full penalty). Part of the sparse index contract (re-index on change). |
-| `sparse_search.bm25_k1` | — | `float` | `1.2` | ≥ 0.5, ≤ 3.0 | BM25 term-frequency saturation for the Qdrant/bm25 sparse vectors (higher = more weight to term frequency). Part of the sparse index contract (re-index on change). |
-| `sparse_search.enabled` | — | `bool` | `true` | — | Enable the sparse (Qdrant/bm25) leg in tri-brid retrieval |
-| `sparse_search.top_k` | — | `int` | `50` | ≥ 10, ≤ 200 | Number of results to retrieve from the sparse leg |
+| `qdrant.url` | — | `str` | `"http://127.0.0.1:56333"` | — | Base URL of the Compose-owned Qdrant service that stores every corpus's dense and sparse chunk vectors |

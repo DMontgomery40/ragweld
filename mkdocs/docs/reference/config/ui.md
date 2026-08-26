@@ -35,26 +35,26 @@
 
 | JSON key | Env key(s) | Type | Default | Constraints | Summary |
 |---------|------------|------|---------|-------------|---------|
-| `ui.chat_default_model` | `CHAT_DEFAULT_MODEL` | `str` | `"gpt-4o-mini"` | — | Default model for chat if not specified in request |
+| `ui.chat_default_model` | `CHAT_DEFAULT_MODEL` | `str` | `"ragweld-local"` | — | Default model for chat if not specified in request |
 | `ui.chat_history_max` | `CHAT_HISTORY_MAX` | `int` | `50` | ≥ 10, ≤ 500 | Max chat history messages |
-| `ui.chat_show_citations` | `CHAT_SHOW_CITATIONS` | `int` | `1` | ≥ 0, ≤ 1 | Show citations list on chat answers |
-| `ui.chat_show_confidence` | `CHAT_SHOW_CONFIDENCE` | `int` | `0` | ≥ 0, ≤ 1 | Show confidence badge on chat answers |
-| `ui.chat_show_debug_footer` | `CHAT_SHOW_DEBUG_FOOTER` | `int` | `1` | ≥ 0, ≤ 1 | Show dev/debug footer under chat answers |
-| `ui.chat_show_trace` | `CHAT_SHOW_TRACE` | `int` | `1` | ≥ 0, ≤ 1 | Show routing trace panel by default |
-| `ui.chat_stream_include_thinking` | `CHAT_STREAM_INCLUDE_THINKING` | `int` | `1` | ≥ 0, ≤ 1 | Include reasoning/thinking in streamed responses when supported by model |
-| `ui.chat_stream_timeout` | `CHAT_STREAM_TIMEOUT` | `int` | `120` | ≥ 30, ≤ 600 | Streaming response timeout in seconds |
-| `ui.chat_streaming_enabled` | `CHAT_STREAMING_ENABLED` | `int` | `1` | ≥ 0, ≤ 1 | Enable streaming responses |
+| `ui.chat_show_citations` | `CHAT_SHOW_CITATIONS` | `bool` | `true` | — | Show citations list on chat answers |
+| `ui.chat_show_confidence` | `CHAT_SHOW_CONFIDENCE` | `bool` | `false` | — | Show confidence badge on chat answers |
+| `ui.chat_show_debug_footer` | `CHAT_SHOW_DEBUG_FOOTER` | `bool` | `true` | — | Show dev/debug footer under chat answers |
+| `ui.chat_show_trace` | `CHAT_SHOW_TRACE` | `bool` | `true` | — | Show routing trace panel by default |
+| `ui.chat_stream_include_thinking` | `CHAT_STREAM_INCLUDE_THINKING` | `bool` | `true` | — | Include reasoning/thinking in streamed responses when supported by model |
+| `ui.chat_stream_timeout` | `CHAT_STREAM_TIMEOUT` | `int` | `600` | ≥ 30, ≤ 600 | Streaming response timeout in seconds (sized for single-stream CPU serving of the local model) |
+| `ui.chat_streaming_enabled` | `CHAT_STREAMING_ENABLED` | `bool` | `true` | — | Enable streaming responses |
 | `ui.chat_thinking_budget_tokens` | `CHAT_THINKING_BUDGET_TOKENS` | `int` | `10000` | ≥ 1000, ≤ 100000 | Max thinking tokens for Anthropic extended thinking |
 | `ui.editor_bind` | `EDITOR_BIND` | `str` | `"local"` | — | Editor bind mode |
-| `ui.editor_embed_enabled` | `EDITOR_EMBED_ENABLED` | `int` | `1` | ≥ 0, ≤ 1 | Enable editor embedding |
-| `ui.editor_enabled` | `EDITOR_ENABLED` | `int` | `1` | ≥ 0, ≤ 1 | Enable embedded editor |
+| `ui.editor_embed_enabled` | `EDITOR_EMBED_ENABLED` | `bool` | `true` | — | Enable editor embedding |
+| `ui.editor_enabled` | `EDITOR_ENABLED` | `bool` | `true` | — | Enable embedded editor |
 | `ui.editor_image` | `EDITOR_IMAGE` | `str` | `"codercom/code-server:latest"` | — | Editor Docker image |
 | `ui.editor_port` | `EDITOR_PORT` | `int` | `4440` | ≥ 1024, ≤ 65535 | Embedded editor port |
 | `ui.grafana_auth_mode` | `GRAFANA_AUTH_MODE` | `str` | `"anonymous"` | — | Grafana authentication mode |
-| `ui.grafana_base_url` | `GRAFANA_BASE_URL` | `str` | `"http://127.0.0.1:3001"` | — | Grafana base URL |
-| `ui.grafana_dashboard_slug` | `GRAFANA_DASHBOARD_SLUG` | `str` | `"tribrid-overview"` | — | Grafana dashboard slug |
-| `ui.grafana_dashboard_uid` | `GRAFANA_DASHBOARD_UID` | `str` | `"tribrid-overview"` | — | Default Grafana dashboard UID |
-| `ui.grafana_embed_enabled` | `GRAFANA_EMBED_ENABLED` | `int` | `1` | ≥ 0, ≤ 1 | Enable Grafana embedding |
+| `ui.grafana_base_url` | `GRAFANA_BASE_URL` | `str` | `"http://127.0.0.1:3301"` | — | Grafana base URL |
+| `ui.grafana_dashboard_slug` | `GRAFANA_DASHBOARD_SLUG` | `str` | `"on-call-overview"` | — | Grafana dashboard slug |
+| `ui.grafana_dashboard_uid` | `GRAFANA_DASHBOARD_UID` | `str` | `"ragweld-oncall-overview"` | — | Default Grafana dashboard UID |
+| `ui.grafana_embed_enabled` | `GRAFANA_EMBED_ENABLED` | `bool` | `true` | — | Enable Grafana embedding |
 | `ui.grafana_kiosk` | `GRAFANA_KIOSK` | `str` | `"tv"` | — | Grafana kiosk mode |
 | `ui.grafana_org_id` | `GRAFANA_ORG_ID` | `int` | `1` | — | Grafana organization ID |
 | `ui.grafana_refresh` | `GRAFANA_REFRESH` | `str` | `"10s"` | — | Grafana refresh interval |
@@ -62,22 +62,22 @@
 | `ui.learning_reranker_dockview_layout_json` | `LEARNING_RERANKER_DOCKVIEW_LAYOUT_JSON` | `str` | `""` | — | Serialized Dockview layout JSON for Learning Reranker Studio pane persistence |
 | `ui.learning_reranker_layout_engine` | `LEARNING_RERANKER_LAYOUT_ENGINE` | `Literal["dockview", "panels"]` | `"dockview"` | allowed="dockview", "panels" | Learning Reranker Studio layout engine selection |
 | `ui.learning_reranker_logs_renderer` | `LEARNING_RERANKER_LOGS_RENDERER` | `Literal["json", "xterm"]` | `"xterm"` | allowed="json", "xterm" | Preferred logs renderer for Learning Reranker Studio |
-| `ui.learning_reranker_show_setup_row` | `LEARNING_RERANKER_SHOW_SETUP_ROW` | `int` | `0` | ≥ 0, ≤ 1 | Show setup summary row above studio dock layout (1=show, 0=collapsed) |
+| `ui.learning_reranker_show_setup_row` | `LEARNING_RERANKER_SHOW_SETUP_ROW` | `bool` | `false` | — | Show setup summary row above studio dock layout instead of collapsing it |
 | `ui.learning_reranker_studio_bottom_panel_pct` | `LEARNING_RERANKER_STUDIO_BOTTOM_PANEL_PCT` | `int` | `28` | ≥ 18, ≤ 45 | Default bottom dock height percentage for Learning Reranker Studio |
-| `ui.learning_reranker_studio_immersive` | `LEARNING_RERANKER_STUDIO_IMMERSIVE` | `int` | `1` | ≥ 0, ≤ 1 | Use immersive full-height studio mode for Learning Reranker |
+| `ui.learning_reranker_studio_immersive` | `LEARNING_RERANKER_STUDIO_IMMERSIVE` | `bool` | `true` | — | Use immersive full-height studio mode for Learning Reranker |
 | `ui.learning_reranker_studio_left_panel_pct` | `LEARNING_RERANKER_STUDIO_LEFT_PANEL_PCT` | `int` | `20` | ≥ 15, ≤ 35 | Default left dock width percentage for Learning Reranker Studio |
 | `ui.learning_reranker_studio_right_panel_pct` | `LEARNING_RERANKER_STUDIO_RIGHT_PANEL_PCT` | `int` | `30` | ≥ 20, ≤ 45 | Default right dock width percentage for Learning Reranker Studio |
-| `ui.learning_reranker_studio_v2_enabled` | `LEARNING_RERANKER_STUDIO_V2_ENABLED` | `int` | `1` | ≥ 0, ≤ 1 | Enable Learning Reranker Studio V2 layout and controls |
+| `ui.learning_reranker_studio_v2_enabled` | `LEARNING_RERANKER_STUDIO_V2_ENABLED` | `bool` | `true` | — | Enable Learning Reranker Studio V2 layout and controls |
 | `ui.learning_reranker_visualizer_color_mode` | `LEARNING_RERANKER_VISUALIZER_COLOR_MODE` | `Literal["absolute", "delta"]` | `"absolute"` | allowed="absolute", "delta" | Neural Visualizer trajectory coloring mode (absolute loss vs delta loss) |
 | `ui.learning_reranker_visualizer_max_points` | `LEARNING_RERANKER_VISUALIZER_MAX_POINTS` | `int` | `10000` | ≥ 1000, ≤ 50000 | Maximum telemetry points retained for Neural Visualizer |
 | `ui.learning_reranker_visualizer_motion_intensity` | `LEARNING_RERANKER_VISUALIZER_MOTION_INTENSITY` | `float` | `1.0` | ≥ 0.0, ≤ 2.0 | Global motion intensity multiplier for Neural Visualizer effects |
 | `ui.learning_reranker_visualizer_quality` | `LEARNING_RERANKER_VISUALIZER_QUALITY` | `Literal["balanced", "cinematic", "ultra"]` | `"cinematic"` | allowed="balanced", "cinematic", "ultra" | Neural Visualizer quality tier |
-| `ui.learning_reranker_visualizer_reduce_motion` | `LEARNING_RERANKER_VISUALIZER_REDUCE_MOTION` | `int` | `0` | ≥ 0, ≤ 1 | Reduce Neural Visualizer motion for accessibility/performance |
+| `ui.learning_reranker_visualizer_reduce_motion` | `LEARNING_RERANKER_VISUALIZER_REDUCE_MOTION` | `bool` | `false` | — | Reduce Neural Visualizer motion for accessibility/performance |
 | `ui.learning_reranker_visualizer_renderer` | `LEARNING_RERANKER_VISUALIZER_RENDERER` | `Literal["auto", "webgpu", "webgl2", "canvas2d"]` | `"auto"` | allowed="auto", "webgpu", "webgl2", "canvas2d" | Preferred renderer for Neural Visualizer |
-| `ui.learning_reranker_visualizer_show_vector_field` | `LEARNING_RERANKER_VISUALIZER_SHOW_VECTOR_FIELD` | `int` | `1` | ≥ 0, ≤ 1 | Render animated vector field accents in Neural Visualizer |
+| `ui.learning_reranker_visualizer_show_vector_field` | `LEARNING_RERANKER_VISUALIZER_SHOW_VECTOR_FIELD` | `bool` | `true` | — | Render animated vector field accents in Neural Visualizer |
 | `ui.learning_reranker_visualizer_tail_seconds` | `LEARNING_RERANKER_VISUALIZER_TAIL_SECONDS` | `float` | `8.0` | ≥ 1.0, ≤ 30.0 | Temporal tail length in seconds for visualizer trajectory effects |
 | `ui.learning_reranker_visualizer_target_fps` | `LEARNING_RERANKER_VISUALIZER_TARGET_FPS` | `int` | `60` | ≥ 30, ≤ 144 | Target FPS for Neural Visualizer animation loop |
-| `ui.open_browser` | `OPEN_BROWSER` | `int` | `1` | ≥ 0, ≤ 1 | Auto-open browser on start |
+| `ui.open_browser` | `OPEN_BROWSER` | `bool` | `true` | — | Auto-open browser on start |
 | `ui.runtime_mode` | `RUNTIME_MODE` | `Literal["development", "production"]` | `"development"` | allowed="development", "production" | Runtime environment mode (development uses localhost, production uses deployed URLs) |
 | `ui.theme_mode` | `THEME_MODE` | `str` | `"dark"` | pattern=^(light\|dark\|auto)$ | UI theme mode |
 
@@ -310,7 +310,7 @@
 ??? info "`ui.learning_reranker_show_setup_row` (`LEARNING_RERANKER_SHOW_SETUP_ROW`) — Learning Reranker Show Setup Row"
     **Category**: `reranking`
 
-    `LEARNING_RERANKER_SHOW_SETUP_ROW` controls whether the setup summary row is visible above the training studio dock layout (`1` = shown, `0` = collapsed; default `0`). This row provides quick context about run configuration and can reduce navigation overhead when comparing experiments, especially in dense training sessions. Hiding it increases available workspace for logs, visualizer output, and inspection panels, which can be better on smaller displays. Use `1` when onboarding or debugging configuration drift, and `0` when users already know the setup and need maximal panel real estate.
+    `LEARNING_RERANKER_SHOW_SETUP_ROW` controls whether the setup summary row is visible above the training studio dock layout (enabled = shown, disabled = collapsed; default disabled). This row provides quick context about run configuration and can reduce navigation overhead when comparing experiments, especially in dense training sessions. Hiding it increases available workspace for logs, visualizer output, and inspection panels, which can be better on smaller displays. Enable it when onboarding or debugging configuration drift, and disable it when users already know the setup and need maximal panel real estate.
 
     **Links**:
     - [Automating UI Optimization through Multi-Agentic Reasoning (arXiv)](https://arxiv.org/abs/2602.13126)

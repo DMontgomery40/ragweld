@@ -26,7 +26,7 @@
 [Config API & workflow](../../configuration.md){ .md-button }
 [Glossary](../../glossary.md){ .md-button }
 
-**Total parameters**: 32
+**Total parameters**: 30
 
 ??? info "Group index"
     - `(root)`
@@ -35,17 +35,15 @@
 
 | JSON key | Env key(s) | Type | Default | Constraints | Summary |
 |---------|------------|------|---------|-------------|---------|
-| `retrieval.bm25_b` | `BM25_B` | `float` | `0.4` | ≥ 0.0, ≤ 1.0 | BM25 length normalization (0=no penalty, 1=full penalty, 0.3-0.5 recommended for code) |
-| `retrieval.bm25_k1` | `BM25_K1` | `float` | `1.2` | ≥ 0.5, ≤ 3.0 | BM25 term frequency saturation parameter (higher = more weight to term frequency) |
 | `retrieval.bm25_weight` | `BM25_WEIGHT` | `float` | `0.3` | ≥ 0.0, ≤ 1.0 | Weight for BM25 in hybrid search |
-| `retrieval.chunk_summary_search_enabled` | `CHUNK_SUMMARY_SEARCH_ENABLED` | `int` | `1` | ≥ 0, ≤ 1 | Enable chunk_summary-based retrieval |
+| `retrieval.chunk_summary_search_enabled` | `CHUNK_SUMMARY_SEARCH_ENABLED` | `bool` | `true` | — | Enable chunk_summary-based retrieval |
 | `retrieval.conf_any` | `CONF_ANY` | `float` | `0.55` | ≥ 0.0, ≤ 1.0 | Minimum confidence threshold |
 | `retrieval.conf_avg5` | `CONF_AVG5` | `float` | `0.55` | ≥ 0.0, ≤ 1.0 | Confidence threshold for avg top-5 |
 | `retrieval.conf_top1` | `CONF_TOP1` | `float` | `0.62` | ≥ 0.0, ≤ 1.0 | Confidence threshold for top-1 |
 | `retrieval.dedup_by` | — | `Literal["chunk_id", "file_path"]` | `"chunk_id"` | allowed="chunk_id", "file_path" | Dedup key for final results. |
 | `retrieval.enable_mmr` | — | `bool` | `false` | — | Enable MMR diversification when embeddings are available. |
 | `retrieval.eval_final_k` | `EVAL_FINAL_K` | `int` | `5` | ≥ 1, ≤ 50 | Top-k for evaluation runs |
-| `retrieval.eval_multi` | `EVAL_MULTI` | `int` | `1` | ≥ 0, ≤ 1 | Enable multi-query in eval |
+| `retrieval.eval_multi` | `EVAL_MULTI` | `bool` | `true` | — | Enable multi-query in eval |
 | `retrieval.fallback_confidence` | `FALLBACK_CONFIDENCE` | `float` | `0.55` | ≥ 0.0, ≤ 1.0 | Confidence threshold for fallback retrieval strategies |
 | `retrieval.final_k` | `FINAL_K` | `int` | `10` | ≥ 1, ≤ 100 | Default top-k for search results |
 | `retrieval.hydration_max_chars` | — | `int` | `2000` | ≥ 500, ≤ 10000 | Max characters for result hydration |
@@ -60,43 +58,15 @@
 | `retrieval.mmr_lambda` | — | `float` | `0.7` | ≥ 0.0, ≤ 1.0 | MMR lambda (1=query relevance only, 0=diversity only). |
 | `retrieval.multi_query_m` | `MULTI_QUERY_M` | `int` | `4` | ≥ 1, ≤ 10 | Query variants for multi-query |
 | `retrieval.neighbor_window` | — | `int` | `1` | ≥ 0, ≤ 10 | Include adjacent chunks by ordinal for coherence (requires chunk_ordinal metadata). |
-| `retrieval.query_expansion_enabled` | `QUERY_EXPANSION_ENABLED` | `int` | `1` | ≥ 0, ≤ 1 | Enable synonym expansion |
+| `retrieval.query_expansion_enabled` | `QUERY_EXPANSION_ENABLED` | `bool` | `true` | — | Enable synonym expansion |
 | `retrieval.rrf_k_div` | `RRF_K_DIV` | `int` | `60` | ≥ 1, ≤ 200 | RRF rank smoothing constant (higher = more weight to top ranks) |
 | `retrieval.topk_dense` | `TOPK_DENSE` | `int` | `75` | ≥ 10, ≤ 200 | Top-K for dense vector search |
 | `retrieval.topk_sparse` | `TOPK_SPARSE` | `int` | `75` | ≥ 10, ≤ 200 | Top-K for sparse BM25 search |
 | `retrieval.tribrid_synonyms_path` | `TRIBRID_SYNONYMS_PATH` | `str` | `""` | — | Custom path to semantic_synonyms.json (default: data/semantic_synonyms.json) |
-| `retrieval.use_semantic_synonyms` | `USE_SEMANTIC_SYNONYMS` | `int` | `1` | ≥ 0, ≤ 1 | Enable semantic synonym expansion |
+| `retrieval.use_semantic_synonyms` | `USE_SEMANTIC_SYNONYMS` | `bool` | `true` | — | Enable semantic synonym expansion |
 | `retrieval.vector_weight` | `VECTOR_WEIGHT` | `float` | `0.7` | ≥ 0.0, ≤ 1.0 | Weight for vector search |
 
 ### Details (glossary)
-
-??? info "`retrieval.bm25_b` (`BM25_B`) — BM25 b (Length Normalization)"
-    **Category**: `retrieval`
-
-    BM25_B is the length-normalization parameter in BM25 and controls how strongly long chunks are penalized compared with short chunks. Higher values increase normalization, which helps when long documents accumulate incidental term matches; lower values reduce that penalty and can help when key evidence naturally lives in larger files. In hybrid retrieval this parameter shapes sparse scores before fusion with dense vectors, so it directly affects which lexical results survive into reranking. Tune b with mixed query types, including exact identifiers and natural-language requests, to avoid overfitting one retrieval mode.
-
-    **Badges**:
-    - Sparse Retrieval
-
-    **Links**:
-    - [SPLADE at Billion Scale (arXiv)](https://arxiv.org/abs/2511.22263)
-    - [Practical BM25 Variables](https://www.elastic.co/blog/practical-bm25-part-2-the-bm25-algorithm-and-its-variables)
-    - [Elasticsearch Similarity Settings](https://www.elastic.co/guide/en/elasticsearch/reference/current/index-modules-similarity.html)
-    - [Lucene BM25Similarity API](https://lucene.apache.org/core/10_3_1/core/org/apache/lucene/search/similarities/BM25Similarity.html)
-
-??? info "`retrieval.bm25_k1` (`BM25_K1`) — BM25 k1 (Term Saturation)"
-    **Category**: `retrieval`
-
-    BM25_K1 controls term-frequency saturation, meaning how much repeated occurrences of a term continue to increase sparse relevance. Lower values make scoring closer to binary presence and reduce repetition bias; higher values reward repetition more strongly, which can help when repetition is genuinely informative. In code search, overly high k1 can over-rank boilerplate-heavy files, while very low k1 can under-rank dense implementation chunks. Tune k1 jointly with b and tokenizer configuration, then validate on both exact-match and intent-style queries.
-
-    **Badges**:
-    - Sparse Retrieval
-
-    **Links**:
-    - [Rational Retrieval Acts for Sparse Retrieval (arXiv)](https://arxiv.org/abs/2505.03676)
-    - [Practical BM25 Variables](https://www.elastic.co/blog/practical-bm25-part-2-the-bm25-algorithm-and-its-variables)
-    - [Elasticsearch Similarity Settings](https://www.elastic.co/guide/en/elasticsearch/reference/current/index-modules-similarity.html)
-    - [Lucene BM25Similarity API](https://lucene.apache.org/core/10_3_1/core/org/apache/lucene/search/similarities/BM25Similarity.html)
 
 ??? info "`retrieval.bm25_weight` (`BM25_WEIGHT`) — BM25 Weight (Hybrid Fusion)"
     **Category**: `retrieval`
