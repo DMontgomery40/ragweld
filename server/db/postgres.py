@@ -1967,6 +1967,24 @@ class PostgresClient:
             )
         return row is not None
 
+    async def record_fence_phase(self, repo_id: str, run_id: str, phase: str) -> bool:
+        """Durable run phase on the fence (e.g. ``retiring`` after the commit); False when not the holder."""
+        await self._require_pool()
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                UPDATE corpora
+                SET meta = jsonb_set(meta, '{index_run,phase}', to_jsonb($3::text))
+                WHERE repo_id = $1 AND meta->'index_run'->>'run_id' = $2
+                RETURNING 1;
+                """,
+                repo_id,
+                run_id,
+                phase,
+            )
+        return row is not None
+
     async def heartbeat_index_fence(self, repo_id: str, run_id: str) -> bool:
         """Refresh the fence's heartbeat; False when this run no longer holds it."""
         await self._require_pool()
@@ -2105,9 +2123,10 @@ class PostgresClient:
     async def clear_index_tombstone(self, repo_id: str, tombstone: DeletionTombstone) -> bool:
         """Every external cleanup named by THIS tombstone succeeded: clear it, and only it.
 
-        Compare-and-set on the tombstone's own timestamp so a newer tombstone
-        (a later deletion that merged more targets) is never cleared by an
-        older cleanup. False when the row carries a different tombstone.
+        Compare-and-set on the tombstone's REVISION (minted on every write, merges
+        included) so a newer tombstone is never cleared by an older cleanup that
+        still holds a previous revision. False when the row carries a different
+        tombstone or a corpus-delete tombstone.
         """
         await self._require_pool()
         assert self._pool is not None
@@ -2117,12 +2136,12 @@ class PostgresClient:
                 UPDATE corpora
                 SET meta = COALESCE(meta, '{}'::jsonb) - 'index_tombstone'
                 WHERE repo_id = $1
-                  AND meta->'index_tombstone'->>'created_at' = $2
+                  AND meta->'index_tombstone'->>'revision' = $2
                   AND COALESCE(meta->'index_tombstone'->>'intent', 'deindex') = 'deindex'
                 RETURNING 1;
                 """,
                 repo_id,
-                tombstone.model_dump(mode="json")["created_at"],
+                tombstone.revision,
             )
         return row is not None
 

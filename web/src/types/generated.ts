@@ -1674,6 +1674,19 @@ export interface ObservabilityWorkbenchLink {
   description?: string | null; // default: None
 }
 
+/** Public error detail (HTTP 409) when a corpus's persisted index state does not validate. */
+export interface PersistedStateCorruptDetail {
+  code?: "persisted_state_corrupt"; // default: "persisted_state_corrupt"
+  /** Corpus whose persisted state is malformed */
+  corpus_id: string;
+  /** Which persisted key is malformed (generation, index_tombstone, index_run) */
+  key: string;
+  /** Stable, non-sensitive summary */
+  message: string;
+  /** The repair action (de-index the corpus, then re-index) */
+  operator_hint: string;
+}
+
 /** Public error detail (HTTP 413 / typed stream error) when a request cannot fit the alias's context window. */
 export interface PromptBudgetExceededDetail {
   code?: "prompt_budget_exceeded"; // default: "prompt_budget_exceeded"
@@ -3956,6 +3969,11 @@ export interface OkResponse {
   ok: boolean;
   /** Optional human-readable detail, e.g. why the call was an explicit no-op. */
   message?: string | null;
+}
+
+/** FastAPI response envelope for a persisted-state corruption detail. */
+export interface PersistedStateCorruptResponse {
+  detail: PersistedStateCorruptDetail;
 }
 
 /** FastAPI response envelope for a refused over-budget generation request. */

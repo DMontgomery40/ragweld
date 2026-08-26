@@ -1647,3 +1647,49 @@ status test), full `uv run pytest -q` alone 1156 passed / 91 skipped,
 Playwright `curious_user_p1_fixes` 9 passed against the restarted backend,
 quick gates green. Codex pass 7 launched on the committed diff.
 
+### Adversarial review pass 7 (codex exec, high effort) — REFUTED again (8 P1 / 3 P2); acted on, residuals recorded
+
+Session 14i, by finding:
+
+1. **Retention-window hydration — recorded residual.** A reader that
+   resolved generation G1 and queries G1's retained Neo4j graph after G2
+   committed hydrates by chunk_id from G2's rows: ids that still exist come
+   back with G2's (same-file) content, ids that vanished are filtered. No
+   wrong data is served; the reader may see fewer hits during the commit
+   window. Fixing it needs generation-versioned chunk rows or a request-long
+   repeatable-read snapshot; accepted and documented.
+2. **Tombstone revision**: every write (merges included) mints a revision;
+   `clear_index_tombstone` CASes on it, so an older cleanup can never clear a
+   newer merged tombstone.
+3. **Unknown commits are cancellation-safe**: the outcome is marked unknown
+   before the first reconciliation await and cleared only by a definitive
+   negative; a second cancellation during reconciliation leaves it unknown;
+   the stop route never rewrites an unknown run as cancelled
+   (`_UNKNOWN_COMMITS`); reconciliation clears the marker.
+4. **Local terminal state yields to a newer manifest** (promoted after the run
+   this process remembers); the dashboard's `running` derives from the fence
+   only.
+5. **Heartbeat in its own thread** (`_FenceHeartbeat`, own event loop): a
+   starved API loop can no longer make a live run look dead.
+6. **Quarantine, not lockdown**: a corrupt manifest quarantines that corpus
+   only (readiness lists it; its reads answer the typed 409
+   `persisted_state_corrupt`; DELETE repair routes are exempt from the gate);
+   the gate now covers infrastructure failure only.
+7. **Shared-resource retention test seeds real Neo4j graphs** (the due entry's
+   own graph is physically deleted; the shared graph physically survives).
+8. **Post-commit stop waits for the durable `retiring` phase** on the fence
+   (written after the commit, before retirement) with eight due collections
+   of retirement work; the test still asserts this process's task is live.
+   A fully deterministic barrier would need a test seam — recorded.
+9. **Stop on a stale uncommitted fence reclaims its staged inventory** (and the
+   staging rows) before releasing.
+10. Startup storage migration — recorded residual (a one-time rewrite, not a
+    read-time fallback).
+11. **Reconciliation propagates malformed manifests** as the typed 409 instead
+    of "unknown".
+
+Verification (session 14i): live lane 17 passed, full `uv run pytest -q` alone
+1156 passed / 91 skipped, Playwright `curious_user_p1_fixes` 9 passed against
+the restarted backend, quick gates green. Codex pass 8 launched on the
+committed diff.
+

@@ -39,6 +39,7 @@ import asyncio
 import logging
 import os
 import socket
+import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
@@ -175,6 +176,10 @@ class IndexRunFence(BaseModel):
     staged_graph_repo_id: str | None = Field(
         default=None, description="Graph id this run is building (reclaimed if the run dies)."
     )
+    phase: Literal["building", "retiring"] = Field(
+        default="building",
+        description="retiring: the manifest is committed and best-effort retirement is running.",
+    )
 
     def is_stale(self, *, now: datetime, lease_seconds: int) -> bool:
         return self.heartbeat_at + timedelta(seconds=max(1, int(lease_seconds))) <= now
@@ -207,6 +212,10 @@ class DeletionTombstone(BaseModel):
     qdrant_collections: list[str] = Field(default_factory=list)
     graph_repo_ids: list[str] = Field(default_factory=list)
     created_at: datetime
+    revision: str = Field(
+        default_factory=lambda: uuid.uuid4().hex,
+        description="Minted on every write; the cleanup that clears the tombstone must hold this exact revision.",
+    )
     intent: Literal["deindex", "delete_corpus"] = Field(
         default="deindex",
         description=(
@@ -224,6 +233,9 @@ class DeletionTombstone(BaseModel):
             ),
             graph_repo_ids=list(dict.fromkeys([*other.graph_repo_ids, *self.graph_repo_ids])),
             created_at=min(self.created_at, other.created_at),
+            # A merge is a new write: an older cleanup holding the previous revision
+            # can no longer clear it.
+            revision=uuid.uuid4().hex,
             intent="delete_corpus" if "delete_corpus" in (self.intent, other.intent) else "deindex",
         )
 
@@ -530,7 +542,12 @@ def upgrade_pre_retention_manifest(raw: dict[str, Any]) -> GenerationManifest | 
     return manifest
 
 
-_UPGRADE_STATE = {"complete": False, "failed": False}
+_UPGRADE_STATE: dict[str, Any] = {"complete": False, "failed": False, "quarantined": {}}
+
+
+def quarantined_corpora() -> dict[str, str]:
+    """Corpora whose persisted index state failed validation at the last upgrade (repair: de-index)."""
+    return dict(_UPGRADE_STATE["quarantined"])
 
 
 def manifest_upgrade_complete() -> bool:
@@ -562,6 +579,7 @@ async def ensure_generation_manifests(config: TriBridConfig) -> int:
     pg = PostgresClient(config.indexing.postgres_url)
     await pg.connect()
     upgraded = 0
+    quarantined: dict[str, str] = {}
     try:
         qdrant = QdrantChunkStore(config)
         for row in await pg.list_corpora():
@@ -571,17 +589,21 @@ async def ensure_generation_manifests(config: TriBridConfig) -> int:
             meta = row.get("meta") if isinstance(row.get("meta"), dict) else {}
             raw = meta.get(GENERATION_META_KEY)
             if raw is not None:
-                if not isinstance(raw, dict):
-                    raise PersistedStateCorruptError(repo_id, GENERATION_META_KEY, raw)
-                upgraded_manifest = upgrade_pre_retention_manifest(raw)
-                if upgraded_manifest is None:
-                    # Current shape: it must validate; a corrupt manifest blocks the
-                    # upgrade (readiness pending, manifest routes closed) until the
-                    # corpus is de-indexed.
-                    try:
+                # Current shape must validate. A corrupt manifest quarantines THAT
+                # corpus (readiness names it; its own reads answer the typed 409; the
+                # de-index repair route stays open) and never blocks the others.
+                try:
+                    if not isinstance(raw, dict):
+                        raise PersistedStateCorruptError(repo_id, GENERATION_META_KEY, raw)
+                    upgraded_manifest = upgrade_pre_retention_manifest(raw)
+                    if upgraded_manifest is None:
                         GenerationManifest.model_validate(raw)
-                    except Exception as exc:
-                        raise PersistedStateCorruptError(repo_id, GENERATION_META_KEY, raw) from exc
+                except Exception as exc:
+                    quarantined[repo_id] = f"{type(exc).__name__}: {exc}"
+                    logger.error(
+                        "corpus %s quarantined: malformed generation manifest (%s)", repo_id, exc
+                    )
+                    continue
                 # Alias removal is its own idempotent step: a manifest recorded by an
                 # earlier pass whose alias drop failed still loses its alias here.
                 if await qdrant.legacy_alias_target(repo_id) is not None:
@@ -628,6 +650,7 @@ async def ensure_generation_manifests(config: TriBridConfig) -> int:
         await pg.disconnect()
     _UPGRADE_STATE["complete"] = True
     _UPGRADE_STATE["failed"] = False
+    _UPGRADE_STATE["quarantined"] = quarantined
     return upgraded
 
 
@@ -676,6 +699,7 @@ __all__ = [
     "heartbeat_interval_seconds",
     "manifest_upgrade_blocked",
     "manifest_upgrade_complete",
+    "quarantined_corpora",
     "qdrant_collection_of",
     "reclaim_stale_run",
     "tombstone_from_meta",

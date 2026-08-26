@@ -40,11 +40,17 @@ from server.api.synthetic import router as synthetic_router
 from server.chat.prompt_budget import warm_prompt_budget
 from server.config import load_config
 from server.gateway_catalog import warm_gateway_catalog
-from server.indexing.generations import DeletionIncompleteError, manifest_upgrade_blocked
+from server.indexing.generations import (
+    DeletionIncompleteError,
+    PersistedStateCorruptError,
+    manifest_upgrade_blocked,
+)
 from server.mcp.server import get_mcp_server, record_mounted_state
 from server.models.index import (
     IndexDeletionIncompleteDetail,
     IndexDeletionIncompleteResponse,
+    PersistedStateCorruptDetail,
+    PersistedStateCorruptResponse,
 )
 from server.models.tribrid_config_model import (
     DependencyUnavailableDetail,
@@ -298,7 +304,11 @@ async def _manifest_upgrade_gate(request: Request, call_next):  # type: ignore[n
 
     Liveness and readiness stay reachable; readiness reports `index_manifests`.
     """
-    if manifest_upgrade_blocked() and request.url.path.startswith(_MANIFEST_ROUTE_PREFIXES):
+    if (
+        manifest_upgrade_blocked()
+        and request.url.path.startswith(_MANIFEST_ROUTE_PREFIXES)
+        and request.method.upper() != "DELETE"  # de-index / corpus delete are the repair path
+    ):
         detail = DependencyUnavailableDetail(
             code="dependency_unavailable",
             dependency="postgres",
@@ -315,6 +325,26 @@ async def _manifest_upgrade_gate(request: Request, call_next):  # type: ignore[n
             content=DependencyUnavailableResponse(detail=detail).model_dump(mode="json"),
         )
     return await call_next(request)
+
+
+@app.exception_handler(PersistedStateCorruptError)
+async def _persisted_state_corrupt_handler(
+    _request: Request, exc: PersistedStateCorruptError
+) -> JSONResponse:
+    """Malformed persisted index state answers a typed, repairable 409 (never reads as absent)."""
+    detail = PersistedStateCorruptDetail(
+        corpus_id=exc.repo_id,
+        key=exc.key,
+        message=f"Corpus {exc.repo_id} carries a malformed {exc.key}.",
+        operator_hint=(
+            f"De-index the corpus (DELETE /api/index/{exc.repo_id}) to clear the malformed state "
+            "(its collections and graphs are swept by namespace), then re-index."
+        ),
+    )
+    return JSONResponse(
+        status_code=409,
+        content=PersistedStateCorruptResponse(detail=detail).model_dump(mode="json"),
+    )
 
 
 @app.exception_handler(DeletionIncompleteError)

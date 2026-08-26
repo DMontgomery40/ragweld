@@ -39,6 +39,7 @@ from server.indexing.generations import (
     IndexFenceHeldError,
     IndexFenceLostError,
     IndexRunFence,
+    PersistedStateCorruptError,
     TombstoneCleanupError,
     drop_tombstoned_stores,
     fence_owner,
@@ -112,6 +113,7 @@ _INDEX_RUNS_DIR = Path(__file__).parent.parent.parent / "data" / "index_runs"
 _STAGING_REPO_PREFIX = "__staging__"
 
 _ACTIVE_RUNS: dict[str, str] = {}
+_UNKNOWN_COMMITS: dict[str, str] = {}  # runs whose promotion outcome awaits manifest reconciliation
 _QUEUE_RUN_CONTEXT: dict[int, tuple[str, str]] = {}
 
 # Index estimate heuristics (intentionally rough).
@@ -248,6 +250,8 @@ async def _manifest_names_run(repo_id: str, run_id: str) -> bool | None:
     except DeletionIncompleteError:
         # Being de-indexed: no live generation names any run.
         return False
+    except PersistedStateCorruptError:
+        raise  # malformed state is a typed, repairable 409, never "unknown"
     except Exception:
         logger.warning("could not read the generation manifest of %s", repo_id, exc_info=True)
         return None
@@ -303,6 +307,8 @@ async def _finalize_interrupted_run(repo_id: str, run: IndexRunSummary) -> Index
         # The manifest could not be read (Postgres outage): the run's outcome is
         # unknown right now, never an error. It is reconsidered on the next read.
         return run
+    if _UNKNOWN_COMMITS.get(repo_id) == run.run_id:
+        _UNKNOWN_COMMITS.pop(repo_id, None)
     if named:
         finalized = run.model_copy(
             update={"status": "complete", "progress": 1.0, "completed_at": datetime.now(UTC)}
@@ -545,7 +551,11 @@ async def _cancel_index_run(repo_id: str) -> IndexStatus:
 
     _TASKS.pop(repo_id, None)
     current = _STATUS.get(repo_id)
-    if current is None or current.status == "indexing":
+    if _UNKNOWN_COMMITS.get(repo_id):
+        # The run's promotion outcome is unknown until the manifest is read back:
+        # the operator's cancellation must not rewrite that as "cancelled".
+        pass
+    elif current is None or current.status == "indexing":
         # The task ended without publishing a terminal state (it never reached its
         # handlers): the operator's cancellation is the outcome.
         _STATUS[repo_id] = IndexStatus(
@@ -605,6 +615,12 @@ async def _stop_without_local_task(repo_id: str) -> IndexStatus:
                 and fence.staged_qdrant_collection in manifest.all_qdrant_collections()
             )
         )
+        if not committed:
+            # Reclaim the dead run's staged inventory BEFORE the fence (its only
+            # record of those ids) is released.
+            await reclaim_stale_run(cfg, repo_id, fence)
+            with contextlib.suppress(Exception):
+                await pg.delete_corpus_with_data(_build_staging_repo_id(repo_id, fence.run_id))
         released = await pg.release_index_fence(repo_id, fence.run_id)
     except IndexFenceCorruptError as exc:
         raise _fence_corrupt_conflict(repo_id, exc) from exc
@@ -646,6 +662,25 @@ async def _stop_without_local_task(repo_id: str) -> IndexStatus:
         )
     _STATUS[repo_id] = status
     return status
+
+
+async def _manifest_is_newer_than_local(
+    repo_id: str, cfg: TriBridConfig, local: IndexStatus
+) -> bool:
+    """Whether another worker promoted this corpus after the run this process remembers."""
+    pg = PostgresClient(cfg.indexing.postgres_url)
+    try:
+        await pg.connect()
+        manifest = await pg.get_generation(repo_id)
+    finally:
+        with contextlib.suppress(Exception):
+            await pg.disconnect()
+    if manifest is None:
+        return False
+    if manifest.run_id == _ACTIVE_RUNS.get(repo_id):
+        return False
+    completed = local.completed_at or local.started_at
+    return completed is None or manifest.promoted_at > completed
 
 
 async def _assert_not_tombstoned(repo_id: str, cfg: TriBridConfig) -> None:
@@ -1890,35 +1925,53 @@ async def _release_fence(repo_id: str, run_id: str) -> bool:
             await pg_release.disconnect()
 
 
-async def _heartbeat_fence(
-    cfg: TriBridConfig, repo_id: str, run_id: str, fence_lost: asyncio.Event
-) -> None:
-    """Keep the durable fence fresh while the run builds; flag the run when it lost the fence."""
-    interval = heartbeat_interval_seconds(cfg.indexing.index_run_lease_seconds)
-    while True:
-        await asyncio.sleep(interval)
-        try:
-            pg = PostgresClient(cfg.indexing.postgres_url)
-            await pg.connect()
+class _FenceHeartbeat(threading.Thread):
+    """Heartbeats the durable fence from its own thread and event loop.
+
+    Indexing work that blocks the API event loop (Docling extraction, large
+    reads, CPU-heavy chunking) must never let a live run look dead to another
+    worker, so the heartbeat does not share that loop.
+    """
+
+    def __init__(self, cfg: TriBridConfig, repo_id: str, run_id: str) -> None:
+        super().__init__(name=f"index-fence-heartbeat:{repo_id}", daemon=True)
+        self._cfg = cfg
+        self._repo_id = repo_id
+        self._run_id = run_id
+        self._stop = threading.Event()
+        self.fence_lost = threading.Event()
+
+    def stop(self) -> None:
+        self._stop.set()
+
+    def run(self) -> None:
+        interval = heartbeat_interval_seconds(self._cfg.indexing.index_run_lease_seconds)
+        while not self._stop.wait(interval):
             try:
-                alive = await pg.heartbeat_index_fence(repo_id, run_id)
-            finally:
-                with contextlib.suppress(Exception):
-                    await pg.disconnect()
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            logger.warning("fence heartbeat for %s run %s failed: %s", repo_id, run_id, exc)
-            continue
-        if not alive:
-            logger.error(
-                "index run %s lost the fence on %s (released, taken over after a stale heartbeat, "
-                "or cleared by a deletion); it will not commit",
-                run_id,
-                repo_id,
-            )
-            fence_lost.set()
-            return
+                alive = asyncio.run(self._beat())
+            except Exception as exc:
+                logger.warning(
+                    "fence heartbeat for %s run %s failed: %s", self._repo_id, self._run_id, exc
+                )
+                continue
+            if not alive:
+                logger.error(
+                    "index run %s lost the fence on %s (released, taken over after a stale heartbeat, "
+                    "or cleared by a deletion); it will not commit",
+                    self._run_id,
+                    self._repo_id,
+                )
+                self.fence_lost.set()
+                return
+
+    async def _beat(self) -> bool:
+        pg = PostgresClient(self._cfg.indexing.postgres_url)
+        await pg.connect()
+        try:
+            return await pg.heartbeat_index_fence(self._repo_id, self._run_id)
+        finally:
+            with contextlib.suppress(Exception):
+                await pg.disconnect()
 
 
 def _publish_commit_unknown(
@@ -1955,6 +2008,7 @@ def _publish_commit_unknown(
         embedding_model=None,
         embedding_dimensions=None,
     )
+    _UNKNOWN_COMMITS[repo_id] = run_id
     with contextlib.suppress(Exception):
         _persist_run_summary(summary)
     _emit_event(queue, {"type": "warning", "message": message}, guarantee=True)
@@ -2123,6 +2177,7 @@ async def _background_index_job(
     commit_unknown = False  # promotion interrupted and the manifest unreadable: touch nothing
     stats: IndexStats | None = None
     complete_published = False
+    heartbeat: _FenceHeartbeat | None = None
 
     def _publish_complete_once() -> None:
         nonlocal complete_published
@@ -2133,8 +2188,6 @@ async def _background_index_job(
             repo_id=repo_id, run_id=run_id, started_at=started_at, stats=stats, queue=queue
         )
 
-    fence_lost = asyncio.Event()
-    heartbeat_task: asyncio.Task[None] | None = None
     try:
         INDEX_RUNS_TOTAL.inc()
         _emit_event(
@@ -2143,10 +2196,8 @@ async def _background_index_job(
             drop_oldest=True,
         )
         cfg = await load_scoped_config(repo_id=repo_id)
-        heartbeat_task = asyncio.create_task(
-            _heartbeat_fence(cfg, repo_id, run_id, fence_lost),
-            name=f"index-fence-heartbeat:{repo_id}",
-        )
+        heartbeat = _FenceHeartbeat(cfg, repo_id, run_id)
+        heartbeat.start()
         qdrant = QdrantChunkStore(cfg)
         vector_dim = (
             int(cfg.embedding.embedding_dim or 0)
@@ -2232,7 +2283,7 @@ async def _background_index_job(
         # swap and no window where new chunk rows pair with old vectors or graph.
         # The generation being replaced joins the manifest's retired list and
         # stays readable for indexing.generation_retention_seconds.
-        if fence_lost.is_set():
+        if heartbeat is not None and heartbeat.fence_lost.is_set():
             raise IndexFenceLostError(repo_id, run_id, None)
         postgres = PostgresClient(cfg.indexing.postgres_url)
         await postgres.connect()
@@ -2263,19 +2314,26 @@ async def _background_index_job(
                 # The transaction may have committed although this await did not
                 # return normally (cancellation delivered on the way back, or the
                 # connection lost after COMMIT). Never clean staged resources on
-                # a guess: let the shielded transaction finish, then confirm
-                # against the manifest (also shielded).
+                # a guess: the outcome is UNKNOWN from this instant, and only a
+                # definitive negative (the manifest read back and does not name
+                # this run) clears that. A second cancellation delivered during
+                # the reconciliation leaves the run unknown, never "staged".
+                commit_unknown = True
                 if not promote.done():
                     with contextlib.suppress(BaseException):
                         await asyncio.shield(promote)
                 if promote.done() and not promote.cancelled() and promote.exception() is None:
                     committed = True
+                    commit_unknown = False
                 else:
-                    outcome = await asyncio.shield(_manifest_names_run(repo_id, run_id))
-                    if outcome is None:
-                        commit_unknown = True
-                    elif outcome:
+                    outcome: bool | None = None
+                    with contextlib.suppress(BaseException):
+                        outcome = await asyncio.shield(_manifest_names_run(repo_id, run_id))
+                    if outcome is True:
                         committed = True
+                        commit_unknown = False
+                    elif outcome is False:
+                        commit_unknown = False
                 raise
         finally:
             with contextlib.suppress(Exception):
@@ -2300,6 +2358,15 @@ async def _background_index_job(
         # before any best-effort retirement so a failure or cancellation there
         # can never report a live generation as failed or cancelled.
         _publish_complete_once()
+        # Durable phase: anyone watching the fence sees "retiring" (the commit is
+        # done; only best-effort retirement remains).
+        with contextlib.suppress(Exception):
+            pg_phase = PostgresClient(cfg.indexing.postgres_url)
+            await pg_phase.connect()
+            try:
+                await pg_phase.record_fence_phase(repo_id, run_id, "retiring")
+            finally:
+                await pg_phase.disconnect()
         await _retire_due_generations(cfg, repo_id, run_id, generation, queue)
         # Update process-level “size” gauges (best-effort; no per-corpus labels).
         try:
@@ -2492,10 +2559,8 @@ async def _background_index_job(
             _persist_run_summary(summary)
         _emit_event(queue, {"type": "error", "message": str(e)}, guarantee=True)
     finally:
-        if heartbeat_task is not None:
-            heartbeat_task.cancel()
-            with contextlib.suppress(BaseException):
-                await heartbeat_task
+        if heartbeat is not None:
+            heartbeat.stop()
         # The release must survive a cancellation delivered while this `finally`
         # is awaiting (a stop that lands after the commit): shield it, and never
         # let it raise out of the cleanup. An unknown commit outcome keeps its
@@ -2873,9 +2938,7 @@ async def get_dashboard_index_status(
         raise _fence_corrupt_conflict(repo_id, exc) from exc
     # A fresh fence anywhere means running; this process's state refines it only
     # for the run the fence names.
-    running = live is not None or (
-        repo_id in _TASKS and s is not None and s.status == "indexing" and live is None
-    )
+    running = live is not None
     progress = float(s.progress) if s is not None else None
     current_file = s.current_file if s is not None else None
 
@@ -3116,7 +3179,12 @@ async def get_index_status(corpus_id: str) -> IndexStatus:
             completed_at=None,
         )
     if local is not None and local.status != "indexing":
-        return local
+        # A terminal state this process remembers is only current while the
+        # durable manifest still belongs to the run it describes.
+        if cfg is not None and await _manifest_is_newer_than_local(repo_id, cfg, local):
+            _STATUS.pop(repo_id, None)
+        else:
+            return local
     await _flush_run_events()
     persisted_run = await asyncio.to_thread(_load_latest_run_summary, repo_id)
     if persisted_run is not None:

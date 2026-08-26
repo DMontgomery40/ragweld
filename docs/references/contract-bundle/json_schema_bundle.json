@@ -2,7 +2,7 @@
   "domain_modules": [
     "server.models.index"
   ],
-  "model_count": 260,
+  "model_count": 262,
   "module": "server.models.tribrid_config_model",
   "root_models": {
     "ActiveSources": {
@@ -21382,6 +21382,99 @@
         "ok"
       ],
       "title": "OkResponse",
+      "type": "object"
+    },
+    "PersistedStateCorruptDetail": {
+      "description": "Public error detail (HTTP 409) when a corpus's persisted index state does not validate.",
+      "properties": {
+        "code": {
+          "const": "persisted_state_corrupt",
+          "default": "persisted_state_corrupt",
+          "title": "Code",
+          "type": "string"
+        },
+        "corpus_id": {
+          "description": "Corpus whose persisted state is malformed",
+          "title": "Corpus Id",
+          "type": "string"
+        },
+        "key": {
+          "description": "Which persisted key is malformed (generation, index_tombstone, index_run)",
+          "title": "Key",
+          "type": "string"
+        },
+        "message": {
+          "description": "Stable, non-sensitive summary",
+          "title": "Message",
+          "type": "string"
+        },
+        "operator_hint": {
+          "description": "The repair action (de-index the corpus, then re-index)",
+          "title": "Operator Hint",
+          "type": "string"
+        }
+      },
+      "required": [
+        "corpus_id",
+        "key",
+        "message",
+        "operator_hint"
+      ],
+      "title": "PersistedStateCorruptDetail",
+      "type": "object"
+    },
+    "PersistedStateCorruptResponse": {
+      "$defs": {
+        "PersistedStateCorruptDetail": {
+          "description": "Public error detail (HTTP 409) when a corpus's persisted index state does not validate.",
+          "properties": {
+            "code": {
+              "const": "persisted_state_corrupt",
+              "default": "persisted_state_corrupt",
+              "title": "Code",
+              "type": "string"
+            },
+            "corpus_id": {
+              "description": "Corpus whose persisted state is malformed",
+              "title": "Corpus Id",
+              "type": "string"
+            },
+            "key": {
+              "description": "Which persisted key is malformed (generation, index_tombstone, index_run)",
+              "title": "Key",
+              "type": "string"
+            },
+            "message": {
+              "description": "Stable, non-sensitive summary",
+              "title": "Message",
+              "type": "string"
+            },
+            "operator_hint": {
+              "description": "The repair action (de-index the corpus, then re-index)",
+              "title": "Operator Hint",
+              "type": "string"
+            }
+          },
+          "required": [
+            "corpus_id",
+            "key",
+            "message",
+            "operator_hint"
+          ],
+          "title": "PersistedStateCorruptDetail",
+          "type": "object"
+        }
+      },
+      "description": "FastAPI response envelope for a persisted-state corruption detail.",
+      "properties": {
+        "detail": {
+          "$ref": "#/$defs/PersistedStateCorruptDetail"
+        }
+      },
+      "required": [
+        "detail"
+      ],
+      "title": "PersistedStateCorruptResponse",
       "type": "object"
     },
     "PromptBudgetExceededDetail": {

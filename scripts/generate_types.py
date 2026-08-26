@@ -255,6 +255,8 @@ def main(output_path: Path | None = None) -> None:
             IndexRunSummary,
             IndexStats,
             IndexStatus,
+            PersistedStateCorruptDetail,
+            PersistedStateCorruptResponse,
         )
         from server.models.tribrid_config_model import (  # noqa: I001
             AgentTrainControlPlaneStatusResponse,
@@ -496,6 +498,8 @@ def main(output_path: Path | None = None) -> None:
         IndexRunConflictResponse,
         IndexDeletionIncompleteDetail,
         IndexDeletionIncompleteResponse,
+        PersistedStateCorruptDetail,
+        PersistedStateCorruptResponse,
         DashboardIndexStatusMetadata,
         DashboardIndexStatusResponse,
         DashboardIndexStatsResponse,

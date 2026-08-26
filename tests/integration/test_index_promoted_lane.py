@@ -17,6 +17,7 @@ from httpx import ASGITransport, AsyncClient
 
 import server.api.index as index_api
 from server.config import load_config
+from server.db.neo4j import Neo4jClient
 from server.db.postgres import PostgresClient
 from server.indexing.generations import DeletionTombstone, RetiredGeneration
 from server.main import app
@@ -371,7 +372,7 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
             await qdrant.create_generation(
                 corpus_id, embedding_dim=int(cfg.embedding.embedding_dim)
             )
-            for _ in range(4)
+            for _ in range(8)
         ]
         await pg.set_generation(
             corpus_id,
@@ -406,12 +407,21 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
                 break
             await asyncio.sleep(0.02)
         assert committed_generation is not None, "the sixth run never committed"
-        # The stop must hit a LIVE run: this process still owns the task and the
-        # durable fence still names it (otherwise the test would prove nothing).
+        # The stop must hit a LIVE run in its post-commit phase: the durable fence
+        # says "retiring" (written after the commit, before retirement starts) and
+        # this process still owns the task. The eight due collections above give
+        # that phase real work, so the stop lands inside it.
+        phase_deadline = asyncio.get_running_loop().time() + 30
+        fence_now = await pg.get_index_fence(corpus_id)
+        while asyncio.get_running_loop().time() < phase_deadline and (
+            fence_now is None or fence_now.phase != "retiring"
+        ):
+            await asyncio.sleep(0.01)
+            fence_now = await pg.get_index_fence(corpus_id)
+        assert fence_now is not None and fence_now.phase == "retiring", fence_now
         assert corpus_id in index_api._TASKS and not index_api._TASKS[corpus_id].done(), (
-            "the sixth run finished before the stop could land; widen the window"
+            "the sixth run finished its retirement before the stop could land"
         )
-        assert (await pg.get_index_fence(corpus_id)) is not None
         stopped_after_commit = await client.post(f"/api/index/{corpus_id}/stop")
         assert stopped_after_commit.status_code == 200, stopped_after_commit.text
         assert stopped_after_commit.json()["status"] == "complete", stopped_after_commit.json()
@@ -437,6 +447,31 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         fresh_collection = await qdrant.create_generation(
             corpus_id, embedding_dim=int(cfg.embedding.embedding_dim)
         )
+        # Real Neo4j graphs under the seeded ids: the due entry's own graph must be
+        # physically deleted, the shared one must physically survive.
+        due_graph = f"seed-due-graph-{uuid.uuid4().hex[:6]}"
+        shared_graph = f"seed-shared-graph-{uuid.uuid4().hex[:6]}"
+        seed_neo4j = Neo4jClient(
+            cfg.graph_storage.neo4j_uri,
+            cfg.graph_storage.neo4j_user,
+            cfg.graph_storage.resolve_password(),
+            database=cfg.graph_storage.resolve_database(corpus_id),
+        )
+        await seed_neo4j.connect()
+        try:
+            driver = seed_neo4j._require_driver()
+            async with driver.session(database=seed_neo4j.database) as session:
+                for gid in (due_graph, shared_graph):
+                    await session.run(
+                        "CREATE (:__Entity__ {repo_id: $repo_id, name: $name, id: $id})",
+                        repo_id=gid,
+                        name=f"Salinity sensor ({gid})",
+                        id=f"{gid}:salinity-sensor",
+                    )
+            assert (await seed_neo4j.get_graph_stats(due_graph)).total_entities == 1
+            assert (await seed_neo4j.get_graph_stats(shared_graph)).total_entities == 1
+        finally:
+            await seed_neo4j.disconnect()
         seeded = committed_generation.model_copy(
             update={
                 "retired": [
@@ -446,13 +481,19 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
                     RetiredGeneration(
                         run_id="seed-due",
                         qdrant_collection=due_collection,
-                        graph_repo_id="shared-graph-seed",
+                        graph_repo_id=shared_graph,
+                        retired_at=datetime.now(UTC) - timedelta(seconds=7200),
+                    ),
+                    RetiredGeneration(
+                        run_id="seed-due-own-graph",
+                        qdrant_collection=None,
+                        graph_repo_id=due_graph,
                         retired_at=datetime.now(UTC) - timedelta(seconds=7200),
                     ),
                     RetiredGeneration(
                         run_id="seed-fresh",
                         qdrant_collection=fresh_collection,
-                        graph_repo_id="shared-graph-seed",
+                        graph_repo_id=shared_graph,
                         retired_at=datetime.now(UTC),
                     ),
                 ]
@@ -477,12 +518,27 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         # The shared graph survived on the fresh entry (entry-wise retirement would have
         # dropped it with the due entry); the due entry is gone entirely.
         by_run = {r.run_id: r for r in after_mixed.retired}
-        assert by_run["seed-fresh"].graph_repo_id == "shared-graph-seed", after_mixed
+        assert by_run["seed-fresh"].graph_repo_id == shared_graph, after_mixed
         # The due entry lost its own collection but still names the shared graph
         # (dropping it entry-wise would have deleted a graph the fresh entry holds);
         # it goes with the graph once nothing alive names it.
         assert "seed-due" in by_run and by_run["seed-due"].qdrant_collection is None, after_mixed
-        assert by_run["seed-due"].graph_repo_id == "shared-graph-seed", after_mixed
+        assert by_run["seed-due"].graph_repo_id == shared_graph, after_mixed
+        assert "seed-due-own-graph" not in by_run, after_mixed  # its only resource was dropped
+        # Physically: the due entry's own graph is gone, the shared graph survived.
+        check_neo4j = Neo4jClient(
+            cfg.graph_storage.neo4j_uri,
+            cfg.graph_storage.neo4j_user,
+            cfg.graph_storage.resolve_password(),
+            database=cfg.graph_storage.resolve_database(corpus_id),
+        )
+        await check_neo4j.connect()
+        try:
+            assert (await check_neo4j.get_graph_stats(due_graph)).total_entities == 0
+            assert (await check_neo4j.get_graph_stats(shared_graph)).total_entities == 1
+            await check_neo4j.delete_graph(shared_graph)
+        finally:
+            await check_neo4j.disconnect()
         assert (
             await qdrant.status(corpus_id, physical=fresh_collection)
         ).physical_collection == fresh_collection

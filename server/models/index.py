@@ -202,6 +202,22 @@ class IndexDeletionIncompleteDetail(BaseModel):
     operator_hint: str = Field(description="What the operator can do next")
 
 
+class PersistedStateCorruptDetail(BaseModel):
+    """Public error detail (HTTP 409) when a corpus's persisted index state does not validate."""
+
+    code: Literal["persisted_state_corrupt"] = "persisted_state_corrupt"
+    corpus_id: str = Field(description="Corpus whose persisted state is malformed")
+    key: str = Field(description="Which persisted key is malformed (generation, index_tombstone, index_run)")
+    message: str = Field(description="Stable, non-sensitive summary")
+    operator_hint: str = Field(description="The repair action (de-index the corpus, then re-index)")
+
+
+class PersistedStateCorruptResponse(BaseModel):
+    """FastAPI response envelope for a persisted-state corruption detail."""
+
+    detail: PersistedStateCorruptDetail
+
+
 class IndexDeletionIncompleteResponse(BaseModel):
     """FastAPI response envelope for an incomplete-deletion detail."""
 
@@ -221,4 +237,6 @@ __all__ = [
     "IndexRunSummary",
     "IndexStats",
     "IndexStatus",
+    "PersistedStateCorruptDetail",
+    "PersistedStateCorruptResponse",
 ]

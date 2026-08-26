@@ -12,7 +12,7 @@ from server.chat.gateway_runtime import (
 from server.config import load_config
 from server.db.neo4j import Neo4jClient
 from server.db.postgres import PostgresClient
-from server.indexing.generations import manifest_upgrade_complete
+from server.indexing.generations import manifest_upgrade_complete, quarantined_corpora
 from server.models.tribrid_config_model import (
     CorpusScope,
     HealthServiceStatus,
@@ -119,8 +119,18 @@ async def readiness_check(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> ReadinessSt
     # until then manifest-dependent routes may meet a pre-upgrade shape, so the
     # service is not ready (liveness is unaffected).
     manifests = ReadinessDependencyStatus()
-    if manifest_upgrade_complete():
+    quarantined = quarantined_corpora()
+    if manifest_upgrade_complete() and not quarantined:
         manifests.ok = True
+    elif manifest_upgrade_complete():
+        # The service is ready; these corpora are not (their reads answer the typed 409).
+        manifests.ok = True
+        manifests.error = (
+            f"{len(quarantined)} corpus/corpora carry malformed index state: {sorted(quarantined)}"
+        )
+        manifests.operator_hint = (
+            "De-index each listed corpus (DELETE /api/index/{corpus_id}), then re-index it."
+        )
     else:
         ready = False
         manifests.error = "Generation-manifest upgrade has not completed in this process."
