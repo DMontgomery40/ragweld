@@ -715,7 +715,7 @@ gap; there was never a W23 — nothing lost.
   changed to mode `0555`, and an explicit UID/GID 1000 write was denied. The
   NFSv4 mount was then retriggered and returned active.
 
-### W43 `FIXED LIVE AND IN PLAN; reboot acceptance pending` — the original W37 drop-in would hold Scrypted's cameras hostage to pve1
+### W43 `FIXED AND ACCEPTED LIVE` — the original W37 drop-in would hold Scrypted's cameras hostage to pve1
 
 - Correcting a directive I wrote. W37 part 2 told Task 2 Step 3 to add
   `ExecStartPre=/bin/sh -c 'ls /srv/media >/dev/null && findmnt -t nfs4 /srv/media'`
@@ -747,6 +747,47 @@ gap; there was never a W23 — nothing lost.
   bridge is live and confirm both 1043 and 4214 come back with media
   present — the boot-order path is the one this trap lives in, and it is
   never exercised by the migration steps themselves.
+- Live acceptance: `.173` rebooted after migration. Grafana 103, Scrypted
+  1043, and Plex 4214 all returned automatically; Scrypted stayed active with
+  its render device; the host and 4214 guest both reported the NFS source as
+  `nfs4`; all 12 media containers returned and Gluetun was healthy.
+
+### W44 `OPEN` (P1 for the Plex plan) — nothing checks `onboot`, so the reboot proof can pass while Plex stays down after every real reboot
+
+- `onboot` appears nowhere in the plan, the Task 1 `pct config 4214` inventory,
+  or the Task 2 evidence. Proxmox defaults `onboot` to `0`, and the Task 1
+  dump recorded `cores/memory/unprivileged/features/rootfs/net0/mp1` with no
+  `onboot` line — so 4214 most likely does **not** autostart.
+- Why this bites precisely here: the whole boot-order apparatus we just built
+  (`pve-container@4214.service.d/srv-media.conf`, `Requires=`/`After=`
+  automount, the `ExecStartPre` trigger) only runs when something starts that
+  unit. With `onboot: 0` nothing does at boot. The W43 reboot acceptance would
+  then "pass" — Scrypted up, no errors, `findmnt` fine on the host — while
+  4214 is simply *not running* and Plex is down until someone notices. A
+  reboot check that does not assert the container is running proves the
+  opposite of what it looks like it proves.
+- Better way (one line of inventory, one decision, one assertion):
+  1. Task 1 Step 2 records the actual `onboot` value alongside `mp1`.
+  2. Before the W43 reboot test, set it deliberately on the destination:
+     `pct set 4214 --onboot 1 --startup order=2` (order after Scrypted so the
+     camera workload claims the render device first; rollback is
+     `pct set 4214 --onboot 0 --delete startup`). If the operator prefers
+     manual starts, record that choice explicitly instead — but record it.
+  3. The W43 reboot acceptance must assert `pct status 4214` is `running`
+     **and** `pct exec 4214 -- findmnt -t nfs4 /srv/media` before it counts.
+     Without the running assertion the test is vacuous.
+
+### W45 `NOTE` (P3, Plex rollback hygiene) — restoring the fstab backup re-adds the stale absent-UUID line
+
+- Task 2 disabled one `.173` fstab line targeting `/srv/media` for absent UUID
+  `5ddacfd6-…` and saved `/etc/fstab.ragweld-pre-nfs-20260828`. The recorded
+  bridge rollback says "restore the dated fstab backup", which would put that
+  broken line back — an fstab entry for a device that does not exist, now
+  pointed at a path that will be a live mountpoint.
+- Better way: the rollback restores the backup **minus** that line (or simply
+  leaves the disabled line disabled and notes the backup as reference only).
+  State it in the evidence file's rollback section so a later operator does
+  not faithfully restore a landmine.
 
 ## Low / rollout-time reminders
 

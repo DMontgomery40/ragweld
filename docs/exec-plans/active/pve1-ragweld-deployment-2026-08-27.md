@@ -2,14 +2,14 @@
 
 Date: 2026-08-28
 
-Status: source gate published; Plex preflight and PBS rollback backups verified; Ragweld LXC provisioning not started
+Status: source gate published; Plex migrated to `.173` with non-visual acceptance green; signed-in Plex transcode proof and Ragweld LXC provisioning pending
 
 ## Scope
 
-This record captures the verified source baseline for the approved permanent
-Ragweld deployment to `pve1` before any remote provisioning or data copy. It is
-not a deployment log yet; it is the pre-deployment source-gate record the
-rollout plan expects to exist before the first Proxmox mutation.
+This record began as the verified source baseline for the approved permanent
+Ragweld deployment to `pve1` and now tracks the predecessor Plex migration
+gate. Detailed Plex/PBS/NFS evidence lives in
+`docs/exec-plans/active/plex-return-to-pve-2026-08-27.md`.
 
 ## Current source state
 
@@ -21,9 +21,10 @@ rollout plan expects to exist before the first Proxmox mutation.
 - Published docs-autopilot sync tip before live preflight:
   `62cff6055c096e3209b7527b101038b9e2ee9259`
   (`docs(deploy): sync published rollout readiness`)
-- Required W37 follow-up committed locally after live preflight:
-  `b421d203` (`fix(deploy): keep plex media automount live`); publication is
-  part of the execution-evidence push that follows this update.
+- Required W37 follow-up published:
+  `b421d203` (`fix(deploy): keep plex media automount live`).
+- Published verified NFS bridge checkpoint before migration:
+  `809386f8` (`docs(homelab): record verified plex media bridge`).
 - User-owned local dirt intentionally excluded from publication:
   `AGENTS.md`, `CLAUDE.md`, and untracked `.claude/skills/`
 
@@ -154,11 +155,13 @@ Ready:
 - external adversarial review of record, with its actionable findings closed in
   committed source
 - rollout planning from the corrected pve1 design
-- Plex Task 1 preflight and fresh PBS rollback backups complete
-- W37 automount safety fix committed and ready to publish
+- Plex Tasks 1-3 complete: fresh PBS backups, verified NFSv4 bridge, offline
+  root-disk migration to `.173`, guest-side NFS proof, and reboot acceptance
+- W37-W45 incorporated into the executable plan and live state
 
 Not yet done:
 
-- NFS bridge installation, Plex migration, and post-migration acceptance
+- signed-in Plex direct-play/hardware-transcode proof, including concurrent
+  Scrypted visual/GPU health
 - Ragweld LXC 100 provisioning, DNS/Cloudflare/auth, clean corpus seeding, and
   final external-browser/recovery acceptance

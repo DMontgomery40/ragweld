@@ -74,6 +74,21 @@ From `docs/exec-plans/active/watchdog-proxmox-foundation-2026-08-28.md`
   before acceptance. Any hit stops the plan. If an init genuinely needs root
   ownership on one subtree, the fix is a targeted `no_root_squash` for that
   path with an explicit ruling — never a blanket export relaxation.
+- **W44 — decide and assert `onboot` before the reboot proof.** `onboot` is
+  absent from the Task 1 inventory and Proxmox defaults it to `0`, so the
+  per-container drop-in and its automount ordering may never run at boot.
+  Task 1 Step 2 records the live `onboot` value; before the W43 reboot test,
+  set it deliberately on `.173` — `pct set 4214 --onboot 1 --startup order=2`
+  (after Scrypted, so the camera workload claims the render device first;
+  rollback `pct set 4214 --onboot 0 --delete startup`) — or record an explicit
+  operator decision to keep manual starts. The reboot acceptance must assert
+  `pct status 4214` is `running` **and** the guest-side `findmnt -t nfs4`;
+  without the running assertion the reboot test passes while Plex is down.
+- **W45 — do not faithfully restore the stale fstab line.** The bridge
+  rollback says to restore `/etc/fstab.ragweld-pre-nfs-20260828`, which would
+  re-add the disabled entry for absent UUID `5ddacfd6-…` pointed at
+  `/srv/media`. Restore the backup minus that line, or treat the backup as
+  reference only and leave the line disabled. Say so in the evidence file.
 - **W43 — isolate the start gate and reboot `.173` once before acceptance.**
   The media pre-start check belongs only to `pve-container@4214.service`, not
   global `pve-guests.service`, so pve1 availability cannot hold Scrypted's
@@ -139,13 +154,13 @@ and only the guest view is real.
 - Consumes: live cluster state, `pbs-beelink`, LXC 4214.
 - Produces: verified LXC 4214 and VM 120 backup identifiers plus pre-migration inventory used by every later task.
 
-- [ ] **Step 1: Define the exact SSH prefix locally**
+- [x] **Step 1: Define the exact SSH prefix locally**
 
 ```bash
 PVE_SSH=(ssh -i /Users/davidmontgomery/.ssh/proxmox_portable_backup_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes)
 ```
 
-- [ ] **Step 2: Verify the source, destination, quorum, storage, mount, and guest identity**
+- [x] **Step 2: Verify the source, destination, quorum, storage, mount, and guest identity**
 
 Run read-only checks:
 
@@ -163,7 +178,7 @@ Expected:
 - `.173` exposes `/dev/dri/renderD128`;
 - no existing `.173:/srv/media` mount conflicts with the planned unit.
 
-- [ ] **Step 3: Record the current application inventory without secrets**
+- [x] **Step 3: Record the current application inventory without secrets**
 
 ```bash
 "${PVE_SSH[@]}" root@192.168.68.171 'pct exec 4214 -- docker ps --format "{{.Names}}|{{.Status}}|{{.Ports}}"; pct exec 4214 -- sh -lc '\''for c in plex sonarr radarr qbittorrent; do docker inspect --format "{{.Name}} user={{.Config.User}} {{range .Mounts}}{{println .Source \"->\" .Destination \"rw=\" .RW}}{{end}}" "$c"; done'\'''
@@ -171,7 +186,7 @@ Expected:
 
 Expected: Plex, Sonarr, Radarr, qBittorrent, Prowlarr, Overseerr, Portainer, exporters, gluetun, and startpage are running; the media consumers use UID/GID 1000 and writable `/srv/media` paths.
 
-- [ ] **Step 4: Create fresh snapshot-mode PBS backups**
+- [x] **Step 4: Create fresh snapshot-mode PBS backups**
 
 ```bash
 "${PVE_SSH[@]}" root@192.168.68.171 'vzdump 4214 --storage pbs-beelink --mode snapshot --compress zstd'
@@ -180,7 +195,7 @@ Expected: Plex, Sonarr, Radarr, qBittorrent, Prowlarr, Overseerr, Portainer, exp
 
 Expected: both commands exit 0 with `TASK OK`. Any warning about the external Plex bind mount must state it is excluded rather than failed; the LXC root disk/Docker state and the HAOS VM disk must be included.
 
-- [ ] **Step 5: Resolve and record the newest backup**
+- [x] **Step 5: Resolve and record the newest backup**
 
 ```bash
 "${PVE_SSH[@]}" root@192.168.68.171 'pvesm list pbs-beelink --content backup --vmid 4214 | tail -n 3'
@@ -189,7 +204,7 @@ Expected: both commands exit 0 with `TASK OK`. Any warning about the external Pl
 
 Record both exact volume identifiers, timestamps, sizes, source/destination PVE versions, mount source, and current Git commit in the evidence file. Do not record credentials, tokens, or Plex authentication material.
 
-- [ ] **Step 6: Commit preflight evidence**
+- [x] **Step 6: Commit preflight evidence**
 
 ```bash
 git add docs/exec-plans/active/plex-return-to-pve-2026-08-27.md
@@ -210,14 +225,14 @@ git push origin main
 - Consumes: exact pve1 export and `.173` mount templates.
 - Produces: writable `.173:/srv/media` backed by pve1 media and surviving reboot/network restart.
 
-- [ ] **Step 1: Copy templates to explicit temporary paths**
+- [x] **Step 1: Copy templates to explicit temporary paths**
 
 ```bash
 scp -i /Users/davidmontgomery/.ssh/proxmox_portable_backup_ed25519 -o IdentitiesOnly=yes deploy/proxmox/plex/exports.ragweld deploy/proxmox/plex/nfs.conf root@192.168.68.171:/root/
 scp -i /Users/davidmontgomery/.ssh/proxmox_portable_backup_ed25519 -o IdentitiesOnly=yes deploy/proxmox/plex/srv-media.mount deploy/proxmox/plex/srv-media.automount root@192.168.68.173:/root/
 ```
 
-- [ ] **Step 2: Install and activate NFSv4 on pve1**
+- [x] **Step 2: Install and activate NFSv4 on pve1**
 
 ```bash
 "${PVE_SSH[@]}" root@192.168.68.171 'apt-get update && apt-get install -y nfs-kernel-server && install -d -m 0755 /etc/exports.d /etc/nfs.conf.d && install -m 0644 /root/exports.ragweld /etc/exports.d/ragweld-media.exports && install -m 0644 /root/nfs.conf /etc/nfs.conf.d/99-ragweld.conf && systemctl restart nfs-server && exportfs -ra && exportfs -v'
@@ -225,7 +240,7 @@ scp -i /Users/davidmontgomery/.ssh/proxmox_portable_backup_ed25519 -o Identities
 
 Expected: the only Ragweld export client shown is `192.168.68.173`; NFSv3 is disabled.
 
-- [ ] **Step 3: Install the systemd mount/automount on `.173`**
+- [x] **Step 3: Install the systemd mount/automount on `.173`**
 
 ```bash
 "${PVE_SSH[@]}" root@192.168.68.173 'apt-get update && apt-get install -y nfs-common && install -d -m 0755 /srv/media /etc/systemd/system/pve-container@4214.service.d && test -z "$(ls -A /srv/media)" && chmod 0555 /srv/media && install -m 0644 /root/srv-media.mount /etc/systemd/system/srv-media.mount && install -m 0644 /root/srv-media.automount /etc/systemd/system/srv-media.automount && printf "%s\n" "[Unit]" "Requires=srv-media.automount" "After=srv-media.automount network-online.target" "" "[Service]" "ExecStartPre=/usr/bin/timeout 60 /bin/sh -c '\''ls /srv/media >/dev/null 2>&1 && findmnt -t nfs4 /srv/media >/dev/null'\''" > /etc/systemd/system/pve-container@4214.service.d/srv-media.conf && chmod 0644 /etc/systemd/system/pve-container@4214.service.d/srv-media.conf && systemctl daemon-reload && systemctl enable --now srv-media.automount && timeout 30 ls /srv/media >/dev/null && findmnt -t nfs4 /srv/media'
@@ -233,7 +248,7 @@ Expected: the only Ragweld export client shown is `192.168.68.173`; NFSv3 is dis
 
 Expected: NFSv4 mount from `192.168.68.171:/srv/media`, `rw`, `hard`, and `noatime`.
 
-- [ ] **Step 4: Prove UID/GID 1000 read and write across the bridge**
+- [x] **Step 4: Prove UID/GID 1000 read and write across the bridge**
 
 ```bash
 "${PVE_SSH[@]}" root@192.168.68.173 'setpriv --reuid=1000 --regid=1000 --clear-groups sh -c "printf nfs-probe > /srv/media/.ragweld-nfs-probe" && stat -c "%u:%g %a %s" /srv/media/.ragweld-nfs-probe'
@@ -249,7 +264,7 @@ owner `65534:65534`, proving `root_squash`; content matches; both exact probe
 files are removed. These two named probes are the only media-path deletions
 authorized by this task.
 
-- [ ] **Step 5: Prove the automount survives a clean unmount**
+- [x] **Step 5: Prove the automount survives a clean unmount**
 
 ```bash
 "${PVE_SSH[@]}" root@192.168.68.173 'systemctl stop srv-media.mount; findmnt -t autofs /srv/media; timeout 30 ls /srv/media >/dev/null; findmnt -t nfs4 /srv/media'
@@ -257,7 +272,7 @@ authorized by this task.
 
 Expected: access retriggers the automount and the same NFSv4 source returns.
 
-- [ ] **Step 6: Append bridge evidence and commit**
+- [x] **Step 6: Append bridge evidence and commit**
 
 Record export client, mount source/options, UID/GID probe, and rollback commands. Commit and push only the evidence file.
 
@@ -270,7 +285,7 @@ Record export client, mount source/options, UID/GID probe, and rollback commands
 - Consumes: verified backup and NFS bridge.
 - Produces: VMID 4214 registered and running on node `pve`, absent from `pve1` runtime.
 
-- [ ] **Step 1: Re-run the destructive-action gate**
+- [x] **Step 1: Re-run the destructive-action gate**
 
 Immediately before stopping anything, rerun:
 
@@ -281,7 +296,7 @@ Immediately before stopping anything, rerun:
 
 Proceed only if quorum, PBS, both `local-lvm` pools, media source, NFS target, and GPU device match Task 1/2.
 
-- [ ] **Step 2: Stop LXC 4214 cleanly and confirm it is stopped**
+- [x] **Step 2: Stop LXC 4214 cleanly and confirm it is stopped**
 
 ```bash
 "${PVE_SSH[@]}" root@192.168.68.171 'pct shutdown 4214 --timeout 180; pct status 4214'
@@ -289,7 +304,7 @@ Proceed only if quorum, PBS, both `local-lvm` pools, media source, NFS target, a
 
 Expected: `status: stopped`. If shutdown times out, inspect the guest; do not force-stop until database/download activity is understood.
 
-- [ ] **Step 3: Migrate only the root disk to `.173`**
+- [x] **Step 3: Migrate only the root disk to `.173`**
 
 ```bash
 "${PVE_SSH[@]}" root@192.168.68.171 'pct migrate 4214 pve --target-storage local-lvm'
@@ -297,7 +312,7 @@ Expected: `status: stopped`. If shutdown times out, inspect the guest; do not fo
 
 Expected: task exit 0. The `shared=1` `/srv/media` bind entry remains in config and is not copied.
 
-- [ ] **Step 4: Validate the target config before start**
+- [x] **Step 4: Validate the target config before start**
 
 ```bash
 "${PVE_SSH[@]}" root@192.168.68.173 'pct config 4214; findmnt -t nfs4 /srv/media; ls -l /dev/dri/renderD128'
@@ -305,7 +320,7 @@ Expected: task exit 0. The `shared=1` `/srv/media` bind entry remains in config 
 
 Required config: VMID 4214, 16 cores, privileged, nesting/keyctl/fuse, IP `192.168.68.214/24`, `mp1 /srv/media`, and `/dev/dri` mappings.
 
-- [ ] **Step 5: Start on `.173` and require clean container status**
+- [x] **Step 5: Start on `.173` and require clean container status**
 
 ```bash
 "${PVE_SSH[@]}" root@192.168.68.173 'findmnt -t nfs4 /srv/media; pct start 4214; pct status 4214; pct exec 4214 -- findmnt -t nfs4 /srv/media; pct exec 4214 -- ls -l /dev/dri; pct exec 4214 -- docker ps --format "{{.Names}}|{{.Status}}"'
@@ -333,7 +348,7 @@ Do not continue forward acceptance after rollback.
 - Consumes: running 4214 on `.173`.
 - Produces: application-level acceptance and retained rollback window.
 
-- [ ] **Step 1: Verify all expected HTTP services from the LAN**
+- [x] **Step 1: Verify all expected HTTP services from the LAN**
 
 ```bash
 curl -fsS -o /dev/null http://192.168.68.214:32400/web/
@@ -347,7 +362,7 @@ curl -fkSs -o /dev/null https://192.168.68.214:9443
 
 Expected: all return an HTTP response without timeout.
 
-- [ ] **Step 2: Verify container and VPN health**
+- [x] **Step 2: Verify container and VPN health**
 
 ```bash
 "${PVE_SSH[@]}" root@192.168.68.173 'pct exec 4214 -- docker ps --format "{{.Names}}|{{.Status}}"; pct exec 4214 -- docker inspect --format "{{.State.Health.Status}}" gluetun; pct exec 4214 -- docker logs --tail 50 gluetun'
@@ -358,7 +373,7 @@ Expected: gluetun healthy, no containers restarting, no route/auth regression,
 and no media-permission signature in the four media-container logs. Do not
 print VPN credentials.
 
-- [ ] **Step 3: Prove application-user media writes**
+- [x] **Step 3: Prove application-user media writes**
 
 ```bash
 "${PVE_SSH[@]}" root@192.168.68.173 'pct exec 4214 -- docker exec -u 1000:1000 sonarr sh -c "printf sonarr-probe > /tv/.ragweld-sonarr-probe"; pct exec 4214 -- docker exec -u 1000:1000 radarr sh -c "printf radarr-probe > /movies/.ragweld-radarr-probe"; pct exec 4214 -- docker exec -u 1000:1000 qbittorrent sh -c "printf qbit-probe > /downloads/.ragweld-qbit-probe"'

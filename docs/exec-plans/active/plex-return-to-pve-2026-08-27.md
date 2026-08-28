@@ -1,6 +1,6 @@
 # Plex return-to-pve execution evidence
 
-Status: Tasks 1-2 verified; offline LXC migration not started
+Status: Tasks 1-3 and non-visual Task 4 acceptance verified; signed-in Plex playback/transcode proof pending
 
 Plan: `docs/superpowers/plans/2026-08-27-plex-return-to-pve.md`
 
@@ -146,3 +146,89 @@ only after confirming the NFS mount is absent and restoring its prior mode. On p
 `/etc/exports.d/ragweld-media.exports` and
 `/etc/nfs.conf.d/99-ragweld.conf`, then reload `exportfs` and restart NFS.
 Do not remove the quarantine or PBS backups during this plan.
+
+## Task 3 — offline LXC migration evidence
+
+- The final destructive-action gate reverified quorum, both fresh PBS backup
+  IDs, source ext4 media, `shared=1`, source container health, destination
+  NFSv4, destination storage/GPU, Scrypted health, and the 4214-only start
+  gate.
+- LXC 4214 shut down gracefully and returned `status: stopped`; no force-stop
+  was used.
+- `pct migrate 4214 pve --target-storage local-lvm` completed successfully in
+  `00:04:59`.
+- Migration explicitly ignored the shared `/srv/media` bind, copied the full
+  32 GiB root LV at approximately 116 MB/s, imported
+  `local-lvm:vm-4214-disk-0` on node `pve`, and removed the source LV only
+  after successful import.
+- Proxmox config ownership then existed only at
+  `/etc/pve/nodes/pve/lxc/4214.conf`; the pve1 node copy was absent.
+- Stopped destination config preserved:
+  - 16 cores, 32000 MiB memory, 2000 MiB swap
+  - privileged container with `nesting=1,keyctl=1,fuse=1`
+  - fixed IP `192.168.68.214/24`
+  - `mp1: /srv/media,mp=/srv/media,shared=1`
+  - root disk `local-lvm:vm-4214-disk-0,size=32G`
+  - `/dev/dri`, `renderD128`, `/dev/net/tun`, and `/dev/fuse` mappings
+- The 4214-only fatal/bounded NFS pre-start gate was present before start.
+- Start succeeded. The guest itself—not merely the host—reported
+  `192.168.68.171:/srv/media` as `nfs4`, so the bind did not capture the autofs
+  stub. Both GPU devices were visible inside the guest.
+- All 12 prior containers started; Gluetun reached `healthy`; zero containers
+  were restarting; Plex/Sonarr/Radarr/qBittorrent showed no permission,
+  `EACCES`, failed-chown, or operation-not-permitted signatures.
+
+## Task 4 — acceptance evidence
+
+### LAN services
+
+Post-migration and post-reboot checks returned an HTTP response for every
+expected surface:
+
+- Plex `:32400/web/` -> `302`
+- Overseerr `:5055` -> `307`
+- Radarr `:7878` -> `302`
+- Sonarr `:8989` -> `401`
+- Prowlarr `:9696` -> `302`
+- qBittorrent `:8080` -> `200`
+- Startpage `:8082` -> `200`
+- Portainer `:9000` -> `200`
+- Portainer TLS `:9443` -> `200`
+
+### Application-user media writes
+
+- Sonarr wrote through `/tv`, Radarr through `/movies`, and qBittorrent
+  through `/downloads` as UID/GID `1000:1000`.
+- pve1 observed each exact probe in its inventory-derived host directory with
+  owner `1000:1000` and the expected content.
+- The three exact probe files were removed through their owning containers and
+  confirmed absent on pve1.
+
+### Boot-order and shared-resource proof
+
+- Pre-reboot: Grafana 103, Scrypted 1043, and Plex 4214 were running with
+  `onboot=1`; Scrypted was active with `renderD128`; Plex's guest NFS was
+  `nfs4`; Gluetun was healthy.
+- Node `pve` was rebooted once. SSH returned with boot time
+  `2026-08-28 08:10:43`.
+- After reboot, all three LXCs returned to `running`.
+- `pve-guests.service`, `srv-media.automount`, and `srv-media.mount` were
+  active. Host and guest views both reported the same NFSv4 source.
+- Scrypted remained active with its render device. Plex's container sees
+  `/dev/dri/card0` and `/dev/dri/renderD128`.
+- All 12 Plex/arr containers returned; Gluetun was healthy; no media-permission
+  signatures appeared; all nine LAN HTTP checks still responded.
+- W43 is therefore accepted: the Plex-only start gate preserves cameras and
+  survives the actual boot-order path.
+
+### Remaining visual acceptance
+
+- The in-app browser loaded the migrated Plex Web UI and reached Plex's
+  legitimate authorization screen for `192.168.68.214`.
+- That browser has no Plex token/session. No credential, password, or token was
+  entered or read.
+- A signed-in user must finish the remaining direct-play and forced
+  lower-quality transcode interaction in that preserved in-app tab. While it
+  runs, capture Plex's hardware-transcode indicator and sanitized `.173`
+  video-engine activity. This is the only remaining Plex-plan acceptance
+  item before starting Ragweld LXC provisioning.
