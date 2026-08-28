@@ -34,6 +34,11 @@ PROXMOX_SECRET_ROOT_ENV = "RAGWELD_ETC_ROOT"
 PROXMOX_CONTRACT_ENV = {
     "GRAFANA_ADMIN_PASSWORD": "contract-only",
     "LANGFUSE_OIDC_CLIENT_SECRET": "contract-only",
+    "LANGFUSE_POSTGRES_PASSWORD": "contract-langfuse-postgres",
+    "CLICKHOUSE_PASSWORD": "contract-langfuse-clickhouse",
+    "REDIS_AUTH": "contract-langfuse-redis",
+    "LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID": "contract-langfuse-minio-user",
+    "LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY": "contract-langfuse-minio-password",
 }
 PROXMOX_RUNTIME_SYMLINKS = {
     ".env": "runtime.env",
@@ -395,6 +400,15 @@ exit 0
         repo / ".venv/bin/uvicorn",
         """#!/usr/bin/env bash
 exit 0
+""",
+    )
+    real_python = ROOT / ".venv" / "bin" / "python"
+    if not real_python.is_file():
+        pytest.skip("repo .venv python is unavailable")
+    _write_executable(
+        repo / ".venv/bin/python",
+        f"""#!/usr/bin/env bash
+exec {shlex.quote(str(real_python))} "$@"
 """,
     )
     (repo / "web" / "dist").mkdir(parents=True, exist_ok=True)
@@ -964,11 +978,13 @@ def test_proxmox_lifecycle_stop_runtime_only_stops_owned_stack_without_destructi
 ) -> None:
     assert PROXMOX_STOP_RUNTIME.is_file()
     repo, log_path = _materialize_proxmox_runtime_repo(tmp_path)
+    secret_root = _build_secret_root(tmp_path, include_tunnel=False)
 
     result = _run_shell_script(
         repo / "deploy" / "proxmox" / "stop-runtime.sh",
         cwd=repo,
         env={
+            PROXMOX_SECRET_ROOT_ENV: str(secret_root),
             "FAKE_TOOL_LOG": str(log_path),
             "PATH": f"{tmp_path / 'bin'}:{os.environ['PATH']}",
         },
@@ -1125,3 +1141,269 @@ def test_proxmox_secret_bootstrap_fails_closed_on_existing_initialized_secret_ro
     assert second.returncode != 0
     assert "already initialized" in second.stderr
     assert (secret_root / "runtime.env").read_text(encoding="utf-8") == before
+
+
+def _require_compose_cli() -> str:
+    docker_path = shutil.which("docker")
+    if docker_path is None:
+        pytest.skip("docker CLI is unavailable")
+    version = subprocess.run(
+        [docker_path, "compose", "version"],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if version.returncode != 0:
+        pytest.skip("docker compose plugin is unavailable")
+    return docker_path
+
+
+def _materialize_real_proxmox_contract_repo(tmp_path: Path) -> tuple[Path, Path]:
+    repo = tmp_path / "repo"
+    for relative_path in (
+        "docker-compose.yml",
+        "infra/docker-compose.observability.yml",
+        "infra/litellm.env.example",
+        "infra/langfuse.env.example",
+        "deploy/proxmox/docker-compose.yml",
+        "deploy/proxmox/Caddyfile",
+        "deploy/proxmox/authelia/configuration.yml",
+        "deploy/proxmox/start-runtime.sh",
+        "deploy/proxmox/stop-runtime.sh",
+        "deploy/proxmox/bootstrap-secrets.sh",
+    ):
+        source = ROOT / relative_path
+        target = repo / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(source.read_bytes())
+        if os.access(source, os.X_OK):
+            target.chmod(0o755)
+    _write_executable(
+        repo / "start.sh",
+        """#!/usr/bin/env bash
+set -euo pipefail
+printf 'start %s\\n' "$*" >> "$PROXMOX_HOST_CAPTURE"
+printf 'config %s\\n' "${RAGWELD_CONFIG_PATH:-}" >> "$PROXMOX_HOST_CAPTURE"
+exit 0
+""",
+    )
+    _write_executable(
+        repo / "stop.sh",
+        """#!/usr/bin/env bash
+set -euo pipefail
+printf 'stop %s\\n' "$*" >> "$PROXMOX_HOST_CAPTURE"
+exit 0
+""",
+    )
+    _write_executable(
+        repo / ".venv/bin/uvicorn",
+        """#!/usr/bin/env bash
+exit 0
+""",
+    )
+    real_python = ROOT / ".venv" / "bin" / "python"
+    if not real_python.is_file():
+        pytest.skip("repo .venv python is unavailable")
+    python_log = tmp_path / "python.log"
+    _write_executable(
+        repo / ".venv/bin/python",
+        f"""#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$0 $*" >> {shlex.quote(str(python_log))}
+exec {shlex.quote(str(real_python))} "$@"
+""",
+    )
+    (repo / "web" / "dist").mkdir(parents=True, exist_ok=True)
+    (repo / "web" / "dist" / "index.html").write_text("<!doctype html>\n", encoding="utf-8")
+    return repo, python_log
+
+
+def _run_bootstrap(tmp_path: Path) -> tuple[Path, Path, Path]:
+    repo, python_log = _materialize_real_proxmox_contract_repo(tmp_path)
+    password_file = tmp_path / "owner-password"
+    password_file.write_text("owner-secret-for-bootstrap\n", encoding="utf-8")
+    password_file.chmod(0o600)
+    secret_root = tmp_path / "ragweld-etc"
+    result = _run_shell_script(
+        repo / "deploy" / "proxmox" / "bootstrap-secrets.sh",
+        "david",
+        str(password_file),
+        cwd=repo,
+        env={PROXMOX_SECRET_ROOT_ENV: str(secret_root)},
+    )
+    assert result.returncode == 0, result.stderr
+    _write_private_file(secret_root / "tribrid_config.json", "{}\n")
+    return repo, secret_root, python_log
+
+
+def _real_compose_config(repo: Path, env: dict[str, str]) -> dict[str, Any]:
+    docker_path = _require_compose_cli()
+    result = subprocess.run(
+        [
+            docker_path,
+            "compose",
+            "--project-name",
+            "ragweld",
+            "-f",
+            "docker-compose.yml",
+            "-f",
+            "infra/docker-compose.observability.yml",
+            "-f",
+            "deploy/proxmox/docker-compose.yml",
+            "config",
+            "--format",
+            "json",
+        ],
+        cwd=repo,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert isinstance(payload, dict)
+    return payload
+
+
+def _source_runtime_environment(secret_root: Path) -> dict[str, str]:
+    env = dict(os.environ)
+    env.update(_parse_env_file(secret_root / "runtime.env"))
+    env.update(_parse_env_file(secret_root / "langfuse.env"))
+    env["LANGFUSE_OIDC_CLIENT_SECRET"] = (
+        secret_root / "langfuse-oidc-client-secret"
+    ).read_text(encoding="utf-8").strip()
+    return env
+
+
+def _install_runtime_symlinks(repo: Path, secret_root: Path) -> None:
+    for relative_path, secret_name in PROXMOX_RUNTIME_SYMLINKS.items():
+        repo_path = repo / relative_path
+        repo_path.parent.mkdir(parents=True, exist_ok=True)
+        repo_path.symlink_to(secret_root / secret_name)
+
+
+def _write_real_compose_proxy(bin_dir: Path, capture_path: Path) -> None:
+    docker_path = _require_compose_cli()
+    _write_executable(
+        bin_dir / "docker",
+        f"""#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${{1:-}}" == "compose" && "${{2:-}}" == "version" ]]; then
+  exec {shlex.quote(docker_path)} "$@"
+fi
+if [[ "${{1:-}}" == "compose" ]]; then
+  passthrough=()
+  for arg in "$@"; do
+    if [[ "$arg" == "up" || "$arg" == "stop" ]]; then
+      break
+    fi
+    passthrough+=("$arg")
+  done
+  {shlex.quote(docker_path)} "${{passthrough[@]}}" config --format json > {shlex.quote(str(capture_path))}
+  exit 0
+fi
+exec {shlex.quote(docker_path)} "$@"
+""",
+    )
+
+
+def test_proxmox_bootstrap_uses_repo_python_and_sets_runtime_config_path_contract(tmp_path: Path) -> None:
+    repo, secret_root, python_log = _run_bootstrap(tmp_path)
+    runtime_env = _parse_env_file(secret_root / "runtime.env")
+
+    assert repo == tmp_path / "repo"
+    assert python_log.exists()
+    assert str(repo / ".venv/bin/python") in python_log.read_text(encoding="utf-8")
+    assert runtime_env["RAGWELD_CONFIG_PATH"] == "/etc/ragweld/tribrid_config.json"
+    assert "CONFIG_FILE" not in runtime_env
+
+
+def test_proxmox_bootstrap_outputs_drive_real_production_compose_credentials(tmp_path: Path) -> None:
+    repo, secret_root, _ = _run_bootstrap(tmp_path)
+    _install_runtime_symlinks(repo, secret_root)
+    env = _source_runtime_environment(secret_root)
+
+    config = _real_compose_config(repo, env)
+    services = config["services"]
+    langfuse_env = _parse_env_file(secret_root / "langfuse.env")
+
+    assert langfuse_env["LANGFUSE_POSTGRES_PASSWORD"]
+    assert langfuse_env["DATABASE_URL"] == (
+        f"postgresql://langfuse:{langfuse_env['LANGFUSE_POSTGRES_PASSWORD']}@langfuse-postgres:5432/langfuse"
+    )
+    assert services["langfuse-postgres"]["environment"]["POSTGRES_PASSWORD"] == langfuse_env["LANGFUSE_POSTGRES_PASSWORD"]
+    assert services["langfuse-clickhouse"]["environment"]["CLICKHOUSE_PASSWORD"] == langfuse_env["CLICKHOUSE_PASSWORD"]
+    assert services["langfuse-redis"]["command"] == ["redis-server", "--requirepass", langfuse_env["REDIS_AUTH"]]
+    redis_healthcheck = services["langfuse-redis"]["healthcheck"]["test"]
+    assert redis_healthcheck[0] == "CMD-SHELL"
+    assert "REDIS_AUTH" in redis_healthcheck[1]
+    assert langfuse_env["REDIS_AUTH"] not in redis_healthcheck[1]
+    assert services["langfuse-minio"]["environment"]["MINIO_ROOT_USER"] == langfuse_env["LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID"]
+    assert services["langfuse-minio"]["environment"]["MINIO_ROOT_PASSWORD"] == langfuse_env["LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY"]
+    assert services["langfuse-minio"]["environment"]["MINIO_ACCESS_KEY"] == langfuse_env["LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID"]
+    assert services["langfuse-minio"]["environment"]["MINIO_SECRET_KEY"] == langfuse_env["LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY"]
+
+
+def test_proxmox_start_runtime_sources_generated_runtime_and_langfuse_env_before_compose_parse(
+    tmp_path: Path,
+) -> None:
+    repo, secret_root, _ = _run_bootstrap(tmp_path)
+    capture_path = tmp_path / "start-compose.json"
+    host_capture = tmp_path / "host.log"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_real_compose_proxy(bin_dir, capture_path)
+
+    result = _run_shell_script(
+        repo / "deploy" / "proxmox" / "start-runtime.sh",
+        cwd=repo,
+        env={
+            PROXMOX_SECRET_ROOT_ENV: str(secret_root),
+            "RAGWELD_SKIP_TUNNEL": "1",
+            "PROXMOX_HOST_CAPTURE": str(host_capture),
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    config = json.loads(capture_path.read_text(encoding="utf-8"))
+    services = config["services"]
+    langfuse_env = _parse_env_file(secret_root / "langfuse.env")
+    assert services["langfuse"]["environment"]["AUTH_CUSTOM_CLIENT_SECRET"] == (
+        secret_root / "langfuse-oidc-client-secret"
+    ).read_text(encoding="utf-8").strip()
+    assert services["langfuse-postgres"]["environment"]["POSTGRES_PASSWORD"] == langfuse_env["LANGFUSE_POSTGRES_PASSWORD"]
+    assert "start --no-docker --no-local-model --no-frontend" in host_capture.read_text(encoding="utf-8")
+
+
+def test_proxmox_stop_runtime_sources_generated_runtime_and_langfuse_env_before_compose_parse(
+    tmp_path: Path,
+) -> None:
+    repo, secret_root, _ = _run_bootstrap(tmp_path)
+    capture_path = tmp_path / "stop-compose.json"
+    host_capture = tmp_path / "host.log"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_real_compose_proxy(bin_dir, capture_path)
+
+    result = _run_shell_script(
+        repo / "deploy" / "proxmox" / "stop-runtime.sh",
+        cwd=repo,
+        env={
+            PROXMOX_SECRET_ROOT_ENV: str(secret_root),
+            "PROXMOX_HOST_CAPTURE": str(host_capture),
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    config = json.loads(capture_path.read_text(encoding="utf-8"))
+    services = config["services"]
+    langfuse_env = _parse_env_file(secret_root / "langfuse.env")
+    assert services["langfuse"]["environment"]["AUTH_CUSTOM_CLIENT_SECRET"] == (
+        secret_root / "langfuse-oidc-client-secret"
+    ).read_text(encoding="utf-8").strip()
+    assert services["langfuse-clickhouse"]["environment"]["CLICKHOUSE_PASSWORD"] == langfuse_env["CLICKHOUSE_PASSWORD"]
+    assert host_capture.read_text(encoding="utf-8").splitlines()[0] == "stop --no-docker"

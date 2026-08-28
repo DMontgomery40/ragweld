@@ -3,16 +3,102 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 readonly ROOT_DIR
+readonly ETC_ROOT="${RAGWELD_ETC_ROOT:-/etc/ragweld}"
+readonly EXPECTED_UID="$(id -u)"
+readonly EXPECTED_GID="$(id -g)"
+readonly REQUIRED_SECRET_FILES=(
+  "runtime.env"
+  "langfuse.env"
+  "langfuse-oidc-client-secret"
+)
 
 die() {
   echo "ERROR: $*" >&2
   exit 1
 }
 
+stat_mode() {
+  local path="$1"
+  if stat -f '%Lp' "$path" >/dev/null 2>&1; then
+    stat -f '%Lp' "$path"
+  else
+    stat -c '%a' "$path"
+  fi
+}
+
+stat_owner() {
+  local path="$1"
+  if stat -f '%u:%g' "$path" >/dev/null 2>&1; then
+    stat -f '%u:%g' "$path"
+  else
+    stat -c '%u:%g' "$path"
+  fi
+}
+
+require_private_dir() {
+  local path="$1"
+  local label="$2"
+  [[ -d "$path" ]] || die "$label is missing: $path"
+  [[ ! -L "$path" ]] || die "$label must be a directory, not a symlink: $path"
+  [[ "$(stat_owner "$path")" == "${EXPECTED_UID}:${EXPECTED_GID}" ]] || die "$label must be owned by uid:gid ${EXPECTED_UID}:${EXPECTED_GID}: $path"
+  [[ "$(stat_mode "$path")" == "700" ]] || die "$label must have mode 0700: $path"
+}
+
+require_private_file() {
+  local path="$1"
+  local label="$2"
+  [[ -f "$path" ]] || die "$label is missing: $path"
+  [[ ! -L "$path" ]] || die "$label must be a regular file, not a symlink: $path"
+  [[ "$(stat_owner "$path")" == "${EXPECTED_UID}:${EXPECTED_GID}" ]] || die "$label must be owned by uid:gid ${EXPECTED_UID}:${EXPECTED_GID}: $path"
+  [[ "$(stat_mode "$path")" == "600" ]] || die "$label must have mode 0600: $path"
+}
+
+source_private_env_file() {
+  local path="$1"
+  set -a
+  # shellcheck disable=SC1090
+  source "$path"
+  set +a
+}
+
+ensure_repo_symlink() {
+  local repo_path="$1"
+  local expected_target="$2"
+  local actual_target
+  if [[ -e "$repo_path" || -L "$repo_path" ]]; then
+    [[ -L "$repo_path" ]] || die "$repo_path must be absent or an exact symlink to $expected_target"
+    actual_target="$(python3 - "$repo_path" "$expected_target" <<'PY'
+from pathlib import Path
+import sys
+
+actual = Path(sys.argv[1]).resolve(strict=True)
+expected = Path(sys.argv[2]).resolve(strict=True)
+print(actual == expected)
+PY
+)"
+    [[ "$actual_target" == "True" ]] || die "$repo_path must be an exact symlink to $expected_target"
+    return 0
+  fi
+  ln -s "$expected_target" "$repo_path"
+}
+
 main() {
+  local file_path
   cd "$ROOT_DIR"
   [[ -x "$ROOT_DIR/stop.sh" ]] || die "stop.sh is missing or not executable"
   command -v docker >/dev/null 2>&1 || die "docker CLI is required"
+  require_private_dir "$ETC_ROOT" "Ragweld secret root"
+  for file_path in "${REQUIRED_SECRET_FILES[@]}"; do
+    require_private_file "$ETC_ROOT/$file_path" "Required secret file"
+  done
+  ensure_repo_symlink "$ROOT_DIR/.env" "$ETC_ROOT/runtime.env"
+  ensure_repo_symlink "$ROOT_DIR/infra/litellm.env" "$ETC_ROOT/litellm.env"
+  ensure_repo_symlink "$ROOT_DIR/infra/langfuse.env" "$ETC_ROOT/langfuse.env"
+
+  source_private_env_file "$ETC_ROOT/runtime.env"
+  source_private_env_file "$ETC_ROOT/langfuse.env"
+  IFS= read -r LANGFUSE_OIDC_CLIENT_SECRET < "$ETC_ROOT/langfuse-oidc-client-secret"
+  export LANGFUSE_OIDC_CLIENT_SECRET
 
   ./stop.sh --no-docker
   docker compose --project-name ragweld \

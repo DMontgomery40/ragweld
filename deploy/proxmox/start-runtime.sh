@@ -137,6 +137,14 @@ require_compose() {
   docker compose version >/dev/null 2>&1 || die "docker compose plugin is required"
 }
 
+source_private_env_file() {
+  local path="$1"
+  set -a
+  # shellcheck disable=SC1090
+  source "$path"
+  set +a
+}
+
 main() {
   local file_path
   local compose_args
@@ -171,10 +179,8 @@ main() {
   ensure_repo_symlink "$ROOT_DIR/infra/litellm.env" "$ETC_ROOT/litellm.env"
   ensure_repo_symlink "$ROOT_DIR/infra/langfuse.env" "$ETC_ROOT/langfuse.env"
 
-  set -a
-  # shellcheck disable=SC1090
-  source "$ETC_ROOT/runtime.env"
-  set +a
+  source_private_env_file "$ETC_ROOT/runtime.env"
+  source_private_env_file "$ETC_ROOT/langfuse.env"
   IFS= read -r LANGFUSE_OIDC_CLIENT_SECRET < "$ETC_ROOT/langfuse-oidc-client-secret"
   export LANGFUSE_OIDC_CLIENT_SECRET
   export RAGWELD_CONFIG_PATH="$ETC_ROOT/tribrid_config.json"

@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+readonly ROOT_DIR
 readonly ETC_ROOT="${RAGWELD_ETC_ROOT:-/etc/ragweld}"
 readonly DEFAULT_ETC_ROOT="/etc/ragweld"
+readonly PYTHON_BIN="${PYTHON_BIN:-$ROOT_DIR/.venv/bin/python}"
 
 die() {
   echo "ERROR: $*" >&2
@@ -23,7 +26,7 @@ require_cmd() {
 }
 
 require_python_hash_support() {
-  python3 - <<'PY' >/dev/null
+  "$PYTHON_BIN" - <<'PY' >/dev/null
 from cryptography.hazmat.primitives.kdf.argon2 import Argon2id
 Argon2id
 PY
@@ -31,7 +34,7 @@ PY
 
 read_secret_file() {
   local path="$1"
-  python3 - "$path" <<'PY'
+  "$PYTHON_BIN" - "$path" <<'PY'
 from pathlib import Path
 import sys
 
@@ -41,7 +44,7 @@ PY
 
 random_alnum() {
   local length="$1"
-  python3 - "$length" <<'PY'
+  "$PYTHON_BIN" - "$length" <<'PY'
 import secrets
 import string
 import sys
@@ -59,7 +62,7 @@ random_hex() {
 
 pbkdf2_sha512_digest() {
   local secret_path="$1"
-  python3 - "$secret_path" <<'PY'
+  "$PYTHON_BIN" - "$secret_path" <<'PY'
 import base64
 import hashlib
 import secrets
@@ -79,7 +82,7 @@ PY
 
 argon2id_digest() {
   local password_path="$1"
-  python3 - "$password_path" <<'PY'
+  "$PYTHON_BIN" - "$password_path" <<'PY'
 from pathlib import Path
 import secrets
 import sys
@@ -111,7 +114,7 @@ write_atomic_file() {
 
 remove_tree() {
   local target="$1"
-  python3 - "$target" <<'PY'
+  "$PYTHON_BIN" - "$target" <<'PY'
 from pathlib import Path
 import shutil
 import sys
@@ -142,6 +145,7 @@ main() {
   local oidc_secret
   local oidc_digest
   local postgres_password
+  local langfuse_postgres_password
   local neo4j_password
   local litellm_api_key
   local grafana_password
@@ -166,11 +170,11 @@ main() {
     die "bootstrap-secrets.sh must run as root when targeting $DEFAULT_ETC_ROOT"
   fi
 
-  require_cmd python3
   require_cmd openssl
   require_cmd install
   require_cmd mktemp
-  require_python_hash_support || die "python3 must provide cryptography Argon2 support for Authelia-compatible hashes"
+  [[ -x "$PYTHON_BIN" ]] || die "required repo python is missing or not executable: $PYTHON_BIN"
+  require_python_hash_support || die "repo python must provide cryptography Argon2 support for Authelia-compatible hashes"
   ensure_target_root_is_uninitialized
 
   if [[ "$(id -u)" == "0" ]]; then
@@ -203,6 +207,7 @@ main() {
   chmod 600 "$staging_root/authelia/oidc-rsa.pem"
 
   postgres_password="$(random_alnum 48)"
+  langfuse_postgres_password="$(random_alnum 48)"
   neo4j_password="$(random_alnum 48)"
   litellm_api_key="sk-ragweld-$(random_alnum 48)"
   grafana_password="$(random_alnum 48)"
@@ -234,7 +239,7 @@ GRAFANA_URL=http://127.0.0.1:3301
 PROMETHEUS_URL=http://127.0.0.1:59090
 METRICS_ENABLED=true
 TRACING_ENABLED=true
-CONFIG_FILE=$DEFAULT_ETC_ROOT/tribrid_config.json
+RAGWELD_CONFIG_PATH=$DEFAULT_ETC_ROOT/tribrid_config.json
 MODELS_DIR=/opt/ragweld/models
 DATA_DIR=/opt/ragweld/data
 GRAFANA_ADMIN_PASSWORD=$grafana_password
@@ -247,7 +252,8 @@ EOF
 EOF
 
   cat <<EOF | write_atomic_file "$staging_root/langfuse.env"
-DATABASE_URL=postgresql://langfuse:$postgres_password@langfuse-postgres:5432/langfuse
+LANGFUSE_POSTGRES_PASSWORD=$langfuse_postgres_password
+DATABASE_URL=postgresql://langfuse:$langfuse_postgres_password@langfuse-postgres:5432/langfuse
 SALT=$langfuse_salt
 ENCRYPTION_KEY=$langfuse_encryption_key
 NEXTAUTH_SECRET=$langfuse_nextauth_secret

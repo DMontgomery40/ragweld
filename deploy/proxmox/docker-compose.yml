@@ -73,6 +73,28 @@ services:
       - path: /etc/ragweld/langfuse.env
         required: false
 
+  langfuse-postgres:
+    environment:
+      POSTGRES_PASSWORD: "${LANGFUSE_POSTGRES_PASSWORD:?set LANGFUSE_POSTGRES_PASSWORD}"
+
+  langfuse-clickhouse:
+    environment:
+      CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:?set CLICKHOUSE_PASSWORD}"
+
+  langfuse-redis:
+    environment:
+      REDIS_AUTH: "${REDIS_AUTH:?set REDIS_AUTH}"
+    command: ["redis-server", "--requirepass", "${REDIS_AUTH:?set REDIS_AUTH}"]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_AUTH}\" ping | grep PONG"]
+
+  langfuse-minio:
+    environment:
+      MINIO_ROOT_USER: "${LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID:?set LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID}"
+      MINIO_ROOT_PASSWORD: "${LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY:?set LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY}"
+      MINIO_ACCESS_KEY: "${LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID:?set LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID}"
+      MINIO_SECRET_KEY: "${LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY:?set LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY}"
+
 secrets:
   authelia_session:
     file: /etc/ragweld/authelia/session-secret
