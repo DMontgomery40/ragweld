@@ -1,6 +1,6 @@
 # Plex return-to-pve execution evidence
 
-Status: Physical media return, local-mount recovery, and post-reboot non-visual acceptance verified; signed-in Plex playback/transcode proof pending
+Status: Complete — physical media return, local-mount recovery, reboot, direct-play, and hardware-transcode acceptance verified
 
 Plan: `docs/superpowers/plans/2026-08-27-plex-return-to-pve.md`
 
@@ -239,17 +239,23 @@ expected surface:
 - W43 is therefore accepted: the Plex-only start gate preserves cameras and
   survives the actual boot-order path.
 
-### Remaining visual acceptance
+### Signed-in visual playback acceptance
 
 - The in-app browser loaded the migrated Plex Web UI and reached Plex's
-  legitimate authorization screen for `192.168.68.214`.
-- That browser has no Plex token/session. No credential, password, or token was
-  entered or read.
-- A signed-in user must finish the remaining direct-play and forced
-  lower-quality transcode interaction in that preserved in-app tab. While it
-  runs, capture Plex's hardware-transcode indicator and sanitized `.173`
-  video-engine activity. This is the only remaining Plex-plan acceptance
-  item before starting Ragweld LXC provisioning.
+  legitimate home-user selection for `192.168.68.214`. Selecting the existing
+  owner profile required no credential or token entry and loaded the local
+  movie and TV libraries.
+- Original-quality playback ran from the local server. A token-safe local
+  session probe reported a local playing movie with video decision `copy`.
+- The player was then visibly changed from original 2160p 4K quality to a
+  forced 720p/4 Mbps conversion. The local session reported video decision
+  `transcode`.
+- During that forced conversion, the Plex Transcoder executable carried
+  `-hwaccel`, `vaapi`, and `/dev/dri` markers. Labeled `intel_gpu_top` samples
+  showed active VCS and VECS video engines. This is real Intel hardware
+  transcoding, not merely device visibility.
+- The player was paused and closed after the proof. An exact executable-name
+  check returned zero remaining Plex Transcoder processes.
 
 ## Physical media return and local-mount acceptance
 
@@ -302,7 +308,7 @@ operator transition.
 - Scrypted held active file descriptors on `renderD128` from its Python and
   Node processes after reboot. Plex retained the same render-device access.
 
-The only remaining Plex acceptance is the signed-in visual direct-play and
-forced lower-quality hardware-transcode interaction. The preserved 31.6 GB
+Plex acceptance is complete. The preserved 31.6 GB
 `/srv/media-local-pre-nfs-20260828` quarantine is intentionally untouched until
-its contents are reconciled; it is not part of the mounted Plex array.
+its contents are reconciled; it is cleanup debt, not a Ragweld provisioning
+gate, and it is not part of the mounted Plex array.

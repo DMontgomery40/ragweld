@@ -11,9 +11,9 @@
 > via `fstab` UUID `5ddacfd6-…`. Do not execute them; do not execute W55
 > either, which is now a record rather than a procedure.
 >
-> The local-topology reboot, service/write probes, and Scrypted shared-GPU proof
-> are complete. Still live from this plan: the signed-in Plex
-> direct-play/hardware-transcode proof. See `W55`/`W57` in
+> The local-topology reboot, service/write probes, Scrypted shared-GPU proof,
+> signed-in direct play, and forced hardware-transcode proof are complete. No
+> Plex acceptance gate remains. See `W55`/`W57` in
 > `docs/exec-plans/active/watchdog-proxmox-foundation-2026-08-28.md`.
 
 **Goal:** Move Plex and the arr suite in LXC 4214 from `pve1` back to `pve` (`192.168.68.173`), then keep its physically relocated media local to `.173`.

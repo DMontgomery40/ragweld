@@ -1022,12 +1022,39 @@ local ext4 device, no NFS mount returned, all 12 media containers were healthy,
 the expected app probes responded, and Scrypted Python/Node processes held
 active render-device file descriptors.
 
-**Still open:**
-1. **The signed-in Plex direct-play / hardware-transcode proof** — now
-   genuinely possible and still the visual acceptance item.
-2. **The 31.6 GB quarantine** `/srv/media-local-pre-nfs-20260828` on `.173`'s
-   root. Reconcile it against the live media tree before any deletion; it was
-   deliberately left untouched.
+**Visual acceptance is closed.** The signed-in in-app browser played an
+original-quality local session, then visibly forced 720p/4 Mbps. The sanitized
+Plex session changed from video `copy` to `transcode`; the actual transcoder
+carried `-hwaccel`, `vaapi`, and `/dev/dri` markers while labeled VCS/VECS
+engine samples were active. Playback was closed and no transcoder remained.
+
+**Still open only as cleanup debt:** the 31.6 GB quarantine
+`/srv/media-local-pre-nfs-20260828` on `.173`'s root. Reconcile it against the
+live media tree before any deletion; it was deliberately left untouched and is
+not a Ragweld provisioning gate.
+3. **`/etc/fstab.ragweld-pre-nfs-20260828` on `.173`** — the bridge-era fstab
+   backup. The live fstab has since diverged in the one way that matters: the
+   UUID line is re-enabled and is now what mounts the array. Restoring this
+   backup by reflex during any future rollback would **disable the array's own
+   mount line**. Delete it, or rename it `*.superseded-20260828` so it cannot
+   be restored without a deliberate decision.
+
+**Independent corroboration of the reboot proof (watchdog, read-only 15:20Z).**
+The claim checks out, and the timestamps show it was a real boot-order test
+rather than a post-boot assembly — the configuration predates the boot:
+
+| Event | Timestamp (MDT) |
+| --- | --- |
+| `/etc/fstab` and the `pve-container@4214` drop-in written | `08:54:50` |
+| `.173` boot | `08:59:22` |
+| `srv-media.mount` active (fstab-generated unit) | `08:59:26` |
+| `pve-container@4214.service` active | `08:59:35` |
+| `pve-container@1043.service` (Scrypted) active | `08:59:35` |
+
+`journalctl -u pve-container@4214 -b` for that boot shows a clean
+`Starting…`/`Started…` with no `ExecStartPre` guard failure; Scrypted still
+holds `renderD128`; the guest sees `/dev/mapper/plex--vg-plex--lv`. The mount
+landed 4 s into boot and the container 9 s later, in the intended order.
 
 ## Low / rollout-time reminders
 
