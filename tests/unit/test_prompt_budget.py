@@ -143,7 +143,6 @@ OPENAI_DOCUMENTED_IMAGE_MAX: dict[str, int | None] = {
     "openai/gpt-4o-mini": TILE_MINI_MAX,
     "openai/gpt-4o-mini-2024-07-18": TILE_MINI_MAX,
     "openai/gpt-5": TILE_GPT5_MAX,
-    "openai/gpt-5-codex": TILE_GPT5_MAX,
     "openai/gpt-5-image": None,
     "openai/gpt-5-image-mini": None,
     "openai/gpt-5-mini": math.ceil(1536 * 1.62),
