@@ -41,6 +41,26 @@ if [[ -f "$RALPH_STATE_FILE" ]]; then
   exit $?
 fi
 
+# Anti-loop guard (Claude Code sets stop_hook_active=true when this hook has
+# already blocked once in the current turn). The first block still enforces
+# verification; a second consecutive block would only re-run the same suite
+# against the same tree, which loops forever when another session holds RED
+# tests in the shared worktree. Added 2026-08-28 (operator decision, David).
+# Do not revert as part of "user-owned dirty file" cleanup.
+stop_hook_active="false"
+if command -v jq >/dev/null 2>&1; then
+  stop_hook_active="$(printf '%s' "$HOOK_INPUT" | jq -r '.stop_hook_active // false' 2>/dev/null || echo false)"
+elif printf '%s' "$HOOK_INPUT" | grep -Eq '"stop_hook_active"[[:space:]]*:[[:space:]]*true'; then
+  stop_hook_active="true"
+fi
+if [[ "$stop_hook_active" == "true" ]]; then
+  if command -v jq >/dev/null 2>&1; then
+    jq -n --arg sys "Stop allowed after one verification block this turn (stop_hook_active); the prior failure output stands as the verification status." \
+      '{systemMessage:$sys}'
+  fi
+  exit 0
+fi
+
 missing=()
 [[ -f "AGENTS.md" ]] || missing+=("AGENTS.md")
 [[ -f "docs/index.md" ]] || missing+=("docs/index.md")
