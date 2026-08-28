@@ -10,6 +10,7 @@ from pathlib import Path
 from server.models.tribrid_config_model import TriBridConfig
 
 PRODUCTION_MODEL_ALIAS = "openai.gpt-5.6-terra"
+PRODUCTION_CHAT_MAX_TOKENS = 4096
 PRODUCTION_EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
 PRODUCTION_GRAFANA_URL = "https://grafana.ragweld.com"
 PRODUCTION_LANGFUSE_PUBLIC_URL = "https://langfuse.ragweld.com"
@@ -50,6 +51,7 @@ def _load_source(path: Path) -> TriBridConfig:
 def _apply_production_defaults(config: TriBridConfig) -> TriBridConfig:
     config.generation.gen_model = PRODUCTION_MODEL_ALIAS
     config.generation.enrich_model = PRODUCTION_MODEL_ALIAS
+    config.chat.max_tokens = PRODUCTION_CHAT_MAX_TOKENS
     config.chat.litellm.default_model = PRODUCTION_MODEL_ALIAS
     config.chat.multimodal.vision_model_override = PRODUCTION_MODEL_ALIAS
     config.chat.vllm.enabled = False

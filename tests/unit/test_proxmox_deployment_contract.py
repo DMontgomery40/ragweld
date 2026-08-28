@@ -101,6 +101,7 @@ PROXMOX_PRODUCTION_SERVICES = [
 PRODUCTION_DEFAULTS = {
     ("generation", "gen_model"): "openai.gpt-5.6-terra",
     ("generation", "enrich_model"): "openai.gpt-5.6-terra",
+    ("chat", "max_tokens"): 4096,
     ("chat", "litellm", "default_model"): "openai.gpt-5.6-terra",
     ("chat", "multimodal", "vision_model_override"): "openai.gpt-5.6-terra",
     ("chat", "vllm", "enabled"): False,
