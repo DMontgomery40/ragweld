@@ -85,6 +85,8 @@
     - [Lucene WhitespaceTokenizer](https://lucene.apache.org/core/10_3_1/analysis/common/org/apache/lucene/analysis/core/WhitespaceTokenizer.html)
 
 ??? info "`indexing.generation_retention_seconds` (`GENERATION_RETENTION_SECONDS`) — Generation Retention Seconds"
+    **Category**: `retrieval`
+
     GENERATION_RETENTION_SECONDS is how long a replaced index generation (its Qdrant collection and Neo4j graph) stays readable after a promotion before the next commit retires it. Promotion writes a new generation manifest in one Postgres transaction; a request that resolved the old manifest just before that commit still queries the old stores, so the grace must cover the longest request lifetime. A value of 0 retires the replaced generation at the very next commit. Retired generations are dropped by exact id, never by name prefix.
 
 ??? info "`indexing.index_excluded_exts` (`INDEX_EXCLUDED_EXTS`) — Excluded Extensions"
@@ -116,6 +118,8 @@
     - [Weaviate Data Import](https://docs.weaviate.io/weaviate/manage-objects/import)
 
 ??? info "`indexing.index_run_lease_seconds` (`INDEX_RUN_LEASE_SECONDS`) — Index Run Lease Seconds"
+    **Category**: `retrieval`
+
     INDEX_RUN_LEASE_SECONDS is the lease on the durable per-corpus index-run fence stored on the corpus row. A running index heartbeats the fence at a tenth of the lease; a second run on the same corpus is refused with a typed 409 while the fence is fresh. A fence whose last heartbeat is older than the lease is treated as a crashed worker: a new run may take it over, and stopping the corpus releases it. Set it longer than the longest pause a run can have without heartbeating.
 
 ??? info "`indexing.indexing_batch_size` (`INDEXING_BATCH_SIZE`) — Indexing Batch Size"

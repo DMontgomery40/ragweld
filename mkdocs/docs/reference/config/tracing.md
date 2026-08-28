@@ -26,7 +26,7 @@
 [Config API & workflow](../../configuration.md){ .md-button }
 [Glossary](../../glossary.md){ .md-button }
 
-**Total parameters**: 26
+**Total parameters**: 27
 
 ??? info "Group index"
     - `(root)`
@@ -45,6 +45,7 @@
 | `tracing.langfuse_base_url` | `LANGFUSE_BASE_URL` | `str` | `""` | — | Langfuse base URL |
 | `tracing.langfuse_enabled` | `LANGFUSE_ENABLED` | `bool` | `false` | — | Enable Langfuse generation observations |
 | `tracing.langfuse_project` | `LANGFUSE_PROJECT` | `str` | `"ragweld"` | — | Langfuse project label for traces and generations |
+| `tracing.langfuse_public_base_url` | `LANGFUSE_PUBLIC_BASE_URL` | `str` | `"http://127.0.0.1:53000"` | — | Public Langfuse URL used for browser-facing operator deep links |
 | `tracing.log_level` | `LOG_LEVEL` | `str` | `"INFO"` | pattern=^(DEBUG\|INFO\|WARNING\|ERROR)$ | Logging level |
 | `tracing.metrics_enabled` | `METRICS_ENABLED` | `bool` | `true` | — | Enable metrics collection |
 | `tracing.mimir_base_url` | `MIMIR_BASE_URL` | `str` | `""` | — | Grafana Mimir base URL used for metrics backend status checks |
@@ -177,6 +178,17 @@
 
     **Links**:
     - [Langfuse Documentation](https://langfuse.com/docs)
+
+??? info "`tracing.langfuse_public_base_url` (`LANGFUSE_PUBLIC_BASE_URL`) — Langfuse Public Base URL"
+    **Category**: `infrastructure`
+
+    LANGFUSE_PUBLIC_BASE_URL is the browser-facing Langfuse origin used for operator deep links. Keep it separate from LANGFUSE_BASE_URL when the API must ingest traces over a private loopback or service-network endpoint but operators reach the Langfuse UI through a protected public hostname. Leave it empty only when you intentionally want no Langfuse browser links.
+
+    **Badges**:
+    - Operator deep links
+
+    **Links**:
+    - [Langfuse Self-Hosting](https://langfuse.com/docs/deployment/self-host)
 
 ??? info "`tracing.log_level` (`LOG_LEVEL`) — Log Level"
     **Category**: `general`

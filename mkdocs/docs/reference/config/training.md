@@ -26,7 +26,7 @@
 [Config API & workflow](../../configuration.md){ .md-button }
 [Glossary](../../glossary.md){ .md-button }
 
-**Total parameters**: 45
+**Total parameters**: 46
 
 ??? info "Group index"
     - `(root)`
@@ -60,6 +60,7 @@
 | `training.ragweld_agent_lora_dropout` | `RAGWELD_AGENT_LORA_DROPOUT` | `float` | `0.05` | ≥ 0.0, ≤ 0.5 | LoRA dropout for ragweld agent MLX fine-tuning. |
 | `training.ragweld_agent_lora_rank` | `RAGWELD_AGENT_LORA_RANK` | `int` | `16` | ≥ 1, ≤ 128 | LoRA rank for ragweld agent MLX fine-tuning. |
 | `training.ragweld_agent_lora_target_modules` | — | `list[str]` | `["q_proj", "k_proj", "v_proj", "o_proj"]` | min_length=1 | Module name suffixes to apply LoRA to (ragweld agent; MLX Qwen3). |
+| `training.ragweld_agent_mlflow_console_base_url` | `RAGWELD_AGENT_MLFLOW_CONSOLE_BASE_URL` | `str` | `"http://127.0.0.1:55500"` | — | Public MLflow console URL used for browser-facing operator deep links. |
 | `training.ragweld_agent_mlflow_experiment_name` | `RAGWELD_AGENT_MLFLOW_EXPERIMENT_NAME` | `str` | `"ragweld-learning-agent"` | — | MLflow experiment name for Learning Agent runs. |
 | `training.ragweld_agent_mlflow_tracking_url` | `RAGWELD_AGENT_MLFLOW_TRACKING_URL` | `str` | `"http://127.0.0.1:55500"` | — | Base URL of the Compose-owned MLflow Tracking server used by Learning Agent runs. |
 | `training.ragweld_agent_model_path` | `RAGWELD_AGENT_MODEL_PATH` | `str` | `"models/learning-agent-active"` | — | Root of the Learning Agent's versioned adapter store (versions/ + ACTIVE.json pointer); each version holds adapter.npz + adapter_config.json + manifest.json. Training-only: the baseline for later runs and lineage; never served by the chat gateway. |
@@ -300,6 +301,14 @@
     - [PEFT LoRA Configuration Reference](https://huggingface.co/docs/peft/main/package_reference/lora)
     - [PEFT LoRA Developer Guide](https://huggingface.co/docs/peft/main/developer_guides/lora)
     - [TRL PEFT Integration](https://huggingface.co/docs/trl/main/peft_integration)
+
+??? info "`training.ragweld_agent_mlflow_console_base_url` (`RAGWELD_AGENT_MLFLOW_CONSOLE_BASE_URL`) — RAGWELD_AGENT_MLFLOW_CONSOLE_BASE_URL"
+    **Category**: `general`
+
+    Browser-facing MLflow console origin used for operator deep links into experiments and runs. Keep it separate from the private tracking API URL when training jobs must talk to MLflow over a loopback or service-network address but humans open the UI through a protected public hostname. When this value is blank, ragweld should omit MLflow browser links instead of reusing the server-side tracking endpoint.
+
+    **Links**:
+    - [MLflow Tracking](https://mlflow.org/docs/latest/ml/tracking/)
 
 ??? info "`training.ragweld_agent_model_path` (`RAGWELD_AGENT_MODEL_PATH`) — RAGWELD_AGENT_MODEL_PATH"
     **Category**: `general`
