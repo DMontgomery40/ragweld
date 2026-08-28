@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from scripts.check_config_reality import (
     MAP_PATH,
     iter_leaf_keys,
@@ -66,7 +68,7 @@ def test_upgrade_raw_config_normalizes_legacy_semantic_chunking() -> None:
     assert "chunking.chunking_strategy" in set(migrated)
 
 
-def test_upgrade_raw_config_replaces_pre_gateway_token_defaults() -> None:
+def test_upgrade_raw_config_replaces_legacy_generation_budget_but_preserves_production_chat_budget() -> None:
     raw = {
         "generation": {"gen_max_tokens": 2048},
         "chat": {"max_tokens": 4096},
@@ -76,17 +78,15 @@ def test_upgrade_raw_config_replaces_pre_gateway_token_defaults() -> None:
 
     assert changed is True
     assert cfg.generation.gen_max_tokens == 512
-    assert cfg.chat.max_tokens == 512
-    assert set(migrated) >= {
-        "generation.gen_max_tokens",
-        "chat.max_tokens",
-    }
+    assert cfg.chat.max_tokens == 4096
+    assert migrated == ["generation.gen_max_tokens"]
 
 
-def test_upgrade_raw_config_preserves_explicit_nonlegacy_token_budgets() -> None:
+@pytest.mark.parametrize("chat_budget", [1024, 4096, 16384])
+def test_upgrade_raw_config_preserves_explicit_nonlegacy_token_budgets(chat_budget: int) -> None:
     raw = {
         "generation": {"gen_max_tokens": 768},
-        "chat": {"max_tokens": 1024},
+        "chat": {"max_tokens": chat_budget},
     }
 
     cfg, changed, migrated = _upgrade_raw_config(raw)
@@ -94,7 +94,7 @@ def test_upgrade_raw_config_preserves_explicit_nonlegacy_token_budgets() -> None
     assert changed is False
     assert migrated == []
     assert cfg.generation.gen_max_tokens == 768
-    assert cfg.chat.max_tokens == 1024
+    assert cfg.chat.max_tokens == chat_budget
 
 
 def test_upgrade_raw_config_replaces_pre_gateway_mlx_embedding_default() -> None:

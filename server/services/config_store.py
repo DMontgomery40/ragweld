@@ -110,11 +110,6 @@ def _upgrade_raw_config(raw: dict[str, Any]) -> tuple[TriBridConfig, bool, list[
         generation["gen_max_tokens"] = 512
         migrated_keys.append("generation.gen_max_tokens")
 
-    chat = working.get("chat")
-    if isinstance(chat, dict) and chat.get("max_tokens") == 4096:
-        chat["max_tokens"] = 512
-        migrated_keys.append("chat.max_tokens")
-
     embedding = working.get("embedding")
     if (
         isinstance(embedding, dict)
