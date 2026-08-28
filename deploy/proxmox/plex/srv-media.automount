@@ -1,0 +1,9 @@
+[Unit]
+Description=Plex media automount bridge
+
+[Automount]
+Where=/srv/media
+TimeoutIdleSec=60
+
+[Install]
+WantedBy=multi-user.target

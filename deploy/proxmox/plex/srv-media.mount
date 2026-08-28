@@ -1,0 +1,13 @@
+[Unit]
+Description=Plex media NFS bridge from pve1
+After=network-online.target
+Wants=network-online.target
+
+[Mount]
+What=192.168.68.171:/srv/media
+Where=/srv/media
+Type=nfs4
+Options=_netdev,hard,noatime,x-systemd.automount
+
+[Install]
+WantedBy=multi-user.target

@@ -1407,3 +1407,90 @@ def test_proxmox_stop_runtime_sources_generated_runtime_and_langfuse_env_before_
     ).read_text(encoding="utf-8").strip()
     assert services["langfuse-clickhouse"]["environment"]["CLICKHOUSE_PASSWORD"] == langfuse_env["CLICKHOUSE_PASSWORD"]
     assert host_capture.read_text(encoding="utf-8").splitlines()[0] == "stop --no-docker"
+
+
+def test_proxmox_plex_nfs_export_is_scoped_to_one_client_without_broad_access() -> None:
+    exports_path = ROOT / "deploy" / "proxmox" / "plex" / "exports.ragweld"
+    assert exports_path.is_file(), f"missing {exports_path.relative_to(ROOT)}"
+
+    source = exports_path.read_text(encoding="utf-8")
+    assert source == "/srv/media 192.168.68.173(rw,sync,root_squash,no_subtree_check)\n"
+
+    match = re.fullmatch(r"/srv/media 192\.168\.68\.173\(([^)]+)\)\n", source)
+    assert match is not None
+    assert match.group(1).split(",") == ["rw", "sync", "root_squash", "no_subtree_check"]
+    assert re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", source) == ["192.168.68.173"]
+
+    forbidden_fragments = (
+        "*",
+        "/24",
+        "no_root_squash",
+        "async",
+        "insecure",
+        "password",
+        "secret",
+        "token",
+        "http://",
+        "https://",
+        "curl ",
+        "wget ",
+        "ssh ",
+    )
+    for fragment in forbidden_fragments:
+        assert fragment not in source
+    for command in ("mkfs", "fdisk", "mount", "curl", "wget", "ssh"):
+        assert re.search(rf"(?m)^\\s*{command}\\b", source) is None
+
+
+def test_proxmox_plex_nfs_conf_is_v4_only() -> None:
+    nfs_conf_path = ROOT / "deploy" / "proxmox" / "plex" / "nfs.conf"
+    assert nfs_conf_path.is_file(), f"missing {nfs_conf_path.relative_to(ROOT)}"
+
+    source = nfs_conf_path.read_text(encoding="utf-8")
+    assert source == "[nfsd]\nvers3=n\nvers4=y\n"
+    assert "vers3=y" not in source
+    assert "vers4=n" not in source
+    assert "password" not in source
+    assert "secret" not in source
+    assert "token" not in source
+    assert "http://" not in source
+    assert "https://" not in source
+
+
+def test_proxmox_plex_nfs_mount_units_use_hard_automount_contract() -> None:
+    mount_path = ROOT / "deploy" / "proxmox" / "plex" / "srv-media.mount"
+    automount_path = ROOT / "deploy" / "proxmox" / "plex" / "srv-media.automount"
+    assert mount_path.is_file(), f"missing {mount_path.relative_to(ROOT)}"
+    assert automount_path.is_file(), f"missing {automount_path.relative_to(ROOT)}"
+
+    mount_source = mount_path.read_text(encoding="utf-8")
+    automount_source = automount_path.read_text(encoding="utf-8")
+
+    assert "What=192.168.68.171:/srv/media" in mount_source
+    assert "Where=/srv/media" in mount_source
+    assert "Type=nfs4" in mount_source
+    assert "Options=_netdev,hard,noatime,x-systemd.automount" in mount_source
+    assert re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", mount_source) == ["192.168.68.171"]
+
+    assert "[Automount]" in automount_source
+    assert "Where=/srv/media" in automount_source
+    assert "TimeoutIdleSec=60" in automount_source
+
+    combined_source = mount_source + automount_source
+    forbidden_fragments = (
+        "soft",
+        "nolock",
+        "no_root_squash",
+        "*",
+        "/24",
+        "0.0.0.0/0",
+        "password",
+        "secret",
+        "token",
+        "http://",
+        "https://",
+    )
+    for fragment in forbidden_fragments:
+        assert fragment not in combined_source
+    for command in ("mount", "umount", "mkfs", "fdisk", "parted", "curl", "wget", "ssh", "scp", "rsync"):
+        assert re.search(rf"(?m)^\\s*{command}\\b", combined_source) is None
