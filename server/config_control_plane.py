@@ -1306,6 +1306,8 @@ async def _build_retrieval_integration_readiness(
             contract,
             state="degraded",
             enabled=True,
+            configured=bool(store.url),
+            reachable=False,
             links=links,
             failing_checks=[*failing_checks, "generation_manifest"],
             operator_hint=(
@@ -1346,6 +1348,8 @@ async def _build_retrieval_integration_readiness(
             contract,
             state="degraded",
             enabled=True,
+            configured=bool(store.url),
+            reachable=False,
             links=links,
             failing_checks=[*failing_checks, "qdrant_status"],
             operator_hint=(

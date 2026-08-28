@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import os
+import uuid
 
 import pytest
 from httpx import AsyncClient
 
+from server.config import load_config
 from server.config_control_plane import list_config_leaf_paths
+from server.db.postgres import PostgresClient
 
 
 @pytest.mark.asyncio
@@ -174,3 +177,39 @@ async def test_config_readiness_marks_missing_litellm_key_unconfigured(client: A
     assert litellm["configured"] is False
     assert litellm["reachable"] is None
     assert litellm["missing_secret_ids"] == ["litellm_api_key"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_postgres
+async def test_scoped_config_readiness_reports_a_deindexing_manifest_as_degraded(
+    client: AsyncClient,
+) -> None:
+    corpus_id = f"readiness-deindex-{uuid.uuid4().hex[:8]}"
+    config = load_config()
+    pg = PostgresClient(config.indexing.postgres_url)
+    tombstone = None
+
+    try:
+        await pg.connect()
+        await pg.upsert_corpus(corpus_id, name=corpus_id, root_path=".")
+        _, tombstone = await pg.delete_index_state(
+            corpus_id,
+            lease_seconds=config.indexing.index_run_lease_seconds,
+        )
+
+        response = await client.get(f"/api/config/readiness?corpus_id={corpus_id}")
+
+        assert response.status_code == 200, response.text
+        retrieval = next(
+            item for item in response.json()["integrations"] if item["id"] == "haystack_docling_qdrant"
+        )
+        assert retrieval["state"] == "degraded"
+        assert retrieval["configured"] is True
+        assert retrieval["reachable"] is False
+        assert "generation_manifest" in retrieval["failing_checks"]
+        assert corpus_id in str(retrieval["operator_hint"])
+    finally:
+        if tombstone is not None:
+            await pg.clear_index_tombstone(corpus_id, tombstone)
+        await pg.delete_corpus_with_data(corpus_id)
+        await pg.disconnect()
