@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import base64
 import copy
+import hashlib
+import hmac
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -12,6 +16,7 @@ from typing import Any
 
 import pytest
 import yaml
+from cryptography.hazmat.primitives.kdf.argon2 import Argon2id
 from server.models.tribrid_config_model import TriBridConfig
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -21,10 +26,66 @@ PROXMOX_DIR = ROOT / "deploy" / "proxmox"
 PROXMOX_COMPOSE = PROXMOX_DIR / "docker-compose.yml"
 PROXMOX_CADDYFILE = PROXMOX_DIR / "Caddyfile"
 PROXMOX_AUTHELIA_CONFIG = PROXMOX_DIR / "authelia" / "configuration.yml"
+PROXMOX_START_RUNTIME = PROXMOX_DIR / "start-runtime.sh"
+PROXMOX_STOP_RUNTIME = PROXMOX_DIR / "stop-runtime.sh"
+PROXMOX_BOOTSTRAP_SECRETS = PROXMOX_DIR / "bootstrap-secrets.sh"
+PROXMOX_SERVICE_UNIT = PROXMOX_DIR / "ragweld.service"
+PROXMOX_SECRET_ROOT_ENV = "RAGWELD_ETC_ROOT"
 PROXMOX_CONTRACT_ENV = {
     "GRAFANA_ADMIN_PASSWORD": "contract-only",
     "LANGFUSE_OIDC_CLIENT_SECRET": "contract-only",
 }
+PROXMOX_RUNTIME_SYMLINKS = {
+    ".env": "runtime.env",
+    "infra/litellm.env": "litellm.env",
+    "infra/langfuse.env": "langfuse.env",
+}
+PROXMOX_REQUIRED_SECRET_FILES = (
+    "tribrid_config.json",
+    "runtime.env",
+    "litellm.env",
+    "langfuse.env",
+    "langfuse-oidc-client-secret",
+    "authelia/session-secret",
+    "authelia/storage-encryption-key",
+    "authelia/oidc-hmac-secret",
+    "authelia/langfuse-client-secret-digest",
+    "authelia/users_database.yml",
+    "authelia/oidc-rsa.pem",
+)
+PROXMOX_BOOTSTRAP_OUTPUT_FILES = tuple(
+    path for path in PROXMOX_REQUIRED_SECRET_FILES if path != "tribrid_config.json"
+)
+PROXMOX_REQUIRED_TUNNEL_FILES = (
+    "cloudflared/config.yml",
+    "cloudflared/credentials.json",
+)
+PROXMOX_PRODUCTION_SERVICES = [
+    "postgres",
+    "neo4j",
+    "qdrant",
+    "mlflow",
+    "litellm",
+    "postgres-exporter",
+    "prometheus",
+    "grafana",
+    "loki",
+    "promtail",
+    "tempo",
+    "alloy",
+    "mimir",
+    "pyroscope",
+    "alertmanager",
+    "langfuse",
+    "langfuse-worker",
+    "langfuse-postgres",
+    "langfuse-clickhouse",
+    "langfuse-redis",
+    "langfuse-minio",
+    "flyte",
+    "authelia",
+    "caddy",
+]
 PRODUCTION_DEFAULTS = {
     ("generation", "gen_model"): "openai.gpt-5.4-mini",
     ("generation", "enrich_model"): "openai.gpt-5.4-mini",
@@ -228,6 +289,202 @@ def _nested_set(payload: dict[str, object], path: tuple[str, ...], value: object
         current = current[key]
         assert isinstance(current, dict)
     current[path[-1]] = value
+
+
+def _run_shell_script(
+    script: Path,
+    *args: str,
+    cwd: Path,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    merged_env = dict(os.environ)
+    if env:
+        merged_env.update(env)
+    return subprocess.run(
+        ["bash", str(script), *args],
+        cwd=cwd,
+        env=merged_env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def _mode(path: Path) -> int:
+    return path.stat().st_mode & 0o777
+
+
+def _write_executable(path: Path, source: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(source, encoding="utf-8")
+    path.chmod(0o755)
+
+
+def _write_private_file(path: Path, source: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(source, encoding="utf-8")
+    path.chmod(0o600)
+
+
+def _parse_env_file(path: Path) -> dict[str, str]:
+    payload: dict[str, str] = {}
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        key, value = line.split("=", 1)
+        payload[key] = value
+    return payload
+
+
+def _ab64_encode(data: bytes) -> str:
+    return base64.b64encode(data).decode("ascii").rstrip("=").replace("+", ".")
+
+
+def _ab64_decode(data: str) -> bytes:
+    padded = data.replace(".", "+")
+    padded += "=" * (-len(padded) % 4)
+    return base64.b64decode(padded)
+
+
+def _verify_authelia_pbkdf2_sha512(secret: str, digest: str) -> bool:
+    match = re.fullmatch(r"\$pbkdf2-sha512\$(\d+)\$([^$]+)\$([^$]+)", digest)
+    assert match is not None, digest
+    rounds = int(match.group(1))
+    salt = _ab64_decode(match.group(2))
+    expected = _ab64_encode(hashlib.pbkdf2_hmac("sha512", secret.encode("utf-8"), salt, rounds))
+    return hmac.compare_digest(expected, match.group(3))
+
+
+def _materialize_proxmox_runtime_repo(tmp_path: Path) -> tuple[Path, Path]:
+    repo = tmp_path / "repo"
+    for relative_path in (
+        "deploy/proxmox/start-runtime.sh",
+        "deploy/proxmox/stop-runtime.sh",
+        "deploy/proxmox/bootstrap-secrets.sh",
+    ):
+        source = ROOT / relative_path
+        target = repo / relative_path
+        _write_executable(target, source.read_text(encoding="utf-8"))
+    for relative_path in (
+        "docker-compose.yml",
+        "infra/docker-compose.observability.yml",
+        "deploy/proxmox/docker-compose.yml",
+    ):
+        target = repo / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("services: {}\n", encoding="utf-8")
+    _write_executable(
+        repo / "start.sh",
+        """#!/usr/bin/env bash
+set -euo pipefail
+printf 'start %s\\n' "$*" >> "$FAKE_TOOL_LOG"
+printf 'config %s\\n' "${RAGWELD_CONFIG_PATH:-}" >> "$FAKE_TOOL_LOG"
+exit 0
+""",
+    )
+    _write_executable(
+        repo / "stop.sh",
+        """#!/usr/bin/env bash
+set -euo pipefail
+printf 'stop %s\\n' "$*" >> "$FAKE_TOOL_LOG"
+exit 0
+""",
+    )
+    _write_executable(
+        repo / ".venv/bin/uvicorn",
+        """#!/usr/bin/env bash
+exit 0
+""",
+    )
+    (repo / "web" / "dist").mkdir(parents=True, exist_ok=True)
+    (repo / "web" / "dist" / "index.html").write_text("<!doctype html>\n", encoding="utf-8")
+    (repo / "infra").mkdir(parents=True, exist_ok=True)
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log_path = tmp_path / "tool.log"
+    _write_executable(
+        bin_dir / "docker",
+        """#!/usr/bin/env bash
+set -euo pipefail
+printf 'docker %s\\n' "$*" >> "$FAKE_TOOL_LOG"
+exit 0
+""",
+    )
+    return repo, log_path
+
+
+def _build_secret_root(tmp_path: Path, *, include_tunnel: bool) -> Path:
+    secret_root = tmp_path / "ragweld-etc"
+    secret_root.mkdir(parents=True, exist_ok=True)
+    secret_root.chmod(0o700)
+    (secret_root / "authelia").mkdir(parents=True, exist_ok=True)
+    (secret_root / "authelia").chmod(0o700)
+    (secret_root / "authelia" / "state").mkdir(parents=True, exist_ok=True)
+    (secret_root / "authelia" / "state").chmod(0o700)
+
+    _write_private_file(secret_root / "tribrid_config.json", "{}\n")
+    _write_private_file(
+        secret_root / "runtime.env",
+        "\n".join(
+            [
+                "LITELLM_BASE_URL=http://127.0.0.1:54000/v1",
+                "LITELLM_API_KEY=sk-ragweld-runtime-test",
+                "POSTGRES_HOST=127.0.0.1",
+                "POSTGRES_PORT=5432",
+                "POSTGRES_DB=tribrid_rag",
+                "POSTGRES_USER=postgres",
+                "POSTGRES_PASSWORD=runtime-postgres-password",
+                "NEO4J_URI=bolt://127.0.0.1:7687",
+                "NEO4J_USER=neo4j",
+                "NEO4J_PASSWORD=runtime-neo4j-password",
+                "GRAFANA_ADMIN_PASSWORD=runtime-grafana-password",
+                "LANGFUSE_PUBLIC_KEY=pk-lf-runtime",
+                "LANGFUSE_SECRET_KEY=sk-lf-runtime",
+                "SERVER_HOST=127.0.0.1",
+                "SERVER_PORT=58012",
+                "METRICS_ENABLED=true",
+                "TRACING_ENABLED=true",
+                "",
+            ]
+        ),
+    )
+    _write_private_file(secret_root / "litellm.env", "# provider keys installed later\n")
+    _write_private_file(
+        secret_root / "langfuse.env",
+        "\n".join(
+            [
+                "DATABASE_URL=postgresql://langfuse:langfuse@langfuse-postgres:5432/langfuse",
+                "SALT=langfuse-test-salt",
+                "ENCRYPTION_KEY=langfuse-test-encryption-key",
+                "NEXTAUTH_SECRET=langfuse-test-nextauth-secret",
+                "TELEMETRY_ENABLED=false",
+                "",
+            ]
+        ),
+    )
+    _write_private_file(secret_root / "langfuse-oidc-client-secret", "runtime-oidc-secret\n")
+    _write_private_file(secret_root / "authelia/session-secret", "authelia-session-secret\n")
+    _write_private_file(secret_root / "authelia/storage-encryption-key", "authelia-storage-secret\n")
+    _write_private_file(secret_root / "authelia/oidc-hmac-secret", "authelia-oidc-hmac\n")
+    _write_private_file(
+        secret_root / "authelia/langfuse-client-secret-digest",
+        "$pbkdf2-sha512$310000$c8p78n7pUMln0jzvd4aK4Q$JNRBzwAo0ek5qKn50cFzzvE9RXV88h1wJn5KGiHrD0YKtZaR/nCb2CJPOsKaPK0hjf.9yHxzQGZziziccp6Yng\n",
+    )
+    _write_private_file(
+        secret_root / "authelia/users_database.yml",
+        "users:\n  owner:\n    password: '$argon2id$v=19$m=65536,t=3,p=4$Hjc8e7WYcBFcJmEDUOsS9A$ozM7RyZR1EyDR8cuyVpDDfmLrGPGFgo5E2NNqRumui4'\n",
+    )
+    _write_private_file(secret_root / "authelia/oidc-rsa.pem", "-----BEGIN PRIVATE KEY-----\nlocal-test\n-----END PRIVATE KEY-----\n")
+
+    if include_tunnel:
+        (secret_root / "cloudflared").mkdir(parents=True, exist_ok=True)
+        (secret_root / "cloudflared").chmod(0o700)
+        _write_private_file(secret_root / "cloudflared/config.yml", "tunnel: local-test\n")
+        _write_private_file(secret_root / "cloudflared/credentials.json", '{"AccountTag":"local"}\n')
+
+    return secret_root
 
 
 def test_proxmox_renderer_writes_validated_production_defaults_atomically(tmp_path: Path) -> None:
@@ -548,3 +805,323 @@ def test_proxmox_authelia_configuration_is_owner_only_and_deny_by_default() -> N
             "key": "{{ secret \"/config/oidc-rsa.pem\" | mindent 12 \"|\" | msquote }}",
         }
     ]
+
+
+def test_proxmox_lifecycle_artifacts_exist_and_use_strict_shell_contract() -> None:
+    for path in (
+        PROXMOX_START_RUNTIME,
+        PROXMOX_STOP_RUNTIME,
+        PROXMOX_BOOTSTRAP_SECRETS,
+    ):
+        assert path.is_file(), f"missing {path.relative_to(ROOT)}"
+        source = path.read_text(encoding="utf-8")
+        assert source.startswith("#!/usr/bin/env bash\nset -euo pipefail\n")
+        assert "rm -rf" not in source
+
+    assert PROXMOX_SERVICE_UNIT.is_file(), f"missing {PROXMOX_SERVICE_UNIT.relative_to(ROOT)}"
+    stop_source = PROXMOX_STOP_RUNTIME.read_text(encoding="utf-8")
+    assert " docker compose " in stop_source
+    assert " down" not in stop_source
+    assert "rm " not in stop_source
+    assert "volume rm" not in stop_source
+
+
+def test_proxmox_lifecycle_unit_owns_exact_runtime_paths_and_tunnel_default() -> None:
+    source = PROXMOX_SERVICE_UNIT.read_text(encoding="utf-8")
+
+    assert "Description=Ragweld personal MLOps platform" in source
+    assert "Wants=network-online.target" in source
+    assert "After=network-online.target docker.service" in source
+    assert "Requires=docker.service" in source
+    assert "User=ragweld" in source
+    assert "Group=ragweld" in source
+    assert "SupplementaryGroups=docker" in source
+    assert "WorkingDirectory=/opt/ragweld" in source
+    assert "Environment=RAGWELD_SKIP_TUNNEL=0" in source
+    assert "ExecStart=/opt/ragweld/deploy/proxmox/start-runtime.sh" in source
+    assert "ExecStop=/opt/ragweld/deploy/proxmox/stop-runtime.sh" in source
+    assert "Restart=on-failure" in source
+    assert "RestartSec=10" in source
+    assert "TimeoutStartSec=900" in source
+    assert "TimeoutStopSec=180" in source
+    assert "KillMode=mixed" in source
+    assert "WantedBy=multi-user.target" in source
+    assert PROXMOX_SECRET_ROOT_ENV not in source
+
+
+@pytest.mark.parametrize(
+    ("skip_tunnel", "include_tunnel", "expected_services"),
+    [
+        ("1", False, PROXMOX_PRODUCTION_SERVICES),
+        ("0", True, [*PROXMOX_PRODUCTION_SERVICES, "cloudflared"]),
+    ],
+)
+def test_proxmox_lifecycle_start_runtime_runs_exact_compose_allowlist_and_host_flags(
+    tmp_path: Path,
+    skip_tunnel: str,
+    include_tunnel: bool,
+    expected_services: list[str],
+) -> None:
+    assert PROXMOX_START_RUNTIME.is_file()
+    repo, log_path = _materialize_proxmox_runtime_repo(tmp_path)
+    secret_root = _build_secret_root(tmp_path, include_tunnel=include_tunnel)
+
+    result = _run_shell_script(
+        repo / "deploy" / "proxmox" / "start-runtime.sh",
+        cwd=repo,
+        env={
+            PROXMOX_SECRET_ROOT_ENV: str(secret_root),
+            "RAGWELD_SKIP_TUNNEL": skip_tunnel,
+            "FAKE_TOOL_LOG": str(log_path),
+            "PATH": f"{tmp_path / 'bin'}:{os.environ['PATH']}",
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    lines = log_path.read_text(encoding="utf-8").splitlines()
+    docker_lines = [line for line in lines if line.startswith("docker ")]
+    assert docker_lines
+    compose_up = next(line for line in docker_lines if " up " in line)
+    tokens = shlex.split(compose_up)
+    assert tokens[:14] == [
+        "docker",
+        "compose",
+        "--project-name",
+        "ragweld",
+        "-f",
+        "docker-compose.yml",
+        "-f",
+        "infra/docker-compose.observability.yml",
+        "-f",
+        "deploy/proxmox/docker-compose.yml",
+        "up",
+        "-d",
+        "--wait",
+        expected_services[0],
+    ]
+    assert tokens[13:] == expected_services
+    assert "api" not in tokens[13:]
+    assert ("cloudflared" in tokens[13:]) is include_tunnel
+
+    assert f"start --no-docker --no-local-model --no-frontend" in lines
+    assert f"config {secret_root / 'tribrid_config.json'}" in lines
+    for relative_path, secret_name in PROXMOX_RUNTIME_SYMLINKS.items():
+        repo_path = repo / relative_path
+        assert repo_path.is_symlink(), relative_path
+        assert repo_path.resolve() == secret_root / secret_name
+
+
+def test_proxmox_lifecycle_start_runtime_fails_closed_on_insecure_secret_mode_before_compose(
+    tmp_path: Path,
+) -> None:
+    assert PROXMOX_START_RUNTIME.is_file()
+    repo, log_path = _materialize_proxmox_runtime_repo(tmp_path)
+    secret_root = _build_secret_root(tmp_path, include_tunnel=False)
+    (secret_root / "langfuse.env").chmod(0o644)
+
+    result = _run_shell_script(
+        repo / "deploy" / "proxmox" / "start-runtime.sh",
+        cwd=repo,
+        env={
+            PROXMOX_SECRET_ROOT_ENV: str(secret_root),
+            "RAGWELD_SKIP_TUNNEL": "1",
+            "FAKE_TOOL_LOG": str(log_path),
+            "PATH": f"{tmp_path / 'bin'}:{os.environ['PATH']}",
+        },
+    )
+
+    assert result.returncode != 0
+    assert "langfuse.env" in result.stderr
+    assert "0600" in result.stderr
+    assert (not log_path.exists()) or all(" up " not in line for line in log_path.read_text(encoding="utf-8").splitlines())
+
+
+def test_proxmox_lifecycle_start_runtime_refuses_conflicting_repo_env_paths(tmp_path: Path) -> None:
+    assert PROXMOX_START_RUNTIME.is_file()
+    repo, log_path = _materialize_proxmox_runtime_repo(tmp_path)
+    secret_root = _build_secret_root(tmp_path, include_tunnel=False)
+    (repo / ".env").write_text("conflict\n", encoding="utf-8")
+
+    result = _run_shell_script(
+        repo / "deploy" / "proxmox" / "start-runtime.sh",
+        cwd=repo,
+        env={
+            PROXMOX_SECRET_ROOT_ENV: str(secret_root),
+            "RAGWELD_SKIP_TUNNEL": "1",
+            "FAKE_TOOL_LOG": str(log_path),
+            "PATH": f"{tmp_path / 'bin'}:{os.environ['PATH']}",
+        },
+    )
+
+    assert result.returncode != 0
+    assert ".env" in result.stderr
+    assert "symlink" in result.stderr
+    assert (not log_path.exists()) or all(" up " not in line for line in log_path.read_text(encoding="utf-8").splitlines())
+
+
+def test_proxmox_lifecycle_stop_runtime_only_stops_owned_stack_without_destructive_commands(
+    tmp_path: Path,
+) -> None:
+    assert PROXMOX_STOP_RUNTIME.is_file()
+    repo, log_path = _materialize_proxmox_runtime_repo(tmp_path)
+
+    result = _run_shell_script(
+        repo / "deploy" / "proxmox" / "stop-runtime.sh",
+        cwd=repo,
+        env={
+            "FAKE_TOOL_LOG": str(log_path),
+            "PATH": f"{tmp_path / 'bin'}:{os.environ['PATH']}",
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    lines = log_path.read_text(encoding="utf-8").splitlines()
+    assert lines[0] == "stop --no-docker"
+    assert lines[1] == (
+        "docker compose --project-name ragweld -f docker-compose.yml -f infra/docker-compose.observability.yml "
+        "-f deploy/proxmox/docker-compose.yml stop"
+    )
+
+
+def test_proxmox_secret_bootstrap_rejects_non_private_password_file_before_initialization(
+    tmp_path: Path,
+) -> None:
+    assert PROXMOX_BOOTSTRAP_SECRETS.is_file()
+    repo, _ = _materialize_proxmox_runtime_repo(tmp_path)
+    password_file = tmp_path / "owner-password"
+    password_file.write_text("owner-secret\n", encoding="utf-8")
+    password_file.chmod(0o644)
+    secret_root = tmp_path / "ragweld-etc"
+
+    result = _run_shell_script(
+        repo / "deploy" / "proxmox" / "bootstrap-secrets.sh",
+        "david",
+        str(password_file),
+        cwd=repo,
+        env={PROXMOX_SECRET_ROOT_ENV: str(secret_root)},
+    )
+
+    assert result.returncode != 0
+    assert "0600" in result.stderr
+    assert not secret_root.exists()
+
+
+def test_proxmox_secret_bootstrap_generates_owner_only_runtime_material_and_exact_hash_formats(
+    tmp_path: Path,
+) -> None:
+    assert PROXMOX_BOOTSTRAP_SECRETS.is_file()
+    repo, _ = _materialize_proxmox_runtime_repo(tmp_path)
+    password = "owner-secret-for-bootstrap"
+    password_file = tmp_path / "owner-password"
+    password_file.write_text(f"{password}\n", encoding="utf-8")
+    password_file.chmod(0o600)
+    secret_root = tmp_path / "ragweld-etc"
+
+    result = _run_shell_script(
+        repo / "deploy" / "proxmox" / "bootstrap-secrets.sh",
+        "david",
+        str(password_file),
+        cwd=repo,
+        env={PROXMOX_SECRET_ROOT_ENV: str(secret_root)},
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == ""
+
+    assert _mode(secret_root) == 0o700
+    assert _mode(secret_root / "authelia") == 0o700
+    assert _mode(secret_root / "authelia" / "state") == 0o700
+    for relative_path in PROXMOX_BOOTSTRAP_OUTPUT_FILES:
+        assert _mode(secret_root / relative_path) == 0o600
+
+    runtime_env = _parse_env_file(secret_root / "runtime.env")
+    litellm_env = (secret_root / "litellm.env").read_text(encoding="utf-8")
+    langfuse_env = _parse_env_file(secret_root / "langfuse.env")
+    oidc_secret = (secret_root / "langfuse-oidc-client-secret").read_text(encoding="utf-8").strip()
+    oidc_digest = (secret_root / "authelia" / "langfuse-client-secret-digest").read_text(encoding="utf-8").strip()
+    users_database = yaml.safe_load((secret_root / "authelia" / "users_database.yml").read_text(encoding="utf-8"))
+
+    assert {
+        "LITELLM_BASE_URL",
+        "LITELLM_API_KEY",
+        "POSTGRES_HOST",
+        "POSTGRES_PORT",
+        "POSTGRES_DB",
+        "POSTGRES_USER",
+        "POSTGRES_PASSWORD",
+        "NEO4J_URI",
+        "NEO4J_USER",
+        "NEO4J_PASSWORD",
+        "GRAFANA_ADMIN_PASSWORD",
+        "LANGFUSE_PUBLIC_KEY",
+        "LANGFUSE_SECRET_KEY",
+        "SERVER_HOST",
+        "SERVER_PORT",
+        "METRICS_ENABLED",
+        "TRACING_ENABLED",
+    } <= set(runtime_env)
+    assert runtime_env["LANGFUSE_PUBLIC_KEY"].startswith("pk-lf-")
+    assert runtime_env["LANGFUSE_SECRET_KEY"].startswith("sk-lf-")
+    assert runtime_env["LITELLM_API_KEY"].startswith("sk-ragweld-")
+    for forbidden_key in (
+        "OPENAI_API_KEY",
+        "OPENROUTER_API_KEY",
+        "VOYAGE_API_KEY",
+        "COHERE_API_KEY",
+        "JINA_API_KEY",
+        "LANGFUSE_OIDC_CLIENT_SECRET",
+    ):
+        assert forbidden_key not in runtime_env
+
+    assert "OPENAI_API_KEY" not in litellm_env
+    assert "OPENROUTER_API_KEY" not in litellm_env
+    assert langfuse_env["LANGFUSE_INIT_PROJECT_PUBLIC_KEY"] == runtime_env["LANGFUSE_PUBLIC_KEY"]
+    assert langfuse_env["LANGFUSE_INIT_PROJECT_SECRET_KEY"] == runtime_env["LANGFUSE_SECRET_KEY"]
+    assert langfuse_env["LANGFUSE_INIT_USER_EMAIL"] == "david@ragweld.local"
+    assert langfuse_env["LANGFUSE_INIT_USER_NAME"] == "david"
+    assert langfuse_env["DATABASE_URL"].startswith("postgresql://langfuse:")
+    assert langfuse_env["CLICKHOUSE_URL"] == "http://langfuse-clickhouse:8123"
+    assert langfuse_env["LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT"] == "http://langfuse-minio:9000"
+
+    assert oidc_secret
+    assert oidc_secret not in (secret_root / "runtime.env").read_text(encoding="utf-8")
+    assert oidc_secret not in (secret_root / "langfuse.env").read_text(encoding="utf-8")
+    assert _verify_authelia_pbkdf2_sha512(oidc_secret, oidc_digest)
+
+    owner_record = users_database["users"]["david"]
+    assert owner_record["displayname"] == "david"
+    assert owner_record["email"] == "david@ragweld.local"
+    assert owner_record["groups"] == ["owners"]
+    assert owner_record["password"].startswith("$argon2id$v=19$m=65536,t=3,p=4$")
+    Argon2id.verify_phc_encoded(password.encode("utf-8"), owner_record["password"])
+
+
+def test_proxmox_secret_bootstrap_fails_closed_on_existing_initialized_secret_root(tmp_path: Path) -> None:
+    assert PROXMOX_BOOTSTRAP_SECRETS.is_file()
+    repo, _ = _materialize_proxmox_runtime_repo(tmp_path)
+    password_file = tmp_path / "owner-password"
+    password_file.write_text("owner-secret\n", encoding="utf-8")
+    password_file.chmod(0o600)
+    secret_root = tmp_path / "ragweld-etc"
+
+    first = _run_shell_script(
+        repo / "deploy" / "proxmox" / "bootstrap-secrets.sh",
+        "david",
+        str(password_file),
+        cwd=repo,
+        env={PROXMOX_SECRET_ROOT_ENV: str(secret_root)},
+    )
+    assert first.returncode == 0, first.stderr
+    before = (secret_root / "runtime.env").read_text(encoding="utf-8")
+
+    second = _run_shell_script(
+        repo / "deploy" / "proxmox" / "bootstrap-secrets.sh",
+        "david",
+        str(password_file),
+        cwd=repo,
+        env={PROXMOX_SECRET_ROOT_ENV: str(secret_root)},
+    )
+
+    assert second.returncode != 0
+    assert "already initialized" in second.stderr
+    assert (secret_root / "runtime.env").read_text(encoding="utf-8") == before

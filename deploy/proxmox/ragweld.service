@@ -1,0 +1,23 @@
+[Unit]
+Description=Ragweld personal MLOps platform
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=ragweld
+Group=ragweld
+SupplementaryGroups=docker
+WorkingDirectory=/opt/ragweld
+Environment=RAGWELD_SKIP_TUNNEL=0
+ExecStart=/opt/ragweld/deploy/proxmox/start-runtime.sh
+ExecStop=/opt/ragweld/deploy/proxmox/stop-runtime.sh
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=900
+TimeoutStopSec=180
+KillMode=mixed
+
+[Install]
+WantedBy=multi-user.target
