@@ -115,6 +115,9 @@ class MlflowClient:
             raise MlflowUnavailableError("MLflow did not return a run id")
         return MlflowRunHandle(tracking_url=self.tracking_url, experiment_id=experiment_id, run_id=run_id)
 
+    def get_run(self, run_id: str) -> dict[str, Any] | None:
+        return self._get("/runs/get", {"run_id": run_id})
+
     def log_params(self, run_id: str, params: dict[str, Any]) -> None:
         self._post(
             "/runs/log-batch",

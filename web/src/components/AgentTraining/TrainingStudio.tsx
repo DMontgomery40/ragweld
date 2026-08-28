@@ -32,6 +32,8 @@ type BottomTab = 'timeline' | 'logs' | 'gradient';
 type LayoutPreset = 'balanced' | 'focus_viz' | 'focus_logs' | 'focus_inspector';
 type SyntheticRecipeKind = 'eval_dataset' | 'full_stack';
 
+const PUBLIC_BROWSER_LINK_HINT = 'Browser links use this; ingestion/tracking uses the local URL.';
+
 type StudioDockRenderers = {
   runs: () => ReactElement;
   visualizer: () => ReactElement;
@@ -288,6 +290,10 @@ export function TrainingStudio() {
   const [mlflowTrackingUrl, setMlflowTrackingUrl] = useConfigField<string>(
     'training.ragweld_agent_mlflow_tracking_url',
     ''
+  );
+  const [mlflowConsoleBaseUrl, setMlflowConsoleBaseUrl] = useConfigField<string>(
+    'training.ragweld_agent_mlflow_console_base_url',
+    'http://127.0.0.1:55500'
   );
   const [mlflowExperimentName, setMlflowExperimentName] = useConfigField<string>(
     'training.ragweld_agent_mlflow_experiment_name',
@@ -1270,7 +1276,7 @@ export function TrainingStudio() {
               </div>
 
               <details className="studio-details" open={workflowBackend === 'flyte' || trackingBackend === 'mlflow' || ragweldBackend === 'unsloth'}>
-                <summary>Flyte + MLflow + Unsloth target lane</summary>
+                <summary data-testid="learning-agent-target-lane-summary">Flyte + MLflow + Unsloth target lane</summary>
                 <div className="studio-form-grid two">
                   <div className="input-group">
                     <label>Flyte admin base URL</label>
@@ -1304,6 +1310,22 @@ export function TrainingStudio() {
                   <div className="input-group">
                     <label>MLflow tracking URL</label>
                     <input type="text" value={mlflowTrackingUrl} onChange={(e) => setMlflowTrackingUrl(e.target.value)} placeholder="http://localhost:5000" />
+                  </div>
+                  <div className="input-group">
+                    <label>MLflow Browser URL</label>
+                    <input
+                      data-testid="learning-agent-mlflow-console-base-url"
+                      type="text"
+                      value={mlflowConsoleBaseUrl}
+                      onChange={(e) => setMlflowConsoleBaseUrl(e.target.value)}
+                      placeholder="http://127.0.0.1:55500"
+                    />
+                    <div
+                      data-testid="learning-agent-mlflow-console-base-url-hint"
+                      style={{ fontSize: '11px', color: 'var(--fg-muted)', lineHeight: 1.4, marginTop: 6 }}
+                    >
+                      {PUBLIC_BROWSER_LINK_HINT}
+                    </div>
                   </div>
                   <div className="input-group">
                     <label>MLflow experiment</label>

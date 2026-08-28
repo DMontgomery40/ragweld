@@ -172,6 +172,8 @@ async def test_reset_config(client: AsyncClient) -> None:
     data = response.json()
     # Should return default config
     assert "embedding" in data
+    assert data["tracing"]["langfuse_public_base_url"] == "http://127.0.0.1:53000"
+    assert data["training"]["ragweld_agent_mlflow_console_base_url"] == "http://127.0.0.1:55500"
 
 
 @pytest.mark.asyncio

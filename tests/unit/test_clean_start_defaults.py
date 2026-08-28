@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from server.models.tribrid_config_model import ChatConfig, SystemPromptsConfig, TrainingConfig
+from server.models.tribrid_config_model import ChatConfig, SystemPromptsConfig, TrainingConfig, TriBridConfig
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -27,8 +27,11 @@ def test_clean_start_embedding_does_not_select_in_process_mlx() -> None:
 
 
 def test_clean_start_keeps_local_public_observability_links_for_operator_surfaces() -> None:
+    defaults = TriBridConfig()
     runtime_config = json.loads((ROOT / "tribrid_config.json").read_text(encoding="utf-8"))
 
+    assert defaults.tracing.langfuse_public_base_url == "http://127.0.0.1:53000"
+    assert defaults.training.ragweld_agent_mlflow_console_base_url == "http://127.0.0.1:55500"
     assert runtime_config["tracing"]["langfuse_public_base_url"] == "http://127.0.0.1:53000"
     assert runtime_config["training"]["ragweld_agent_mlflow_console_base_url"] == "http://127.0.0.1:55500"
 

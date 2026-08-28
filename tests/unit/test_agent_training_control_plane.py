@@ -40,6 +40,8 @@ class _ControlPlaneHandler(BaseHTTPRequestHandler):
         elif path.startswith("/flyte/api/v1/launch_plans/"):
             # flyteadmin lists an unknown launch plan name as an empty page, not a 404.
             payload = b"{}"
+        elif path == "/mlflow/api/2.0/mlflow/runs/get":
+            payload = json.dumps({"run": {"info": {"run_id": "ml-456"}}}).encode("utf-8")
         else:
             self.send_response(404)
             self.end_headers()
@@ -209,32 +211,36 @@ def test_agent_run_links_include_flyte_execution_and_mlflow_tracking() -> None:
 
 
 def test_resume_mlflow_tracking_uses_persisted_experiment_id_and_requires_it() -> None:
-    cfg = TriBridConfig()
-    cfg.training.ragweld_agent_mlflow_tracking_url = "http://mlflow.example"
-    run = AgentTrainRun(
-        run_id="corpus__20260325_120000",
-        corpus_id="corpus",
-        status="running",
-        started_at=datetime.now(UTC),
-        config_snapshot=cfg.model_dump(mode="json"),
-        config=cfg.to_flat_dict(),
-        epochs=1,
-        batch_size=1,
-        lr=0.0001,
-        warmup_ratio=0.0,
-        max_length=128,
-        tracking_backend="mlflow",
-        tracking_run_id="ml-456",
-        tracking_experiment_id="7",
-    )
+    server = _ControlPlaneServer()
+    try:
+        cfg = TriBridConfig()
+        cfg.training.ragweld_agent_mlflow_tracking_url = f"{server.base_url}/mlflow"
+        run = AgentTrainRun(
+            run_id="corpus__20260325_120000",
+            corpus_id="corpus",
+            status="running",
+            started_at=datetime.now(UTC),
+            config_snapshot=cfg.model_dump(mode="json"),
+            config=cfg.to_flat_dict(),
+            epochs=1,
+            batch_size=1,
+            lr=0.0001,
+            warmup_ratio=0.0,
+            max_length=128,
+            tracking_backend="mlflow",
+            tracking_run_id="ml-456",
+            tracking_experiment_id="7",
+        )
 
-    client, handle = _resume_mlflow_tracking(run, cfg)
-    assert client.tracking_url == "http://mlflow.example"
-    assert handle.run_url == "http://mlflow.example/#/experiments/7/runs/ml-456"
+        client, handle = _resume_mlflow_tracking(run, cfg)
+        assert client.tracking_url == f"{server.base_url}/mlflow"
+        assert handle.run_url == f"{server.base_url}/mlflow/#/experiments/7/runs/ml-456"
 
-    run.tracking_experiment_id = None
-    with pytest.raises(MlflowUnavailableError, match="tracking_experiment_id"):
-        _resume_mlflow_tracking(run, cfg)
+        run.tracking_experiment_id = None
+        with pytest.raises(MlflowUnavailableError, match="tracking_experiment_id"):
+            _resume_mlflow_tracking(run, cfg)
+    finally:
+        server.close()
 
 
 @pytest.mark.asyncio

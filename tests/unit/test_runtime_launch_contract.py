@@ -497,7 +497,9 @@ def test_generated_wire_types_include_split_public_operator_urls_without_extra_f
     generated_source = (ROOT / "web" / "src" / "types" / "generated.ts").read_text(encoding="utf-8")
 
     assert "langfuse_public_base_url?: string;" in generated_source
+    assert 'langfuse_public_base_url?: string; // default: "http://127.0.0.1:53000"' in generated_source
     assert "ragweld_agent_mlflow_console_base_url?: string;" in generated_source
+    assert 'ragweld_agent_mlflow_console_base_url?: string; // default: "http://127.0.0.1:55500"' in generated_source
     assert "tracking_experiment_id?: string | null;" in generated_source
     assert "faro_public_base_url" not in generated_source
 

@@ -1043,6 +1043,16 @@ def _primary_from_metrics(metrics: Mapping[str, object] | None) -> float | None:
     return finite_or_none(metrics.get("eval_loss"))
 
 
+class TrackingBackendUnavailableError(MlflowUnavailableError):
+    code = "tracking_backend_unavailable"
+    backend = "mlflow"
+
+    def __init__(self, message: str) -> None:
+        detail = str(message or "").strip()
+        self.detail = detail
+        super().__init__(f"{self.code}: {detail}")
+
+
 def _resume_mlflow_tracking(run: AgentTrainRun, cfg: Any) -> tuple[MlflowClient, MlflowRunHandle] | None:
     if str(run.tracking_backend or "local") != "mlflow":
         return None
@@ -1051,10 +1061,20 @@ def _resume_mlflow_tracking(run: AgentTrainRun, cfg: Any) -> tuple[MlflowClient,
         return None
     tracking_experiment_id = str(run.tracking_experiment_id or "").strip()
     if not tracking_experiment_id:
-        raise MlflowUnavailableError(
+        raise TrackingBackendUnavailableError(
             "Persisted MLflow run metadata is missing tracking_experiment_id; refusing to rediscover the experiment id."
         )
     client = MlflowClient(str(cfg.training.ragweld_agent_mlflow_tracking_url or ""))
+    try:
+        run_payload = client.get_run(tracking_run_id)
+    except MlflowUnavailableError as exc:
+        raise TrackingBackendUnavailableError(str(exc)) from exc
+    run_info = (run_payload or {}).get("run") or {}
+    resumed_run_id = str(((run_info.get("info") or {}).get("run_id")) or "").strip()
+    if resumed_run_id != tracking_run_id:
+        raise TrackingBackendUnavailableError(
+            f"Persisted MLflow run {tracking_run_id} is not readable at {client.tracking_url}; refusing to continue untracked."
+        )
     return client, MlflowRunHandle(
         tracking_url=client.tracking_url,
         experiment_id=tracking_experiment_id,
@@ -1119,15 +1139,10 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
         _raise_if_cancelled()
 
         if str(run.tracking_backend or "local") == "mlflow" and str(run.tracking_run_id or "").strip():
-            try:
-                resumed = _resume_mlflow_tracking(run, cfg)
-                if resumed is not None:
-                    mlflow_client, mlflow_handle = resumed
-                    _emit_log(f"MLflow tracking active: {mlflow_handle.run_url}")
-            except MlflowUnavailableError as exc:
-                mlflow_client = None
-                mlflow_handle = None
-                _emit_log(f"MLflow tracking unavailable at job start: {exc}")
+            resumed = _resume_mlflow_tracking(run, cfg)
+            if resumed is not None:
+                mlflow_client, mlflow_handle = resumed
+                _emit_log(f"MLflow tracking active: {mlflow_handle.run_url}")
 
         if not mlx_is_available():
             raise RuntimeError("MLX is not available on this platform (install mlx + mlx-lm)")

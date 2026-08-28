@@ -102,6 +102,8 @@ const SECTION_DESC_STYLE: CSSProperties = {
   marginBottom: 12,
 };
 
+const PUBLIC_BROWSER_LINK_HINT = 'Browser links use this; ingestion/tracking uses the local URL.';
+
 export function RetrievalSubtab() {
   const { api } = useAPI();
   const [selectedCard, setSelectedCard] = useState<RetrievalCardId>('search_paths');
@@ -249,6 +251,10 @@ export function RetrievalSubtab() {
   const [otelServiceName, setOtelServiceName] = useConfigField<string>('tracing.otel_service_name', 'ragweld-api');
   const [langfuseEnabled, setLangfuseEnabled] = useConfigField<boolean>('tracing.langfuse_enabled', false);
   const [langfuseBaseUrl, setLangfuseBaseUrl] = useConfigField<string>('tracing.langfuse_base_url', '');
+  const [langfusePublicBaseUrl, setLangfusePublicBaseUrl] = useConfigField<string>(
+    'tracing.langfuse_public_base_url',
+    'http://127.0.0.1:53000',
+  );
   const [langfuseProject, setLangfuseProject] = useConfigField<string>('tracing.langfuse_project', 'ragweld');
   const [tempoBaseUrl, setTempoBaseUrl] = useConfigField<string>('tracing.tempo_base_url', '');
   const [alloyBaseUrl, setAlloyBaseUrl] = useConfigField<string>('tracing.alloy_base_url', '');
@@ -2138,7 +2144,7 @@ export function RetrievalSubtab() {
                     Configure Langfuse, Tempo, and Alloy endpoints used for live request tracing and operator drilldown.
                   </div>
 
-                  <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
+                  <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
                     <div className="input-group">
                       <label className="toggle">
                         <input
@@ -2164,6 +2170,22 @@ export function RetrievalSubtab() {
                       />
                     </div>
                     <div className="input-group">
+                      <label>Langfuse Browser URL</label>
+                      <input
+                        data-testid="retrieval-langfuse-public-base-url"
+                        type="text"
+                        value={langfusePublicBaseUrl}
+                        onChange={(e) => setLangfusePublicBaseUrl(e.target.value)}
+                        placeholder="http://127.0.0.1:53000"
+                      />
+                      <div
+                        data-testid="retrieval-langfuse-public-base-url-hint"
+                        style={{ fontSize: '11px', color: 'var(--fg-muted)', lineHeight: 1.4, marginTop: 6 }}
+                      >
+                        {PUBLIC_BROWSER_LINK_HINT}
+                      </div>
+                    </div>
+                    <div className="input-group">
                       <label>Langfuse Project</label>
                       <input
                         type="text"
@@ -2174,7 +2196,7 @@ export function RetrievalSubtab() {
                     </div>
                   </div>
 
-                  <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
+                  <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
                     <div className="input-group">
                       <label>Tempo Base URL</label>
                       <input
