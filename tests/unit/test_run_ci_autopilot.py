@@ -176,7 +176,7 @@ def test_ai_patch_failure_still_allows_config_docs_and_keeps_root_clean(tmp_path
 
     previous_env = os.environ.copy()
     try:
-        os.environ["OPENAI_API_KEY"] = "test-key"
+        os.environ["OPENROUTER_API_KEY"] = "test-key"
         os.environ["FAKE_DOCS_AI_MODE"] = "fail"
         os.environ["FAKE_CONFIG_MODE"] = "success"
         os.environ["FAKE_MKDOCS_MODE"] = "success"
@@ -208,7 +208,7 @@ def test_strict_build_failure_discards_temp_state_and_does_not_push(tmp_path: Pa
 
     previous_env = os.environ.copy()
     try:
-        os.environ["OPENAI_API_KEY"] = "test-key"
+        os.environ["OPENROUTER_API_KEY"] = "test-key"
         os.environ["FAKE_DOCS_AI_MODE"] = "success"
         os.environ["FAKE_CONFIG_MODE"] = "success"
         os.environ["FAKE_MKDOCS_MODE"] = "fail"
@@ -264,7 +264,7 @@ def test_successful_run_pushes_docs_commit_and_reports_push_output(tmp_path: Pat
 
     previous_env = os.environ.copy()
     try:
-        os.environ["OPENAI_API_KEY"] = "test-key"
+        os.environ["OPENROUTER_API_KEY"] = "test-key"
         os.environ["FAKE_DOCS_AI_MODE"] = "success"
         os.environ["FAKE_CONFIG_MODE"] = "success"
         os.environ["FAKE_MKDOCS_MODE"] = "success"
@@ -313,7 +313,7 @@ def test_no_generated_changes_reports_pushed_false_and_leaves_remote_untouched(t
 
     previous_env = os.environ.copy()
     try:
-        os.environ["OPENAI_API_KEY"] = "test-key"
+        os.environ["OPENROUTER_API_KEY"] = "test-key"
         os.environ["FAKE_DOCS_AI_MODE"] = "empty"
         os.environ["FAKE_CONFIG_MODE"] = "success"
         os.environ["FAKE_MKDOCS_MODE"] = "success"
@@ -342,7 +342,7 @@ def test_strict_build_failure_reports_pushed_false(tmp_path: Path) -> None:
 
     previous_env = os.environ.copy()
     try:
-        os.environ["OPENAI_API_KEY"] = "test-key"
+        os.environ["OPENROUTER_API_KEY"] = "test-key"
         os.environ["FAKE_DOCS_AI_MODE"] = "success"
         os.environ["FAKE_CONFIG_MODE"] = "success"
         os.environ["FAKE_MKDOCS_MODE"] = "fail"
@@ -416,7 +416,12 @@ def test_docs_workflows_wire_push_base_and_publish_dispatch() -> None:
 
     job = autopilot["jobs"]["docs-autopilot"]
     assert "GITHUB_EVENT_BEFORE" not in job["env"]  # per-push base is not a supported path
-    assert job["env"]["OPENAI_MODEL"] == "${{ vars.OPENAI_MODEL || 'gpt-5.6-sol' }}"
+    assert job["env"]["OPENROUTER_API_KEY"] == "${{ secrets.OPENROUTER_API_KEY }}"
+    assert job["env"]["DOCS_AUTOPILOT_MODEL"] == "${{ vars.DOCS_AUTOPILOT_MODEL || 'z-ai/glm-5.3-flash' }}"
+    # The docs lane no longer talks to api.openai.com; a stale OpenAI key in the
+    # job env would silently look like configuration that still works.
+    assert "OPENAI_API_KEY" not in job["env"]
+    assert "OPENAI_MODEL" not in job["env"]
     assert autopilot["permissions"] == {"contents": "write", "actions": "write"}
 
     steps = {step.get("id") or step.get("name"): step for step in job["steps"]}

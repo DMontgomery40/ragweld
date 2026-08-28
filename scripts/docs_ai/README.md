@@ -65,6 +65,17 @@ other branch diffs from its fork point with `origin/main`. If the run history
 cannot be read, the run fails closed. An explicit `base_ref` input always
 wins.
 
+### Patch application
+
+Hunk `@@` counts from a language model are routinely wrong — that single flaw
+stalled this pipeline from 2026-03-12 to 2026-08-28, with `git apply` refusing
+otherwise-correct patches as `corrupt patch at line N`. Patches are applied
+with `git apply --recount --index`, which recomputes the counts. Context lines
+must still match the file exactly, so a patch that invents content is still
+refused; only the arithmetic is forgiven. A truncated response (Responses API
+`status != "completed"`) is rejected at the transport, because recounting a
+hunk that was cut off mid-body would land a half-written page.
+
 Because that base is keyed on run *conclusion*, a run is "success" only when
 the LLM lane processed its range. An AI patch that fails to apply is dropped
 and the run still commits the deterministic config reference, but exits
@@ -87,16 +98,25 @@ differently.
 
 The autopilot **will not write docs** unless you configure:
 
-- `OPENAI_API_KEY` (Actions secret)
+- `OPENROUTER_API_KEY` (Actions secret) — `gh secret set OPENROUTER_API_KEY`
 
 Optional (Actions variables or secrets):
 
-- `OPENAI_MODEL` (default: `gpt-5.6-sol`, the flagship tier; `gpt-5.6-terra` is the
-  balanced tier and `gpt-5.6-luna` the fast/cheap one — all verified as direct
-  `api.openai.com` model ids on 2026-08-23)
-- `OPENAI_MAX_OUTPUT_TOKENS`
-- `OPENAI_REASONING_EFFORT`
-- `OPENAI_VERBOSITY`
+- `DOCS_AUTOPILOT_MODEL` (default: `z-ai/glm-5.3-flash`)
+- `DOCS_AUTOPILOT_MAX_OUTPUT_TOKENS` (default: `131072`, the provider maximum)
+- `DOCS_AUTOPILOT_CONTEXT_BUDGET_TOKENS` (default: `700000`)
+- `DOCS_AUTOPILOT_REASONING_EFFORT`, `DOCS_AUTOPILOT_VERBOSITY`, `DOCS_AUTOPILOT_API_BASE`
+
+### Why this model
+
+`z-ai/glm-5.3-flash` carries a 1,048,576-token window at ~$0.075/M in and
+$0.25/M out, so a full run costs roughly **$0.08**. That budget is what pays
+for the thing that actually makes the pipeline work: the plan quotes the
+**entire current docs corpus verbatim** (92 pages, ~580 KB) so the model can
+copy context lines byte-for-byte instead of guessing them. A run at
+2026-08-28 built a 651k-token plan — every page quoted, 138 code diffs
+included, and the count of diffs dropped for budget stated in the plan itself.
+Nothing is capped silently.
 
 ## Scripts
 
@@ -183,11 +203,11 @@ Plan only (no network):
 python scripts/docs_ai/generate_docs_from_diff.py --base origin/main --output mkdocs-docs-plan.md
 ```
 
-Generate + apply patch (requires `OPENAI_API_KEY`):
+Generate + apply patch (requires `OPENROUTER_API_KEY`):
 
 ```bash
-export OPENAI_API_KEY=...
-python scripts/docs_ai/generate_docs_from_diff.py --base origin/main --llm openai --apply
+export OPENROUTER_API_KEY=...
+uv run python scripts/docs_ai/generate_docs_from_diff.py --base origin/main --llm openrouter --apply
 uv run python scripts/generate_config_reference_docs.py --clean
 mkdocs build --strict
 ```
@@ -195,7 +215,7 @@ mkdocs build --strict
 To reproduce the full CI orchestration locally from a clean checkout:
 
 ```bash
-export OPENAI_API_KEY=...
+export OPENROUTER_API_KEY=...
 python scripts/docs_ai/run_ci_autopilot.py --base origin/main
 ```
 
@@ -207,9 +227,9 @@ If docs are missing/out-of-date and you want a “generate everything” pass, r
 # Writes a large plan artifact (no network)
 python scripts/docs_ai/generate_docs_from_diff.py --base EMPTY --output mkdocs-docs-plan.md
 
-# Generates + applies a docs-only patch (requires OPENAI_API_KEY)
-export OPENAI_API_KEY=...
-python scripts/docs_ai/generate_docs_from_diff.py --base EMPTY --llm openai --apply
+# Generates + applies a docs-only patch (requires OPENROUTER_API_KEY)
+export OPENROUTER_API_KEY=...
+uv run python scripts/docs_ai/generate_docs_from_diff.py --base EMPTY --llm openrouter --apply
 uv run python scripts/generate_config_reference_docs.py --clean
 mkdocs build --strict
 ```

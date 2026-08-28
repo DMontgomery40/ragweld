@@ -38,8 +38,23 @@ PLAN_FILE = ROOT / "mkdocs-docs-plan.md"
 # repository as added (bootstrap / catch-up run).
 EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
-CHANGED_FILES_LIST_LIMIT = 250
-DIFF_CONTEXT_FILE_LIMIT = 60
+# z-ai/glm-5.3-flash: 1,048,576-token window via OpenRouter, 131,072 max
+# completion, $0.075/M in and $0.25/M out - cheap enough to quote the entire
+# docs corpus on every run, which is what makes generated hunks apply.
+DEFAULT_MODEL = "z-ai/glm-5.3-flash"
+DEFAULT_API_BASE = "https://openrouter.ai/api/v1"
+DEFAULT_MAX_OUTPUT_TOKENS = 131072
+# Input budget, in tokens, estimated at ~4 characters per token. Leaves the
+# completion budget plus headroom inside the provider's 1,048,576 window.
+DEFAULT_CONTEXT_BUDGET_TOKENS = 700000
+CHARS_PER_TOKEN = 4
+
+CHANGED_FILES_LIST_LIMIT = 4000
+DIFF_CONTEXT_FILE_LIMIT = 400
+PER_FILE_DIFF_CHAR_LIMIT = 60000
+# Share of the large-pool budget reserved for verbatim docs pages; the rest
+# goes to code diffs. Docs content is what makes a hunk apply, so it wins.
+DOCS_CONTEXT_BUDGET_SHARE = 0.45
 
 ALLOWED_PATH_PREFIXES = (
     "mkdocs/docs/",
@@ -150,7 +165,11 @@ def _maybe_load_dotenv() -> None:
     This loader is intentionally minimal (no export of empty values, ignores comments).
     """
 
-    env_path = ROOT / ".env"
+    for env_path in (ROOT / ".env", ROOT / "infra" / "litellm.env"):
+        _load_env_file(env_path)
+
+
+def _load_env_file(env_path: Path) -> None:
     if not env_path.exists():
         return
     try:
@@ -358,11 +377,39 @@ def _select_context_files(changed: List[str], *, limit: int) -> List[str]:
     return selected[:limit]
 
 
-def _selected_docs_context(*, rel_paths: Optional[List[str]] = None, max_chars_per_file: int = 7000) -> List[str]:
-    """Return a small set of existing docs content so patches can apply reliably.
+def _all_docs_context(*, budget_chars: int) -> tuple[List[str], int]:
+    """Quote the current text of every docs page, newest-shallowest first.
 
-    Only included for bootstrap runs to avoid ballooning per-commit costs.
+    The single highest-leverage input: a model can only emit context lines that
+    apply if it can see the exact bytes. The whole corpus is ~580 KB (~145k
+    tokens) against a 1M-token window, so it fits with room to spare. Returns
+    the blocks plus the number of pages the budget could not fit.
     """
+
+    docs_dir = ROOT / "mkdocs" / "docs"
+    if not docs_dir.exists():
+        return [], 0
+
+    pages = sorted(docs_dir.rglob("*.md"), key=lambda q: (len(q.relative_to(docs_dir).parts), q.as_posix()))
+    blocks: list[str] = []
+    spent = 0
+    omitted = 0
+    for page in pages:
+        content = _read_text(page)
+        if not content.strip():
+            continue
+        rel = page.relative_to(docs_dir).as_posix()
+        block = f"### mkdocs/docs/{rel}\n```markdown\n{content}\n```"
+        if spent + len(block) > budget_chars:
+            omitted += 1
+            continue
+        blocks.append(block)
+        spent += len(block)
+    return blocks, omitted
+
+
+def _selected_docs_context(*, rel_paths: Optional[List[str]] = None, max_chars_per_file: int = 7000) -> List[str]:
+    """Return a named set of existing docs content (used for targeted excerpts)."""
 
     docs_dir = ROOT / "mkdocs" / "docs"
     if not docs_dir.exists():
@@ -412,23 +459,37 @@ def build_plan(base_ref: str) -> str:
     prompt_base = _read_text(PROMPT_BASE_PATH)
 
     is_bootstrap = base_norm == EMPTY_TREE
-    context_file_limit = 25 if is_bootstrap else DIFF_CONTEXT_FILE_LIMIT
-    default_max_chars = 6000 if is_bootstrap else 8000
 
+    budget_tokens = int(os.getenv("DOCS_AUTOPILOT_CONTEXT_BUDGET_TOKENS", str(DEFAULT_CONTEXT_BUDGET_TOKENS)))
+    budget_chars = max(0, budget_tokens) * CHARS_PER_TOKEN
+    # Reserve for the fixed sections (mkdocs.yml, tree listing, prompt base,
+    # screenshot list, changed-file list) before the two large pools.
+    fixed_reserve = 250_000
+    docs_budget = max(0, int((budget_chars - fixed_reserve) * DOCS_CONTEXT_BUDGET_SHARE))
+    docs_context, docs_omitted = _all_docs_context(budget_chars=docs_budget)
+    diff_budget = max(0, budget_chars - fixed_reserve - sum(len(b) for b in docs_context))
+
+    # Fill the remaining window with code diffs in priority order, then say
+    # exactly what did not fit. A silent cap reads as "everything is covered".
     diffs: list[str] = []
-    for path in _select_context_files(changed, limit=context_file_limit):
-        max_chars = default_max_chars
-        if path == "server/models/tribrid_config_model.py":
-            max_chars = 20000
-        d = git_diff_text(base_norm, path, max_chars=max_chars)
-        if d:
-            diffs.append(f"### {path}\n{d}")
+    diff_spent = 0
+    diff_candidates = _select_context_files(changed, limit=DIFF_CONTEXT_FILE_LIMIT)
+    diffs_omitted = 0
+    for path in diff_candidates:
+        d = git_diff_text(base_norm, path, max_chars=PER_FILE_DIFF_CHAR_LIMIT)
+        if not d:
+            continue
+        block = f"### {path}\n{d}"
+        if diff_spent + len(block) > diff_budget:
+            diffs_omitted += 1
+            continue
+        diffs.append(block)
+        diff_spent += len(block)
 
     changed_preview = changed[:CHANGED_FILES_LIST_LIMIT]
     changed_more = max(0, len(changed) - len(changed_preview))
 
     bootstrap_note: list[str] = []
-    docs_context: list[str] = []
     if is_bootstrap:
         bootstrap_note = [
             "## Bootstrap mode",
@@ -436,10 +497,9 @@ def build_plan(base_ref: str) -> str:
             "After this catch-up, normal pushes should go back to small incremental diffs.",
             "",
         ]
-        docs_context = _selected_docs_context(max_chars_per_file=5000)
 
-    # Always include short excerpts from high-traffic docs so the model preserves
-    # structure and edits in place instead of rewriting wholesale.
+    # Short excerpts from high-traffic pages, called out separately from the
+    # full corpus below so the model treats their structure as load-bearing.
     preserve_context = _selected_docs_context(
         rel_paths=[
             "index.md",
@@ -448,7 +508,7 @@ def build_plan(base_ref: str) -> str:
         ],
         max_chars_per_file=3500,
     )
-    screenshot_assets = scan_screenshot_assets(limit=120)
+    screenshot_assets = scan_screenshot_assets(limit=400)
 
     sections: list[str] = [
         "# Docs Autopilot Plan (diff-driven)",
@@ -460,7 +520,7 @@ def build_plan(base_ref: str) -> str:
         *(["- ... and " + str(changed_more) + " more (truncated)"] if changed_more else []),
         "",
         "## Current MkDocs config (mkdocs.yml)",
-        mkdocs_yml[:12000] if mkdocs_yml else "(mkdocs.yml not found)",
+        mkdocs_yml or "(mkdocs.yml not found)",
         "",
         "## Current docs tree (mkdocs/docs)",
         *(scan_docs_tree() or ["- (mkdocs/docs not found)"]),
@@ -471,31 +531,22 @@ def build_plan(base_ref: str) -> str:
         "## Existing high-traffic docs excerpts (preserve structure; edit minimally)",
         *(preserve_context or ["- (no preserve context pages found)"]),
         "",
-        *(["## Selected docs content (bootstrap-only)", *docs_context, ""] if docs_context else []),
-        "## Prompt base (docs_prompt_base.md)",
-        (prompt_base or "(missing scripts/docs_ai/docs_prompt_base.md)")[:4000],
+        "## Current docs content (verbatim - copy context lines from here)",
+        f"{len(docs_context)} page(s) quoted in full"
+        + (f"; {docs_omitted} omitted for context budget" if docs_omitted else "; none omitted"),
         "",
-        "## Code diffs (truncated)",
+        *(docs_context or ["- (no docs pages found)"]),
+        "",
+        "## Prompt base (docs_prompt_base.md)",
+        prompt_base or "(missing scripts/docs_ai/docs_prompt_base.md)",
+        "",
+        "## Code diffs",
+        f"{len(diffs)} file diff(s) included"
+        + (f"; {diffs_omitted} omitted for context budget" if diffs_omitted else "; none omitted"),
+        "",
         *(diffs or ["(no diffs captured)"]),
     ]
     return "\n".join(sections).strip() + "\n"
-
-
-def _extract_unified_diff(text: str) -> str:
-    if not text:
-        return ""
-
-    # Prefer fenced diff blocks if present.
-    m = re.search(r"```diff\\s*\\n([\\s\\S]*?)```", text, re.MULTILINE)
-    if m:
-        return (m.group(1) or "").strip() + "\n"
-
-    # Otherwise, find the first diff header.
-    m2 = re.search(r"^diff --git\\s+", text, re.MULTILINE)
-    if m2:
-        return text[m2.start() :].strip() + "\n"
-
-    return text.strip() + "\n"
 
 
 def _parse_diff_paths(patch_text: str) -> List[Tuple[str, str]]:
@@ -676,20 +727,100 @@ def _validate_patch_safety(patch_text: str, *, allow_large_deletes: bool) -> Lis
     return errors
 
 
-def call_openai_unified_diff(prompt: str) -> str:
+PATCH_START_RE = re.compile(r"^(?:diff --git |\*\*\* Begin Patch)", re.MULTILINE)
+FENCE_RE = re.compile(r"```[^\n]*\n(.*?)```", re.DOTALL)
+
+
+def _extract_unified_diff(text: str) -> str:
+    """Pull the patch out of a model reply.
+
+    Models wrap patches in code fences and top-and-tail them with prose. Both
+    have to be stripped: git reads the file literally, so one stray "Here you
+    go:" line makes the whole patch corrupt.
+    """
+    if not text:
+        return ""
+
+    # Prefer a fenced block that actually contains a patch (```diff, ```patch,
+    # or an unlabelled fence) over anything quoted elsewhere in the reply.
+    for match in FENCE_RE.finditer(text):
+        block = match.group(1)
+        if PATCH_START_RE.search(block):
+            start = PATCH_START_RE.search(block).start()
+            return block[start:].strip() + "\n"
+
+    # Otherwise take everything from the first patch marker, dropping a
+    # trailing fence and any sign-off after it.
+    marker = PATCH_START_RE.search(text)
+    if marker:
+        body = text[marker.start() :]
+        fence_end = body.find("\n```")
+        if fence_end != -1:
+            body = body[:fence_end]
+        return body.strip() + "\n"
+
+    return text.strip() + "\n"
+
+
+def response_output_text(data: object) -> str:
+    """Read the assistant text out of a Responses API payload.
+
+    Refuses anything the provider did not finish. A patch cut off mid-hunk is
+    not a smaller patch: `git apply --recount` would renumber the truncated
+    hunk and land a half-written page, so truncation has to die here.
+    """
+    if not isinstance(data, dict):
+        raise RuntimeError(f"Unexpected response format: {type(data)}")
+
+    error = data.get("error")
+    if error:
+        raise RuntimeError(f"Provider returned an error: {error}")
+
+    status = data.get("status")
+    if status is not None and status != "completed":
+        detail = data.get("incomplete_details") or {}
+        reason = detail.get("reason") if isinstance(detail, dict) else None
+        raise RuntimeError(
+            f"Model response did not complete (status={status}, reason={reason or 'unknown'}). "
+            "Raise DOCS_AUTOPILOT_MAX_OUTPUT_TOKENS or narrow the base range; "
+            "a truncated patch is never applied."
+        )
+
+    out_text = data.get("output_text")
+    if isinstance(out_text, str) and out_text.strip():
+        return out_text.strip()
+
+    chunks: list[str] = []
+    for item in data.get("output", []) or []:
+        if not isinstance(item, dict):
+            continue
+        for content in item.get("content", []) or []:
+            # Reasoning blocks arrive as `reasoning_text`; only the message counts.
+            if isinstance(content, dict) and content.get("type") == "output_text":
+                text = content.get("text", "")
+                if text:
+                    chunks.append(str(text))
+    if chunks:
+        return "\n".join(chunks).strip()
+
+    raise RuntimeError("Model returned no output text.")
+
+
+def call_llm_unified_diff(prompt: str) -> str:
     import requests
 
     _maybe_load_dotenv()
 
-    api_key = (os.getenv("OPENAI_API_KEY") or "").strip().strip('"').strip("'")
+    api_key = (os.getenv("OPENROUTER_API_KEY") or "").strip().strip('"').strip("'")
     if not api_key:
-        raise RuntimeError("OPENAI_API_KEY not set")
+        raise RuntimeError(
+            "OPENROUTER_API_KEY not set. In CI add it with: "
+            "gh secret set OPENROUTER_API_KEY --repo <owner>/<repo>"
+        )
 
-    # Default to the latest flagship tier (override via OPENAI_MODEL, e.g.
-    # gpt-5.6-terra for balanced cost or gpt-5.6-luna for fast/cheap runs).
-    model = os.getenv("OPENAI_MODEL", "gpt-5.6-sol")
-    url = (os.getenv("OPENAI_API_BASE", "https://api.openai.com/v1").rstrip("/") + "/responses")
-    max_output_tokens = int(os.getenv("OPENAI_MAX_OUTPUT_TOKENS", "14000"))
+    model = os.getenv("DOCS_AUTOPILOT_MODEL", DEFAULT_MODEL)
+    url = (os.getenv("DOCS_AUTOPILOT_API_BASE", DEFAULT_API_BASE).rstrip("/") + "/responses")
+    max_output_tokens = int(os.getenv("DOCS_AUTOPILOT_MAX_OUTPUT_TOKENS", str(DEFAULT_MAX_OUTPUT_TOKENS)))
 
     base_prompt = _read_text(PROMPT_BASE_PATH).strip()
     system_prompt = (
@@ -704,48 +835,28 @@ def call_openai_unified_diff(prompt: str) -> str:
         "When screenshot assets are present under mkdocs/docs/assets/images/, keep screenshot references/captions aligned with docs.\n"
         "You may create, move, or delete pages and restructure folders, and you may update mkdocs.yml nav accordingly.\n"
         "Only modify MkDocs sources: mkdocs/docs/** and mkdocs.yml.\n"
+        "The plan quotes the full current text of every page, so copy context lines verbatim from it.\n"
         "Output ONLY a standard git unified diff patch suitable for `git apply`.\n"
         "Your output MUST use git patch headers: `diff --git a/path b/path`.\n"
-        "Each hunk must have correct @@ line counts. No stray characters, no code fences, no commentary.\n"
+        "Hunk line counts are recomputed on apply, but every context line must match the quoted page exactly.\n"
+        "No stray characters, no code fences, no commentary.\n"
+        "Finish every hunk you start; never stop mid-patch.\n"
         "The result must pass `mkdocs build --strict`.\n"
     )
 
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     payload = {
         "model": model,
-        # Responses API: prefer top-level instructions + input. This avoids relying on
-        # message-compat mode and matches the API reference examples.
         "instructions": system_prompt,
         "input": prompt,
-        # GPT-5 family controls
-        "text": {"verbosity": os.getenv("OPENAI_VERBOSITY", "high")},
-        "reasoning": {"effort": os.getenv("OPENAI_REASONING_EFFORT", "high")},
+        "text": {"verbosity": os.getenv("DOCS_AUTOPILOT_VERBOSITY", "high")},
+        "reasoning": {"effort": os.getenv("DOCS_AUTOPILOT_REASONING_EFFORT", "high")},
         "max_output_tokens": max_output_tokens,
     }
 
-    r = requests.post(url, headers=headers, json=payload, timeout=int(os.getenv("OPENAI_HTTP_TIMEOUT_SECONDS", "900")))
+    r = requests.post(url, headers=headers, json=payload, timeout=int(os.getenv("DOCS_AUTOPILOT_HTTP_TIMEOUT_SECONDS", "1800")))
     r.raise_for_status()
-    data = r.json()
-
-    # Prefer Responses API output_text.
-    if isinstance(data, dict):
-        out_text = data.get("output_text")
-        if isinstance(out_text, str) and out_text.strip():
-            return out_text.strip()
-
-        chunks: list[str] = []
-        for item in data.get("output", []) or []:
-            if not isinstance(item, dict):
-                continue
-            for content in item.get("content", []) or []:
-                if isinstance(content, dict) and content.get("type") == "output_text":
-                    t = content.get("text", "")
-                    if t:
-                        chunks.append(str(t))
-        if chunks:
-            return "\n".join(chunks).strip()
-
-    raise RuntimeError(f"Unexpected OpenAI response format: {type(data)}")
+    return response_output_text(r.json())
 
 
 def _is_allowed_patch_path(path: str) -> bool:
@@ -962,7 +1073,10 @@ def apply_patch(patch_path: Path) -> tuple[bool, str]:
             return False, str(e)
 
     try:
-        run(f"git apply --index {shlex.quote(str(patch_path))}")
+        # --recount: models miscount `@@` headers routinely and git otherwise
+        # rejects the whole patch as corrupt. Context lines still have to match,
+        # so this fixes arithmetic without accepting invented content.
+        run(f"git apply --recount --index {shlex.quote(str(patch_path))}")
         return True, ""
     except RuntimeError as e:
         err = str(e)
@@ -979,7 +1093,7 @@ def apply_patch(patch_path: Path) -> tuple[bool, str]:
 def main() -> None:
     ap = argparse.ArgumentParser(prog="docs-autopilot", description="Diff-driven MkDocs autopilot for ragweld")
     ap.add_argument("--base", default="origin/main", help="Git ref to diff against (base..HEAD)")
-    ap.add_argument("--llm", choices=["openai"], default=None, help="LLM provider (currently: openai)")
+    ap.add_argument("--llm", choices=["openrouter"], default=None, help="LLM provider (currently: openrouter)")
     ap.add_argument("--apply", action="store_true", help="Apply the returned patch with `git apply --index`")
     ap.add_argument("--apply-patch", default="", help="Apply an existing patch file and exit (no LLM call)")
     ap.add_argument("--output", default=str(PLAN_FILE.name), help="Plan output file (plan mode)")
@@ -1006,7 +1120,7 @@ def main() -> None:
         return
 
     # LLM mode -> patch
-    llm_text = call_openai_unified_diff(plan)
+    llm_text = call_llm_unified_diff(plan)
     patch_text = _extract_unified_diff(llm_text)
     if not patch_text.strip():
         print("LLM returned an empty patch. Assuming no docs update is needed.")

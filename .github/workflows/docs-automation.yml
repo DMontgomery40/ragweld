@@ -34,11 +34,12 @@ jobs:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     env:
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      # OpenAI model used by scripts/docs_ai/generate_docs_from_diff.py (Responses API).
-      # GPT-5.6 Sol is the flagship tier; set the OPENAI_MODEL repo variable to
-      # gpt-5.6-terra (balanced) or gpt-5.6-luna (fast/cheap) to trade quality for cost.
-      OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-5.6-sol' }}
+      # OpenRouter key used by scripts/docs_ai/generate_docs_from_diff.py
+      # (Responses API). Add it with: gh secret set OPENROUTER_API_KEY
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      # z-ai/glm-5.3-flash: 1M-token window, 131k max completion, ~$0.08 a run,
+      # which buys quoting the whole docs corpus so generated hunks apply.
+      DOCS_AUTOPILOT_MODEL: ${{ vars.DOCS_AUTOPILOT_MODEL || 'z-ai/glm-5.3-flash' }}
     steps:
       - uses: actions/checkout@v4
         with:

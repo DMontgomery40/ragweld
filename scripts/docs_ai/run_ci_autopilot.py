@@ -221,12 +221,26 @@ def resolve_branch_name() -> str:
     raise RuntimeError("Unable to resolve branch name for docs-autopilot push.")
 
 
-def _first_line(text: str) -> str:
-    for line in text.splitlines():
-        stripped = line.strip()
-        if stripped:
-            return stripped
-    return "(no details captured)"
+def _error_detail(result: CommandResult) -> str:
+    """Best available failure text for an operator annotation.
+
+    The first stdout line is usually progress noise: a real "corrupt patch at
+    line 42" once got reported as "LLM patch saved: ...", which cost a log
+    download to diagnose. Prefer stderr, then a stdout line that looks like an
+    error, then the last line of output.
+    """
+    for stream in (result.stderr, result.stdout):
+        lines = [line.strip() for line in (stream or "").splitlines() if line.strip()]
+        if not lines:
+            continue
+        for line in lines:
+            lowered = line.lower()
+            if lowered.startswith(("error", "details:", "fatal", "traceback")) or "error:" in lowered:
+                return line
+        if stream is result.stderr:
+            return lines[-1]
+    tail = [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
+    return tail[-1] if tail else "(no details captured)"
 
 
 def _annotation(level: str, message: str) -> None:
@@ -347,7 +361,7 @@ def _run_ai_patch(worktree: Path, base_ref: str) -> tuple[bool, str]:
             "--base",
             base_ref,
             "--llm",
-            "openai",
+            "openrouter",
             "--apply",
         ),
         cwd=worktree,
@@ -355,7 +369,7 @@ def _run_ai_patch(worktree: Path, base_ref: str) -> tuple[bool, str]:
     )
     _copy_if_exists(worktree / PATCH_FILE.name, PATCH_FILE)
     if result.returncode != 0:
-        return False, _first_line(result.stderr or result.stdout)
+        return False, _error_detail(result)
 
     patch_text = (worktree / PATCH_FILE.name).read_text(encoding="utf-8") if (worktree / PATCH_FILE.name).exists() else ""
     if not patch_text.strip():
@@ -374,7 +388,7 @@ def _run_config_reference_generation(worktree: Path) -> tuple[bool, str]:
         check=False,
     )
     if result.returncode != 0:
-        return False, _first_line(result.stderr or result.stdout)
+        return False, _error_detail(result)
     _run(("git", "add", "--", "mkdocs/docs/reference/config"), cwd=worktree)
     return True, "Configuration reference regenerated."
 
@@ -382,7 +396,7 @@ def _run_config_reference_generation(worktree: Path) -> tuple[bool, str]:
 def _run_build(worktree: Path) -> tuple[bool, str]:
     result = _run((_mkdocs_bin(), "build", "--strict"), cwd=worktree, check=False)
     if result.returncode != 0:
-        return False, _first_line(result.stderr or result.stdout)
+        return False, _error_detail(result)
     return True, "mkdocs build --strict passed."
 
 
@@ -452,8 +466,11 @@ def main(argv: list[str] | None = None) -> int:
         f"- Base ref: `{base_ref}`",
     ]
 
-    if not (os.getenv("OPENAI_API_KEY") or "").strip():
-        raise RuntimeError("OPENAI_API_KEY is required for docs-autopilot CI.")
+    if not (os.getenv("OPENROUTER_API_KEY") or "").strip():
+        raise RuntimeError(
+            "OPENROUTER_API_KEY is required for docs-autopilot CI. "
+            "Add it with: gh secret set OPENROUTER_API_KEY"
+        )
 
     with temporary_worktree() as worktree:
         _run_generate_plan(worktree, base_ref)
