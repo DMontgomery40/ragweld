@@ -45,6 +45,62 @@ async def test_ready_reports_gateway_and_serving_failures_separately(client: Asy
     assert "operator_hint" in dependencies["vllm"]
 
 
+@pytest.mark.asyncio
+async def test_ready_marks_configured_disabled_vllm_nonblocking(client: AsyncClient) -> None:
+    baseline = await client.get("/api/config")
+    assert baseline.status_code == 200
+    config = baseline.json()
+    config["chat"]["vllm"]["enabled"] = False
+    saved = await client.put("/api/config", json=config)
+    assert saved.status_code == 200
+
+    old_vllm = os.environ.get("VLLM_BASE_URL")
+    os.environ["VLLM_BASE_URL"] = "http://127.0.0.1:1/v1"
+    try:
+        response = await client.get("/api/ready")
+    finally:
+        if old_vllm is None:
+            os.environ.pop("VLLM_BASE_URL", None)
+        else:
+            os.environ["VLLM_BASE_URL"] = old_vllm
+
+    dependency = response.json()["dependencies"]["vllm"]
+    assert dependency["ok"] is True
+    assert dependency["error"] is None
+    assert dependency["operator_hint"] is None
+    assert dependency["info"] == {
+        "status": "disabled by configuration",
+        "required": False,
+    }
+
+
+@pytest.mark.asyncio
+async def test_ready_marks_configured_enabled_vllm_blocking_when_unreachable(
+    client: AsyncClient,
+) -> None:
+    baseline = await client.get("/api/config")
+    assert baseline.status_code == 200
+    config = baseline.json()
+    config["chat"]["vllm"]["enabled"] = True
+    saved = await client.put("/api/config", json=config)
+    assert saved.status_code == 200
+
+    old_vllm = os.environ.get("VLLM_BASE_URL")
+    os.environ["VLLM_BASE_URL"] = "http://127.0.0.1:1/v1"
+    try:
+        response = await client.get("/api/ready")
+    finally:
+        if old_vllm is None:
+            os.environ.pop("VLLM_BASE_URL", None)
+        else:
+            os.environ["VLLM_BASE_URL"] = old_vllm
+
+    dependency = response.json()["dependencies"]["vllm"]
+    assert dependency["ok"] is False
+    assert dependency["error"] == "vLLM model serving is unavailable."
+    assert dependency["operator_hint"] is not None
+
+
 @pytest.mark.requires_postgres
 @pytest.mark.asyncio
 async def test_ready_unknown_corpus_reports_not_ready(client: AsyncClient) -> None:

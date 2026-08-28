@@ -193,34 +193,41 @@ async def readiness_check(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> ReadinessSt
     # Local serving backend: readiness requires the served identity, not just a
     # listener — the alias must front chat.vllm.default_model at the catalog
     # ragweld-local context window.
-    serving_mismatch: str | None = None
-    try:
-        from server.gateway_catalog import LOCAL_GATEWAY_ALIAS, gateway_rows_snapshot
-        from server.observability.status import vllm_serving_mismatch
-
-        vllm_url = resolve_vllm_base_url(configured_url=cfg.chat.vllm.base_url)
-        async with httpx.AsyncClient(timeout=2.0) as client:
-            response = await client.get(f"{vllm_url}/models")
-            response.raise_for_status()
-            payload = response.json()
-        local_row = gateway_rows_snapshot().get(LOCAL_GATEWAY_ALIAS)
-        serving_mismatch = vllm_serving_mismatch(
-            payload,
-            expected_model=cfg.chat.vllm.default_model,
-            expected_context=local_row.context if local_row is not None else None,
-        )
-        if serving_mismatch is not None:
-            raise RuntimeError(serving_mismatch)
+    if not cfg.chat.vllm.enabled:
         vllm_status.ok = True
-        vllm_status.info = {"status": "reachable"}
-    except Exception:
-        ready = False
-        if serving_mismatch is not None:
-            vllm_status.error = f"vLLM model serving mismatch: {serving_mismatch}."
-            vllm_status.operator_hint = "Restart the host local-model server on the configured model (./start.sh) or fix chat.vllm.default_model / the catalog ragweld-local row."
-        else:
-            vllm_status.error = "vLLM model serving is unavailable."
-            vllm_status.operator_hint = "Start the host local-model server (./start.sh, or its vllm-metal serve command) and wait for model loading to complete."
+        vllm_status.info = {
+            "status": "disabled by configuration",
+            "required": False,
+        }
+    else:
+        serving_mismatch: str | None = None
+        try:
+            from server.gateway_catalog import LOCAL_GATEWAY_ALIAS, gateway_rows_snapshot
+            from server.observability.status import vllm_serving_mismatch
+
+            vllm_url = resolve_vllm_base_url(configured_url=cfg.chat.vllm.base_url)
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                response = await client.get(f"{vllm_url}/models")
+                response.raise_for_status()
+                payload = response.json()
+            local_row = gateway_rows_snapshot().get(LOCAL_GATEWAY_ALIAS)
+            serving_mismatch = vllm_serving_mismatch(
+                payload,
+                expected_model=cfg.chat.vllm.default_model,
+                expected_context=local_row.context if local_row is not None else None,
+            )
+            if serving_mismatch is not None:
+                raise RuntimeError(serving_mismatch)
+            vllm_status.ok = True
+            vllm_status.info = {"status": "reachable"}
+        except Exception:
+            ready = False
+            if serving_mismatch is not None:
+                vllm_status.error = f"vLLM model serving mismatch: {serving_mismatch}."
+                vllm_status.operator_hint = "Restart the host local-model server on the configured model (./start.sh) or fix chat.vllm.default_model / the catalog ragweld-local row."
+            else:
+                vllm_status.error = "vLLM model serving is unavailable."
+                vllm_status.operator_hint = "Start the host local-model server (./start.sh, or its vllm-metal serve command) and wait for model loading to complete."
 
     status = ReadinessStatus(
         ready=ready,
