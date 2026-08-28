@@ -79,8 +79,33 @@ override the conflicting steps below until the steps themselves are rewritten.
   the proposed NFS OOM guard and do not reduce LXC 100 to 20 GiB for that old
   coupling. Keep the approved 24 GiB LXC allocation, then re-check real pve1
   headroom after the full stack starts.
+- **W59 — watch the thin pool, not the RAM.** pve1's `local-lvm` is a 794 GiB
+  thin pool at 1.58% used (~819 GiB available), holding both
+  `vm-100-disk-0` (300 GiB thin, Ragweld) and HAOS's 32 GiB. Sizing is not a
+  problem and the 300 GiB can be grown later with `pct resize`. The risk is
+  pool exhaustion: if `pve/data` hits 100% **every thin volume goes read-only,
+  HAOS included**, and on this node `thin_pool_autoextend_*` is unset with only
+  16 GiB of unallocated VG to extend into — no automatic rescue. Before corpus
+  seeding (Task 7): add a `pve/data` `Data%`/`Meta%` alert at 70% warn / 85%
+  page (Prometheus+Alertmanager are already in the stack; a root cron running
+  `lvs --noheadings -o data_percent,metadata_percent pve/data` is the fallback),
+  set `thin_pool_autoextend_threshold = 80` and `thin_pool_autoextend_percent
+  = 10` in `/etc/lvm/lvm.conf`, and record the ~819 GiB shared ceiling in the
+  evidence so seeding is sized against a known budget.
 - **W17 — Cloudflare limits.** Note the 100 MB request-body and ~100 s idle
   response limits in the evidence file; corpus seeding stays rsync.
+- **Live firewall correction — the Proxmox cluster firewall is disabled.** A
+  syntactically valid `/etc/pve/firewall/100.fw` is installed as dormant
+  defense-in-depth, but it is not the active boundary and this rollout must not
+  enable the cluster firewall globally just for one guest. LXC 100 instead
+  owns an `nftables` guard at filter priority `-200`: established/related and
+  loopback traffic remain allowed; DHCP from `192.168.68.1`, LAN ICMP, LAN
+  TCP/22, and required ICMPv6 neighbor/router discovery are allowed; new
+  `eth0` input and forward traffic is dropped. This priority runs before
+  Docker's filter chains, so published containers cannot bypass it. Acceptance
+  uses temporary real listeners on 58000 and 58012: each must return `200`
+  inside the guest, time out from the Mac, and then be removed. Re-run the same
+  live-listener proof after Docker starts.
 
 ---
 

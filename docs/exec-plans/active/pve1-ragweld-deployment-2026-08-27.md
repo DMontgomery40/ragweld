@@ -2,7 +2,7 @@
 
 Date: 2026-08-28
 
-Status: source and Plex gates complete; pve1 live preflight green; LXC 100 provisioning authorized
+Status: source and Plex gates complete; LXC 100 provisioned with live firewall acceptance; runtime bootstrap pending
 
 ## Scope
 
@@ -173,6 +173,51 @@ Rollback owner for LXC creation: the controller executing this plan. If later
 bootstrap fails, leave LXC 100 stopped for inspection; do not delete it or
 change HAOS/Plex as an attempted recovery.
 
+## Task 2 — LXC 100 provisioning evidence
+
+- Cached and checksum-verified the exact template
+  `debian-13-standard_13.6-1_amd64.tar.zst` on pve1.
+- Created privileged LXC 100 stopped, then attached only
+  `/dev/dri/renderD128` and `/dev/dri/card0`. Its config has no Plex media,
+  Proxmox filesystem, or host-control socket mount.
+- Running guest proof:
+  - 16 CPUs;
+  - 24 GiB RAM and 8 GiB swap;
+  - 295 GiB usable root with 279 GiB initially available;
+  - both DRM devices at major `226`, minors `0` and `128`;
+  - DHCP address `192.168.68.225/24`, default route `192.168.68.1`; and
+  - locked deployment commit
+    `3abb80dfe65bb1eb21ccfd68fba664c7bb5f5b25` at
+    `/root/ragweld-deployment-commit` mode `0600`, while `/etc/ragweld`
+    remains absent for bootstrap ownership.
+
+### SSH and firewall acceptance
+
+- Installed the exact key-only SSH policy. Effective values are
+  `passwordauthentication no`, `kbdinteractiveauthentication no`,
+  `pubkeyauthentication yes`, and `permitrootlogin without-password`.
+- Debian's socket-activated SSH failed on SIGHUP reload because systemd still
+  owned port 22 and sshd could not re-bind it. A controlled service restart
+  recreated `/run/sshd`, re-adopted the socket, and left key-only direct SSH
+  green from the Mac.
+- pve1's cluster firewall is globally `disabled/running`. Enabling it for this
+  guest would create unnecessary cluster-wide blast radius, so the verified
+  `/etc/pve/firewall/100.fw` is dormant defense-in-depth, not the claimed
+  boundary.
+- LXC 100 therefore runs its own nftables input/forward guard at priority
+  `-200`, before Docker filter chains. It allows loopback,
+  established/related, router DHCP, LAN ICMP, LAN SSH, and IPv6
+  neighbor/router discovery; it drops other new `eth0` input and forward
+  traffic.
+- Two temporary Python HTTP services listened on `0.0.0.0:58000` and
+  `0.0.0.0:58012`. Each returned `200` through guest loopback; direct Mac
+  requests timed out with curl exit `28`, while direct key-only SSH still
+  succeeded. Both transient services were stopped and the final listener list
+  contained only SSH and local loopback SMTP.
+
+Task 2 rollback is `pct stop 100`. Do not delete the LXC on a later bootstrap
+failure; leave it stopped with this evidence for inspection.
+
 ## Ready / not ready
 
 Ready:
@@ -190,8 +235,10 @@ Ready:
 - signed-in original playback and forced Intel VAAPI hardware-transcode proof
   complete
 - pve1 Task 1 live capacity/VMID/GPU/PBS preflight green
+- LXC 100 provisioned and reachable at `192.168.68.225` with its isolated
+  ingress boundary proved against live listeners
 
 Not yet done:
 
-- Ragweld LXC 100 provisioning, DNS/Cloudflare/auth, clean corpus seeding, and
-  final external-browser/recovery acceptance
+- Docker/source/runtime bootstrap, DNS/Cloudflare/auth, clean corpus seeding,
+  and final external-browser/recovery acceptance
