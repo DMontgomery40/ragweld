@@ -328,7 +328,7 @@ the readiness 500 behind W33); two of mine that were wrong on a detail (W3's
   are discovered from the overlay, not hand-listed, so the next `:?` addition
   cannot desynchronize two tests.
 
-### W19 `ADOPTED; first run failed — see W35` — the paid GLM adversarial review has no durable, findable output
+### W19 `DELIVERED — initial and final-range report/trace pairs preserved` — the paid GLM adversarial review has no durable, findable output
 
 - `glm_review_agent.py` writes `--report`/`--trace` wherever the caller
   points them; nothing has been written yet (the reviews so far were subagent
@@ -514,7 +514,7 @@ the readiness 500 behind W33); two of mine that were wrong on a detail (W3's
   and classify every hit as probe/ingest (local) or link (public) in the
   commit message so this cannot recur one builder at a time.
 
-### W35 `FIXED (harness) — review of record delivered` (`glm-review-0b106b28..9d834fcf.md`, 18 rounds, 43 tool calls, $0.064, verdict REFUTED-narrow with every W dispositioned) — the tool-using GLM run discarded six minutes of paid trace and the fallback stalled
+### W35 `FIXED (harness) — review of record plus final-range rerun delivered` (`glm-review-0b106b28..9d834fcf.md`, 18 rounds, verdict REFUTED-narrow; `glm-rereview-9d834fcf..dc42075a.md`, 35 rounds, verdict PASS) — the tool-using GLM run discarded six minutes of paid trace and the fallback stalled
 
 - `glm_review_agent.py` writes `--trace`/`--report` only after the loop
   returns; the 11:53-11:59 run ended in `RuntimeError("reviewer returned no
@@ -585,7 +585,7 @@ gap; there was never a W23 — nothing lost.
 
 ## Plex plan pre-read (2026-08-28 07:10, before any live step)
 
-### W37 `OPEN` (P1 for the Plex plan) — automount idle expiry + LXC bind mount = empty media at container start
+### W37 `FIXED b421d203 (publication gate pending)` — automount idle expiry + LXC bind mount = empty media at container start
 
 - `deploy/proxmox/plex/srv-media.automount` sets `TimeoutIdleSec=60`
   (systemd's default is 0 = never expire). LXC 4214 consumes `/srv/media`
@@ -610,8 +610,11 @@ gap; there was never a W23 — nothing lost.
      immediately before `pct start 4214`, and after start prove
      `pct exec 4214 -- findmnt -t nfs4 /srv/media` (fstype must be `nfs4`,
      not `autofs`).
+- Controller RED/GREEN evidence 2026-08-28: the exact contract test failed
+  against `TimeoutIdleSec=60`, then passed after the template moved to
+  `TimeoutIdleSec=0`. Publish this two-file change before Plex Task 2.
 
-### W38 `OPEN` (P2) — `pct migrate` needs `shared=1` on the bind mount; the plan assumes it
+### W38 `SATISFIED by live preflight 2026-08-28` — `pct migrate` needs `shared=1` on the bind mount; the plan assumes it
 
 - Task 1 Step 2 "expects" `mp1: /srv/media,mp=/srv/media,shared=1`, but the
   spec's verified state only says "bind mount". Proxmox refuses to migrate a
@@ -619,8 +622,10 @@ gap; there was never a W23 — nothing lost.
   actual `mp1` line; if `shared=1` is absent, add
   `pct set 4214 -mp1 /srv/media,mp=/srv/media,shared=1` as an explicit,
   metadata-only Task 3 Step 0 with its own rollback (`shared=0`).
+- Controller revalidation read the exact live line:
+  `mp1: /srv/media,mp=/srv/media,shared=1`; no metadata change is required.
 
-### W39 `OPEN` (P2) — pve1 host firewall not checked for NFS
+### W39 `SATISFIED at live preflight; recheck before export` — pve1 host firewall not checked for NFS
 
 - Task 2 Step 2 starts `nfs-server` on pve1 but never checks
   `pve-firewall status` / the host ruleset. If the datacenter or host
@@ -630,14 +635,22 @@ gap; there was never a W23 — nothing lost.
   if enabled, add a host rule `IN ACCEPT -source 192.168.68.173 -p tcp
   -dport 2049` in `/etc/pve/nodes/pve1/host.fw` before mounting, and record
   it as a bridge component to remove with the bridge.
+- `pve-firewall status` on pve1 returned `disabled/running` during the
+  2026-08-28 preflight, so no rule is currently required. The plan still
+  rechecks immediately before installing the export.
 
-### W40 `NOTE` (P3) — Task 4 probe paths are hardcoded
+### W40 `RESOLVED by live inventory 2026-08-28` — Task 4 probe paths are hardcoded
 
 - Step 3 assumes `/tv`→`/srv/media/tv-sonarr`, `/movies`→`/srv/media/radarr`,
   `/downloads`→`/srv/media/downloads`. Task 1 Step 3 already inventories the
   real container mounts; derive the probe paths from that inventory (and
   the container UID) so a differently-mapped library does not read as a
   write failure.
+- Live Docker mount inventory confirms Sonarr `/tv` and `/downloads`, Radarr
+  `/movies` and `/downloads`, and qBittorrent `/downloads`, with host sources
+  recorded in `plex-return-to-pve-2026-08-27.md`. All four media containers
+  explicitly carry `PUID=1000` and `PGID=1000`; Task 4 uses those observed
+  values rather than hardcoded guesses.
 
 ## Low / rollout-time reminders
 

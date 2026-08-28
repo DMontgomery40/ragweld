@@ -2,7 +2,7 @@
 
 Date: 2026-08-28
 
-Status: source gate verified and published; Proxmox mutation not started
+Status: source gate published; Plex preflight and PBS rollback backups verified; Ragweld LXC provisioning not started
 
 ## Scope
 
@@ -18,9 +18,12 @@ rollout plan expects to exist before the first Proxmox mutation.
 - Verified application tip for the runtime/deployment surface:
   `dc42075a0f19a4f41dc28ea58d77f98985f4855a`
   (`fix(deploy): close final foundation review findings`)
-- Published closeout tip: `40c11299263f7a4a56bb855ec911642902ab82ff`
-  (`docs(deploy): record proxmox foundation closeout`)
-- Local `main` and `origin/main` now match at `40c11299263f7a4a56bb855ec911642902ab82ff`
+- Published docs-autopilot sync tip before live preflight:
+  `62cff6055c096e3209b7527b101038b9e2ee9259`
+  (`docs(deploy): sync published rollout readiness`)
+- Required W37 follow-up committed locally after live preflight:
+  `b421d203` (`fix(deploy): keep plex media automount live`); publication is
+  part of the execution-evidence push that follows this update.
 - User-owned local dirt intentionally excluded from publication:
   `AGENTS.md`, `CLAUDE.md`, and untracked `.claude/skills/`
 
@@ -44,6 +47,11 @@ Executed on 2026-08-28 from `/Users/davidmontgomery/ragweld`.
 - The current full-gate count is higher than the earlier pre-closeout run
   because the W34 observability regression and the stale-corpus config-readiness
   regression each gained a permanent test.
+- The W37 tree was then reverified from scratch:
+  - deployment contract: `34 passed` in `17.66s`
+  - full suite: `1219 passed, 98 skipped, 7 warnings` in `256.90s`
+  - docs ownership, banned patterns, generated types, LiteLLM lockstep, and
+    `git diff --check`: pass
 
 ### External adversarial review of record
 
@@ -56,6 +64,16 @@ Executed on 2026-08-28 from `/Users/davidmontgomery/ragweld`.
   - `dc42075a`: W36 deployment-script/test hygiene wave plus rollout-plan rewrite
 - The two one-shot `None` artifacts were renamed `*-failed.md` and are not
   cited as review evidence.
+- Final-range paid GLM rerun:
+  `.superpowers/sdd/2026-08-27-proxmox-runtime-foundation/glm-rereview-9d834fcf..dc42075a.md`
+  with sibling `.jsonl` trace, `35` tool rounds, verdict `PASS`.
+- The harness initially stopped at its own obsolete 24-round cap. Its preserved
+  trace was rebuilt exactly, a regression test proved continuation at round 25,
+  and the same review continued without a total-round cutoff until the model
+  returned its report. The model receives up to one hour per response.
+- The rerun found no P1 source defect, secret leak, auth bypass, or fake-green
+  test in the final fix range. Its two P2 gate observations are closed by the
+  final full-suite evidence above and by this final-range rerun itself.
 
 Reason for the unsandboxed rerun: the managed sandbox blocked localhost test
 servers, local database sockets, and Chromium launch/cleanup paths needed by
@@ -136,8 +154,11 @@ Ready:
 - external adversarial review of record, with its actionable findings closed in
   committed source
 - rollout planning from the corrected pve1 design
-- next remote rollout step is ready to start at Task 1 Step 3
+- Plex Task 1 preflight and fresh PBS rollback backups complete
+- W37 automount safety fix committed and ready to publish
 
 Not yet done:
 
-- any Proxmox, DNS, Cloudflare, Plex, or pve1 mutation
+- NFS bridge installation, Plex migration, and post-migration acceptance
+- Ragweld LXC 100 provisioning, DNS/Cloudflare/auth, clean corpus seeding, and
+  final external-browser/recovery acceptance
