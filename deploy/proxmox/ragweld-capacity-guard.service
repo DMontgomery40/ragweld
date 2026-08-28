@@ -1,0 +1,11 @@
+[Unit]
+Description=Ragweld pve1 thin-pool and guest-volume capacity guard
+After=pve-cluster.service lvm2-monitor.service
+Wants=lvm2-monitor.service
+ConditionPathExists=/etc/pve/lxc/100.conf
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/flock --nonblock --conflict-exit-code 0 /run/lock/ragweld-capacity-guard.lock /usr/local/sbin/ragweld-host-capacity-guard.sh
+TimeoutStartSec=180s
+UMask=0077

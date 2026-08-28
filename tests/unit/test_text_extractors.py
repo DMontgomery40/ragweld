@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import subprocess
+import sys
+import textwrap
 from pathlib import Path
 
 from server.indexing.text_extractors import extract_text_for_path, extraction_method_for_path
@@ -84,6 +87,46 @@ def test_extract_text_for_html_uses_docling_and_keeps_tables(tmp_path: Path) -> 
     assert out is not None
     assert "calibrated every 45 days" in out
     assert "|" in out  # table survived conversion to markdown
+
+
+def test_docling_converter_singleton_is_thread_safe_under_real_concurrent_threads() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    script = textwrap.dedent(
+        """
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+
+        from server.indexing import text_extractors as text_extractors
+
+
+        def race_once() -> None:
+            text_extractors._DOCLING_CONVERTER = None
+            barrier = threading.Barrier(8)
+
+            def build(_index: int) -> int:
+                barrier.wait()
+                return id(text_extractors._docling_converter())
+
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                ids = list(executor.map(build, range(8)))
+            if len(set(ids)) != 1:
+                print(ids)
+                raise SystemExit(1)
+
+
+        for _ in range(5):
+            race_once()
+        """
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=repo_root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_extraction_method_is_direct_for_code_and_text(tmp_path: Path) -> None:

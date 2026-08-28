@@ -14,11 +14,11 @@ import sys
 import threading
 import uuid
 from collections import defaultdict
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from starlette.responses import StreamingResponse
@@ -101,6 +101,7 @@ from server.services.config_store import CorpusNotFoundError
 from server.services.config_store import get_config as load_scoped_config
 
 logger = logging.getLogger(__name__)
+T = TypeVar("T")
 
 router = APIRouter(tags=["index"])
 
@@ -112,6 +113,8 @@ _STATS: dict[str, IndexStats] = {}
 _TASKS: dict[str, asyncio.Task[None]] = {}
 _EVENT_QUEUES: dict[str, asyncio.Queue[dict[str, Any]]] = {}
 _LAST_STARTED_REPO: str | None = None
+# Keep Docling OCR serialized even if an awaiting index task is cancelled.
+_DOCLING_EXTRACTION_LOCK = asyncio.Lock()
 
 _MODELS_JSON_PATH = Path(__file__).parent.parent.parent / "data" / "models.json"
 _INDEX_RUNS_DIR = Path(__file__).parent.parent.parent / "data" / "index_runs"
@@ -1449,6 +1452,99 @@ async def _run_index(
                 await neo4j.disconnect()
 
 
+def _extract_text_for_index_sync(
+    path: Path,
+    *,
+    parquet_max_rows: int = 5000,
+    parquet_max_chars: int = 2_000_000,
+    parquet_max_cell_chars: int = 20_000,
+    parquet_text_columns_only: bool = True,
+    parquet_include_column_names: bool = True,
+) -> str | None:
+    content = extract_text_for_path(
+        path,
+        parquet_max_rows=parquet_max_rows,
+        parquet_max_chars=parquet_max_chars,
+        parquet_max_cell_chars=parquet_max_cell_chars,
+        parquet_text_columns_only=parquet_text_columns_only,
+        parquet_include_column_names=parquet_include_column_names,
+    )
+    if content is not None:
+        return content
+    return path.read_text(encoding="utf-8", errors="ignore")
+
+
+async def _run_docling_extraction_locked(
+    func: Callable[..., T],
+    /,
+    *args: Any,
+    **kwargs: Any,
+) -> T:
+    await _DOCLING_EXTRACTION_LOCK.acquire()
+    released = False
+
+    def _release_lock(_future: object | None = None) -> None:
+        nonlocal released
+        if released:
+            return
+        released = True
+        _DOCLING_EXTRACTION_LOCK.release()
+
+    worker_coroutine: Any = None
+    worker: asyncio.Task[T] | None = None
+    callback_registered = False
+    try:
+        worker_coroutine = asyncio.to_thread(func, *args, **kwargs)
+        worker = asyncio.create_task(worker_coroutine)
+        worker.add_done_callback(_release_lock)
+        callback_registered = True
+        return await asyncio.shield(worker)
+    except BaseException:
+        if worker is not None and not callback_registered and not worker.done():
+            try:
+                await asyncio.shield(worker)
+            except BaseException:
+                pass
+        raise
+    finally:
+        if worker is None:
+            if worker_coroutine is not None:
+                worker_coroutine.close()
+            _release_lock()
+        elif worker.done() or not callback_registered:
+            _release_lock()
+
+
+async def _extract_text_for_index(
+    path: Path,
+    *,
+    parquet_max_rows: int = 5000,
+    parquet_max_chars: int = 2_000_000,
+    parquet_max_cell_chars: int = 20_000,
+    parquet_text_columns_only: bool = True,
+    parquet_include_column_names: bool = True,
+) -> str | None:
+    if extraction_method_for_path(path) == "docling":
+        return await _run_docling_extraction_locked(
+            _extract_text_for_index_sync,
+            path,
+            parquet_max_rows=parquet_max_rows,
+            parquet_max_chars=parquet_max_chars,
+            parquet_max_cell_chars=parquet_max_cell_chars,
+            parquet_text_columns_only=parquet_text_columns_only,
+            parquet_include_column_names=parquet_include_column_names,
+        )
+    return await asyncio.to_thread(
+        _extract_text_for_index_sync,
+        path,
+        parquet_max_rows=parquet_max_rows,
+        parquet_max_chars=parquet_max_chars,
+        parquet_max_cell_chars=parquet_max_cell_chars,
+        parquet_text_columns_only=parquet_text_columns_only,
+        parquet_include_column_names=parquet_include_column_names,
+    )
+
+
 async def _run_index_body(
     *,
     repo_id: str,
@@ -1781,7 +1877,7 @@ async def _run_index_body(
         else:
             try:
                 with INDEX_STAGE_LATENCY_SECONDS.labels(stage="file_read").time():
-                    content = extract_text_for_path(
+                    content = await _extract_text_for_index(
                         abs_path,
                         parquet_max_rows=int(
                             getattr(cfg.indexing, "parquet_extract_max_rows", 5000) or 5000
@@ -1801,8 +1897,6 @@ async def _run_index_body(
                             getattr(cfg.indexing, "parquet_extract_include_column_names", True)
                         ),
                     )
-                    if content is None:
-                        content = abs_path.read_text(encoding="utf-8", errors="ignore")
             except Exception as exc:
                 INDEX_STAGE_ERRORS_TOTAL.labels(stage="file_read").inc()
                 _emit_event(

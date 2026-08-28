@@ -26,6 +26,371 @@
 
 ## Operator corrections (David, 2026-08-28)
 
+### W97 raised to P2 — I reproduced the ingestion deadlock; and W95 is closed
+
+W95 is done and your fix is better than the one I asked for: all four doubles
+now use `if [[ "$1" == --kill-after=* ]]; then shift 2; else shift; fi`, so each
+tolerates both argv shapes rather than only the new one. Contract file is 48
+passed, 0 failed. I am dropping the hoist request — three prologues are now
+byte-identical and the fourth only adds a `pct` case after the same prologue, so
+the live defect is gone and only the cost of a future sweep remains. Housekeeping
+if you touch it again; not a commit blocker.
+
+**W97 is the one to fix before you commit.** I stopped arguing it and
+reproduced it, replicating the structure of `_run_docling_extraction_locked` in
+a standalone script with a forced failure in the `acquire()` → `try` window:
+
+```
+lock held before:        False
+raised:                  MemoryError
+lock held AFTER failure:  True
+next extraction DEADLOCKED on acquire() -> all Docling ingestion blocked
+```
+
+The second caller never acquires. `_DOCLING_EXTRACTION_LOCK` is a module-level
+singleton, so that is every subsequent PDF, DOCX, PPTX, XLSX and HTML ingestion
+for the life of the process, recoverable only by restart. That is why I am
+moving it from P3 to P2 — narrow trigger, total blast radius.
+
+To be straight about the evidence: what I proved is that *any* exception in
+that window strands the lock and hangs the next caller. I did **not** produce a
+real `MemoryError` from `create_task` in situ; that trigger is credible on a
+24 GiB guest running OCR (both `create_task` and the `to_thread` coroutine
+allocate), and loop-shutdown `RuntimeError` is the other candidate, but neither
+is demonstrated. The structural defect is the thing to fix, and it wants fixing
+whichever trigger you think likeliest, because the fix is four lines:
+
+```python
+try:
+    worker = asyncio.create_task(asyncio.to_thread(func, *args, **kwargs))
+    worker.add_done_callback(_release_lock)
+except BaseException:
+    _release_lock()
+    raise
+```
+
+`BaseException`, not `Exception` — a cancellation delivered in that window must
+not strand the lock either. W98 (consume the orphan's exception in the
+done-callback) still stands and is cheaper still.
+
+
+### W97 / W98 — the cancellation-safe Docling lock is good work; it can still strand itself
+
+W86 and W92 both landed better than I asked for. On W86 you replaced the weak
+substring check with a full-line anchored regex that pins the label and the
+`|| status=1`, ran metadata through the whole 71 → 86 → 10 cycle, and — the
+part I liked — answered the count-coupling trap by swapping the brittle
+`count(...) == 2` assertions for explicit presence *and absence* checks, which
+is what those counts were badly approximating anyway. On W92 your status delta
+separates the deployed baseline from the reviewed local candidate and says "do
+not invent its future hash", which forecloses a failure I had not thought to
+guard against.
+
+`_run_docling_extraction_locked` is also the right design, and not the obvious
+one. `async with lock: await asyncio.to_thread(...)` looks correct and is not:
+cancel the caller and the lock drops while the OS thread keeps running Docling,
+so a second extraction runs concurrently with the orphan and the serialization
+is defeated. `shield` plus `add_done_callback` plus the idempotent `released`
+flag plus `finally: if worker.done()` to close the `call_soon` window is
+careful work.
+
+**W97 — the acquire sits outside the try.** Lines 1483 through 1494 —
+`acquire()`, `create_task`, `add_done_callback` — are all before the `try` at
+1495. Anything raising in that window leaves a module-level lock held by nobody
+and released by nothing, so **every subsequent PDF, DOCX, PPTX, XLSX and HTML
+ingestion blocks forever on `acquire()` until the process restarts.** Not as
+theoretical as it sounds: `create_task` raises `MemoryError` under allocation
+pressure, and the one path where that is plausible here is the one about to
+hand a 359-page PDF to an OCR pipeline on a 24 GiB guest. It would also present
+as "indexing hangs, API stops progressing" — identical to the W77 symptom you
+just fixed, so it would likely be misdiagnosed as that regressing.
+
+Wrap the wiring: `try: worker = create_task(...); worker.add_done_callback(...)
+except BaseException: _release_lock(); raise`. `BaseException`, not
+`Exception` — a cancellation delivered in that window must not strand the lock
+either.
+
+**W98 — the orphan's exception is never retrieved.** Once the caller is
+cancelled nothing awaits `worker` again, so a Docling failure surfaces as a
+detached `Task exception was never retrieved` at GC time, attributed to no
+request. Not a correctness bug, a diagnosability one, and it lands on exactly
+the operator who is already staring at odd ingestion behaviour. Have the
+done-callback consume it — it already receives the future — and log it with a
+line saying the caller had gone away.
+
+**One freshness note on the delta itself,** since it is the same shape as the
+problem it fixed: it lists W80/W83/W86/W87/W88/W89 as implemented but not W90,
+W91 or W95, which are open. Either add them, or give the block a standing rule
+— "anything not listed here is tracked in the watchdog file" — so it degrades
+honestly instead of reading as complete.
+
+
+### W95 — you swept three of the four `timeout` doubles; the fourth is the failing test
+
+W87 and W88 are both landed and good — `text_extractors.py` now has
+`import threading`, `_DOCLING_CONVERTER_LOCK` and `with _DOCLING_CONVERTER_LOCK:`,
+so the module-local invariant sits underneath your `asyncio.Lock` policy exactly
+as I asked, and the test that measured seven duplicate converters is green.
+
+Adding `--kill-after=10s` to `run_with_timeout` was right. The problem is that
+your `timeout` doubles emulate that CLI positionally, and you updated three of
+them (test lines 1099, 1164, 1293, each gaining
+`if [[ "$1" == --kill-after=* ]]; then shift 2`) and missed the fourth at line
+1423, which is still a bare `shift` then `exec "$@"`. I ran it both ways to be
+sure:
+
+```
+double 9s echo hi                    -> hi
+double --kill-after=10s 9s echo hi   -> exec: 9s: not found  (127)
+```
+
+One `shift` eats the flag, so it tries to exec a program called `9s`.
+
+Watch the bit that hides it. That double serves a parametrised test: the
+`exit 42` case expects "pveum user list failed" and the `not-json` case expects
+"pveum returned malformed JSON". With the double broken *both* commands die at
+127, so both emit "pveum user list failed" — the first case still passes, but
+only because the broken fixture produces the string it was looking for; the
+fake `pveum`'s `exit 42` is never reached. A completely broken double therefore
+shows up as one failure instead of two, which is why it reads like an isolated
+red-first test rather than a sweep you didn't finish.
+
+Fix the fourth double, but do the structural fix too: hoist one
+`_FAKE_TIMEOUT_SOURCE` constant (or a fixture that writes it) and point all four
+call sites at it. Four hand-copied emulations of one CLI is what made an
+incomplete sweep possible in the first place — with one copy, the next flag on
+`run_with_timeout` is a one-line change.
+
+**Rule to carry:** a test double that reimplements a CLI's argument parsing is
+coupled to the caller's exact argv shape, and nobody diffs scaffolding against
+its caller. Positional doubles also fail with plausible-looking error text, so
+the symptom reads as a product bug instead of a fixture bug. Keep one copy, and
+parse flags rather than count positions.
+
+For the record, the other two current failures are not regressions:
+`test_docling_cancellation_keeps_lock_until_blocking_worker_finishes` is
+red-first against a symbol you have not added yet, and
+`test_proxmox_capacity_guard_alerts_on_real_guest_df_output_without_override`
+is the W87 landing — it passes in a full-file run now (47 passed, 1 failed).
+
+
+### W90 / W91 / W92 — the capacity unit is good; two assertions cover the wrong half, and the handoff is still on disk
+
+The service and timer are well built and I want that noted before the nitpicks:
+`--conflict-exit-code 0`, `install -d -m 0700 "$STATE_DIR"` (atomic mode, better
+than the `mkdir -p` I went looking for), `UMask=0077`,
+`ConditionPathExists=/etc/pve/lxc/100.conf` so it no-ops on a host without the
+guest, `After=pve-cluster.service lvm2-monitor.service`, and
+`RandomizedDelaySec=30s`. Two weak assertions against that much correct detail
+is a good ratio.
+
+**W90 — assert the flag that carries the behaviour.** The test says
+`assert "flock --nonblock" in service`, which matches whether or not
+`--conflict-exit-code 0` is present. That flag is the whole point: without it a
+skipped overlapping run exits 1, a `Type=oneshot` unit records a failure, and
+since the timer keeps firing you get a permanently failed unit that masks the
+real alerts the guard exists to raise. Assert the full flag set, or anchor a
+regex on the entire `ExecStart=` line so the lock path and script path are
+pinned too.
+
+**W91 — `Persistent=true` does nothing here.** Per `systemd.timer(5)` it only
+has an effect on timers configured with `OnCalendar=`, and this timer is
+monotonic-only (`OnBootSec`/`OnUnitActiveSec`). The test asserts it anyway,
+which pins a no-op as contract and reads as "missed runs are caught up after
+downtime" — they are not. Harmless in practice, since `OnBootSec=5m` already
+covers the after-downtime case, so this is about the contract claiming
+something untrue. Drop the directive and its assertion, or keep it with a
+comment saying it is inert until an `OnCalendar=` exists.
+
+**W92 — finish the handoff fix you started.** Unstaging
+`handoff-2026-08-28-pve1-fresh-agent.md` was the right call and it closes the
+sharp edge of W89: the commit will no longer contain both the W80
+implementation and a document instructing someone to write it. But the file is
+still on disk in `docs/exec-plans/active/`, which AGENTS.md puts in mandatory
+read order — and read order is a filesystem path, not a git query. Any agent in
+this checkout still hits §10 "Remaining gate B" for work that is already done.
+Now that it is untracked the edit is free: put the status delta under the
+existing "current through 2026-08-28 13:50 MDT" stamp — W80 closed, gate A
+authoring closed with five test functions and only the pve1 install remaining,
+W83/W86/W87/W88/W90/W91 open.
+
+
+### W89 — before you commit: the handoff you staged tells a fresh agent to build what is in the same commit
+
+Everything is staged and nothing is committed yet, so this is easy to fix now
+and annoying to fix later. I checked the staged diff for secrets first: clean —
+the only secret-shaped strings are two git SHAs and the SHA-256 of the public
+NASA NTRS fixture, which is good practice to pin. Hosts are your own domains,
+IPs are RFC1918. No reason to hold the commit.
+
+The problem is `docs/exec-plans/active/handoff-2026-08-28-pve1-fresh-agent.md`.
+It is stamped "current through 2026-08-28 13:50 MDT" and the W80 work landed
+after that stamp, so one commit will contain both the offload
+(`server/api/index.py:1475-1500`), `_DOCLING_EXTRACTION_LOCK` at 115, the
+`DOCLING_NUM_THREADS`/`OMP_NUM_THREADS` caps and four passing regressions —
+*and* §10 "Remaining gate B — implement W80 event-loop offload and explicit CPU
+cap", whose step 5 says "Implement the W80 FIFO event-loop regression first,
+watch it fail, then add the offload." `docs/exec-plans/active/` is mandatory
+read order under AGENTS.md, so a fresh agent follows that and writes a test that
+passes immediately, which is the most confusing place to start.
+
+Also stale in the same file: §9 says "three focused tests" — there are five test
+functions now, six cases — and it frames gate A as unfinished when the artifacts
+are authored and tested and only the pve1 install remains.
+
+Do not rewrite the gate bodies; the reasoning in them is worth keeping. The file
+already has a "current through" stamp, so put a short **status delta** right
+under it: W80 closed (offload, lock, thread caps, four tests), gate A authoring
+closed with five test functions and only installation outstanding, W83/W86/W87/
+W88 still open. A fresh agent then hits the delta before it reaches any spent
+imperative.
+
+**Rule to carry:** a handoff is a snapshot, but committing it into a
+mandatory-read directory turns it into a standing instruction. When a snapshot
+and the work it describes land in the same commit, the snapshot must carry a
+delta — or it should not be in the mandatory-read path at all.
+
+
+### W88 — your Docling lock is better than the fix I asked for; keep it, and add the small one underneath
+
+You ignored my `threading.Lock` suggestion and did something better, so take
+the credit: `_DOCLING_EXTRACTION_LOCK` held across the whole extraction, with
+non-Docling suffixes bypassing it, bounds total OCR concurrency to one. My
+version would only have stopped the duplicate model load and still allowed N
+corpora to run N concurrent OCR jobs at 4 threads each. Yours attacks the
+symptom I actually measured in W77 — roughly 7.5 cores across 152 threads — not
+just the memory spike. And
+`test_unsupported_suffix_fallback_bypasses_the_docling_lock` is a good test:
+proving a plain read is *not* serialized is the part most people skip.
+
+Two things to finish.
+
+**Add the module-local lock as well — it is not redundant.** The guard now
+lives in `server/api/index.py` while the state it protects
+(`_DOCLING_CONVERTER`) lives in `server/indexing/text_extractors.py:13`, still
+an unguarded check-then-set in a module that imports no `threading`. The
+invariant became "any caller of `extract_text_for_path` on a Docling suffix
+must hold `server.api.index._DOCLING_EXTRACTION_LOCK`", which nothing states
+and the owning module cannot enforce. It holds only because there is exactly
+one production caller today; a Flyte ingest task, a CLI path or a script would
+each break it silently. `asyncio.Lock` is also per-event-loop, so any second
+loop gets nothing. Treat the two as different things — yours is the policy, the
+five-liner is the invariant — the same belt-and-braces call you made with
+`DOCLING_NUM_THREADS` plus `OMP_NUM_THREADS`. Add a one-line comment at the
+global naming the guarantee, so it is readable where the state is defined.
+
+**Write down that the serialization is intentional.** Holding the lock across
+the full extraction means two corpora can never OCR in parallel; multi-corpus
+indexing wall-clock is now serialized. On a 24 GiB guest with a 4-thread cap I
+want that, so keep it — but record it as a deliberate throughput decision tied
+to W77. Otherwise the next person chasing slow parallel indexing finds the lock,
+sees no rationale, and removes it.
+
+
+### W86 / W87 — the capacity-guard tests are good; close the two branches they step over
+
+The new guard tests are the right shape and I want that shape kept. They run
+the script under `bash` against fake `sendmail`/`logger`/`timeout`/`pveum`/`lvs`
+binaries and assert real behaviour — dedup, escalation, RECOVERED, a probe
+timeout that must not suppress its sibling, no state written when delivery
+fails plus a clean retry, the exact `timeout` argv, and no `Traceback` on
+`pveum` failure. The `0 < TimeoutStartSec < OnUnitActiveSec` overlap invariant
+is a genuine invariant, not a string match. That is how shell should be tested
+here.
+
+Two branches are stepped over, both cheap to close with the harness you already
+built.
+
+**W86 (do this one) — `pool_meta` never alerts in any test.** Every case pins
+metadata below warning (`RAGWELD_POOL_META_PERCENT: "10"`, and the fake `lvs`
+printing `71.0 10.0`), so `send_transition pool_meta ... 70 85` at
+`host-capacity-guard.sh:231` has no behavioural proof at all. The only guard on
+those numbers is `assert "70" in guard and "85" in guard` — a whole-file
+substring test that still passes if the thresholds are swapped or if the digits
+turn up inside an unrelated number. You already do this properly for the timer
+with an anchored `re.search`, so match that: assert on the call line itself for
+all three pairs (`guest_root 75 90`, `pool_data 70 85`, `pool_meta 70 85`), and
+add warning/critical/recovered cases for metadata.
+
+This is the branch that matters most. A data-full thin pool blocks new writes;
+a metadata-full thin pool goes read-only and needs offline `thin_check` /
+`lvconvert --repair`. The least-tested threshold is guarding the worse
+outcome.
+
+Trap before you write it: the existing assertions say
+`count("Subject: [Ragweld][WARNING]") == 2`, and that 2 is guest_root plus
+pool_data. Push metadata over 70 inside the shared `base_env` and those counts
+break in cases that have nothing to do with your change. Give the metadata case
+its own state dir and its own env.
+
+**W87 (small) — no test ever runs the `df` parse successfully.** The dedup and
+retry tests inject `RAGWELD_GUEST_USED_PERCENT`, and the one test that reaches
+the real command forces `timeout` to exit 124, so
+`df --output=pcent / | tail -n 1 | tr -d ' %'` at line 201 is never executed
+against real output. Your `lvs` side is covered properly — the fake prints
+`71.0 10.0` and that exercises the column split and the `${value%%.*}`
+truncation. Mirror it: a fake `pct` printing `Use%` then ` 76%`, with
+`RAGWELD_GUEST_USED_PERCENT` unset, asserting the guest_root WARNING fires.
+
+**Rule to carry:** an env seam that injects an already-parsed value is useful,
+but every test that uses it skips the parsing it was meant to cover. When a
+script has a probe and a parse, at least one test per probe has to go through
+the real command shape.
+
+
+### W83 — lock the Docling converter singleton, in the same slice as the W80 offload
+
+The `asyncio.to_thread` offload is right and I want it kept. It has one
+consequence you need to close before this ships: it removed the mutual
+exclusion the event loop was giving you for free.
+
+`server/indexing/text_extractors.py:21-26` builds `_DOCLING_CONVERTER` with an
+unguarded check-then-set, and that file imports no `threading`. That was safe
+only while extraction ran on the single event-loop thread. It now runs in the
+default thread pool, and the run fence is per-corpus — `server/api/index.py:119`
+is `_ACTIVE_RUNS: dict[str, str]` keyed by `repo_id` — so two corpora indexing
+at once puts two executor threads into that function, both seeing `None`, both
+loading Docling's layout and OCR weights. On a 24 GiB guest that duplicate load
+is the memory spike, and its trigger ("two corpora at the same time") makes it
+nearly unreproducible after the fact.
+
+Do it as double-checked locking with a module-level `threading.Lock()` — no
+behaviour change, five lines. **You already wrote this pattern in the file you
+are fixing:** `server/api/index.py:462` guards `_EVENT_WRITER` with
+`with _EVENT_WRITER_LOCK:` around exactly this check-then-set. So make the
+converter match `_ensure_event_writer` — same idiom, already shipped and
+reviewed. `_DOCLING_CONVERTER` is just the one that predates the offload.
+
+Keep it to that one symbol. I audited the rest: it is the only lazily-created
+`= None` module global in `server/`, the other module-level containers are
+constant lookup tables or `@lru_cache` (thread-safe in CPython), `_ACTIVE_RUNS`
+is never touched from an offloaded callee, and `_flush_run_events_sync` only
+does a thread-safe `Queue.join()`. **Do not turn this into a codebase-wide
+locking sweep.** And W80 itself needs nothing further — `extract_text_for_path`
+has exactly one production caller and it is your offload wrapper, so no second
+blocking call site was left behind. Red test first, in
+`tests/api/test_index_batch_parallelism.py` next to the W80 test: set
+`_DOCLING_CONVERTER = None`, run two `asyncio.to_thread(_docling_converter)`
+calls under `asyncio.gather`, and assert the two returns are **the same object**
+(`a is b`). Identity is the honest assertion — true only if exactly one
+converter was built, no mocking required, and red today.
+
+**Carry the rule, not just the patch:** moving a sync function into a thread
+pool promotes every lazy global in its transitive callee set from
+single-threaded to concurrent. Audit that set for module-level caches whenever
+you offload, and land the offload and the lock together.
+
+**Credit where it is due on W80 itself:** extracting a module-level
+`async def _extract_text_for_index` is better than the inline `to_thread` I
+asked for — it is an addressable symbol, so GitNexus impact works on it and it
+is unit-testable on its own. And the named-pipe test is the right proof: it
+asserts the loop resumes while extraction blocks, with no services and no
+mocks. Both halves of the thread cap check out too — I verified
+`DOCLING_NUM_THREADS` and `OMP_NUM_THREADS` each resolve to
+`AcceleratorOptions.num_threads == 4`, and `set -a` in
+`source_private_env_file()` does export them to uvicorn.
+
+
 From `docs/exec-plans/active/watchdog-proxmox-foundation-2026-08-28.md`. These
 override the conflicting steps below until the steps themselves are rewritten.
 
@@ -171,6 +536,15 @@ override the conflicting steps below until the steps themselves are rewritten.
   onnxruntime intra/inter-op threads at 2-4) so indexing cannot take half the
   box, and **budget seeding in hours, not minutes**, treating the API as
   offline throughout.
+  **Root cause located (W80):** `server/api/index.py:1784` calls
+  `extract_text_for_path(...)` directly inside `async def
+  _flush_pending_cross_file_chunks` (`:1657`), and
+  `server/indexing/text_extractors.py:93` runs `.convert()` synchronously — so
+  OCR executes on the event loop. `server/indexing/embedder.py` already uses
+  `await asyncio.to_thread(...)` in five places for exactly this reason.
+  Minimal fix is `content = await asyncio.to_thread(extract_text_for_path, ...)`,
+  plus the thread cap so one document cannot claim half the LXC. `c2a8e83b`
+  did not address this — its "harden ingestion" is the libgl1/cv2 preflight.
 - **W75 (measured 2026-08-28, sharpens W59) — alert on the volume as well as
   the pool; the volume is the nearer wall.** Two hours in and with **no corpora
   yet**, `vm-100-disk-0` is already at **15.64% of 300 GB (~44 GB)** and
@@ -189,6 +563,37 @@ override the conflicting steps below until the steps themselves are rewritten.
   `vm-100-disk-0` Data% was 15.67%, and `pve/data` was 6.94% Data / 0.46%
   Meta. The first corpus moved the pool by only 0.02 percentage points; the
   guardrails remain required, but capacity is not a seeding blocker.
+  **Independent-review correction (W81):** the original 10% autoextend is
+  impossible on this host: 10% of the 794.30 GiB pool is about 79.4 GiB, while
+  the VG has only 16.00 GiB free. Use the repo-owned per-LV
+  `deploy/proxmox/ragweld-thinpool.profile` at threshold 80% / extension 1%
+  (about 7.9 GiB), attach it only to `pve/data`, and treat every extension as
+  an immediate capacity action rather than a rescue plan. Install the
+  host-level five-minute capacity timer so alerts do not depend on LXC 100 or
+  its observability stack. It must email the configured `root@pam` address and
+  journal deduplicated warning/critical/recovery transitions for guest `/` at
+  75%/90%, pool Data%/Meta% at 70%/85%, and measurement-probe failure.
+
+  Install and verify on pve1:
+
+  ```bash
+  install -m 0755 deploy/proxmox/host-capacity-guard.sh /usr/local/sbin/ragweld-host-capacity-guard.sh
+  install -m 0644 deploy/proxmox/ragweld-capacity-guard.service /etc/systemd/system/ragweld-capacity-guard.service
+  install -m 0644 deploy/proxmox/ragweld-capacity-guard.timer /etc/systemd/system/ragweld-capacity-guard.timer
+  install -m 0644 deploy/proxmox/ragweld-thinpool.profile /etc/lvm/profile/ragweld-thinpool.profile
+  lvmconfig --type profilable-metadata --file /etc/lvm/profile/ragweld-thinpool.profile activation/thin_pool_autoextend_threshold activation/thin_pool_autoextend_percent
+  lvchange --metadataprofile ragweld-thinpool pve/data
+  systemd-analyze verify /etc/systemd/system/ragweld-capacity-guard.service /etc/systemd/system/ragweld-capacity-guard.timer
+  systemctl daemon-reload
+  systemctl enable --now ragweld-capacity-guard.timer
+  systemctl start ragweld-capacity-guard.service
+  lvs -o lv_name,lv_profile,seg_monitor,data_percent,metadata_percent pve/data
+  systemctl list-timers ragweld-capacity-guard.timer
+  ```
+
+  Roll back by disabling the timer, running `lvchange --detachprofile
+  pve/data`, removing the four installed artifacts and state directory, then
+  running `systemctl daemon-reload`.
   ~~Original text below.~~
 - **W59 (original) — watch the thin pool, not the RAM.** pve1's `local-lvm` is a 794 GiB
   thin pool at 1.58% used (~819 GiB available), holding both
@@ -200,8 +605,8 @@ override the conflicting steps below until the steps themselves are rewritten.
   seeding (Task 7): add a `pve/data` `Data%`/`Meta%` alert at 70% warn / 85%
   page (Prometheus+Alertmanager are already in the stack; a root cron running
   `lvs --noheadings -o data_percent,metadata_percent pve/data` is the fallback),
-  set `thin_pool_autoextend_threshold = 80` and `thin_pool_autoextend_percent
-  = 10` in `/etc/lvm/lvm.conf`, and record the ~819 GiB shared ceiling in the
+  The original global `80/10` autoextend prescription is superseded by W81;
+  use the scoped `80/1` profile above and record the shared ceiling in the
   evidence so seeding is sized against a known budget.
 - **W17 — Cloudflare limits.** Note the 100 MB request-body and ~100 s idle
   response limits in the evidence file; corpus seeding stays rsync.
@@ -869,7 +1274,7 @@ Completion requires the second pass to satisfy the spec acceptance criteria, not
 
 **Interfaces:**
 - Consumes: accepted LXC 100.
-- Produces: verified initial backup, daily retention job, logical-backup commands, isolated restore proof, and final source/runtime hashes.
+- Produces: verified initial backup, recorded existing PBS policy, safe logical-backup commands, isolated restore proof, and final source/runtime hashes.
 
 - [ ] **Step 1: Create and verify the first LXC backup**
 
@@ -879,70 +1284,87 @@ ssh -i /Users/davidmontgomery/.ssh/proxmox_portable_backup_ed25519 -o Identities
 
 Expected: `TASK OK` and a new LXC 100 backup identifier.
 
-- [ ] **Step 2: Create the daily PBS job**
+- [ ] **Step 2: Record the existing enabled PBS policy**
 
-First verify no job ID `ragweld-daily` exists. Then:
+Read the current cluster backup policy and record the existing enabled job that
+already covers VMID 100:
 
 ```bash
-ssh -i /Users/davidmontgomery/.ssh/proxmox_portable_backup_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes root@192.168.68.171 "pvesh create /cluster/backup --id ragweld-daily --node pve1 --storage pbs-beelink --vmid 100 --mode snapshot --compress zstd --schedule '03:30' --prune-backups keep-daily=7,keep-weekly=4 --notes-template 'Ragweld {{guestname}} VMID {{vmid}} on {{node}}' --enabled 1"
+ssh -i /Users/davidmontgomery/.ssh/proxmox_portable_backup_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes root@192.168.68.171 'pvesh get /cluster/backup --output-format json'
 ```
 
-Read the job back with `pvesh get /cluster/backup` and record it.
+Expected: the existing enabled `backup-pbs-cluster` job includes VMID 100,
+uses snapshot + zstd, and targets `pbs-beelink`. Do **not** create a duplicate
+`ragweld-daily` job.
 
 - [ ] **Step 3: Create logical backup commands without exporting secrets**
 
-Create a dated mode-`0700` root and load credentials without printing them:
+Create a root-owned mode-`0700` staging directory first, never write directly
+to the final timestamp directory, and promote only after every command and
+health check succeeds:
 
 ```bash
 BACKUP_DATE="$(date -u +%Y%m%dT%H%M%SZ)"
-BACKUP_ROOT="/srv/ragweld/backups/$BACKUP_DATE"
-install -d -o ragweld -g ragweld -m 0700 "$BACKUP_ROOT"/{postgres,neo4j,qdrant,mlflow,langfuse}
+BACKUP_PARENT="/srv/ragweld/backups"
+STAGE_ROOT="$BACKUP_PARENT/.incomplete-$BACKUP_DATE"
+FINAL_ROOT="$BACKUP_PARENT/$BACKUP_DATE"
+QDRANT_API="http://127.0.0.1:56333"
+QDRANT_CONTAINER="$(docker compose --project-name ragweld -f /opt/ragweld/docker-compose.yml ps -q qdrant)"
+install -d -m 0700 "$BACKUP_PARENT" "$STAGE_ROOT"
+install -d -m 0700 "$STAGE_ROOT"/{postgres,neo4j,qdrant,mlflow,langfuse}
 set -a
 . /etc/ragweld/runtime.env
 . /etc/ragweld/langfuse.env
 set +a
-```
+declare -a QDRANT_SNAPSHOTS=()
+restore_services() {
+  docker compose --project-name ragweld -f /opt/ragweld/docker-compose.yml -f /opt/ragweld/infra/docker-compose.observability.yml start neo4j mlflow langfuse-clickhouse langfuse-minio langfuse langfuse-worker >/dev/null
+}
+cleanup_snapshots() {
+  for ENTRY in "${QDRANT_SNAPSHOTS[@]}"; do
+    IFS=: read -r COLLECTION SNAPSHOT_NAME <<<"$ENTRY"
+    curl -fsS -X DELETE "$QDRANT_API/collections/$COLLECTION/snapshots/$SNAPSHOT_NAME" >/dev/null || true
+  done
+}
+trap 'status=$?; if (( status != 0 )); then restore_services; cleanup_snapshots; rm -rf "$STAGE_ROOT"; fi; exit "$status"' EXIT
 
-Create logical Postgres dumps:
+docker compose --project-name ragweld -f /opt/ragweld/docker-compose.yml exec -T postgres pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc > "$STAGE_ROOT/postgres/ragweld.dump"
+docker compose --project-name ragweld -f /opt/ragweld/docker-compose.yml -f /opt/ragweld/infra/docker-compose.observability.yml exec -T langfuse-postgres pg_dump -U langfuse -d langfuse -Fc > "$STAGE_ROOT/langfuse/langfuse-postgres.dump"
 
-```bash
-docker compose --project-name ragweld -f /opt/ragweld/docker-compose.yml exec -T postgres pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc > "$BACKUP_ROOT/postgres/ragweld.dump"
-docker compose --project-name ragweld -f /opt/ragweld/docker-compose.yml -f /opt/ragweld/infra/docker-compose.observability.yml exec -T langfuse-postgres pg_dump -U postgres -d postgres -Fc > "$BACKUP_ROOT/langfuse/langfuse-postgres.dump"
-```
-
-Take one Qdrant snapshot per real collection and copy each snapshot out of the
-container using the returned snapshot name:
-
-```bash
-QDRANT_CONTAINER="$(docker compose --project-name ragweld -f /opt/ragweld/docker-compose.yml ps -q qdrant)"
-for COLLECTION in $(curl -fsS http://127.0.0.1:56333/collections | jq -r '.result.collections[].name'); do
-  SNAPSHOT_NAME="$(curl -fsS -X POST "http://127.0.0.1:56333/collections/$COLLECTION/snapshots" | jq -r '.result.name')"
+for COLLECTION in $(curl -fsS "$QDRANT_API/collections" | jq -r '.result.collections[].name'); do
+  SNAPSHOT_NAME="$(curl -fsS -X POST "$QDRANT_API/collections/$COLLECTION/snapshots" | jq -r '.result.name')"
   test -n "$SNAPSHOT_NAME"
-  install -d -m 0700 "$BACKUP_ROOT/qdrant/$COLLECTION"
-  docker cp "$QDRANT_CONTAINER:/qdrant/storage/collections/$COLLECTION/snapshots/$SNAPSHOT_NAME" "$BACKUP_ROOT/qdrant/$COLLECTION/$SNAPSHOT_NAME"
+  QDRANT_SNAPSHOTS+=("$COLLECTION:$SNAPSHOT_NAME")
+  install -d -m 0700 "$STAGE_ROOT/qdrant/$COLLECTION"
+  docker cp "$QDRANT_CONTAINER:/qdrant/snapshots/$COLLECTION/$SNAPSHOT_NAME" "$STAGE_ROOT/qdrant/$COLLECTION/$SNAPSHOT_NAME"
+  test -s "$STAGE_ROOT/qdrant/$COLLECTION/$SNAPSHOT_NAME"
 done
+
+docker compose --project-name ragweld -f /opt/ragweld/docker-compose.yml -f /opt/ragweld/infra/docker-compose.observability.yml stop neo4j mlflow langfuse-clickhouse langfuse-minio langfuse langfuse-worker
+docker run --rm -v ragweld_neo4j_data:/data:ro -v "$STAGE_ROOT/neo4j:/backup" neo4j:5.26.20-community neo4j-admin database dump neo4j --to-path=/backup --overwrite-destination=true
+docker run --rm -v ragweld_mlflow_data:/source:ro -v "$STAGE_ROOT/mlflow:/backup" alpine:3.22 tar -C /source -czf /backup/mlflow-data.tgz .
+docker run --rm -v ragweld_langfuse_clickhouse_data:/source:ro -v "$STAGE_ROOT/langfuse:/backup" alpine:3.22 tar -C /source -czf /backup/langfuse-clickhouse.tgz .
+docker run --rm -v ragweld_langfuse_minio_data:/source:ro -v "$STAGE_ROOT/langfuse:/backup" alpine:3.22 tar -C /source -czf /backup/langfuse-minio.tgz .
+restore_services
+
+cleanup_snapshots
+QDRANT_SNAPSHOTS=()
+curl -fsS http://127.0.0.1:58012/api/ready >/dev/null
+curl -fsS http://127.0.0.1:55500/health >/dev/null
+curl -fsS http://127.0.0.1:53000/api/public/health >/dev/null
+chmod -R go-rwx "$STAGE_ROOT"
+(
+  cd "$STAGE_ROOT"
+  find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum
+) > "$STAGE_ROOT/SHA256SUMS"
+mv "$STAGE_ROOT" "$FINAL_ROOT"
+trap - EXIT
 ```
 
-Stop only stateful services that cannot be copied consistently while live,
-archive their named volumes, and restart the exact services immediately:
-
-```bash
-docker compose --project-name ragweld -f /opt/ragweld/docker-compose.yml -f /opt/ragweld/infra/docker-compose.observability.yml stop neo4j mlflow langfuse langfuse-worker langfuse-clickhouse langfuse-minio
-docker run --rm -v ragweld_neo4j_data:/data:ro -v "$BACKUP_ROOT/neo4j:/backup" neo4j:5.26.20-community neo4j-admin database dump neo4j --to-path=/backup --overwrite-destination=true
-docker run --rm -v ragweld_mlflow_data:/source:ro -v "$BACKUP_ROOT/mlflow:/backup" alpine:3.22 tar -C /source -czf /backup/mlflow-data.tgz .
-docker run --rm -v ragweld_langfuse_clickhouse_data:/source:ro -v "$BACKUP_ROOT/langfuse:/backup" alpine:3.22 tar -C /source -czf /backup/langfuse-clickhouse.tgz .
-docker run --rm -v ragweld_langfuse_minio_data:/source:ro -v "$BACKUP_ROOT/langfuse:/backup" alpine:3.22 tar -C /source -czf /backup/langfuse-minio.tgz .
-docker compose --project-name ragweld -f /opt/ragweld/docker-compose.yml -f /opt/ragweld/infra/docker-compose.observability.yml start neo4j mlflow langfuse-clickhouse langfuse-minio langfuse-worker langfuse
-chmod -R go-rwx "$BACKUP_ROOT"
-find "$BACKUP_ROOT" -type f ! -name SHA256SUMS -exec sha256sum {} + > "$BACKUP_ROOT/SHA256SUMS"
-```
-
-Re-run `/api/ready` and the Langfuse/MLflow health checks after restart. Add no
-backup payload to Git.
-
-After the command block succeeds, save that exact block as
-`/usr/local/sbin/ragweld-logical-backup`, add `#!/usr/bin/env bash` and
-`set -euo pipefail`, make it mode `0700`, and install:
+Add no backup payload to Git. Only after one clean manual run of that exact
+block succeeds should you save it as `/usr/local/sbin/ragweld-logical-backup`
+with `#!/usr/bin/env bash` plus `set -euo pipefail`, make it mode `0700`, and
+install:
 
 ```ini
 # /etc/systemd/system/ragweld-logical-backup.service
@@ -974,8 +1396,9 @@ WantedBy=timers.target
 
 Run `systemd-analyze verify` on both units, enable the timer, and record
 `systemctl list-timers ragweld-logical-backup.timer`. Component-backup pruning
-is not automated until measured backup growth establishes a safe retention
-window; PBS still enforces seven daily and four weekly whole-LXC restore points.
+remains deferred until measured backup growth establishes a safe retention
+window; PBS still enforces seven daily and four weekly whole-LXC restore
+points.
 
 - [ ] **Step 4: Prove an isolated restore**
 

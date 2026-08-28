@@ -1,0 +1,13 @@
+[Unit]
+Description=Check Ragweld and pve1 thin-pool capacity every five minutes
+
+[Timer]
+OnBootSec=5m
+OnUnitActiveSec=5m
+AccuracySec=30s
+RandomizedDelaySec=30s
+Persistent=true
+Unit=ragweld-capacity-guard.service
+
+[Install]
+WantedBy=timers.target

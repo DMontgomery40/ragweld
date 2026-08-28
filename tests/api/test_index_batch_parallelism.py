@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import os
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -11,6 +16,168 @@ from server.indexing.chunker import Chunker
 from server.indexing.loader import FileLoader
 from server.models.tribrid_config_model import TriBridConfig
 from server.retrieval.contracts import sparse_contract_from_config
+
+
+@pytest.mark.asyncio
+async def test_file_extraction_yields_the_api_event_loop(tmp_path: Path) -> None:
+    extractor = index_api._extract_text_for_index
+    fifo = tmp_path / "slow-reader.txt"
+    os.mkfifo(fifo)
+
+    def _delayed_writer() -> None:
+        time.sleep(0.5)
+        fifo.write_text("event loop stayed responsive", encoding="utf-8")
+
+    writer = threading.Thread(target=_delayed_writer, daemon=True)
+    writer.start()
+    started = time.monotonic()
+    extraction = asyncio.create_task(extractor(fifo))
+    await asyncio.sleep(0.05)
+    responsive_after = time.monotonic() - started
+    content = await asyncio.wait_for(extraction, timeout=2.0)
+    writer.join(timeout=2.0)
+
+    assert responsive_after < 0.35
+    assert content == "event loop stayed responsive"
+    assert not writer.is_alive()
+
+
+@pytest.mark.asyncio
+async def test_unsupported_suffix_fallback_file_read_yields_the_api_event_loop(
+    tmp_path: Path,
+) -> None:
+    extractor = index_api._extract_text_for_index
+    fifo = tmp_path / "slow-reader.unsupported"
+    os.mkfifo(fifo)
+
+    def _delayed_writer() -> None:
+        time.sleep(0.5)
+        fifo.write_text("fallback stayed responsive", encoding="utf-8")
+
+    writer = threading.Thread(target=_delayed_writer, daemon=True)
+    writer.start()
+    started = time.monotonic()
+    extraction = asyncio.create_task(extractor(fifo))
+    await asyncio.sleep(0.05)
+    responsive_after = time.monotonic() - started
+    content = await asyncio.wait_for(extraction, timeout=2.0)
+    writer.join(timeout=2.0)
+
+    assert responsive_after < 0.35
+    assert content == "fallback stayed responsive"
+    assert not writer.is_alive()
+
+
+@pytest.mark.asyncio
+async def test_unsupported_suffix_fallback_bypasses_the_docling_lock(tmp_path: Path) -> None:
+    extractor = index_api._extract_text_for_index
+    fifo = tmp_path / "slow-reader.lockless"
+    os.mkfifo(fifo)
+
+    def _delayed_writer() -> None:
+        time.sleep(0.5)
+        fifo.write_text("docling lock ignored", encoding="utf-8")
+
+    writer = threading.Thread(target=_delayed_writer, daemon=True)
+    writer.start()
+    started = time.monotonic()
+    async with index_api._DOCLING_EXTRACTION_LOCK:
+        extraction = asyncio.create_task(extractor(fifo))
+        await asyncio.sleep(0.05)
+        responsive_after = time.monotonic() - started
+        content = await asyncio.wait_for(extraction, timeout=2.0)
+    writer.join(timeout=2.0)
+
+    assert responsive_after < 0.35
+    assert content == "docling lock ignored"
+    assert not writer.is_alive()
+
+
+@pytest.mark.asyncio
+async def test_docling_cancellation_keeps_lock_until_blocking_worker_finishes(
+) -> None:
+    first_started = threading.Event()
+    first_release = threading.Event()
+    second_entered = threading.Event()
+
+    def _first_worker() -> str:
+        first_started.set()
+        assert first_release.wait(timeout=5.0)
+        return "first worker released"
+
+    def _second_worker() -> str:
+        second_entered.set()
+        return "second worker entered"
+
+    second_task: asyncio.Task[str | None] | None = None
+    first_task = asyncio.create_task(index_api._run_docling_extraction_locked(_first_worker))
+    try:
+        assert await asyncio.to_thread(first_started.wait, 5.0)
+
+        first_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await first_task
+
+        second_task = asyncio.create_task(index_api._run_docling_extraction_locked(_second_worker))
+        await asyncio.sleep(0.2)
+        assert not second_entered.is_set()
+
+        first_release.set()
+        content = await asyncio.wait_for(second_task, timeout=10.0)
+    finally:
+        first_release.set()
+        if second_task is not None and not second_task.done():
+            second_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await second_task
+
+    assert content is not None
+    assert content == "second worker entered"
+
+
+@pytest.mark.asyncio
+async def test_docling_task_creation_failure_releases_extraction_lock() -> None:
+    loop = asyncio.get_running_loop()
+    original_factory = loop.get_task_factory()
+    lock = index_api._DOCLING_EXTRACTION_LOCK
+
+    await lock.acquire()
+    extraction = asyncio.create_task(
+        index_api._run_docling_extraction_locked(lambda: "must not run")
+    )
+    await asyncio.sleep(0)
+
+    def _fail_to_thread_task_creation(
+        event_loop: asyncio.AbstractEventLoop,
+        coroutine: object,
+        **kwargs: object,
+    ) -> asyncio.Task[object]:
+        code = getattr(coroutine, "cr_code", None)
+        if getattr(code, "co_name", None) == "to_thread":
+            close = getattr(coroutine, "close", None)
+            if callable(close):
+                close()
+            raise MemoryError("forced task creation failure")
+        if original_factory is not None:
+            return original_factory(event_loop, coroutine, **kwargs)  # type: ignore[arg-type]
+        return asyncio.Task(coroutine, loop=event_loop, **kwargs)  # type: ignore[arg-type]
+
+    loop.set_task_factory(_fail_to_thread_task_creation)
+    lock.release()
+    try:
+        with pytest.raises(MemoryError, match="forced task creation failure"):
+            await extraction
+    finally:
+        loop.set_task_factory(original_factory)
+
+    stranded = lock.locked()
+    if stranded:
+        lock.release()
+
+    assert not stranded
+    assert await index_api._run_docling_extraction_locked(lambda: "next worker entered") == (
+        "next worker entered"
+    )
 
 
 def test_parallel_batches_disabled_when_neo4j_graph_upserts_enabled() -> None:

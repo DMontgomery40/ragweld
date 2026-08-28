@@ -17,6 +17,7 @@ from typing import Any
 import pytest
 import yaml
 from cryptography.hazmat.primitives.kdf.argon2 import Argon2id
+
 from server.models.tribrid_config_model import TriBridConfig
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -31,6 +32,10 @@ PROXMOX_START_RUNTIME = PROXMOX_DIR / "start-runtime.sh"
 PROXMOX_STOP_RUNTIME = PROXMOX_DIR / "stop-runtime.sh"
 PROXMOX_BOOTSTRAP_SECRETS = PROXMOX_DIR / "bootstrap-secrets.sh"
 PROXMOX_SERVICE_UNIT = PROXMOX_DIR / "ragweld.service"
+PROXMOX_CAPACITY_GUARD = PROXMOX_DIR / "host-capacity-guard.sh"
+PROXMOX_CAPACITY_SERVICE = PROXMOX_DIR / "ragweld-capacity-guard.service"
+PROXMOX_CAPACITY_TIMER = PROXMOX_DIR / "ragweld-capacity-guard.timer"
+PROXMOX_THINPOOL_PROFILE = PROXMOX_DIR / "ragweld-thinpool.profile"
 PROXMOX_ROLLOUT_PLAN = ROOT / "docs" / "superpowers" / "plans" / "2026-08-27-pve1-ragweld-rollout.md"
 PROXMOX_SECRET_ROOT_ENV = "RAGWELD_ETC_ROOT"
 PROXMOX_CONTRACT_ENV = {
@@ -576,6 +581,20 @@ def test_proxmox_production_policy_never_routes_defaults_or_smoke_to_gpt_5_4() -
     assert model_defaults == {"openai.gpt-5.6-terra"}
 
 
+def test_proxmox_rollout_copies_collection_scoped_qdrant_snapshots() -> None:
+    rollout_source = PROXMOX_ROLLOUT_PLAN.read_text(encoding="utf-8")
+    correct_copy = (
+        'docker cp "$QDRANT_CONTAINER:/qdrant/snapshots/$COLLECTION/$SNAPSHOT_NAME" '
+        '"$STAGE_ROOT/qdrant/$COLLECTION/$SNAPSHOT_NAME"'
+    )
+
+    assert correct_copy in rollout_source
+    assert (
+        'docker cp "$QDRANT_CONTAINER:/qdrant/snapshots/$SNAPSHOT_NAME"' not in rollout_source
+    )
+    assert 'test -s "$STAGE_ROOT/qdrant/$COLLECTION/$SNAPSHOT_NAME"' in rollout_source
+
+
 def test_proxmox_renderer_preserves_source_bytes(tmp_path: Path) -> None:
     source = tmp_path / "source.json"
     source.write_bytes(SOURCE_CONFIG.read_bytes())
@@ -930,6 +949,530 @@ def test_linux_docling_runtimes_install_and_preflight_opencv_dependencies() -> N
     assert "libgl1 and libglib2.0-0t64" in start_runtime
 
 
+def test_proxmox_capacity_guard_is_host_scoped_deduplicated_and_rollback_safe() -> None:
+    for path in (
+        PROXMOX_CAPACITY_GUARD,
+        PROXMOX_CAPACITY_SERVICE,
+        PROXMOX_CAPACITY_TIMER,
+        PROXMOX_THINPOOL_PROFILE,
+    ):
+        assert path.is_file(), f"missing {path.relative_to(ROOT)}"
+
+    profile = PROXMOX_THINPOOL_PROFILE.read_text(encoding="utf-8")
+    assert "thin_pool_autoextend_threshold=80" in profile
+    assert "thin_pool_autoextend_percent=1" in profile
+    assert "thin_pool_autoextend_percent=10" not in profile
+
+    guard = PROXMOX_CAPACITY_GUARD.read_text(encoding="utf-8")
+    assert "pct exec" in guard
+    assert "df --output=pcent /" in guard
+    assert "data_percent,metadata_percent" in guard
+    assert "/usr/sbin/sendmail" in guard
+    assert "/usr/bin/timeout" in guard
+    assert "root@pam" in guard
+    assert "dmontg@gmail.com" not in guard
+    assert "RECOVERED" in guard
+    assert re.search(
+        r'^\s*"\$TIMEOUT_BIN" --kill-after=10s "\$\{COMMAND_TIMEOUT_SECONDS\}s" "\$@"$',
+        guard,
+        flags=re.MULTILINE,
+    )
+    assert re.search(
+        r'^\s*send_transition guest_root "guest root filesystem" "\$guest_used" 75 90 "\$alert_email" \|\| status=1$',
+        guard,
+        flags=re.MULTILINE,
+    )
+    assert re.search(
+        r'^\s*send_transition pool_data "pve/data data" "\$pool_data" 70 85 "\$alert_email" \|\| status=1$',
+        guard,
+        flags=re.MULTILINE,
+    )
+    assert re.search(
+        r'^\s*send_transition pool_meta "pve/data metadata" "\$pool_meta" 70 85 "\$alert_email" \|\| status=1$',
+        guard,
+        flags=re.MULTILINE,
+    )
+
+    service = PROXMOX_CAPACITY_SERVICE.read_text(encoding="utf-8")
+    assert "Type=oneshot" in service
+    assert "flock --nonblock" in service
+    assert "host-capacity-guard.sh" in service
+    service_timeout_match = re.search(r"^TimeoutStartSec=(\S+)$", service, flags=re.MULTILINE)
+    assert service_timeout_match is not None
+    service_timeout_seconds = int(service_timeout_match.group(1).removesuffix("s"))
+
+    timer = PROXMOX_CAPACITY_TIMER.read_text(encoding="utf-8")
+    assert "OnBootSec=5m" in timer
+    assert "OnUnitActiveSec=5m" in timer
+    assert "Persistent=true" in timer
+    timer_interval_match = re.search(r"^OnUnitActiveSec=(\d+)m$", timer, flags=re.MULTILINE)
+    assert timer_interval_match is not None
+    timer_interval_seconds = int(timer_interval_match.group(1)) * 60
+    assert 0 < service_timeout_seconds < timer_interval_seconds
+
+
+def test_proxmox_capacity_guard_alerts_once_per_state_and_reports_recovery(
+    tmp_path: Path,
+) -> None:
+    sendmail_log = tmp_path / "sendmail.log"
+    logger_log = tmp_path / "logger.log"
+    timeout_log = tmp_path / "timeout.log"
+    fake_sendmail = tmp_path / "sendmail"
+    fake_logger = tmp_path / "logger"
+    fake_timeout = tmp_path / "timeout"
+    state_dir = tmp_path / "state"
+    _write_executable(
+        fake_sendmail,
+        f"""#!/usr/bin/env bash
+set -euo pipefail
+cat >> {shlex.quote(str(sendmail_log))}
+""",
+    )
+    _write_executable(
+        fake_logger,
+        f"""#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >> {shlex.quote(str(logger_log))}
+""",
+    )
+    _write_executable(
+        fake_timeout,
+        f"""#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >> {shlex.quote(str(timeout_log))}
+exit 99
+""",
+    )
+
+    base_env = {
+        "RAGWELD_CAPACITY_STATE_DIR": str(state_dir),
+        "RAGWELD_CAPACITY_ALERT_EMAIL": "alerts@example.test",
+        "RAGWELD_SENDMAIL": str(fake_sendmail),
+        "RAGWELD_LOGGER": str(fake_logger),
+        "RAGWELD_TIMEOUT_BIN": str(fake_timeout),
+        "RAGWELD_GUEST_USED_PERCENT": "76",
+        "RAGWELD_POOL_DATA_PERCENT": "71",
+        "RAGWELD_POOL_META_PERCENT": "10",
+    }
+
+    first = _run_shell_script(PROXMOX_CAPACITY_GUARD, cwd=ROOT, env=base_env)
+    assert first.returncode == 0, first.stderr
+    assert not timeout_log.exists()
+    first_mail = sendmail_log.read_text(encoding="utf-8")
+    assert first_mail.count("Subject: [Ragweld][WARNING]") == 2
+
+    second = _run_shell_script(PROXMOX_CAPACITY_GUARD, cwd=ROOT, env=base_env)
+    assert second.returncode == 0, second.stderr
+    assert sendmail_log.read_text(encoding="utf-8") == first_mail
+
+    critical_env = {
+        **base_env,
+        "RAGWELD_GUEST_USED_PERCENT": "91",
+        "RAGWELD_POOL_DATA_PERCENT": "86",
+    }
+    critical = _run_shell_script(PROXMOX_CAPACITY_GUARD, cwd=ROOT, env=critical_env)
+    assert critical.returncode == 0, critical.stderr
+    critical_mail = sendmail_log.read_text(encoding="utf-8")
+    assert critical_mail.count("Subject: [Ragweld][CRITICAL]") == 2
+
+    recovered_env = {
+        **base_env,
+        "RAGWELD_GUEST_USED_PERCENT": "14",
+        "RAGWELD_POOL_DATA_PERCENT": "7.1",
+    }
+    recovered = _run_shell_script(PROXMOX_CAPACITY_GUARD, cwd=ROOT, env=recovered_env)
+    assert recovered.returncode == 0, recovered.stderr
+    recovered_mail = sendmail_log.read_text(encoding="utf-8")
+    assert recovered_mail.count("Subject: [Ragweld][RECOVERED]") == 2
+    assert "guest root filesystem" in recovered_mail
+    assert "pve/data data" in recovered_mail
+
+
+def test_proxmox_capacity_guard_alerts_on_guest_probe_timeout_without_suppressing_pool(
+    tmp_path: Path,
+) -> None:
+    sendmail_log = tmp_path / "sendmail.log"
+    timeout_log = tmp_path / "timeout.log"
+    fake_bin = tmp_path / "bin"
+    fake_sendmail = fake_bin / "sendmail"
+    fake_logger = fake_bin / "logger"
+    fake_timeout = fake_bin / "timeout"
+    _write_executable(
+        fake_sendmail,
+        f"""#!/usr/bin/env bash
+set -euo pipefail
+cat >> {shlex.quote(str(sendmail_log))}
+""",
+    )
+    _write_executable(fake_logger, "#!/usr/bin/env bash\nexit 0\n")
+    _write_executable(
+        fake_timeout,
+        f"""#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >> {shlex.quote(str(timeout_log))}
+if [[ "$1" == --kill-after=* ]]; then
+  shift 2
+else
+  shift
+fi
+if [[ "$1" == "pct" ]]; then
+  exit 124
+fi
+exec "$@"
+""",
+    )
+    _write_executable(
+        fake_bin / "pveum",
+        "#!/usr/bin/env bash\nprintf '[{\"userid\":\"root@pam\",\"email\":\"alerts@example.test\"}]\\n'\n",
+    )
+    _write_executable(fake_bin / "lvs", "#!/usr/bin/env bash\nprintf '71.0 10.0\\n'\n")
+
+    result = _run_shell_script(
+        PROXMOX_CAPACITY_GUARD,
+        cwd=ROOT,
+        env={
+            "RAGWELD_CAPACITY_STATE_DIR": str(tmp_path / "state"),
+            "RAGWELD_SENDMAIL": str(fake_sendmail),
+            "RAGWELD_LOGGER": str(fake_logger),
+            "RAGWELD_TIMEOUT_BIN": str(fake_timeout),
+            "RAGWELD_COMMAND_TIMEOUT_SECONDS": "7",
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    mail = sendmail_log.read_text(encoding="utf-8")
+    assert "Subject: [Ragweld][WARNING] pve1 guest storage probe" in mail
+    assert "Subject: [Ragweld][WARNING] pve1 pve/data data" in mail
+    assert "pve/data storage probe" not in mail
+    assert timeout_log.read_text(encoding="utf-8").splitlines() == [
+        "--kill-after=10s 7s pveum user list --output-format json",
+        "--kill-after=10s 7s pct exec 100 -- df --output=pcent /",
+        "--kill-after=10s 7s lvs --noheadings -o data_percent,metadata_percent pve/data",
+    ]
+
+
+def test_proxmox_capacity_guard_preserves_lvs_exit_status_on_valid_looking_failure(
+    tmp_path: Path,
+) -> None:
+    sendmail_log = tmp_path / "sendmail.log"
+    timeout_log = tmp_path / "timeout.log"
+    fake_bin = tmp_path / "bin"
+    fake_sendmail = fake_bin / "sendmail"
+    fake_logger = fake_bin / "logger"
+    fake_timeout = fake_bin / "timeout"
+    state_dir = tmp_path / "state"
+    _write_executable(
+        fake_sendmail,
+        f"""#!/usr/bin/env bash
+set -euo pipefail
+cat >> {shlex.quote(str(sendmail_log))}
+""",
+    )
+    _write_executable(fake_logger, "#!/usr/bin/env bash\nexit 0\n")
+    _write_executable(
+        fake_timeout,
+        f"""#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >> {shlex.quote(str(timeout_log))}
+if [[ "$1" == --kill-after=* ]]; then
+  shift 2
+else
+  shift
+fi
+exec "$@"
+""",
+    )
+    _write_executable(
+        fake_bin / "pveum",
+        "#!/usr/bin/env bash\nprintf '[{\"userid\":\"root@pam\",\"email\":\"alerts@example.test\"}]\\n'\n",
+    )
+    _write_executable(
+        fake_bin / "lvs",
+        "#!/usr/bin/env bash\nprintf '76.0 74.0\\n'\nexit 23\n",
+    )
+
+    result = _run_shell_script(
+        PROXMOX_CAPACITY_GUARD,
+        cwd=ROOT,
+        env={
+            "RAGWELD_CAPACITY_STATE_DIR": str(state_dir),
+            "RAGWELD_CAPACITY_ALERT_EMAIL": "alerts@example.test",
+            "RAGWELD_SENDMAIL": str(fake_sendmail),
+            "RAGWELD_LOGGER": str(fake_logger),
+            "RAGWELD_TIMEOUT_BIN": str(fake_timeout),
+            "RAGWELD_COMMAND_TIMEOUT_SECONDS": "9",
+            "RAGWELD_GUEST_USED_PERCENT": "10",
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    mail = sendmail_log.read_text(encoding="utf-8")
+    assert "Subject: [Ragweld][WARNING] pve1 pve/data storage probe" in mail
+    assert "Subject: [Ragweld][WARNING] pve1 pve/data data" not in mail
+    assert "Subject: [Ragweld][WARNING] pve1 pve/data metadata" not in mail
+    assert not (state_dir / "pool_data.state").exists()
+    assert not (state_dir / "pool_meta.state").exists()
+    assert (state_dir / "pool_probe.state").read_text(encoding="utf-8").strip() == "failed"
+    assert timeout_log.read_text(encoding="utf-8").splitlines() == [
+        "--kill-after=10s 9s lvs --noheadings -o data_percent,metadata_percent pve/data",
+    ]
+
+
+def test_proxmox_capacity_guard_alerts_once_per_pool_metadata_state_and_reports_recovery(
+    tmp_path: Path,
+) -> None:
+    sendmail_log = tmp_path / "sendmail.log"
+    fake_sendmail = tmp_path / "sendmail"
+    fake_logger = tmp_path / "logger"
+    fake_timeout = tmp_path / "timeout"
+    state_dir = tmp_path / "metadata-state"
+    _write_executable(
+        fake_sendmail,
+        f"""#!/usr/bin/env bash
+set -euo pipefail
+cat >> {shlex.quote(str(sendmail_log))}
+""",
+    )
+    _write_executable(fake_logger, "#!/usr/bin/env bash\nexit 0\n")
+    _write_executable(fake_timeout, "#!/usr/bin/env bash\nset -euo pipefail\nexit 99\n")
+
+    base_env = {
+        "RAGWELD_CAPACITY_STATE_DIR": str(state_dir),
+        "RAGWELD_CAPACITY_ALERT_EMAIL": "alerts@example.test",
+        "RAGWELD_SENDMAIL": str(fake_sendmail),
+        "RAGWELD_LOGGER": str(fake_logger),
+        "RAGWELD_TIMEOUT_BIN": str(fake_timeout),
+        "RAGWELD_GUEST_USED_PERCENT": "10",
+        "RAGWELD_POOL_DATA_PERCENT": "10",
+        "RAGWELD_POOL_META_PERCENT": "71",
+    }
+
+    first = _run_shell_script(PROXMOX_CAPACITY_GUARD, cwd=ROOT, env=base_env)
+    assert first.returncode == 0, first.stderr
+    first_mail = sendmail_log.read_text(encoding="utf-8")
+    assert first_mail.count("Subject: [Ragweld][WARNING]") == 1
+    assert "Subject: [Ragweld][WARNING] pve1 pve/data metadata" in first_mail
+
+    second = _run_shell_script(PROXMOX_CAPACITY_GUARD, cwd=ROOT, env=base_env)
+    assert second.returncode == 0, second.stderr
+    assert sendmail_log.read_text(encoding="utf-8") == first_mail
+
+    critical = _run_shell_script(
+        PROXMOX_CAPACITY_GUARD,
+        cwd=ROOT,
+        env={**base_env, "RAGWELD_POOL_META_PERCENT": "86"},
+    )
+    assert critical.returncode == 0, critical.stderr
+    critical_mail = sendmail_log.read_text(encoding="utf-8")
+    assert critical_mail.count("Subject: [Ragweld][CRITICAL]") == 1
+    assert "Subject: [Ragweld][CRITICAL] pve1 pve/data metadata" in critical_mail
+
+    recovered = _run_shell_script(
+        PROXMOX_CAPACITY_GUARD,
+        cwd=ROOT,
+        env={**base_env, "RAGWELD_POOL_META_PERCENT": "10"},
+    )
+    assert recovered.returncode == 0, recovered.stderr
+    recovered_mail = sendmail_log.read_text(encoding="utf-8")
+    assert recovered_mail.count("Subject: [Ragweld][RECOVERED]") == 1
+    assert "Subject: [Ragweld][RECOVERED] pve1 pve/data metadata" in recovered_mail
+    assert (state_dir / "pool_meta.state").read_text(encoding="utf-8").strip() == "ok"
+
+
+def test_proxmox_capacity_guard_alerts_on_real_guest_df_output_without_override(
+    tmp_path: Path,
+) -> None:
+    sendmail_log = tmp_path / "sendmail.log"
+    timeout_log = tmp_path / "timeout.log"
+    fake_bin = tmp_path / "bin"
+    fake_sendmail = fake_bin / "sendmail"
+    fake_logger = fake_bin / "logger"
+    fake_timeout = fake_bin / "timeout"
+    state_dir = tmp_path / "state"
+    _write_executable(
+        fake_sendmail,
+        f"""#!/usr/bin/env bash
+set -euo pipefail
+cat >> {shlex.quote(str(sendmail_log))}
+""",
+    )
+    _write_executable(fake_logger, "#!/usr/bin/env bash\nexit 0\n")
+    _write_executable(
+        fake_timeout,
+        f"""#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >> {shlex.quote(str(timeout_log))}
+if [[ "$1" == --kill-after=* ]]; then
+  shift 2
+else
+  shift
+fi
+exec "$@"
+""",
+    )
+    _write_executable(
+        fake_bin / "pveum",
+        "#!/usr/bin/env bash\nprintf '[{\"userid\":\"root@pam\",\"email\":\"alerts@example.test\"}]\\n'\n",
+    )
+    _write_executable(
+        fake_bin / "pct",
+        "#!/usr/bin/env bash\nprintf 'Use%%\\n 76%%\\n'\n",
+    )
+
+    result = _run_shell_script(
+        PROXMOX_CAPACITY_GUARD,
+        cwd=ROOT,
+        env={
+            "RAGWELD_CAPACITY_STATE_DIR": str(state_dir),
+            "RAGWELD_SENDMAIL": str(fake_sendmail),
+            "RAGWELD_LOGGER": str(fake_logger),
+            "RAGWELD_TIMEOUT_BIN": str(fake_timeout),
+            "RAGWELD_COMMAND_TIMEOUT_SECONDS": "8",
+            "RAGWELD_POOL_DATA_PERCENT": "10",
+            "RAGWELD_POOL_META_PERCENT": "10",
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    mail = sendmail_log.read_text(encoding="utf-8")
+    assert "Subject: [Ragweld][WARNING] pve1 guest root filesystem" in mail
+    assert "Subject: [Ragweld][WARNING] pve1 guest storage probe" not in mail
+    assert (state_dir / "guest_root.state").read_text(encoding="utf-8").strip() == "warning"
+    assert timeout_log.read_text(encoding="utf-8").splitlines() == [
+        "--kill-after=10s 8s pveum user list --output-format json",
+        "--kill-after=10s 8s pct exec 100 -- df --output=pcent /",
+    ]
+
+
+def test_proxmox_capacity_guard_logs_full_transition_and_retries_after_sendmail_failure(
+    tmp_path: Path,
+) -> None:
+    sendmail_log = tmp_path / "sendmail.log"
+    logger_log = tmp_path / "logger.log"
+    fake_timeout = tmp_path / "timeout"
+    failing_sendmail = tmp_path / "sendmail-fail"
+    working_sendmail = tmp_path / "sendmail-ok"
+    fake_logger = tmp_path / "logger"
+    state_dir = tmp_path / "state"
+    _write_executable(failing_sendmail, "#!/usr/bin/env bash\nset -euo pipefail\nexit 75\n")
+    _write_executable(
+        working_sendmail,
+        f"""#!/usr/bin/env bash
+set -euo pipefail
+cat >> {shlex.quote(str(sendmail_log))}
+""",
+    )
+    _write_executable(
+        fake_logger,
+        f"""#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >> {shlex.quote(str(logger_log))}
+""",
+    )
+    _write_executable(fake_timeout, "#!/usr/bin/env bash\nset -euo pipefail\nexit 99\n")
+
+    base_env = {
+        "RAGWELD_CAPACITY_STATE_DIR": str(state_dir),
+        "RAGWELD_CAPACITY_ALERT_EMAIL": "alerts@example.test",
+        "RAGWELD_LOGGER": str(fake_logger),
+        "RAGWELD_TIMEOUT_BIN": str(fake_timeout),
+        "RAGWELD_GUEST_USED_PERCENT": "76",
+        "RAGWELD_POOL_DATA_PERCENT": "10",
+        "RAGWELD_POOL_META_PERCENT": "10",
+    }
+
+    failed = _run_shell_script(
+        PROXMOX_CAPACITY_GUARD,
+        cwd=ROOT,
+        env={**base_env, "RAGWELD_SENDMAIL": str(failing_sendmail)},
+    )
+    assert failed.returncode == 1
+    logger_lines = logger_log.read_text(encoding="utf-8")
+    assert (
+        "[Ragweld][WARNING] pve1 guest root filesystem: guest root filesystem is at 76% "
+        "(warning 75%, critical 90%)."
+    ) in logger_lines
+    assert "notification delivery failed for guest root filesystem" in logger_lines
+    assert not (state_dir / "guest_root.state").exists()
+
+    retried = _run_shell_script(
+        PROXMOX_CAPACITY_GUARD,
+        cwd=ROOT,
+        env={**base_env, "RAGWELD_SENDMAIL": str(working_sendmail)},
+    )
+    assert retried.returncode == 0, retried.stderr
+    assert "Subject: [Ragweld][WARNING] pve1 guest root filesystem" in sendmail_log.read_text(
+        encoding="utf-8"
+    )
+    assert (state_dir / "guest_root.state").read_text(encoding="utf-8").strip() == "warning"
+
+
+@pytest.mark.parametrize(
+    ("pveum_source", "expected_message"),
+    [
+        (
+            "#!/usr/bin/env bash\nset -euo pipefail\nexit 42\n",
+            "pveum user list failed while resolving root@pam alert email",
+        ),
+        (
+            "#!/usr/bin/env bash\nset -euo pipefail\nprintf 'not-json\\n'\n",
+            "pveum returned malformed JSON while resolving root@pam alert email",
+        ),
+    ],
+)
+def test_proxmox_capacity_guard_reports_clean_pveum_failures_without_traceback(
+    tmp_path: Path,
+    pveum_source: str,
+    expected_message: str,
+) -> None:
+    fake_bin = tmp_path / "bin"
+    logger_log = tmp_path / "logger.log"
+    fake_timeout = fake_bin / "timeout"
+    fake_logger = fake_bin / "logger"
+    _write_executable(
+        fake_timeout,
+        """#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$1" == --kill-after=* ]]; then
+  shift 2
+else
+  shift
+fi
+exec "$@"
+""",
+    )
+    _write_executable(fake_bin / "pveum", pveum_source)
+    _write_executable(fake_bin / "sendmail", "#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n")
+    _write_executable(
+        fake_logger,
+        f"""#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >> {shlex.quote(str(logger_log))}
+""",
+    )
+
+    result = _run_shell_script(
+        PROXMOX_CAPACITY_GUARD,
+        cwd=ROOT,
+        env={
+            "RAGWELD_CAPACITY_STATE_DIR": str(tmp_path / "state"),
+            "RAGWELD_SENDMAIL": str(fake_bin / "sendmail"),
+            "RAGWELD_LOGGER": str(fake_logger),
+            "RAGWELD_TIMEOUT_BIN": str(fake_timeout),
+            "RAGWELD_COMMAND_TIMEOUT_SECONDS": "9",
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        },
+    )
+
+    assert result.returncode != 0
+    assert expected_message in result.stderr
+    assert "Traceback" not in result.stderr
+    assert expected_message in logger_log.read_text(encoding="utf-8")
+
+
 def test_proxmox_lifecycle_artifacts_exist_and_use_strict_shell_contract() -> None:
     for path in (
         PROXMOX_START_RUNTIME,
@@ -1050,7 +1593,7 @@ def test_proxmox_lifecycle_start_runtime_runs_exact_compose_allowlist_and_host_f
     assert "api" not in tokens[13:]
     assert ("cloudflared" in tokens[13:]) is include_tunnel
 
-    assert f"start --no-docker --no-local-model --no-frontend" in lines
+    assert "start --no-docker --no-local-model --no-frontend" in lines
     assert f"config {secret_root / 'tribrid_config.json'}" in lines
     for relative_path, secret_name in PROXMOX_RUNTIME_SYMLINKS.items():
         repo_path = repo / relative_path
@@ -1383,12 +1926,16 @@ def test_proxmox_secret_bootstrap_generates_owner_only_runtime_material_and_exac
         "BACKEND_PORT",
         "METRICS_ENABLED",
         "TRACING_ENABLED",
+        "DOCLING_NUM_THREADS",
+        "OMP_NUM_THREADS",
     } <= set(runtime_env)
     assert runtime_env["LANGFUSE_PUBLIC_KEY"].startswith("pk-lf-")
     assert runtime_env["LANGFUSE_SECRET_KEY"].startswith("sk-lf-")
     assert runtime_env["LITELLM_API_KEY"].startswith("sk-ragweld-")
     assert runtime_env["SERVER_HOST"] == "0.0.0.0"
     assert runtime_env["BACKEND_PORT"] == "58012"
+    assert runtime_env["DOCLING_NUM_THREADS"] == "4"
+    assert runtime_env["OMP_NUM_THREADS"] == "4"
     assert "SERVER_PORT" not in runtime_env
     for forbidden_key in (
         "OPENAI_API_KEY",

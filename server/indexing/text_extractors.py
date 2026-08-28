@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import threading
 from pathlib import Path
 from typing import Any, Literal
 
@@ -11,6 +12,7 @@ ExtractionMethod = Literal["docling", "direct"]
 DOCLING_SUFFIXES: frozenset[str] = frozenset({".pdf", ".docx", ".pptx", ".xlsx", ".html", ".htm"})
 
 _DOCLING_CONVERTER: Any = None
+_DOCLING_CONVERTER_LOCK = threading.Lock()
 
 
 def extraction_method_for_path(path: Path) -> ExtractionMethod:
@@ -19,10 +21,13 @@ def extraction_method_for_path(path: Path) -> ExtractionMethod:
 
 def _docling_converter() -> Any:
     global _DOCLING_CONVERTER
-    if _DOCLING_CONVERTER is None:
-        from docling.document_converter import DocumentConverter
+    if _DOCLING_CONVERTER is not None:
+        return _DOCLING_CONVERTER
+    with _DOCLING_CONVERTER_LOCK:
+        if _DOCLING_CONVERTER is None:
+            from docling.document_converter import DocumentConverter
 
-        _DOCLING_CONVERTER = DocumentConverter()
+            _DOCLING_CONVERTER = DocumentConverter()
     return _DOCLING_CONVERTER
 
 
