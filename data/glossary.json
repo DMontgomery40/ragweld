@@ -5080,6 +5080,28 @@
       ]
     },
     {
+      "term": "Langfuse Public Base URL",
+      "key": "LANGFUSE_PUBLIC_BASE_URL",
+      "definition": "LANGFUSE_PUBLIC_BASE_URL is the browser-facing Langfuse origin used for operator deep links. Keep it separate from LANGFUSE_BASE_URL when the API must ingest traces over a private loopback or service-network endpoint but operators reach the Langfuse UI through a protected public hostname. Leave it empty only when you intentionally want no Langfuse browser links.",
+      "category": "infrastructure",
+      "related": [
+        "Langfuse Base URL",
+        "Langfuse Project"
+      ],
+      "links": [
+        {
+          "text": "Langfuse Self-Hosting",
+          "href": "https://langfuse.com/docs/deployment/self-host"
+        }
+      ],
+      "badges": [
+        {
+          "text": "Operator deep links",
+          "class": "info"
+        }
+      ]
+    },
+    {
       "term": "Langfuse Enabled",
       "key": "LANGFUSE_ENABLED",
       "definition": "LANGFUSE_ENABLED controls whether ragweld enriches generation spans with Langfuse-native prompt, usage, and cost metadata. Enable it when operators need prompt/generation drilldown in addition to raw OpenTelemetry traces. Keep it off if you want pure OTel export without external LLM-native observation.",
@@ -8797,6 +8819,20 @@
       "badges": []
     },
     {
+      "term": "RAGWELD_AGENT_MLFLOW_CONSOLE_BASE_URL",
+      "key": "RAGWELD_AGENT_MLFLOW_CONSOLE_BASE_URL",
+      "definition": "Browser-facing MLflow console origin used for operator deep links into experiments and runs. Keep it separate from the private tracking API URL when training jobs must talk to MLflow over a loopback or service-network address but humans open the UI through a protected public hostname. When this value is blank, ragweld should omit MLflow browser links instead of reusing the server-side tracking endpoint.",
+      "category": "general",
+      "related": [],
+      "links": [
+        {
+          "text": "MLflow Tracking",
+          "href": "https://mlflow.org/docs/latest/ml/tracking/"
+        }
+      ],
+      "badges": []
+    },
+    {
       "term": "RAGWELD_AGENT_PROMOTE_IF_IMPROVES",
       "key": "RAGWELD_AGENT_PROMOTE_IF_IMPROVES",
       "definition": "Boolean gate for checkpoint promotion based on validation outcomes. When enabled, a candidate checkpoint is promoted only if the tracked metric improves versus the current promoted model (typically with `PROMOTE_EPSILON` as the noise threshold). This keeps production candidates aligned to measured quality instead of recency. When disabled, every completed run can overwrite promoted state, which is useful for exploratory debugging but risky for stable deployments.",
@@ -12481,12 +12517,16 @@
     {
       "term": "Generation Retention Seconds",
       "key": "GENERATION_RETENTION_SECONDS",
-      "definition": "GENERATION_RETENTION_SECONDS is how long a replaced index generation (its Qdrant collection and Neo4j graph) stays readable after a promotion before the next commit retires it. Promotion writes a new generation manifest in one Postgres transaction; a request that resolved the old manifest just before that commit still queries the old stores, so the grace must cover the longest request lifetime. A value of 0 retires the replaced generation at the very next commit. Retired generations are dropped by exact id, never by name prefix."
+      "definition": "GENERATION_RETENTION_SECONDS is how long a replaced index generation (its Qdrant collection and Neo4j graph) stays readable after a promotion before the next commit retires it. Promotion writes a new generation manifest in one Postgres transaction; a request that resolved the old manifest just before that commit still queries the old stores, so the grace must cover the longest request lifetime. A value of 0 retires the replaced generation at the very next commit. Retired generations are dropped by exact id, never by name prefix.",
+      "category": "retrieval",
+      "related": []
     },
     {
       "term": "Index Run Lease Seconds",
       "key": "INDEX_RUN_LEASE_SECONDS",
-      "definition": "INDEX_RUN_LEASE_SECONDS is the lease on the durable per-corpus index-run fence stored on the corpus row. A running index heartbeats the fence at a tenth of the lease; a second run on the same corpus is refused with a typed 409 while the fence is fresh. A fence whose last heartbeat is older than the lease is treated as a crashed worker: a new run may take it over, and stopping the corpus releases it. Set it longer than the longest pause a run can have without heartbeating."
+      "definition": "INDEX_RUN_LEASE_SECONDS is the lease on the durable per-corpus index-run fence stored on the corpus row. A running index heartbeats the fence at a tenth of the lease; a second run on the same corpus is refused with a typed 409 while the fence is fresh. A fence whose last heartbeat is older than the lease is treated as a crashed worker: a new run may take it over, and stopping the corpus releases it. Set it longer than the longest pause a run can have without heartbeating.",
+      "category": "retrieval",
+      "related": []
     }
   ]
 }

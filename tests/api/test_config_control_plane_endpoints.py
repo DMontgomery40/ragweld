@@ -51,6 +51,28 @@ async def test_get_config_registry_covers_all_leaf_paths(client: AsyncClient) ->
 
 
 @pytest.mark.asyncio
+async def test_config_registry_exposes_public_operator_link_fields_on_expected_surfaces(
+    client: AsyncClient,
+) -> None:
+    response = await client.get("/api/config/registry")
+    assert response.status_code == 200
+
+    fields = {item["path"]: item for item in response.json()["fields"]}
+    langfuse_public = fields["tracing.langfuse_public_base_url"]
+    mlflow_console = fields["training.ragweld_agent_mlflow_console_base_url"]
+
+    assert langfuse_public["integration"] == "langfuse"
+    assert langfuse_public["ui_surface"] == "observability"
+    assert langfuse_public["exposure_level"] == "basic"
+    assert langfuse_public["secret_dependency_ids"] == ["langfuse_public_key", "langfuse_secret_key"]
+
+    assert mlflow_console["integration"] == "mlflow"
+    assert mlflow_console["ui_surface"] == "training"
+    assert mlflow_console["exposure_level"] == "basic"
+    assert mlflow_console["secret_dependency_ids"] == []
+
+
+@pytest.mark.asyncio
 async def test_get_config_readiness_surfaces_langfuse_secret_blockers(client: AsyncClient) -> None:
     old_public = os.environ.pop("LANGFUSE_PUBLIC_KEY", None)
     old_secret = os.environ.pop("LANGFUSE_SECRET_KEY", None)

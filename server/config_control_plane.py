@@ -233,6 +233,12 @@ _FIELD_OVERRIDES: dict[str, dict[str, Any]] = {
         "ui_surface": "training",
         "exposure_level": "basic",
     },
+    "training.ragweld_agent_mlflow_console_base_url": {
+        "integration": "mlflow",
+        "ui_surface": "training",
+        "exposure_level": "basic",
+        "impact": "live",
+    },
     "training.ragweld_agent_mlflow_experiment_name": {
         "integration": "mlflow",
         "ui_surface": "training",
@@ -257,6 +263,12 @@ _FIELD_OVERRIDES: dict[str, dict[str, Any]] = {
         "integration": "langfuse",
         "ui_surface": "observability",
         "exposure_level": "basic",
+    },
+    "tracing.langfuse_public_base_url": {
+        "integration": "langfuse",
+        "ui_surface": "observability",
+        "exposure_level": "basic",
+        "impact": "live",
     },
     "tracing.langfuse_project": {
         "integration": "langfuse",

@@ -105,9 +105,14 @@ PRODUCTION_DEFAULTS = {
     ("ui", "runtime_mode"): "production",
     ("ui", "open_browser"): False,
     ("ui", "grafana_base_url"): "https://grafana.ragweld.com",
+    ("tracing", "langfuse_base_url"): "http://127.0.0.1:53000",
+    ("tracing", "langfuse_public_base_url"): "https://langfuse.ragweld.com",
+    ("tracing", "faro_base_url"): "https://me.ragweld.com/faro/collect",
     ("training", "ragweld_agent_flyte_admin_base_url"): "http://127.0.0.1:30080",
     ("training", "ragweld_agent_flyte_console_base_url"): "https://flyte.ragweld.com",
+    ("training", "ragweld_agent_flyte_callback_base_url"): "http://172.17.0.1:58012",
     ("training", "ragweld_agent_mlflow_tracking_url"): "http://127.0.0.1:55500",
+    ("training", "ragweld_agent_mlflow_console_base_url"): "https://mlflow.ragweld.com",
     ("evaluation", "ragas_judge_model"): "openai.gpt-5.4-mini",
     ("evaluation", "promptfoo_grader_model"): "openai.gpt-5.4-mini",
 }
@@ -227,36 +232,43 @@ def _assert_caddy_contract(source: str) -> None:
     require_owner = blocks["(require_owner)"]
     assert "uri /api/authz/forward-auth" in require_owner
     assert "copy_headers Remote-User Remote-Groups Remote-Email Remote-Name" in require_owner
-
-    reverse_proxy_targets = {
-        match.group(1)
-        for match in re.finditer(r"^\s*reverse_proxy\s+([^\s{]+)", source, flags=re.MULTILINE)
-    }
-    assert reverse_proxy_targets == {
-        "127.0.0.1:59091",
-        "127.0.0.1:58012",
-        "127.0.0.1:3301",
-        "127.0.0.1:53000",
-        "127.0.0.1:55500",
-        "127.0.0.1:30080",
-    }
+    assert "header_up X-Forwarded-Proto https" in require_owner
 
     for header in expected_sites - {"http://auth.ragweld.com:58000"}:
         assert "import require_owner" in blocks[header], header
 
+    def block_targets(block: str) -> set[str]:
+        return {
+            match.group(1)
+            for match in re.finditer(r"^\s*reverse_proxy\s+([^\s{]+)", block, flags=re.MULTILINE)
+        }
+
     auth_block = blocks["http://auth.ragweld.com:58000"]
     assert "import require_owner" not in auth_block
     assert "reverse_proxy 127.0.0.1:59091" in auth_block
+    assert "header_up X-Forwarded-Proto https" in auth_block
+    assert block_targets(auth_block) == {"127.0.0.1:59091"}
 
     me_block = blocks["http://me.ragweld.com:58000"]
     assert "handle /api/* {" in me_block
     assert "reverse_proxy 127.0.0.1:58012" in me_block
+    assert "handle /faro/collect {" in me_block
+    assert "uri strip_prefix /faro" in me_block
+    assert "reverse_proxy 127.0.0.1:52347" in me_block
     assert "handle_path /web/* {" in me_block
     assert "root * /srv/web" in me_block
     assert "try_files {path} /index.html" in me_block
     assert "file_server" in me_block
     assert "redir /web /web/" in me_block
     assert "redir / /web/" in me_block
+    assert "handle {" in me_block
+    assert "respond 404" in me_block
+    assert block_targets(me_block) == {"127.0.0.1:58012", "127.0.0.1:52347"}
+
+    assert block_targets(blocks["http://grafana.ragweld.com:58000"]) == {"127.0.0.1:3301"}
+    assert block_targets(blocks["http://langfuse.ragweld.com:58000"]) == {"127.0.0.1:53000"}
+    assert block_targets(blocks["http://mlflow.ragweld.com:58000"]) == {"127.0.0.1:55500"}
+    assert block_targets(blocks["http://flyte.ragweld.com:58000"]) == {"127.0.0.1:30080"}
 
 
 def _compose_service_blocks(source: str) -> dict[str, str]:
@@ -423,6 +435,9 @@ exec {shlex.quote(str(real_python))} "$@"
         """#!/usr/bin/env bash
 set -euo pipefail
 printf 'docker %s\\n' "$*" >> "$FAKE_TOOL_LOG"
+if [[ "${1:-} ${2:-}" == "network inspect" ]]; then
+  printf '%s\\n' "${FAKE_DOCKER_BRIDGE_GATEWAY:-172.17.0.1}"
+fi
 exit 0
 """,
     )
@@ -438,7 +453,17 @@ def _build_secret_root(tmp_path: Path, *, include_tunnel: bool) -> Path:
     (secret_root / "authelia" / "state").mkdir(parents=True, exist_ok=True)
     (secret_root / "authelia" / "state").chmod(0o700)
 
-    _write_private_file(secret_root / "tribrid_config.json", "{}\n")
+    _write_private_file(
+        secret_root / "tribrid_config.json",
+        json.dumps(
+            {
+                "training": {
+                    "ragweld_agent_flyte_callback_base_url": "http://172.17.0.1:58012",
+                }
+            }
+        )
+        + "\n",
+    )
     _write_private_file(
         secret_root / "runtime.env",
         "\n".join(
@@ -456,7 +481,7 @@ def _build_secret_root(tmp_path: Path, *, include_tunnel: bool) -> Path:
                 "GRAFANA_ADMIN_PASSWORD=runtime-grafana-password",
                 "LANGFUSE_PUBLIC_KEY=pk-lf-runtime",
                 "LANGFUSE_SECRET_KEY=sk-lf-runtime",
-                "SERVER_HOST=127.0.0.1",
+                "SERVER_HOST=0.0.0.0",
                 "SERVER_PORT=58012",
                 "METRICS_ENABLED=true",
                 "TRACING_ENABLED=true",
@@ -637,6 +662,7 @@ def test_proxmox_compose_is_pinned_loopback_only_and_secret_file_backed() -> Non
         }
     ]
     assert services["grafana"]["environment"]["GF_SECURITY_ADMIN_PASSWORD"] == "contract-only"
+    assert services["grafana"]["environment"]["GF_SERVER_ROOT_URL"] == "https://grafana.ragweld.com"
     assert services["langfuse"]["environment"]["NEXTAUTH_URL"] == "https://langfuse.ragweld.com"
     assert services["langfuse"]["environment"]["AUTH_CUSTOM_CLIENT_SECRET"] == "contract-only"
     assert all(
@@ -707,6 +733,7 @@ def test_proxmox_compose_uses_only_allowlisted_secret_mounts_and_origins() -> No
     assert langfuse_env["AUTH_CUSTOM_CLIENT_ID"] == "langfuse"
     assert langfuse_env["AUTH_CUSTOM_CLIENT_SECRET"] == "contract-only"
     assert langfuse_env["AUTH_CUSTOM_FETCH_USERINFO"] == "true"
+    assert langfuse_env["AUTH_CUSTOM_ALLOW_ACCOUNT_LINKING"] == "true"
     assert langfuse_env["AUTH_CUSTOM_ISSUER"] == "https://auth.ragweld.com"
     assert langfuse_env["AUTH_CUSTOM_NAME"] == "Ragweld"
     assert langfuse_env["AUTH_CUSTOM_SCOPE"] == "openid email profile groups"
@@ -724,6 +751,7 @@ def test_proxmox_compose_uses_only_allowlisted_secret_mounts_and_origins() -> No
 
     worker_env = services["langfuse-worker"].get("environment") or {}
     assert worker_env == {}
+    assert services["alloy"]["environment"]["ALLOY_FARO_CORS_ORIGIN"] == "https://me.ragweld.com"
     overlay_source = PROXMOX_COMPOSE.read_text(encoding="utf-8")
     service_blocks = _compose_service_blocks(overlay_source)
     for service_name in ("langfuse", "langfuse-worker"):
@@ -742,8 +770,18 @@ def test_proxmox_caddyfile_limits_public_routes_to_the_allowlist() -> None:
 
 def test_caddy_contract_parser_detects_appended_unprotected_nested_route() -> None:
     malicious = PROXMOX_CADDYFILE.read_text(encoding="utf-8").replace(
-        "    redir / /web/\n}",
-        "    redir / /web/\n    handle /metrics/* {\n        reverse_proxy 127.0.0.1:59090\n    }\n}",
+        "    handle {\n        respond 404\n    }\n}",
+        "    handle /metrics/* {\n        reverse_proxy 127.0.0.1:59090\n    }\n    handle {\n        respond 404\n    }\n}",
+    )
+
+    with pytest.raises(AssertionError):
+        _assert_caddy_contract(malicious)
+
+
+def test_caddy_contract_parser_detects_broadened_faro_route() -> None:
+    malicious = PROXMOX_CADDYFILE.read_text(encoding="utf-8").replace(
+        "    handle /faro/collect {\n        uri strip_prefix /faro\n        reverse_proxy 127.0.0.1:52347\n    }\n",
+        "    handle_path /faro/* {\n        reverse_proxy 127.0.0.1:52347\n    }\n",
     )
 
     with pytest.raises(AssertionError):
@@ -895,6 +933,7 @@ def test_proxmox_lifecycle_start_runtime_runs_exact_compose_allowlist_and_host_f
     lines = log_path.read_text(encoding="utf-8").splitlines()
     docker_lines = [line for line in lines if line.startswith("docker ")]
     assert docker_lines
+    assert any("network inspect bridge" in line for line in docker_lines)
     compose_up = next(line for line in docker_lines if " up " in line)
     tokens = shlex.split(compose_up)
     assert tokens[:14] == [
@@ -947,6 +986,61 @@ def test_proxmox_lifecycle_start_runtime_fails_closed_on_insecure_secret_mode_be
     assert result.returncode != 0
     assert "langfuse.env" in result.stderr
     assert "0600" in result.stderr
+    assert (not log_path.exists()) or all(" up " not in line for line in log_path.read_text(encoding="utf-8").splitlines())
+
+
+def test_proxmox_lifecycle_start_runtime_fails_closed_without_working_lsof_before_compose(
+    tmp_path: Path,
+) -> None:
+    assert PROXMOX_START_RUNTIME.is_file()
+    repo, log_path = _materialize_proxmox_runtime_repo(tmp_path)
+    secret_root = _build_secret_root(tmp_path, include_tunnel=False)
+    _write_executable(
+        tmp_path / "bin" / "lsof",
+        """#!/usr/bin/env bash
+exit 127
+""",
+    )
+
+    result = _run_shell_script(
+        repo / "deploy" / "proxmox" / "start-runtime.sh",
+        cwd=repo,
+        env={
+            PROXMOX_SECRET_ROOT_ENV: str(secret_root),
+            "RAGWELD_SKIP_TUNNEL": "1",
+            "FAKE_TOOL_LOG": str(log_path),
+            "PATH": f"{tmp_path / 'bin'}:{os.environ['PATH']}",
+        },
+    )
+
+    assert result.returncode != 0
+    assert "lsof" in result.stderr.lower()
+    assert (not log_path.exists()) or all(" up " not in line for line in log_path.read_text(encoding="utf-8").splitlines())
+
+
+def test_proxmox_lifecycle_start_runtime_fails_closed_when_bridge_gateway_differs_from_rendered_callback(
+    tmp_path: Path,
+) -> None:
+    assert PROXMOX_START_RUNTIME.is_file()
+    repo, log_path = _materialize_proxmox_runtime_repo(tmp_path)
+    secret_root = _build_secret_root(tmp_path, include_tunnel=False)
+
+    result = _run_shell_script(
+        repo / "deploy" / "proxmox" / "start-runtime.sh",
+        cwd=repo,
+        env={
+            PROXMOX_SECRET_ROOT_ENV: str(secret_root),
+            "RAGWELD_SKIP_TUNNEL": "1",
+            "FAKE_DOCKER_BRIDGE_GATEWAY": "172.18.0.1",
+            "FAKE_TOOL_LOG": str(log_path),
+            "PATH": f"{tmp_path / 'bin'}:{os.environ['PATH']}",
+        },
+    )
+
+    assert result.returncode != 0
+    assert "ragweld_agent_flyte_callback_base_url" in result.stderr
+    assert "172.17.0.1" in result.stderr
+    assert "172.18.0.1" in result.stderr
     assert (not log_path.exists()) or all(" up " not in line for line in log_path.read_text(encoding="utf-8").splitlines())
 
 
@@ -1079,6 +1173,7 @@ def test_proxmox_secret_bootstrap_generates_owner_only_runtime_material_and_exac
     assert runtime_env["LANGFUSE_PUBLIC_KEY"].startswith("pk-lf-")
     assert runtime_env["LANGFUSE_SECRET_KEY"].startswith("sk-lf-")
     assert runtime_env["LITELLM_API_KEY"].startswith("sk-ragweld-")
+    assert runtime_env["SERVER_HOST"] == "0.0.0.0"
     for forbidden_key in (
         "OPENAI_API_KEY",
         "OPENROUTER_API_KEY",
@@ -1233,7 +1328,17 @@ def _run_bootstrap(tmp_path: Path) -> tuple[Path, Path, Path]:
         env={PROXMOX_SECRET_ROOT_ENV: str(secret_root)},
     )
     assert result.returncode == 0, result.stderr
-    _write_private_file(secret_root / "tribrid_config.json", "{}\n")
+    _write_private_file(
+        secret_root / "tribrid_config.json",
+        json.dumps(
+            {
+                "training": {
+                    "ragweld_agent_flyte_callback_base_url": "http://172.17.0.1:58012",
+                }
+            }
+        )
+        + "\n",
+    )
     return repo, secret_root, python_log
 
 
@@ -1316,6 +1421,7 @@ def test_proxmox_bootstrap_uses_repo_python_and_sets_runtime_config_path_contrac
     assert repo == tmp_path / "repo"
     assert python_log.exists()
     assert str(repo / ".venv/bin/python") in python_log.read_text(encoding="utf-8")
+    assert runtime_env["SERVER_HOST"] == "0.0.0.0"
     assert runtime_env["RAGWELD_CONFIG_PATH"] == "/etc/ragweld/tribrid_config.json"
     assert "CONFIG_FILE" not in runtime_env
 

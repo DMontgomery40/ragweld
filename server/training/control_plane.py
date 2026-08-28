@@ -53,6 +53,18 @@ def _flyte_console_execution_url(console_base_url: str, project: str, domain: st
     )
 
 
+def _mlflow_console_run_url(console_base_url: str, experiment_id: str, run_id: str) -> str:
+    base = _clean_url(console_base_url)
+    experiment = str(experiment_id or "").strip()
+    tracking_run = str(run_id or "").strip()
+    if not (base and experiment and tracking_run):
+        return ""
+    return (
+        f"{base}/#/experiments/{quote(experiment, safe='')}"
+        f"/runs/{quote(tracking_run, safe='')}"
+    )
+
+
 async def _probe_flyte_launch_plan(admin_base_url: str, project: str, domain: str, launchplan: str) -> tuple[bool, str]:
     """Functional readiness: admin healthy AND the launch plan is registered."""
 
@@ -130,32 +142,25 @@ def build_agent_run_links(run: AgentTrainRun, cfg: TriBridConfig) -> list[TraceE
                 )
             )
 
-    mlflow_url = _clean_url(cfg.training.ragweld_agent_mlflow_tracking_url)
-    if str(run.tracking_backend or "").strip() == "mlflow" and mlflow_url:
-        run_link_url = mlflow_url
+    mlflow_console_url = _clean_url(cfg.training.ragweld_agent_mlflow_console_base_url)
+    if str(run.tracking_backend or "").strip() == "mlflow" and mlflow_console_url:
+        run_link_url = mlflow_console_url
         tracking_run_id = str(run.tracking_run_id or "").strip()
-        artifacts_uri = str(run.artifacts_uri or "").strip()
-        if tracking_run_id and artifacts_uri.startswith("mlflow-artifacts:/"):
-            parts = artifacts_uri.split("/")
-            if len(parts) >= 3 and parts[1]:
-                run_link_url = f"{mlflow_url}/#/experiments/{parts[1]}/runs/{tracking_run_id}"
-        mlflow_url = run_link_url
-        detail = (
-            f"MLflow run {run.tracking_run_id}"
-            if str(run.tracking_run_id or "").strip()
-            else f"Experiment {cfg.training.ragweld_agent_mlflow_experiment_name}"
-        )
-        key = ("custom", mlflow_url)
-        if key not in seen:
-            seen.add(key)
-            links.append(
-                TraceExternalLink(
-                    label="MLflow Tracking",
-                    kind="custom",
-                    url=mlflow_url,
-                    detail=detail,
+        tracking_experiment_id = str(run.tracking_experiment_id or "").strip()
+        if tracking_run_id and tracking_experiment_id:
+            run_link_url = _mlflow_console_run_url(mlflow_console_url, tracking_experiment_id, tracking_run_id)
+            detail = f"MLflow run {run.tracking_run_id}"
+            key = ("custom", run_link_url)
+            if key not in seen:
+                seen.add(key)
+                links.append(
+                    TraceExternalLink(
+                        label="MLflow Tracking",
+                        kind="custom",
+                        url=run_link_url,
+                        detail=detail,
+                    )
                 )
-            )
 
     artifacts_uri = str(run.artifacts_uri or "").strip()
     if artifacts_uri.startswith("http://") or artifacts_uri.startswith("https://"):
@@ -210,6 +215,7 @@ async def build_agent_control_plane_status(cfg: TriBridConfig) -> AgentTrainCont
     flyte_launchplan = str(cfg.training.ragweld_agent_flyte_launchplan or "").strip()
     flyte_callback = _clean_url(cfg.training.ragweld_agent_flyte_callback_base_url)
     mlflow_tracking_url = _clean_url(cfg.training.ragweld_agent_mlflow_tracking_url)
+    mlflow_console_url = _clean_url(cfg.training.ragweld_agent_mlflow_console_base_url)
     mlflow_experiment = str(cfg.training.ragweld_agent_mlflow_experiment_name or "").strip()
     unsloth_image = str(cfg.training.ragweld_agent_unsloth_image or "").strip()
 
@@ -290,11 +296,11 @@ async def build_agent_control_plane_status(cfg: TriBridConfig) -> AgentTrainCont
             TraceExternalLink(
                 label="MLflow Tracking",
                 kind="custom",
-                url=mlflow_tracking_url,
+                url=mlflow_console_url,
                 detail=f"Experiment {mlflow_experiment or 'unconfigured'}",
             )
         ]
-        if mlflow_tracking_url
+        if mlflow_console_url
         else []
     )
     mlflow_missing = [

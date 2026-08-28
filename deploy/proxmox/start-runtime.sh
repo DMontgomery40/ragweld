@@ -137,6 +137,37 @@ require_compose() {
   docker compose version >/dev/null 2>&1 || die "docker compose plugin is required"
 }
 
+require_process_inspector() {
+  command -v lsof >/dev/null 2>&1 || die "lsof is required before starting the Proxmox runtime"
+  lsof -v >/dev/null 2>&1 || die "lsof is installed but not executable; fix it before starting the Proxmox runtime"
+}
+
+read_rendered_flyte_callback_host() {
+  "$ROOT_DIR/.venv/bin/python" -c '
+import json
+import sys
+from urllib.parse import urlsplit
+
+payload = json.load(open(sys.argv[1], encoding="utf-8"))
+url = str(((payload.get("training") or {}).get("ragweld_agent_flyte_callback_base_url")) or "").strip()
+if not url:
+    raise SystemExit("training.ragweld_agent_flyte_callback_base_url is empty in the rendered config")
+host = urlsplit(url).hostname or ""
+if not host:
+    raise SystemExit("training.ragweld_agent_flyte_callback_base_url is not a valid URL")
+print(host)
+' "$1"
+}
+
+require_bridge_gateway_matches_rendered_callback() {
+  local callback_host bridge_gateway
+  callback_host="$(read_rendered_flyte_callback_host "$ETC_ROOT/tribrid_config.json")" \
+    || die "Unable to read training.ragweld_agent_flyte_callback_base_url from $ETC_ROOT/tribrid_config.json"
+  bridge_gateway="$(docker network inspect bridge -f '{{(index .IPAM.Config 0).Gateway}}' 2>/dev/null | tr -d '[:space:]')"
+  [[ -n "$bridge_gateway" ]] || die "docker bridge gateway could not be resolved; verify the default bridge before starting the Proxmox runtime"
+  [[ "$callback_host" == "$bridge_gateway" ]] || die "training.ragweld_agent_flyte_callback_base_url host (${callback_host}) must match the docker bridge gateway (${bridge_gateway})"
+}
+
 source_private_env_file() {
   local path="$1"
   set -a
@@ -174,6 +205,8 @@ main() {
   require_repo_executable "$ROOT_DIR/.venv/bin/uvicorn" "Virtualenv uvicorn"
   require_repo_executable "$ROOT_DIR/start.sh" "Host runtime launcher"
   require_compose
+  require_process_inspector
+  require_bridge_gateway_matches_rendered_callback
 
   ensure_repo_symlink "$ROOT_DIR/.env" "$ETC_ROOT/runtime.env"
   ensure_repo_symlink "$ROOT_DIR/infra/litellm.env" "$ETC_ROOT/litellm.env"

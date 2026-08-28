@@ -173,11 +173,14 @@ def test_langfuse_trace_url_is_built_from_config_without_network() -> None:
 
     cfg = TriBridConfig()
     cfg.tracing.langfuse_base_url = "http://127.0.0.1:53000/"
+    cfg.tracing.langfuse_public_base_url = "https://langfuse.ragweld.com/"
     cfg.tracing.langfuse_project = "ragweld"
     assert (
         langfuse_trace_url(cfg.tracing, "a659c9939466c50f4a1158c586673388")
-        == "http://127.0.0.1:53000/project/ragweld/traces/a659c9939466c50f4a1158c586673388"
+        == "https://langfuse.ragweld.com/project/ragweld/traces/a659c9939466c50f4a1158c586673388"
     )
     assert langfuse_trace_url(cfg.tracing, None) is None
+    cfg.tracing.langfuse_public_base_url = ""
+    assert langfuse_trace_url(cfg.tracing, "a659c9939466c50f4a1158c586673388") is None
     cfg.tracing.langfuse_base_url = ""
     assert langfuse_trace_url(cfg.tracing, "abc") is None

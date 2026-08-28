@@ -2606,6 +2606,8 @@ export interface TracingConfig {
   langfuse_enabled?: boolean; // default: False
   /** Langfuse base URL */
   langfuse_base_url?: string; // default: ""
+  /** Public Langfuse URL used for browser-facing operator deep links */
+  langfuse_public_base_url?: string; // default: ""
   /** Langfuse project label for traces and generations */
   langfuse_project?: string; // default: "ragweld"
   /** Tempo or Grafana explore base URL used for trace deep links */
@@ -2716,6 +2718,8 @@ export interface TrainingConfig {
   ragweld_agent_flyte_callback_base_url?: string; // default: ""
   /** Base URL of the Compose-owned MLflow Tracking server used by Learning Agent runs. */
   ragweld_agent_mlflow_tracking_url?: string; // default: "http://127.0.0.1:55500"
+  /** Public MLflow console URL used for browser-facing operator deep links. */
+  ragweld_agent_mlflow_console_base_url?: string; // default: ""
   /** MLflow experiment name for Learning Agent runs. */
   ragweld_agent_mlflow_experiment_name?: string; // default: "ragweld-learning-agent"
   /** Container image or artifact reference used by the Flyte task to run Unsloth training. */
@@ -2944,6 +2948,8 @@ export interface AgentTrainRun {
   workflow_phase?: string | null;
   /** External run identifier in the tracking system when available. */
   tracking_run_id?: string | null;
+  /** External experiment identifier in the tracking system when available. */
+  tracking_experiment_id?: string | null;
   /** Artifact URI or storage path for the run outputs when available. */
   artifacts_uri?: string | null;
   /** Direct operator links for workflow, tracking, or artifact surfaces. */

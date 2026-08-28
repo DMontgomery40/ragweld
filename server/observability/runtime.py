@@ -448,7 +448,7 @@ def langfuse_client_blockers(tracing_cfg: TracingConfig) -> list[str]:
 
 def langfuse_trace_url(tracing_cfg: TracingConfig, trace_id: str | None) -> str | None:
     """Deterministic Langfuse UI deep link — no network lookup on the request path."""
-    base = str(tracing_cfg.langfuse_base_url or "").strip().rstrip("/")
+    base = str(tracing_cfg.langfuse_public_base_url or "").strip().rstrip("/")
     project = str(tracing_cfg.langfuse_project or "").strip()
     if not base or not project or not trace_id:
         return None

@@ -1043,6 +1043,25 @@ def _primary_from_metrics(metrics: Mapping[str, object] | None) -> float | None:
     return finite_or_none(metrics.get("eval_loss"))
 
 
+def _resume_mlflow_tracking(run: AgentTrainRun, cfg: Any) -> tuple[MlflowClient, MlflowRunHandle] | None:
+    if str(run.tracking_backend or "local") != "mlflow":
+        return None
+    tracking_run_id = str(run.tracking_run_id or "").strip()
+    if not tracking_run_id:
+        return None
+    tracking_experiment_id = str(run.tracking_experiment_id or "").strip()
+    if not tracking_experiment_id:
+        raise MlflowUnavailableError(
+            "Persisted MLflow run metadata is missing tracking_experiment_id; refusing to rediscover the experiment id."
+        )
+    client = MlflowClient(str(cfg.training.ragweld_agent_mlflow_tracking_url or ""))
+    return client, MlflowRunHandle(
+        tracking_url=client.tracking_url,
+        experiment_id=tracking_experiment_id,
+        run_id=tracking_run_id,
+    )
+
+
 async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.Event | None = None) -> None:
     try:
         run = _load_run(run_id)
@@ -1101,16 +1120,10 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
 
         if str(run.tracking_backend or "local") == "mlflow" and str(run.tracking_run_id or "").strip():
             try:
-                mlflow_client = MlflowClient(str(cfg.training.ragweld_agent_mlflow_tracking_url or ""))
-                experiment_id = mlflow_client.ensure_experiment(
-                    str(cfg.training.ragweld_agent_mlflow_experiment_name or "ragweld-learning-agent")
-                )
-                mlflow_handle = MlflowRunHandle(
-                    tracking_url=mlflow_client.tracking_url,
-                    experiment_id=experiment_id,
-                    run_id=str(run.tracking_run_id),
-                )
-                _emit_log(f"MLflow tracking active: {mlflow_handle.run_url}")
+                resumed = _resume_mlflow_tracking(run, cfg)
+                if resumed is not None:
+                    mlflow_client, mlflow_handle = resumed
+                    _emit_log(f"MLflow tracking active: {mlflow_handle.run_url}")
             except MlflowUnavailableError as exc:
                 mlflow_client = None
                 mlflow_handle = None
@@ -1786,6 +1799,7 @@ async def start_train_run(request: AgentTrainStartRequest) -> AgentTrainStartRes
                 },
             ) from exc
         run.tracking_run_id = mlflow_handle.run_id
+        run.tracking_experiment_id = mlflow_handle.experiment_id
         run.artifacts_uri = f"mlflow-artifacts:/{mlflow_handle.experiment_id}/{mlflow_handle.run_id}/artifacts"
 
     run = _apply_run_control_plane_metadata(run, cfg)

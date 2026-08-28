@@ -2,6 +2,11 @@ services:
   grafana:
     environment:
       GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD}"
+      GF_SERVER_ROOT_URL: "https://grafana.ragweld.com"
+
+  alloy:
+    environment:
+      ALLOY_FARO_CORS_ORIGIN: "https://me.ragweld.com"
 
   langfuse:
     env_file: !override
@@ -15,6 +20,7 @@ services:
       AUTH_CUSTOM_NAME: "Ragweld"
       AUTH_CUSTOM_SCOPE: "openid email profile groups"
       AUTH_CUSTOM_FETCH_USERINFO: "true"
+      AUTH_CUSTOM_ALLOW_ACCOUNT_LINKING: "true"
       AUTH_DISABLE_USERNAME_PASSWORD: "true"
       AUTH_DISABLE_SIGNUP: "true"
 

@@ -152,6 +152,7 @@ async def test_observability_status_includes_gateway_and_workflow_control_plane_
     cfg["training"]["ragweld_agent_flyte_domain"] = "development"
     cfg["training"]["ragweld_agent_flyte_launchplan"] = "learning-agent-train"
     cfg["training"]["ragweld_agent_mlflow_tracking_url"] = "http://127.0.0.1:9/mlflow"
+    cfg["training"]["ragweld_agent_mlflow_console_base_url"] = "https://mlflow.ragweld.com"
     cfg["training"]["ragweld_agent_mlflow_experiment_name"] = "ragweld-learning-agent"
     cfg["training"]["ragweld_agent_unsloth_image"] = "ghcr.io/ragweld/unsloth:latest"
 

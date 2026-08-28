@@ -31,14 +31,19 @@ def _required_compose_env_keys(path: Path) -> set[str]:
     }
 
 
-def _run(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+def _run(
+    *args: str,
+    env: dict[str, str] | None = None,
+    cwd: Path | None = None,
+) -> subprocess.CompletedProcess[str]:
     merged_env = dict(os.environ)
     if env:
         merged_env.update(env)
+    run_cwd = cwd or ROOT
     if env and "RAGWELD_RUNTIME_DIR" in env:
         return subprocess.run(
             list(args),
-            cwd=ROOT,
+            cwd=run_cwd,
             env=merged_env,
             text=True,
             capture_output=True,
@@ -48,12 +53,23 @@ def _run(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedP
         merged_env["RAGWELD_RUNTIME_DIR"] = runtime_dir
         return subprocess.run(
             list(args),
-            cwd=ROOT,
+            cwd=run_cwd,
             env=merged_env,
             text=True,
             capture_output=True,
             check=False,
         )
+
+
+def _materialize_start_sh_repo(tmp_path: Path) -> Path:
+    repo = tmp_path / "repo"
+    (repo / "scripts").mkdir(parents=True, exist_ok=True)
+    (repo / "start.sh").write_text((ROOT / "start.sh").read_text(encoding="utf-8"), encoding="utf-8")
+    (repo / "scripts" / "runtime_lifecycle.sh").write_text(
+        (ROOT / "scripts" / "runtime_lifecycle.sh").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    return repo
 
 
 def _compose_config(*files: str, env: dict[str, str] | None = None) -> dict[str, Any]:
@@ -127,6 +143,42 @@ def test_start_check_treats_docker_runtime_as_host_owned() -> None:
     assert "colima start" not in output
     assert "colima stop" not in output
     assert "colima delete" not in output
+
+
+def test_start_check_defaults_backend_bind_to_loopback(tmp_path: Path) -> None:
+    repo = _materialize_start_sh_repo(tmp_path)
+    result = _run(
+        "bash",
+        "start.sh",
+        "--check",
+        "--no-docker",
+        "--no-frontend",
+        "--no-local-model",
+        env={"BACKEND_PORT": "58112"},
+        cwd=repo,
+    )
+    output = f"{result.stdout}\n{result.stderr}"
+
+    assert result.returncode == 0, output
+    assert "--host 127.0.0.1 --port 58112" in output
+
+
+def test_start_check_honors_server_host_override_for_backend_bind(tmp_path: Path) -> None:
+    repo = _materialize_start_sh_repo(tmp_path)
+    result = _run(
+        "bash",
+        "start.sh",
+        "--check",
+        "--no-docker",
+        "--no-frontend",
+        "--no-local-model",
+        env={"BACKEND_PORT": "58113", "SERVER_HOST": "0.0.0.0"},
+        cwd=repo,
+    )
+    output = f"{result.stdout}\n{result.stderr}"
+
+    assert result.returncode == 0, output
+    assert "--host 0.0.0.0 --port 58113" in output
 
 
 def test_vite_config_has_no_hidden_process_launcher() -> None:
@@ -439,6 +491,15 @@ def test_active_observability_urls_match_namespaced_loopback_ports() -> None:
     assert TriBridConfig().ui.grafana_base_url == "http://127.0.0.1:3301"
     assert "http://127.0.0.1:53100" in _loki_candidate_urls()
     assert "http://127.0.0.1:3100" not in _loki_candidate_urls()
+
+
+def test_generated_wire_types_include_split_public_operator_urls_without_extra_faro_field() -> None:
+    generated_source = (ROOT / "web" / "src" / "types" / "generated.ts").read_text(encoding="utf-8")
+
+    assert "langfuse_public_base_url?: string;" in generated_source
+    assert "ragweld_agent_mlflow_console_base_url?: string;" in generated_source
+    assert "tracking_experiment_id?: string | null;" in generated_source
+    assert "faro_public_base_url" not in generated_source
 
 
 def test_proxmox_production_contract_env_covers_every_required_overlay_interpolation() -> None:

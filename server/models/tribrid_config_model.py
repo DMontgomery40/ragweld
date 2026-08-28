@@ -3212,6 +3212,10 @@ class AgentTrainRun(BaseModel):
         default=None,
         description="External run identifier in the tracking system when available.",
     )
+    tracking_experiment_id: str | None = Field(
+        default=None,
+        description="External experiment identifier in the tracking system when available.",
+    )
     artifacts_uri: str | None = Field(
         default=None,
         description="Artifact URI or storage path for the run outputs when available.",
@@ -5268,6 +5272,11 @@ class TracingConfig(BaseModel):
         description="Langfuse base URL"
     )
 
+    langfuse_public_base_url: str = Field(
+        default="",
+        description="Public Langfuse URL used for browser-facing operator deep links",
+    )
+
     langfuse_project: str = Field(
         default="ragweld",
         description="Langfuse project label for traces and generations"
@@ -5601,6 +5610,11 @@ class TrainingConfig(BaseModel):
     ragweld_agent_mlflow_tracking_url: str = Field(
         default="http://127.0.0.1:55500",
         description="Base URL of the Compose-owned MLflow Tracking server used by Learning Agent runs.",
+    )
+
+    ragweld_agent_mlflow_console_base_url: str = Field(
+        default="",
+        description="Public MLflow console URL used for browser-facing operator deep links.",
     )
 
     ragweld_agent_mlflow_experiment_name: str = Field(
@@ -6760,6 +6774,7 @@ class TriBridConfig(BaseModel):
             'OTEL_SERVICE_NAME': self.tracing.otel_service_name,
             'LANGFUSE_ENABLED': self.tracing.langfuse_enabled,
             'LANGFUSE_BASE_URL': self.tracing.langfuse_base_url,
+            'LANGFUSE_PUBLIC_BASE_URL': self.tracing.langfuse_public_base_url,
             'LANGFUSE_PROJECT': self.tracing.langfuse_project,
             'TEMPO_BASE_URL': self.tracing.tempo_base_url,
             'ALLOY_BASE_URL': self.tracing.alloy_base_url,
@@ -6814,6 +6829,7 @@ class TriBridConfig(BaseModel):
             'RAGWELD_AGENT_FLYTE_LAUNCHPLAN': self.training.ragweld_agent_flyte_launchplan,
             'RAGWELD_AGENT_FLYTE_CALLBACK_BASE_URL': self.training.ragweld_agent_flyte_callback_base_url,
             'RAGWELD_AGENT_MLFLOW_TRACKING_URL': self.training.ragweld_agent_mlflow_tracking_url,
+            'RAGWELD_AGENT_MLFLOW_CONSOLE_BASE_URL': self.training.ragweld_agent_mlflow_console_base_url,
             'RAGWELD_AGENT_MLFLOW_EXPERIMENT_NAME': self.training.ragweld_agent_mlflow_experiment_name,
             'RAGWELD_AGENT_UNSLOTH_IMAGE': self.training.ragweld_agent_unsloth_image,
             # UI params (43)
@@ -7146,6 +7162,7 @@ class TriBridConfig(BaseModel):
                 otel_service_name=data.get('OTEL_SERVICE_NAME', 'ragweld-api'),
                 langfuse_enabled=data.get('LANGFUSE_ENABLED', False),
                 langfuse_base_url=data.get('LANGFUSE_BASE_URL', ''),
+                langfuse_public_base_url=data.get('LANGFUSE_PUBLIC_BASE_URL', ''),
                 langfuse_project=data.get('LANGFUSE_PROJECT', 'ragweld'),
                 tempo_base_url=data.get('TEMPO_BASE_URL', ''),
                 alloy_base_url=data.get('ALLOY_BASE_URL', ''),
@@ -7207,6 +7224,7 @@ class TriBridConfig(BaseModel):
                 ragweld_agent_flyte_launchplan=data.get('RAGWELD_AGENT_FLYTE_LAUNCHPLAN', ''),
                 ragweld_agent_flyte_callback_base_url=data.get('RAGWELD_AGENT_FLYTE_CALLBACK_BASE_URL', ''),
                 ragweld_agent_mlflow_tracking_url=data.get('RAGWELD_AGENT_MLFLOW_TRACKING_URL', ''),
+                ragweld_agent_mlflow_console_base_url=data.get('RAGWELD_AGENT_MLFLOW_CONSOLE_BASE_URL', ''),
                 ragweld_agent_mlflow_experiment_name=data.get('RAGWELD_AGENT_MLFLOW_EXPERIMENT_NAME', 'ragweld-learning-agent'),
                 ragweld_agent_unsloth_image=data.get('RAGWELD_AGENT_UNSLOTH_IMAGE', ''),
             ),

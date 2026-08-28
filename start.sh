@@ -7,6 +7,7 @@ cd "$ROOT_DIR"
 source "$ROOT_DIR/scripts/runtime_lifecycle.sh"
 
 BACKEND_PORT="${BACKEND_PORT:-58012}"
+SERVER_HOST="${SERVER_HOST:-127.0.0.1}"
 FRONTEND_PORT="${FRONTEND_PORT:-55173}"
 FRONTEND_HOST="${FRONTEND_HOST:-127.0.0.1}"
 # Pinned, not operator-overridable: LiteLLM's generated config, the Compose
@@ -345,7 +346,7 @@ fi
 export COMPOSE_PROJECT_NAME="$RAGWELD_COMPOSE_PROJECT"
 
 # Keep the host API, Vite proxy, and /api/dev/status on one resolved port.
-export BACKEND_PORT FRONTEND_PORT
+export BACKEND_PORT FRONTEND_PORT SERVER_HOST
 export VITE_API_PROXY_TARGET="http://127.0.0.1:${BACKEND_PORT}"
 export LITELLM_BASE_URL="${LITELLM_BASE_URL:-http://127.0.0.1:54000/v1}"
 export LITELLM_API_KEY="${LITELLM_API_KEY:-sk-ragweld-local}"
@@ -494,12 +495,12 @@ if [[ "$START_BACKEND" == "1" && "$BACKEND_MODE" == "local" ]]; then
   fi
 
   if [[ "$DRY_RUN" == "1" ]]; then
-    run "$ROOT_DIR/.venv/bin/uvicorn" server.main:app --host 127.0.0.1 --port "$BACKEND_PORT"
+    run "$ROOT_DIR/.venv/bin/uvicorn" server.main:app --host "$SERVER_HOST" --port "$BACKEND_PORT"
   else
     [[ -x "$ROOT_DIR/.venv/bin/uvicorn" ]] || die "Expected .venv/bin/uvicorn after dependency setup"
     (
       cd "$ROOT_DIR"
-      exec "$ROOT_DIR/.venv/bin/uvicorn" server.main:app --host 127.0.0.1 --port "$BACKEND_PORT"
+      exec "$ROOT_DIR/.venv/bin/uvicorn" server.main:app --host "$SERVER_HOST" --port "$BACKEND_PORT"
     ) &
     BACKEND_PID="$!"
     write_owned_pid "backend" "$BACKEND_PID" "$BACKEND_PORT"
