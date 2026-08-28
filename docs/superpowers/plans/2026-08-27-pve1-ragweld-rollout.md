@@ -151,7 +151,46 @@ override the conflicting steps below until the steps themselves are rewritten.
   delete `100.fw` rather than leaving a file that reads as a boundary — spec §5
   is then knowingly unmet and the tunnel plus loopback binds are the only
   boundary.
-- **W59 — watch the thin pool, not the RAM.** pve1's `local-lvm` is a 794 GiB
+- **W77 (P1, observed live) — the API is unresponsive while Docling indexes, so
+  Task 7 and Task 8 must not overlap.** At 18:30Z with a PDF mid-OCR
+  (`A11_MissionReport.pdf`, rapidocr/CPU), `/api/health` and `/api/ready` both
+  returned `000` with 17 connections queued on the listen socket, uvicorn up
+  1h and holding ~4.4 GB RSS. `/api/health` does no dependency checks, so this
+  is the event loop being blocked by CPU-bound native OCR, not an outage.
+  Until Docling parsing is moved off the loop (ProcessPoolExecutor or a worker
+  process): run Task 8's external browser acceptance **only after** Task 7
+  seeding has finished, never concurrently, and record in the evidence that the
+  API does not answer during indexing so a timed-out UI pass is not
+  misdiagnosed as a deployment failure. Note also that Prometheus scrapes
+  `/metrics` on the same loop, so expect scrape gaps during seeding.
+  **Measured 18:45Z — not a hang, saturation:** onnxruntime/rapidocr fans out
+  to ~152 threads consuming ~7.5 of the LXC's 16 cores on one scanned PDF,
+  still running after 15 minutes, backlog grown to 115 queued connections,
+  while 12 GB of guest memory stays free. Contention starves the loop, not
+  memory. Before Task 7, cap the OCR fan-out (`OMP_NUM_THREADS` plus
+  onnxruntime intra/inter-op threads at 2-4) so indexing cannot take half the
+  box, and **budget seeding in hours, not minutes**, treating the API as
+  offline throughout.
+- **W75 (measured 2026-08-28, sharpens W59) — alert on the volume as well as
+  the pool; the volume is the nearer wall.** Two hours in and with **no corpora
+  yet**, `vm-100-disk-0` is already at **15.64% of 300 GB (~44 GB)** and
+  `pve/data` at **6.92%**; the guest has **242 GB free** while the pool has
+  ~739 GB. So Ragweld hits its own 300 GB ceiling long before it can exhaust
+  the pool. Alert at both levels because they fail differently: guest `df /` at
+  75% warn / 90% page (Ragweld-only, fixed by `pct resize 100 rootfs +100G`
+  against ample thin headroom), and `pve/data` Data%/Meta% at 70% / 85%
+  (node-wide, takes HAOS read-only with it, `thin_pool_autoextend_*` still
+  unset with only 16 GiB of VG to extend into). Before Task 7, set the
+  autoextend keys and both alerts; immediately after the first corpus indexes,
+  re-measure `vm-100-disk-0` so the seeding budget is a measurement rather than
+  an estimate.
+  Follow-up at 18:36Z after the 2,000-file corpus completed and the Apollo PDF
+  was mid-index: guest `/` was 14% used with 242 GB free,
+  `vm-100-disk-0` Data% was 15.67%, and `pve/data` was 6.94% Data / 0.46%
+  Meta. The first corpus moved the pool by only 0.02 percentage points; the
+  guardrails remain required, but capacity is not a seeding blocker.
+  ~~Original text below.~~
+- **W59 (original) — watch the thin pool, not the RAM.** pve1's `local-lvm` is a 794 GiB
   thin pool at 1.58% used (~819 GiB available), holding both
   `vm-100-disk-0` (300 GiB thin, Ragweld) and HAOS's 32 GiB. Sizing is not a
   problem and the 300 GiB can be grown later with `pct resize`. The risk is
@@ -370,7 +409,7 @@ Run package updates separately, then install:
 
 ```bash
 apt-get update
-apt-get install -y ca-certificates curl git gnupg jq lsof openssl rsync sudo uidmap fuse-overlayfs python3 python3-venv build-essential pciutils vainfo
+apt-get install -y ca-certificates curl git gnupg jq libgl1 libglib2.0-0t64 lsof openssl rsync sudo uidmap fuse-overlayfs python3 python3-venv build-essential pciutils vainfo
 ```
 
 Install Docker Engine and the Compose plugin from Docker's official Debian
@@ -704,7 +743,7 @@ If the bootstrap plaintext was exposed in terminal output, generate a replacemen
 - Consumes: public Hugging Face dataset and NASA public-domain PDF.
 - Produces: freshly indexed `epstein-files-public` and `nasa-apollo-11` corpora with provenance manifests.
 
-- [ ] **Step 1: Materialize 2,000 public Epstein email rows**
+- [x] **Step 1: Materialize 2,000 public Epstein email rows**
 
 Run inside `/opt/ragweld` as the `ragweld` user:
 
@@ -714,17 +753,21 @@ uv run python -c 'from pathlib import Path; from server.synthetic.hf_epstein_ema
 
 Expected: exactly 2,000 text files, one out-of-corpus manifest, and 200 or fewer evidence-graded eval rows. Record dataset ID `to-be/epstein-emails`, config `default`, split `train`, timestamp, and manifest SHA-256.
 
-- [ ] **Step 2: Download one public-domain multimodal PDF**
+- [x] **Step 2: Download one public-domain multimodal PDF**
 
 ```bash
 install -d -o ragweld -g ragweld -m 0755 /srv/ragweld/corpora/nasa-apollo-11 /srv/ragweld/corpora-metadata
-sudo -u ragweld curl -fL --retry 2 --output /srv/ragweld/corpora/nasa-apollo-11/A11_MissionReport.pdf https://ntrs.nasa.gov/archive/nasa/casi.ntrs.nasa.gov/19700008096.pdf
+sudo -u ragweld curl -fL --retry 2 --output /srv/ragweld/corpora/nasa-apollo-11/A11_MissionReport.pdf https://ntrs.nasa.gov/api/citations/19700008096/downloads/19700008096.pdf
+file /srv/ragweld/corpora/nasa-apollo-11/A11_MissionReport.pdf
+head -c 8 /srv/ragweld/corpora/nasa-apollo-11/A11_MissionReport.pdf
 sha256sum /srv/ragweld/corpora/nasa-apollo-11/A11_MissionReport.pdf
 ```
 
 Record NASA NTRS document ID `19700008096`, distribution `Public`, and copyright `Work of the US Gov. Public Use Permitted` in the provenance metadata.
+Reject an HTML response even when curl returns `200`; the file must identify as
+PDF and begin `%PDF-` before registration.
 
-- [ ] **Step 3: Register both corpora through the real API**
+- [x] **Step 3: Register both corpora through the real API**
 
 POST `/api/corpora` with exact IDs, names, and paths:
 
@@ -746,7 +789,7 @@ curl -fsS -X POST http://127.0.0.1:58012/api/corpora -H 'Content-Type: applicati
 curl -fsS http://127.0.0.1:58012/api/corpora | jq
 ```
 
-- [ ] **Step 4: Estimate before indexing**
+- [x] **Step 4: Estimate before indexing**
 
 POST `/api/index/estimate` for each corpus. Record file/chunk/token/cost estimates. Stop if the system proposes unexpected per-chunk cloud enrichment spend; keep local Hugging Face embeddings and use OpenRouter only for the bounded semantic/enrichment calls explicitly shown by the estimate.
 
@@ -755,7 +798,7 @@ curl -fsS -X POST http://127.0.0.1:58012/api/index/estimate -H 'Content-Type: ap
 curl -fsS -X POST http://127.0.0.1:58012/api/index/estimate -H 'Content-Type: application/json' -d '{"corpus_id":"nasa-apollo-11","repo_path":"/srv/ragweld/corpora/nasa-apollo-11","force_reindex":false}' | jq
 ```
 
-- [ ] **Step 5: Index the text corpus, then the PDF corpus**
+- [x] **Step 5: Index the text corpus, then the PDF corpus**
 
 POST `/api/index` with `force_reindex=false`, monitor the real stream/status endpoint until terminal completion, and require new Postgres/Qdrant/Neo4j generations. Do not start both indexes concurrently.
 
@@ -769,7 +812,7 @@ watch -n 5 'curl -fsS http://127.0.0.1:58012/api/index/nasa-apollo-11/status | j
 Exit each `watch` only after `status` is `complete`, `error`, or `cancelled`.
 Treat `error` and `cancelled` as blockers and inspect the persisted run events.
 
-- [ ] **Step 6: Ask real evidence questions**
+- [x] **Step 6: Ask real evidence questions**
 
 For Epstein emails, ask one question from the generated eval dataset, such as:
 

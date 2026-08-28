@@ -913,6 +913,23 @@ def test_flyte_gets_a_container_scoped_kmsg_sink_without_host_kernel_exposure() 
     assert "docker exec ragweld-flyte-1 kubectl get nodes" in source
 
 
+def test_linux_docling_runtimes_install_and_preflight_opencv_dependencies() -> None:
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    rollout = PROXMOX_ROLLOUT_PLAN.read_text(encoding="utf-8")
+    start_runtime = PROXMOX_START_RUNTIME.read_text(encoding="utf-8")
+    docker_packages = dockerfile.split("RUN apt-get update && apt-get install -y", 1)[1].split(
+        "&& rm -rf /var/lib/apt/lists/*", 1
+    )[0]
+
+    assert dockerfile.startswith("FROM python:3.12-slim-trixie\n")
+    assert {"libgl1", "libglib2.0-0t64"}.issubset(docker_packages.split())
+    assert re.search(r"apt-get install -y [^\n]*\blibgl1\b", rollout)
+    assert re.search(r"apt-get install -y [^\n]*\blibglib2\.0-0t64\b", rollout)
+    assert '"$ROOT_DIR/.venv/bin/python" -c \'import cv2\'' in start_runtime
+    assert "Docling/OpenCV runtime is unavailable" in start_runtime
+    assert "libgl1 and libglib2.0-0t64" in start_runtime
+
+
 def test_proxmox_lifecycle_artifacts_exist_and_use_strict_shell_contract() -> None:
     for path in (
         PROXMOX_START_RUNTIME,
@@ -1135,6 +1152,46 @@ exit 127
     assert result.returncode != 0
     assert "lsof" in result.stderr.lower()
     assert (not log_path.exists()) or all(" up " not in line for line in log_path.read_text(encoding="utf-8").splitlines())
+
+
+def test_proxmox_lifecycle_start_runtime_fails_closed_without_docling_opencv_runtime(
+    tmp_path: Path,
+) -> None:
+    assert PROXMOX_START_RUNTIME.is_file()
+    repo, log_path = _materialize_proxmox_runtime_repo(tmp_path)
+    secret_root = _build_secret_root(tmp_path, include_tunnel=False)
+    real_python = ROOT / ".venv" / "bin" / "python"
+    _write_executable(
+        repo / ".venv/bin/python",
+        f"""#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${{1:-}}" == "-c" && "${{2:-}}" == "import cv2" ]]; then
+  printf '%s\\n' 'ImportError: libgthread-2.0.so.0: cannot open shared object file' >&2
+  exit 1
+fi
+exec {shlex.quote(str(real_python))} "$@"
+""",
+    )
+
+    result = _run_shell_script(
+        repo / "deploy" / "proxmox" / "start-runtime.sh",
+        cwd=repo,
+        env={
+            PROXMOX_SECRET_ROOT_ENV: str(secret_root),
+            "RAGWELD_SKIP_TUNNEL": "1",
+            "FAKE_TOOL_LOG": str(log_path),
+            "PATH": f"{tmp_path / 'bin'}:{os.environ['PATH']}",
+        },
+    )
+
+    assert result.returncode != 0
+    assert "Docling/OpenCV runtime is unavailable" in result.stderr
+    assert "libgl1" in result.stderr
+    assert "libglib2.0-0t64" in result.stderr
+    assert (not log_path.exists()) or all(
+        " up " not in line
+        for line in log_path.read_text(encoding="utf-8").splitlines()
+    )
 
 
 def test_proxmox_lifecycle_start_runtime_fails_closed_when_bridge_gateway_differs_from_rendered_callback(

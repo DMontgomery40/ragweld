@@ -142,6 +142,11 @@ require_process_inspector() {
   lsof -v >/dev/null 2>&1 || die "lsof is installed but not executable; fix it before starting the Proxmox runtime"
 }
 
+require_docling_runtime() {
+  "$ROOT_DIR/.venv/bin/python" -c 'import cv2' >/dev/null 2>&1 \
+    || die "Docling/OpenCV runtime is unavailable; install the Debian libgl1 and libglib2.0-0t64 packages before starting Ragweld"
+}
+
 read_rendered_flyte_callback_host() {
   "$ROOT_DIR/.venv/bin/python" -c '
 import json
@@ -209,6 +214,7 @@ main() {
   require_repo_executable "$ROOT_DIR/start.sh" "Host runtime launcher"
   require_compose
   require_process_inspector
+  require_docling_runtime
   require_bridge_gateway_matches_rendered_callback
 
   ensure_repo_symlink "$ROOT_DIR/.env" "$ETC_ROOT/runtime.env"

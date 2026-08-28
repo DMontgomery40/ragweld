@@ -24,13 +24,13 @@ from server.api.retrieval_errors import (
     retrieval_contract_mismatch_http_exception,
 )
 from server.chat.handler import ChatGenerationError, chat_once
-from server.chat.prompt_budget import PromptBudgetError
 from server.chat.handler import chat_stream as chat_stream_handler
 from server.chat.model_discovery import discover_litellm_models
-from server.gateway_catalog import gateway_rows_by_alias_cached
+from server.chat.prompt_budget import PromptBudgetError
 from server.chat.recall_indexer import index_recall_conversation
 from server.chat.source_router import resolve_sources
 from server.db.postgres import PostgresClient
+from server.gateway_catalog import gateway_rows_by_alias_cached
 from server.indexing.embedder import Embedder, configure_postgres_embedding_cache_backend
 from server.models.chat import ChatRequest, ChatResponse, Message
 from server.models.tribrid_config_model import (
@@ -274,12 +274,20 @@ async def chat(request: ChatRequest, response: Response) -> ChatResponse:
             )
 
         try:
-            response_text, sources, provider_id, recall_plan, provider_info, llm_used, llm_error = await chat_once(
+            chat_result = await chat_once(
                 request=request,
                 config=config,
                 fusion=fusion,
                 conversation=conv,
             )
+            response_text = chat_result.text
+            sources = chat_result.sources
+            provider_id = chat_result.provider_response_id
+            recall_plan = chat_result.recall_plan
+            provider_info = chat_result.provider
+            llm_used = chat_result.llm_used
+            llm_error = chat_result.llm_error
+            tokens_used = chat_result.tokens_used
             ended_at_ms = int(time.time() * 1000)
             debug = build_chat_debug_info(
                 config=config,
@@ -365,7 +373,7 @@ async def chat(request: ChatRequest, response: Response) -> ChatResponse:
                     kind="chat.response",
                     data={
                         "sources_count": len(sources),
-                        "tokens_used": 0,
+                        "tokens_used": tokens_used,
                     },
                 )
                 await trace_store.annotate(run_id, **current_trace_payload_fields())
@@ -427,7 +435,7 @@ async def chat(request: ChatRequest, response: Response) -> ChatResponse:
                 conversation_id=conv.id,
                 message=assistant_msg,
                 sources=sources,
-                tokens_used=0,
+                tokens_used=tokens_used,
             )
 
         except RetrievalContractMismatchError as e:
@@ -731,7 +739,10 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                         await trace_store.add_event(
                             run_id,
                             kind="chat.response",
-                            data={"sources_count": len(payload.get("sources") or [])},
+                            data={
+                                "sources_count": len(payload.get("sources") or []),
+                                "tokens_used": int(payload.get("tokens_used") or 0),
+                            },
                         )
                         await trace_store.annotate(run_id, **current_trace_payload_fields())
 

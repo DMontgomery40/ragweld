@@ -100,6 +100,13 @@ def _extract_usage_tokens(usage: dict[str, Any] | None) -> tuple[int | None, int
     return input_tokens, output_tokens, total_tokens
 
 
+def usage_total_tokens(usage: dict[str, Any] | None) -> int:
+    """Return the canonical nonnegative total-token count for provider usage."""
+
+    _, _, total_tokens = _extract_usage_tokens(usage)
+    return int(total_tokens or 0)
+
+
 def _parse_provider_cost(raw: Any) -> float | None:
     if raw is None:
         return None

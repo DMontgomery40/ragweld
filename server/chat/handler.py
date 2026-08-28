@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-
 import hashlib
 import json
 import re
 import time
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, cast
 
@@ -23,8 +23,7 @@ from server.chat.provider_router import select_provider_route
 from server.chat.retrieval_gate import classify_for_recall
 from server.chat.source_router import resolve_sources
 from server.db.postgres import PostgresClient
-from server.models.chat_config import RecallConfig, RecallIntensity, RecallPlan
-from server.models.chat_config import ImageAttachment
+from server.models.chat_config import ImageAttachment, RecallConfig, RecallIntensity, RecallPlan
 from server.models.retrieval import ChunkMatch
 from server.models.tribrid_config_model import (
     ChatProviderInfo,
@@ -32,6 +31,7 @@ from server.models.tribrid_config_model import (
     GenerationUnavailableDetail,
     TriBridConfig,
 )
+from server.observability.costing import usage_total_tokens
 from server.retrieval.cache import CacheMode, SemanticCacheService
 from server.services.conversation_store import Conversation
 from server.services.rag import FusionProtocol
@@ -73,6 +73,18 @@ def _coerce_generation_result(result: Any) -> GenerationResult:
             else None
         ),
     )
+
+
+@dataclass(frozen=True, slots=True)
+class ChatOnceResult:
+    text: str
+    sources: list[ChunkMatch]
+    provider_response_id: str | None
+    recall_plan: RecallPlan | None
+    provider: ChatProviderInfo | None
+    llm_used: bool
+    llm_error: str | None
+    tokens_used: int
 
 
 def fit_context_to_route(
@@ -282,7 +294,7 @@ async def chat_once(
     config: TriBridConfig,
     fusion: FusionProtocol,
     conversation: Conversation,
-) -> tuple[str, list[ChunkMatch], str | None, RecallPlan | None, ChatProviderInfo | None, bool, str | None]:
+) -> ChatOnceResult:
     """Non-streaming chat handler."""
 
     corpus_ids = resolve_sources(request.sources)
@@ -517,7 +529,16 @@ async def chat_once(
                 pass
             if provider_id:
                 conversation.last_provider_response_id = provider_id
-            return cached_text, sources, provider_id, recall_plan, provider_info, True, None
+            return ChatOnceResult(
+                text=cached_text,
+                sources=sources,
+                provider_response_id=provider_id,
+                recall_plan=recall_plan,
+                provider=provider_info,
+                llm_used=True,
+                llm_error=None,
+                tokens_used=0,
+            )
 
     try:
         route = resolved_route or select_provider_route(
@@ -591,7 +612,16 @@ async def chat_once(
         except Exception:
             pass
 
-    return text, sources, provider_id, recall_plan, provider_info, llm_used, llm_error
+    return ChatOnceResult(
+        text=text,
+        sources=sources,
+        provider_response_id=provider_id,
+        recall_plan=recall_plan,
+        provider=provider_info,
+        llm_used=llm_used,
+        llm_error=llm_error,
+        tokens_used=usage_total_tokens(generation.usage),
+    )
 
 
 async def chat_stream(
@@ -736,6 +766,7 @@ async def chat_stream(
     provider_info: ChatProviderInfo | None = None
     accumulated = ""
     provider_response_id: str | None = None
+    provider_usage: dict[str, Any] = {}
     temperature = (
         float(config.chat.temperature_no_retrieval) if not corpus_ids else float(config.chat.temperature)
     )
@@ -852,6 +883,7 @@ async def chat_stream(
                 "provider_response_id": provider_response_id,
                 "llm_used": True,
                 "llm_error": None,
+                "tokens_used": 0,
             }
             yield f"data: {json.dumps(done_payload)}\n\n"
             return
@@ -860,6 +892,10 @@ async def chat_stream(
         nonlocal provider_response_id
         if isinstance(val, str) and val.strip():
             provider_response_id = val.strip()
+
+    def _capture_usage(value: dict[str, Any]) -> None:
+        nonlocal provider_usage
+        provider_usage = dict(value)
 
     try:
         route = resolved_route or select_provider_route(
@@ -885,6 +921,7 @@ async def chat_stream(
             context_chunks=sources,
             timeout_s=float(getattr(config.ui, "chat_stream_timeout", 120) or 120),
             on_provider_response_id=_capture_provider_response_id,
+            on_usage=_capture_usage,
         ):
             accumulated += delta
             yield f"data: {json.dumps({'type': 'text', 'content': delta})}\n\n"
@@ -938,6 +975,7 @@ async def chat_stream(
             "provider_response_id": provider_response_id,
             "llm_used": False,
             "llm_error": llm_error,
+            "tokens_used": usage_total_tokens(provider_usage),
         }
         yield f"data: {json.dumps(done_event_payload)}\n\n"
         return
@@ -989,5 +1027,6 @@ async def chat_stream(
         "provider_response_id": provider_response_id,
         "llm_used": bool(llm_used),
         "llm_error": llm_error,
+        "tokens_used": usage_total_tokens(provider_usage),
     }
     yield f"data: {json.dumps(done_event_payload)}\n\n"

@@ -2,7 +2,7 @@
 
 Date: 2026-08-28
 
-Status: source, Plex, LXC, and runtime bootstrap gates complete; full internal stack preflight pending
+Status: full source/Plex/LXC/runtime/recovery/corpus gates complete; authoritative DNS activation, external browser acceptance, and final guardrail/review closeout pending
 
 ## Scope
 
@@ -27,6 +27,12 @@ gate. Detailed Plex/PBS/NFS evidence lives in
   `809386f8` (`docs(homelab): record verified plex media bridge`).
 - Published final Plex local-media and hardware acceptance tip:
   `ad67ad31` (`docs(homelab): close plex hardware acceptance`).
+- Current deployed application tip:
+  `da349c901e54966aec73c5cd63ac6cfc225e8043`
+  (`chore(models): restore catalog lockstep`).
+- Current local candidate adds the Linux Docling/OpenCV runtime dependency and
+  fail-closed startup guard discovered by the real Apollo PDF proof; it remains
+  uncommitted until the independent review and runtime rerun close.
 - User-owned local dirt intentionally excluded from publication:
   `AGENTS.md`, `CLAUDE.md`, and untracked `.claude/skills/`
 
@@ -274,7 +280,8 @@ failure; leave it stopped with this evidence for inspection.
 - Rendered `/etc/ragweld/tribrid_config.json` mode `0600` while preserving the
   source hash
   `e75fe7e128f4f34b4205491dd47309b3edf6eecbf0e4a4b4a05f99fe785b89df`.
-- Verified production mode, `openai.gpt-5.4-mini`, provider embeddings,
+- Verified production mode, `openai.gpt-5.6-terra` for all seven production
+  generation/judge defaults, provider embeddings,
   explicit vLLM disablement, public Grafana/Langfuse/MLflow/Flyte URLs, and
   Flyte callback `http://172.17.0.1:58012`.
 - Installed `ragweld.service` but left it disabled and inactive. Task 4 owns
@@ -282,6 +289,93 @@ failure; leave it stopped with this evidence for inspection.
 
 Task 3 rollback remains `pct stop 100`; source, config, and fresh secrets stay
 on the stopped LXC for inspection.
+
+## Tasks 4-7 — full runtime, recovery, tunnel, and clean-corpus evidence
+
+### Runtime and recovery
+
+- The complete production service is enabled and running in LXC 100. Authelia,
+  Flyte, LiteLLM, Postgres, Qdrant, Neo4j, MLflow, Langfuse, Grafana, and the
+  remaining observability services passed their real readiness checks.
+- Flyte's nested k3s reached `Ready` with container-only
+  `/dev/null:/dev/kmsg`; pve1's real kernel log device is not exposed.
+- Authelia's pinned image validates its configuration before Compose startup.
+- Paid replacement proof through LiteLLM used `openai.gpt-5.6-terra`, returned
+  `OK`, consumed 16 tokens, cost `$0.000082`, and used no fallback.
+- PBS snapshot `pbs-beelink:backup/ct/100/2026-08-28T17:33:31Z` completed, and
+  an offline restore to temporary VMID 900 verified the exact deployment
+  marker, protected config/tunnel files, source checkout, frontend build, and
+  Docker state. The duplicate was never started and VMID 900 was deleted after
+  the proof.
+
+### Cloudflare and authoritative-DNS state
+
+- Cloudflare tunnel `ff9d38b6-5f51-45b5-a9ce-380ded0b886a` is healthy with
+  four registered connections and exact routes for `me`, `auth`, `grafana`,
+  `langfuse`, `mlflow`, and `flyte`.
+- The logged-in Netlify CLI/API, not Cloudflare's incomplete quick scan,
+  supplied the authoritative old-zone inventory. Cloudflare now also carries
+  `deepseek-mcp` -> `ragweld.netlify.app` and `bird-data` -> `169.197.22.5`,
+  both DNS-only, in addition to the apex/`www` landing records.
+- Assigned Cloudflare nameservers are `chance.ns.cloudflare.com` and
+  `kenia.ns.cloudflare.com`. The zone remains pending because the
+  Netlify-registered domain still uses `dns1-4.p04.nsone.net`; the in-app
+  browser is waiting at the user-owned GitHub sign-in handoff. No credential or
+  OTP was handled by the agent.
+
+### Clean public corpora and real cited chat
+
+- Registry started empty and now contains exactly `epstein-files-public` and
+  `nasa-apollo-11`; no Mac/test corpus or old database/index was imported.
+- Public email corpus:
+  - 2,000 files, 200 eval rows, 3,126 promoted chunks, 346,731 tokens;
+  - local Hugging Face `BAAI/bge-small-en-v1.5` embeddings, `$0.00` index cost;
+  - Qdrant points/indexed vectors `3126/3126` and Neo4j documents/chunks
+    `2000/3126`.
+- Apollo corpus:
+  - NASA document `19700008096`, 359 pages, 15,973,944 bytes, SHA-256
+    `3314d99654ebb2ac3e3ef0ab70a84be9519a5f071cf1362118b2b20a6f161dea`;
+  - current NTRS API asset verified as PDF; the old archive URL returned HTML
+    and was rejected;
+  - Docling produced 601,387 markdown characters, then promoted 1,002 chunks /
+    182,260 tokens with Qdrant 1,002 points and Neo4j one document / 1,002
+    chunks.
+- The first Apollo attempt exposed missing Linux OpenCV libraries
+  (`libGL.so.1`, then `libgthread-2.0.so.0`/`libglib-2.0.so.0`). The candidate
+  pins the Debian 13 container base, installs `libgl1` plus
+  `libglib2.0-0t64`, and makes Proxmox startup fail closed on `import cv2`.
+  The direct 359-page conversion and the second API index both completed.
+- Real GPT-5.6 Terra chat proof:
+  - email question returned the cited answer `cam you speak now?`, 8 vector + 8
+    sparse results, authoritative 980 tokens and `$0.00234`;
+  - Apollo question returned the mission purpose and Section 11 location with
+    PDF line citations, 10 vector + 10 sparse + 10 graph results before fusion,
+    authoritative 1,591 tokens and `$0.004584`;
+  - both traces include canonical trace IDs and Grafana, Tempo, and Langfuse
+    links. `ChatResponse.tokens_used` incorrectly returned zero while the trace
+    held authoritative usage. The candidate now propagates the gateway usage
+    through both chat transports using the canonical trace-cost parser; a real
+    local LiteLLM-compatible gateway regression covers snake_case and camelCase
+    usage payloads. Live pve1 redeploy proof remains required before closeout.
+
+### Post-corpus capacity measurement (W75)
+
+- Guest `/`: 14% used, 242 GB free.
+- `vm-100-disk-0`: 15.67% Data.
+- `pve/data`: 6.94% Data / 0.46% Meta.
+- The first corpus moved thin-pool Data% by only 0.02 percentage points.
+  Capacity is not a blocker; the injected volume/pool alerts and LVM
+  autoextend settings remain pending independent review before closeout.
+
+### Current verification candidate
+
+- docs ownership, banned-pattern, generated-type, LiteLLM 371-alias lockstep,
+  and `git diff --check` gates: pass;
+- full backend suite: `1225 passed, 98 skipped, 7 warnings` in `308.01s`;
+- GitNexus unstaged scope: 11 files / 32 symbols, 12 affected execution flows,
+  risk `high`; the changed chat paths therefore require live pve1 proof before
+  this candidate is accepted. The scope also includes preserved user-owned
+  instruction changes that will not be staged.
 
 ## Ready / not ready
 
@@ -307,5 +401,10 @@ Ready:
 
 Not yet done:
 
-- internal full-stack preflight, DNS/Cloudflare/auth, clean corpus seeding, and
-  final external-browser/recovery acceptance
+- Netlify registrar nameserver switch and Cloudflare zone activation
+- signed-in external browser/SSO acceptance across the protected workbench and
+  companion UIs
+- W75 thin-pool/guest-volume alert and autoextend guardrails
+- live pve1 proof that `ChatResponse.tokens_used` matches authoritative trace
+  usage after the candidate is deployed
+- final independent GPT-5.6 plus paid GLM adversarial closeout and publication
