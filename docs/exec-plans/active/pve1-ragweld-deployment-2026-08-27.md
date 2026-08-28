@@ -2,7 +2,7 @@
 
 Date: 2026-08-28
 
-Status: source gate published; Plex migrated to `.173` with non-visual acceptance green; signed-in Plex transcode proof and Ragweld LXC provisioning pending
+Status: source and Plex gates complete; pve1 live preflight green; LXC 100 provisioning authorized
 
 ## Scope
 
@@ -25,6 +25,8 @@ gate. Detailed Plex/PBS/NFS evidence lives in
   `b421d203` (`fix(deploy): keep plex media automount live`).
 - Published verified NFS bridge checkpoint before migration:
   `809386f8` (`docs(homelab): record verified plex media bridge`).
+- Published final Plex local-media and hardware acceptance tip:
+  `ad67ad31` (`docs(homelab): close plex hardware acceptance`).
 - User-owned local dirt intentionally excluded from publication:
   `AGENTS.md`, `CLAUDE.md`, and untracked `.claude/skills/`
 
@@ -146,6 +148,31 @@ gate.
 - The rollout plan corrections for `W4`, `W5`, `W6`, `W7`, `W17`, and `W20`
   are recorded in the active rollout plan and watchdog before any remote step.
 
+## Task 1 Step 3 — live pve1 preflight
+
+Read-only verification on 2026-08-28 established:
+
+- cluster `homelabz` has three votes, three members, and quorum `Yes`;
+- pve1 runs PVE `9.2.2` on kernel `7.0.2-6-pve`;
+- pve1 has 31 GiB RAM total and 25 GiB available before LXC creation;
+- HAOS VM 120 is `running` on pve1 and uses approximately 4.2 GiB;
+- Plex LXC 4214 is `running` on node `pve` (`.173`), not pve1;
+- VMID 100 has no cluster config and is free;
+- pve1 `local-lvm` is active with `824476654 KiB` available;
+- `pbs-beelink` is active with `1729551840 KiB` available;
+- `/dev/dri/card0` and `/dev/dri/renderD128` are present;
+- `/srv/media` is not mounted on pve1; `nfs-server` is inactive; and
+- the pve1 resource check therefore satisfies the approved 24 GiB LXC
+  allocation and 300 GiB thin-root preconditions.
+
+The first location formatter attempted to use `jq`, which is not installed on
+pve1. No mutation depended on it. A Python-only rerun asserted VM 120 on
+`pve1` and LXC 4214 on `pve`, both `running`.
+
+Rollback owner for LXC creation: the controller executing this plan. If later
+bootstrap fails, leave LXC 100 stopped for inspection; do not delete it or
+change HAOS/Plex as an attempted recovery.
+
 ## Ready / not ready
 
 Ready:
@@ -158,10 +185,13 @@ Ready:
 - Plex Tasks 1-3 complete: fresh PBS backups, verified NFSv4 bridge, offline
   root-disk migration to `.173`, guest-side NFS proof, and reboot acceptance
 - W37-W45 incorporated into the executable plan and live state
+- physical media returned to `.173`, full filesystem check and journal replay
+  complete, local-mount reboot proof green
+- signed-in original playback and forced Intel VAAPI hardware-transcode proof
+  complete
+- pve1 Task 1 live capacity/VMID/GPU/PBS preflight green
 
 Not yet done:
 
-- signed-in Plex direct-play/hardware-transcode proof, including concurrent
-  Scrypted visual/GPU health
 - Ragweld LXC 100 provisioning, DNS/Cloudflare/auth, clean corpus seeding, and
   final external-browser/recovery acceptance
