@@ -124,6 +124,48 @@ async def test_observability_status_reports_langfuse_key_and_reachability_failur
 
 
 @pytest.mark.asyncio
+async def test_observability_status_uses_public_langfuse_url_for_operator_links(client: AsyncClient) -> None:
+    baseline = await client.get("/api/config")
+    assert baseline.status_code == 200
+    cfg = baseline.json()
+
+    cfg["tracing"]["tracing_mode"] = "otel_langfuse"
+    cfg["tracing"]["langfuse_enabled"] = True
+    cfg["tracing"]["langfuse_base_url"] = "http://127.0.0.1:9"
+    cfg["tracing"]["langfuse_public_base_url"] = "https://langfuse.ragweld.com"
+
+    old_public = os.environ.get("LANGFUSE_PUBLIC_KEY")
+    old_secret = os.environ.get("LANGFUSE_SECRET_KEY")
+    os.environ["LANGFUSE_PUBLIC_KEY"] = old_public or "pk-test"
+    os.environ["LANGFUSE_SECRET_KEY"] = old_secret or "sk-test"
+    try:
+        saved = await client.put("/api/config", json=cfg)
+        assert saved.status_code == 200
+
+        response = await client.get("/api/observability/status")
+        assert response.status_code == 200
+        data = response.json()
+    finally:
+        if old_public is None:
+            os.environ.pop("LANGFUSE_PUBLIC_KEY", None)
+        else:
+            os.environ["LANGFUSE_PUBLIC_KEY"] = old_public
+        if old_secret is None:
+            os.environ.pop("LANGFUSE_SECRET_KEY", None)
+        else:
+            os.environ["LANGFUSE_SECRET_KEY"] = old_secret
+
+    langfuse = next(component for component in data["components"] if component["id"] == "langfuse")
+    assert langfuse["configured"] is True
+    assert langfuse["reachable"] is False
+    assert langfuse["url"] == "https://langfuse.ragweld.com"
+    assert any(
+        link["label"] == "Langfuse" and link["url"] == "https://langfuse.ragweld.com"
+        for link in langfuse["links"]
+    )
+
+
+@pytest.mark.asyncio
 async def test_generic_api_endpoint_emits_canonical_observability_headers(client: AsyncClient) -> None:
     response = await client.get("/api/config", headers={"X-Correlation-ID": "corr-observe-test"})
     assert response.status_code == 200

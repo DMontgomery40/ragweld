@@ -316,6 +316,7 @@ async def build_observability_status(config: TriBridConfig, *, repo_id: str | No
     opencost_url = str(config.tracing.opencost_base_url or "").strip()
     alertmanager_url = str(config.tracing.alertmanager_base_url or "").strip()
     langfuse_url = str(config.tracing.langfuse_base_url or "").strip()
+    langfuse_public_url = str(config.tracing.langfuse_public_base_url or "").strip()
     litellm_enabled = bool(config.chat.litellm.enabled)
     vllm_enabled = bool(config.chat.vllm.enabled)
     litellm_key: str | None = None
@@ -477,8 +478,8 @@ async def build_observability_status(config: TriBridConfig, *, repo_id: str | No
                 f"{langfuse_detail or 'Generation trace drilldown substrate.'}"
                 f"; ingestion: {_langfuse_ingestion_detail(config)}"
             ),
-            url=langfuse_url or None,
-            links=_make_links("Langfuse", langfuse_url, "Langfuse base URL.", kind="langfuse"),
+            url=langfuse_public_url or None,
+            links=_make_links("Langfuse", langfuse_public_url, "Langfuse base URL.", kind="langfuse"),
         ),
         _decorate_component(
             component_id="grafana",
