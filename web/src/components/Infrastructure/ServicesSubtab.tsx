@@ -87,6 +87,8 @@ const SERVICE_LABELS: Record<RagweldDockerService, string> = {
   'langfuse-minio': 'Langfuse MinIO',
 };
 
+const DEPLOYMENT_ONLY_SERVICES: ReadonlySet<RagweldDockerService> = new Set(['caddy', 'authelia', 'cloudflared']);
+
 function isKnownService(value: string | null | undefined): value is RagweldDockerService {
   return RAGWELD_DOCKER_SERVICES.includes(value as RagweldDockerService);
 }
@@ -188,20 +190,31 @@ export function ServicesSubtab() {
             {group.services.map((service) => {
               const container = containersByService.get(service);
               const running = container?.state === 'running';
+              const deploymentOnly = DEPLOYMENT_ONLY_SERVICES.has(service);
               const optional = OPTIONAL_SERVICES.has(service);
               return (
                 <article key={service} style={{ padding: '14px', border: '1px solid var(--line)', borderRadius: '6px', background: 'var(--bg-elev1)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
                     <strong>{SERVICE_LABELS[service]}</strong>
                     <span style={{ color: running ? 'var(--ok)' : container ? 'var(--warn)' : 'var(--fg-muted)' }}>
-                      {running ? '● Running' : container ? '○ Stopped' : optional ? '— Not deployed (optional)' : '— Missing'}
+                      {running
+                        ? '● Running'
+                        : container
+                          ? '○ Stopped'
+                          : deploymentOnly
+                            ? '— Deployment-only'
+                            : optional
+                              ? '— Not deployed (optional)'
+                              : '— Missing'}
                     </span>
                   </div>
                   <div className="small" style={{ color: 'var(--fg-muted)', marginTop: '8px' }}>
                     {container?.status ||
-                      (optional
-                        ? 'Optional container; not part of the default development topology.'
-                        : 'No managed container exists for this service.')}
+                      (deploymentOnly
+                        ? 'Created by the Proxmox deployment overlay; not expected in default local development.'
+                        : optional
+                          ? 'Optional container; not part of the default development topology.'
+                          : 'No managed container exists for this service.')}
                   </div>
                 </article>
               );

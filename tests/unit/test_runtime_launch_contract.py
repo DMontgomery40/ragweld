@@ -481,6 +481,51 @@ def test_docker_service_allowlists_match_frontend_and_managed_compose_services()
     assert set(_DOCKER_SERVICES) == frontend_services == managed_services == expected_services
 
 
+def test_secure_ingress_ui_contract_marks_missing_services_deployment_only() -> None:
+    docker_subtab_source = (ROOT / "web" / "src" / "components" / "Infrastructure" / "DockerSubtab.tsx").read_text(
+        encoding="utf-8"
+    )
+    services_subtab_source = (
+        ROOT / "web" / "src" / "components" / "Infrastructure" / "ServicesSubtab.tsx"
+    ).read_text(encoding="utf-8")
+
+    deployment_only_set = (
+        "const DEPLOYMENT_ONLY_SERVICES: ReadonlySet<RagweldDockerService> = "
+        "new Set(['caddy', 'authelia', 'cloudflared']);"
+    )
+    deployment_only_detail = (
+        "Created by the Proxmox deployment overlay; not expected in the default local topology."
+    )
+    services_subtab_detail = (
+        "Created by the Proxmox deployment overlay; not expected in default local development."
+    )
+
+    assert deployment_only_set in docker_subtab_source
+    assert deployment_only_set in services_subtab_source
+
+    assert "const deploymentOnly = DEPLOYMENT_ONLY_SERVICES.has(service);" in docker_subtab_source
+    assert "const deploymentOnly = DEPLOYMENT_ONLY_SERVICES.has(service);" in services_subtab_source
+
+    assert "deploymentOnly ? '— Deployment-only' : '— Missing'" in docker_subtab_source
+    assert re.search(
+        r"deploymentOnly\s*\?\s*'— Deployment-only'\s*:\s*optional\s*\?\s*'— Not deployed \(optional\)'\s*:\s*'— Missing'",
+        services_subtab_source,
+    )
+
+    assert deployment_only_detail in docker_subtab_source
+    assert services_subtab_detail in services_subtab_source
+
+    assert "!container && deploymentOnly && (" in docker_subtab_source
+    assert "!container && !deploymentOnly && (" in docker_subtab_source
+    assert "container ? '○ Stopped' : '— Missing'" not in docker_subtab_source
+
+    assert "optional ? '— Not deployed (optional)' : '— Missing'" not in services_subtab_source
+    assert (
+        "optional\n                        ? 'Optional container; not part of the default development topology.'\n                        : 'No managed container exists for this service.'"
+        not in services_subtab_source
+    )
+
+
 def test_generation_gateway_topology_is_pinned_local_and_has_no_paid_fallback() -> None:
     import yaml
     from server.models.tribrid_config_model import TriBridConfig

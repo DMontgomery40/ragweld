@@ -35,6 +35,8 @@ const SERVICE_LABELS: Record<RagweldDockerService, string> = {
   'langfuse-minio': 'Langfuse MinIO',
 };
 
+const DEPLOYMENT_ONLY_SERVICES: ReadonlySet<RagweldDockerService> = new Set(['caddy', 'authelia', 'cloudflared']);
+
 function isRagweldService(value: string | null | undefined): value is RagweldDockerService {
   return RAGWELD_DOCKER_SERVICES.includes(value as RagweldDockerService);
 }
@@ -169,6 +171,7 @@ export function DockerSubtab() {
           {RAGWELD_DOCKER_SERVICES.map((service) => {
             const container = containersByService.get(service);
             const running = container?.state === 'running';
+            const deploymentOnly = DEPLOYMENT_ONLY_SERVICES.has(service);
             const busy = action !== null;
             return (
               <article key={service} style={{ padding: '14px', border: '1px solid var(--line)', borderRadius: '6px', background: 'var(--bg-elev1)' }}>
@@ -176,16 +179,24 @@ export function DockerSubtab() {
                   <div>
                     <strong>{SERVICE_LABELS[service]}</strong>
                     <div className="small" style={{ color: 'var(--fg-muted)', marginTop: '4px' }}>
-                      {container?.status || 'Not created in the Ragweld project'}
+                      {container?.status ||
+                        (deploymentOnly
+                          ? 'Created by the Proxmox deployment overlay; not expected in the default local topology.'
+                          : 'Not created in the Ragweld project')}
                     </div>
                   </div>
                   <span style={{ color: running ? 'var(--ok)' : container ? 'var(--warn)' : 'var(--fg-muted)' }}>
-                    {running ? '● Running' : container ? '○ Stopped' : '— Missing'}
+                    {running ? '● Running' : container ? '○ Stopped' : deploymentOnly ? '— Deployment-only' : '— Missing'}
                   </span>
                 </div>
 
                 <div style={{ display: 'flex', gap: '8px', marginTop: '14px', flexWrap: 'wrap' }}>
-                  {!container && (
+                  {!container && deploymentOnly && (
+                    <span className="small">
+                      Created by the Proxmox deployment overlay; not expected in the default local topology.
+                    </span>
+                  )}
+                  {!container && !deploymentOnly && (
                     <span className="small">
                       Run <code>{service === 'api' ? './start.sh --docker-backend' : ['postgres', 'neo4j'].includes(service) ? './start.sh' : './start.sh --with-observability'}</code> to create it.
                     </span>
