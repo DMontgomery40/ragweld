@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -98,6 +99,119 @@ def _compose_config(*files: str) -> dict[str, Any]:
     payload = json.loads(result.stdout)
     assert isinstance(payload, dict)
     return payload
+
+
+def _caddy_named_blocks(source: str) -> dict[str, str]:
+    blocks: dict[str, list[str]] = {}
+    header: str | None = None
+    current: list[str] = []
+    depth = 0
+
+    for raw_line in source.splitlines():
+        line = raw_line.rstrip()
+        stripped = line.strip()
+
+        if not stripped:
+            if header is not None:
+                current.append(line)
+            continue
+
+        if header is None:
+            if stripped.endswith("{"):
+                header = stripped[:-1].strip()
+                current = [line]
+                depth = 1
+            continue
+
+        current.append(line)
+        if stripped.endswith("{"):
+            depth += 1
+        elif stripped == "}":
+            depth -= 1
+            if depth == 0:
+                blocks[header] = "\n".join(current)
+                header = None
+                current = []
+
+    assert header is None, f"unterminated Caddy block: {header}"
+    return blocks
+
+
+def _assert_caddy_contract(source: str) -> None:
+    blocks = _caddy_named_blocks(source)
+    assert "" in blocks
+    assert "(require_owner)" in blocks
+
+    expected_sites = {
+        "http://auth.ragweld.com:58000",
+        "http://me.ragweld.com:58000",
+        "http://grafana.ragweld.com:58000",
+        "http://langfuse.ragweld.com:58000",
+        "http://mlflow.ragweld.com:58000",
+        "http://flyte.ragweld.com:58000",
+    }
+    site_headers = {header for header in blocks if header.startswith("http://")}
+    assert site_headers == expected_sites
+
+    global_block = blocks[""]
+    assert "admin off" in global_block
+    assert "auto_https off" in global_block
+    assert "default_bind 127.0.0.1" in global_block
+
+    require_owner = blocks["(require_owner)"]
+    assert "uri /api/authz/forward-auth" in require_owner
+    assert "copy_headers Remote-User Remote-Groups Remote-Email Remote-Name" in require_owner
+
+    reverse_proxy_targets = {
+        match.group(1)
+        for match in re.finditer(r"^\s*reverse_proxy\s+([^\s{]+)", source, flags=re.MULTILINE)
+    }
+    assert reverse_proxy_targets == {
+        "127.0.0.1:59091",
+        "127.0.0.1:58012",
+        "127.0.0.1:3301",
+        "127.0.0.1:53000",
+        "127.0.0.1:55500",
+        "127.0.0.1:30080",
+    }
+
+    for header in expected_sites - {"http://auth.ragweld.com:58000"}:
+        assert "import require_owner" in blocks[header], header
+
+    auth_block = blocks["http://auth.ragweld.com:58000"]
+    assert "import require_owner" not in auth_block
+    assert "reverse_proxy 127.0.0.1:59091" in auth_block
+
+    me_block = blocks["http://me.ragweld.com:58000"]
+    assert "handle /api/* {" in me_block
+    assert "reverse_proxy 127.0.0.1:58012" in me_block
+    assert "handle_path /web/* {" in me_block
+    assert "root * /srv/web" in me_block
+    assert "try_files {path} /index.html" in me_block
+    assert "file_server" in me_block
+    assert "redir /web /web/" in me_block
+    assert "redir / /web/" in me_block
+
+
+def _compose_service_blocks(source: str) -> dict[str, str]:
+    match = re.search(r"^services:\n(?P<body>.*?)(?:^\S|\Z)", source, flags=re.MULTILINE | re.DOTALL)
+    assert match is not None
+    body = match.group("body")
+    blocks: dict[str, list[str]] = {}
+    current_name: str | None = None
+    current_lines: list[str] = []
+    for line in body.splitlines():
+        if re.match(r"^  [^:\s][^:]*:\s*$", line):
+            if current_name is not None:
+                blocks[current_name] = "\n".join(current_lines)
+            current_name = line.strip()[:-1]
+            current_lines = [line]
+            continue
+        if current_name is not None:
+            current_lines.append(line)
+    if current_name is not None:
+        blocks[current_name] = "\n".join(current_lines)
+    return blocks
 
 
 def _nested_get(payload: dict[str, object], path: tuple[str, ...]) -> object:
@@ -292,13 +406,32 @@ def test_proxmox_compose_uses_only_allowlisted_secret_mounts_and_origins() -> No
     assert {
         volume["target"]: volume["source"]
         for volume in authelia["volumes"]
-        if volume["target"] in {"/config/configuration.yml", "/config/users_database.yml", "/config/oidc-rsa.pem", "/state"}
+        if volume["target"]
+        in {
+            "/config/configuration.yml",
+            "/config/users_database.yml",
+            "/config/oidc-rsa.pem",
+            "/etc/ragweld/authelia/langfuse-client-secret-digest",
+            "/state",
+        }
     } == {
         "/config/configuration.yml": str(PROXMOX_AUTHELIA_CONFIG),
         "/config/users_database.yml": "/etc/ragweld/authelia/users_database.yml",
         "/config/oidc-rsa.pem": "/etc/ragweld/authelia/oidc-rsa.pem",
+        "/etc/ragweld/authelia/langfuse-client-secret-digest": "/etc/ragweld/authelia/langfuse-client-secret-digest",
         "/state": "/etc/ragweld/authelia/state",
     }
+
+    mounted_targets = {volume["target"] for volume in authelia["volumes"]}
+    referenced_secret_paths = {
+        match.group(1)
+        for match in re.finditer(
+            r'{{ secret "([^"]+)"',
+            PROXMOX_AUTHELIA_CONFIG.read_text(encoding="utf-8"),
+        )
+    }
+    assert referenced_secret_paths <= mounted_targets
+
     langfuse_env = langfuse["environment"]
     assert langfuse_env["AUTH_CUSTOM_CLIENT_ID"] == "langfuse"
     assert langfuse_env["AUTH_CUSTOM_CLIENT_SECRET"] == "contract-only"
@@ -309,75 +442,54 @@ def test_proxmox_compose_uses_only_allowlisted_secret_mounts_and_origins() -> No
     assert langfuse_env["AUTH_DISABLE_SIGNUP"] == "true"
     assert langfuse_env["AUTH_DISABLE_USERNAME_PASSWORD"] == "true"
     assert langfuse_env["NEXTAUTH_URL"] == "https://langfuse.ragweld.com"
+    for inherited_key in (
+        "DATABASE_URL",
+        "NEXTAUTH_SECRET",
+        "LANGFUSE_INIT_USER_EMAIL",
+        "LANGFUSE_INIT_PROJECT_PUBLIC_KEY",
+        "LANGFUSE_INIT_PROJECT_SECRET_KEY",
+    ):
+        assert inherited_key not in langfuse_env
+
+    worker_env = services["langfuse-worker"].get("environment") or {}
+    assert worker_env == {}
+    overlay_source = PROXMOX_COMPOSE.read_text(encoding="utf-8")
+    service_blocks = _compose_service_blocks(overlay_source)
+    for service_name in ("langfuse", "langfuse-worker"):
+        block = service_blocks[service_name]
+        assert "env_file: !override" in block
+        assert "path: /etc/ragweld/langfuse.env" in block
+        assert "required: false" in block
+        assert "./infra/langfuse.env.example" not in block
+        assert "./infra/langfuse.env" not in block
 
 
 def test_proxmox_caddyfile_limits_public_routes_to_the_allowlist() -> None:
     source = PROXMOX_CADDYFILE.read_text(encoding="utf-8")
+    _assert_caddy_contract(source)
 
-    assert "admin off" in source
-    assert "auto_https off" in source
-    assert "default_bind 127.0.0.1" in source
-    assert "uri /api/authz/forward-auth" in source
-    assert "copy_headers Remote-User Remote-Groups Remote-Email Remote-Name" in source
-    assert "handle_path /web/*" in source
-    assert "root * /srv/web" in source
-    assert "try_files {path} /index.html" in source
-    assert "redir /web /web/" in source
-    assert "redir / /web/" in source
 
-    hostnames = {
-        "auth.ragweld.com",
-        "me.ragweld.com",
-        "grafana.ragweld.com",
-        "langfuse.ragweld.com",
-        "mlflow.ragweld.com",
-        "flyte.ragweld.com",
-    }
-    assert {f"http://{hostname}:58000" for hostname in hostnames} <= set(source.split())
+def test_caddy_contract_parser_detects_appended_unprotected_nested_route() -> None:
+    malicious = PROXMOX_CADDYFILE.read_text(encoding="utf-8").replace(
+        "    redir / /web/\n}",
+        "    redir / /web/\n    handle /metrics/* {\n        reverse_proxy 127.0.0.1:59090\n    }\n}",
+    )
 
-    protected_blocks = {
-        "me.ragweld.com": "127.0.0.1:58012",
-        "grafana.ragweld.com": "127.0.0.1:3301",
-        "langfuse.ragweld.com": "127.0.0.1:53000",
-        "mlflow.ragweld.com": "127.0.0.1:55500",
-        "flyte.ragweld.com": "127.0.0.1:30080",
-    }
-    for hostname, upstream in protected_blocks.items():
-        block = source.split(f"http://{hostname}:58000", 1)[1]
-        block = block.split("\n}\n", 1)[0]
-        assert "import require_owner" in block
-        assert upstream in block
+    with pytest.raises(AssertionError):
+        _assert_caddy_contract(malicious)
 
-    auth_block = source.split("http://auth.ragweld.com:58000", 1)[1].split("\n}\n", 1)[0]
-    assert "import require_owner" not in auth_block
-    assert "127.0.0.1:59091" in auth_block
 
-    forbidden_tokens = {
-        "proxmox",
-        "neo4j",
-        "qdrant",
-        "prometheus",
-        "loki",
-        "tempo",
-        "mimir",
-        "pyroscope",
-        "alertmanager",
-        "clickhouse",
-        "redis",
-        "minio",
-        "5432",
-        "7687",
-        "59090",
-        "53100",
-        "53200",
-        "59009",
-        "54040",
-        "59093",
-        "8123",
-        "6379",
-        "9000",
-    }
-    assert forbidden_tokens.isdisjoint(source.lower().split())
+def test_caddy_contract_parser_detects_forbidden_hostname_and_proxy_target() -> None:
+    malicious = PROXMOX_CADDYFILE.read_text(encoding="utf-8") + """
+
+http://prometheus.ragweld.com:58000 {
+    import require_owner
+    reverse_proxy 127.0.0.1:59090
+}
+"""
+
+    with pytest.raises(AssertionError):
+        _assert_caddy_contract(malicious)
 
 
 def test_proxmox_authelia_configuration_is_owner_only_and_deny_by_default() -> None:

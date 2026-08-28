@@ -4,6 +4,9 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD}"
 
   langfuse:
+    env_file: !override
+      - path: /etc/ragweld/langfuse.env
+        required: false
     environment:
       NEXTAUTH_URL: "https://langfuse.ragweld.com"
       AUTH_CUSTOM_CLIENT_ID: "langfuse"
@@ -31,6 +34,7 @@ services:
       - ./deploy/proxmox/authelia/configuration.yml:/config/configuration.yml:ro
       - /etc/ragweld/authelia/users_database.yml:/config/users_database.yml:ro
       - /etc/ragweld/authelia/oidc-rsa.pem:/config/oidc-rsa.pem:ro
+      - /etc/ragweld/authelia/langfuse-client-secret-digest:/etc/ragweld/authelia/langfuse-client-secret-digest:ro
       - /etc/ragweld/authelia/state:/state
     secrets:
       - authelia_session
@@ -63,6 +67,11 @@ services:
     depends_on:
       caddy:
         condition: service_started
+
+  langfuse-worker:
+    env_file: !override
+      - path: /etc/ragweld/langfuse.env
+        required: false
 
 secrets:
   authelia_session:
