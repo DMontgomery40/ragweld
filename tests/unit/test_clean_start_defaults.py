@@ -26,6 +26,13 @@ def test_clean_start_embedding_does_not_select_in_process_mlx() -> None:
     assert runtime_config["embedding"]["embedding_dim"] == 384
 
 
+def test_clean_start_keeps_local_public_observability_links_for_operator_surfaces() -> None:
+    runtime_config = json.loads((ROOT / "tribrid_config.json").read_text(encoding="utf-8"))
+
+    assert runtime_config["tracing"]["langfuse_public_base_url"] == "http://127.0.0.1:53000"
+    assert runtime_config["training"]["ragweld_agent_mlflow_console_base_url"] == "http://127.0.0.1:55500"
+
+
 def test_generic_runtime_surfaces_do_not_embed_optional_epstein_lane_defaults() -> None:
     generic_paths = [
         "server/models/tribrid_config_model.py",

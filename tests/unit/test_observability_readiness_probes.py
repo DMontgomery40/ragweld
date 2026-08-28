@@ -2,10 +2,79 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from threading import Thread
+
 import pytest
 
 from server.observability.runtime import _logs_endpoint_from_traces
-from server.observability.status import readiness_probe_url, vllm_serving_mismatch
+from server.observability.status import _check_url, readiness_probe_url, vllm_serving_mismatch
+
+
+class _ProbeRedirectHandler(BaseHTTPRequestHandler):
+    def do_GET(self) -> None:  # noqa: N802
+        if self.path == "/ok":
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"ok")
+            return
+        if self.path == "/missing":
+            self.send_response(404)
+            self.end_headers()
+            return
+        if self.path == "/same-host-relative":
+            self.send_response(302)
+            self.send_header("Location", "/ok")
+            self.end_headers()
+            return
+        if self.path == "/same-host-absolute":
+            self.send_response(307)
+            self.send_header("Location", f"http://127.0.0.1:{self.server.server_port}/ok")
+            self.end_headers()
+            return
+        if self.path == "/same-host-missing":
+            self.send_response(308)
+            self.send_header("Location", f"http://127.0.0.1:{self.server.server_port}/missing")
+            self.end_headers()
+            return
+        if self.path == "/faro":
+            self.send_response(302)
+            self.send_header("Location", f"http://127.0.0.1:{self.server.server_port}/collect")
+            self.end_headers()
+            return
+        if self.path == "/collect":
+            self.send_response(405)
+            self.end_headers()
+            return
+        if self.path == "/off-host-302":
+            self.send_response(302)
+            self.send_header("Location", "https://me.ragweld.com/web/")
+            self.end_headers()
+            return
+        if self.path == "/off-host-307":
+            self.send_response(307)
+            self.send_header("Location", "https://auth.ragweld.com/login")
+            self.end_headers()
+            return
+        self.send_response(500)
+        self.end_headers()
+
+    def log_message(self, format: str, *args: object) -> None:  # noqa: A003
+        return
+
+
+@contextmanager
+def _probe_redirect_server() -> str:
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _ProbeRedirectHandler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}"
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
 
 
 @pytest.mark.parametrize(
@@ -29,6 +98,46 @@ def test_readiness_probe_url_targets_functional_paths(component: str, base: str,
 def test_logs_endpoint_is_derived_from_the_traces_endpoint() -> None:
     assert _logs_endpoint_from_traces("http://127.0.0.1:54320/v1/traces") == "http://127.0.0.1:54320/v1/logs"
     assert _logs_endpoint_from_traces("http://alloy:4318") == "http://alloy:4318/v1/logs"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("path", "component_id", "expected_reachable", "expected_detail"),
+    [
+        ("/same-host-relative", None, True, "HTTP 200"),
+        ("/same-host-absolute", None, True, "HTTP 200"),
+        ("/same-host-missing", None, False, "HTTP 404"),
+        ("/faro", "faro", True, "listener present (HTTP 405 to GET)"),
+        (
+            "/off-host-302",
+            None,
+            None,
+            "redirected to me.ragweld.com; protected ingress cannot be probed from the API, verify the local listener",
+        ),
+        (
+            "/off-host-307",
+            None,
+            None,
+            "redirected to auth.ragweld.com; protected ingress cannot be probed from the API, verify the local listener",
+        ),
+    ],
+    ids=[
+        "same-host-relative-redirect",
+        "same-host-absolute-redirect",
+        "same-host-redirect-to-missing",
+        "same-host-redirect-to-post-only-faro",
+        "off-host-302-protected-ingress",
+        "off-host-307-protected-ingress",
+    ],
+)
+async def test_check_url_only_treats_off_host_redirects_as_unverified(
+    path: str, component_id: str | None, expected_reachable: bool | None, expected_detail: str
+) -> None:
+    with _probe_redirect_server() as base_url:
+        reachable, detail = await _check_url(f"{base_url}{path}", component_id=component_id)
+
+    assert reachable is expected_reachable
+    assert detail == expected_detail
 
 
 def test_tempo_trace_link_targets_grafana_explore_not_the_bare_tempo_port() -> None:

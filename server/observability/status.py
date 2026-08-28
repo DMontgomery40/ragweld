@@ -72,16 +72,33 @@ async def _check_url(url: str, *, component_id: str | None = None) -> tuple[bool
     if not target:
         return None, None
     try:
-        async with httpx.AsyncClient(timeout=2.0, follow_redirects=True) as client:
-            response = await client.get(target)
+        async with httpx.AsyncClient(timeout=2.0, follow_redirects=False) as client:
+            next_target = target
+            for _ in range(5):
+                response = await client.get(next_target)
+                status = response.status_code
+                if status in {301, 302, 303, 307, 308}:
+                    location = str(response.headers.get("location") or "").strip()
+                    if not location:
+                        return False, f"HTTP {status}"
+                    redirect_target = str(response.url.join(location))
+                    redirect_host = response.url.join(location).host
+                    current_host = response.url.host
+                    if redirect_host and current_host and redirect_host != current_host:
+                        return (
+                            None,
+                            f"redirected to {redirect_host}; protected ingress cannot be probed from the API, verify the local listener",
+                        )
+                    next_target = redirect_target
+                    continue
+                if component_id in {"otlp_export", "faro"} and status in {405, 415}:
+                    # OTLP/Faro intake endpoints are POST-only; a method rejection proves the listener.
+                    return True, f"listener present (HTTP {status} to GET)"
+                # Readiness is a 2xx on the readiness path; 4xx means the path or service is wrong.
+                return status < 300, f"HTTP {status}"
     except Exception as exc:
         return False, str(exc)
-    status = response.status_code
-    if component_id in {"otlp_export", "faro"} and status in {405, 415}:
-        # OTLP/Faro intake endpoints are POST-only; a method rejection proves the listener.
-        return True, f"listener present (HTTP {status} to GET)"
-    # Readiness is a 2xx on the readiness path; 4xx means the path or service is wrong.
-    return status < 300, f"HTTP {status}"
+    return False, "HTTP redirect loop"
 
 
 async def _check_model_api(url: str, *, api_key: str | None = None) -> tuple[bool, str]:
