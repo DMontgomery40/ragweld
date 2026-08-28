@@ -2,7 +2,7 @@
 
 Date: 2026-08-28
 
-Status: source and Plex gates complete; LXC 100 provisioned with live firewall acceptance; runtime bootstrap pending
+Status: source, Plex, LXC, and runtime bootstrap gates complete; full internal stack preflight pending
 
 ## Scope
 
@@ -218,6 +218,71 @@ change HAOS/Plex as an attempted recovery.
 Task 2 rollback is `pct stop 100`. Do not delete the LXC on a later bootstrap
 failure; leave it stopped with this evidence for inspection.
 
+## Task 3 — runtime bootstrap evidence
+
+### Base runtime and immutable source
+
+- Installed the approved Debian prerequisites, including `lsof`, VAAPI
+  drivers/tools, build tooling, and `fuse-overlayfs`.
+- Installed Docker Engine `29.7.2` and Compose `5.5.0` from Docker's official
+  Debian repository. The guest uses cgroup v2, a local Unix socket, and the
+  `overlayfs` storage driver.
+- Re-ran the live firewall proof after Docker installed its own rules. A
+  Docker-published listener on 58000 and host listener on 58012 were both
+  reachable internally and timed out from the Mac, while SSH remained green.
+  Both probes were removed.
+- Installed Node `22.23.2`, npm `10.9.8`, and uv `0.12.7`.
+- Refreshed the immutable lock at the final pre-clone checkpoint, then cloned
+  one `main` branch at
+  `2f1274762602e7c0bb5e780e177dbc7ae216d84e`. The service-owned checkout is
+  clean and matches its root-only lock. No Git safe-directory exception was
+  added.
+
+### Persistent GPU ownership
+
+- The initial Proxmox `dev0`/`dev1` entries created `root:root` devices despite
+  mode `0660`; render/video group membership alone did not grant access.
+- Resolved guest GIDs render `992` and video `44`, added them to the persistent
+  Proxmox device entries, and rebooted LXC 100.
+- After reboot, the devices were `root:render` and `root:video`; SSH,
+  nftables, Docker, and `.225` all returned. The `ragweld` user can read/write
+  both DRM devices and access Docker without root.
+
+### Dependencies, build, and clean secrets
+
+- `uv sync --frozen` selected managed CPython `3.12.14` and installed the
+  locked 246-package environment. The current lock includes CUDA/PyTorch
+  wheels even though this Intel runtime does not use CUDA; the immutable lock
+  was not altered during deployment. The venv occupies about 8.0 GiB.
+- `npm ci` installed 1,287 packages; the production Vite build completed from
+  3,838 modules and produced `web/dist/index.html`. npm reported 17 audit
+  findings (1 low, 5 moderate, 11 high) and the build reported large-chunk
+  warnings. These are recorded honestly; no unreviewed dependency mutation was
+  made during deployment.
+- Generated a new 48-hex-character high-entropy owner passphrase and used it
+  to bootstrap entirely new Postgres, Neo4j, LiteLLM, Grafana, Langfuse,
+  Authelia, and OIDC secrets on-box. All secret files are mode `0600`, owned by
+  `ragweld:ragweld`; no Mac database/auth secret or old platform state was
+  imported.
+- Installed exactly these approved provider keys by name, once in each target
+  environment, without logging values: `OPENROUTER_API_KEY`,
+  `OPENAI_API_KEY`, `VOYAGE_API_KEY`, `COHERE_API_KEY`, `JINA_API_KEY`.
+  All provider staging files were removed.
+
+### Production config and service ownership
+
+- Rendered `/etc/ragweld/tribrid_config.json` mode `0600` while preserving the
+  source hash
+  `e75fe7e128f4f34b4205491dd47309b3edf6eecbf0e4a4b4a05f99fe785b89df`.
+- Verified production mode, `openai.gpt-5.4-mini`, provider embeddings,
+  explicit vLLM disablement, public Grafana/Langfuse/MLflow/Flyte URLs, and
+  Flyte callback `http://172.17.0.1:58012`.
+- Installed `ragweld.service` but left it disabled and inactive. Task 4 owns
+  the tunnel-skipped internal start.
+
+Task 3 rollback remains `pct stop 100`; source, config, and fresh secrets stay
+on the stopped LXC for inspection.
+
 ## Ready / not ready
 
 Ready:
@@ -237,8 +302,10 @@ Ready:
 - pve1 Task 1 live capacity/VMID/GPU/PBS preflight green
 - LXC 100 provisioned and reachable at `192.168.68.225` with its isolated
   ingress boundary proved against live listeners
+- Task 3 runtime bootstrap, immutable source/build, clean secrets, provider
+  allowlist, production config, and persistent non-root GPU access complete
 
 Not yet done:
 
-- Docker/source/runtime bootstrap, DNS/Cloudflare/auth, clean corpus seeding,
-  and final external-browser/recovery acceptance
+- internal full-stack preflight, DNS/Cloudflare/auth, clean corpus seeding, and
+  final external-browser/recovery acceptance

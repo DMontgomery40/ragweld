@@ -79,6 +79,50 @@ override the conflicting steps below until the steps themselves are rewritten.
   the proposed NFS OOM guard and do not reduce LXC 100 to 20 GiB for that old
   coupling. Keep the approved 24 GiB LXC allocation, then re-check real pve1
   headroom after the full stack starts.
+- **W62 — trim the provider-key allowlist before copying.** Verified on the
+  Mac: `OPENROUTER_API_KEY` (len 73, in `infra/litellm.env`) and
+  `OPENAI_API_KEY` (len 167, in `.env`) are real and will copy correctly — the
+  old "key only in the parent shell env" failure does not apply. But
+  `VOYAGE_API_KEY` (15), `COHERE_API_KEY` (15) and `JINA_API_KEY` (13) are
+  placeholder-length and would install credentials that fail at first use,
+  making a bad key look like a Ragweld bug. Copy only `OPENROUTER_API_KEY` and
+  `OPENAI_API_KEY`, and record the other three as deliberately not installed.
+  Note also that `/etc/ragweld/litellm.env` is keyless and
+  `/etc/ragweld/tribrid_config.json` absent until Steps 6-7 run, so
+  `start-runtime.sh` failing closed before then is correct sequencing, not a
+  stack fault.
+- **W60/W63 (operator decision 2026-08-28) — Proxmox firewall stays off; close
+  the API socket instead.** David runs a Firewalla MSP Pro with IPS/IDS and no
+  port-forward, so the perimeter is covered and the datacenter firewall will
+  not be enabled. Delete or rename `/etc/pve/firewall/100.fw` so a file reading
+  `policy_in: DROP` does not masquerade as an active boundary. The residual a
+  gateway device cannot cover is same-subnet LAN traffic, which never traverses
+  the router: with `SERVER_HOST=0.0.0.0` (from W3) the **unauthenticated**
+  Ragweld API on `192.168.68.225:58012` would be reachable by any LAN device,
+  bypassing Authelia — everything else is already loopback-bound (32 Compose
+  `127.0.0.1:` bindings, Caddy `default_bind 127.0.0.1`). Before Task 4, add an
+  in-guest nftables table allowing 58012 from `127.0.0.1` and `172.16.0.0/12`
+  and dropping the rest, then prove it after Task 4: `curl` to
+  `192.168.68.225:58012/api/health` fails from another LAN host while
+  succeeding from inside the guest and from a container via `172.17.0.1`.
+  ~~Superseded text below.~~
+- **W60 (superseded) — the LXC 100 firewall is written but not enforced.** `100.fw` has
+  `enable: 1` / `policy_in: DROP` and `net0` carries `firewall=1`, but
+  `/etc/pve/firewall/cluster.fw` does not exist, `pve-firewall status` is
+  `disabled/running`, and `iptables -S` contains **zero** PVEFW chains — so the
+  guest rules are inert and LXC 100 is open on the LAN. Task 2 Step 6's probe
+  cannot catch this: nothing is listening on 58000/58012 yet, so "not
+  reachable" passes for the wrong reason. Before Task 4: create
+  `/etc/pve/firewall/cluster.fw` with `[OPTIONS] enable: 1` (with SSH sessions
+  already open to both nodes, and after confirming `host.fw` policy keeps node
+  management reachable), then prove *enforcement* — `pve-firewall status`
+  reports enabled, `iptables -S | grep veth100i0` shows guest chains, and a
+  LAN probe against a **listening but disallowed** port is refused. Re-run the
+  58000/58012 probe after Task 4 when those ports are genuinely bound. If the
+  datacenter firewall is deliberately staying off, record that decision and
+  delete `100.fw` rather than leaving a file that reads as a boundary — spec §5
+  is then knowingly unmet and the tunnel plus loopback binds are the only
+  boundary.
 - **W59 — watch the thin pool, not the RAM.** pve1's `local-lvm` is a 794 GiB
   thin pool at 1.58% used (~819 GiB available), holding both
   `vm-100-disk-0` (300 GiB thin, Ragweld) and HAOS's 32 GiB. Sizing is not a
@@ -106,6 +150,23 @@ override the conflicting steps below until the steps themselves are rewritten.
   uses temporary real listeners on 58000 and 58012: each must return `200`
   inside the guest, time out from the Mac, and then be removed. Re-run the same
   live-listener proof after Docker starts.
+- **Live DRM ownership correction — mode alone is insufficient.** `dev0` and
+  `dev1` without explicit GIDs appeared as `root:root` mode `0660`, so the
+  planned `render`/`video` memberships granted nothing. Resolve the guest's
+  actual group IDs, set `dev0 ... gid=<guest-render-gid>` and
+  `dev1 ... gid=<guest-video-gid>`, reboot the LXC, and prove the `ragweld`
+  user can read and write both devices. On this guest the verified IDs are
+  render `992` and video `44`.
+- **Live SSH correction — restart the socket-activated service.** Debian 13's
+  `ssh.socket` owns port 22. A SIGHUP `systemctl reload ssh` passed `sshd -t`
+  but then sshd failed to re-bind the systemd-owned socket. Use
+  `systemctl restart ssh`, re-run `sshd -t`, inspect the effective key-only
+  values, and prove a second direct SSH session before firewall activation.
+- **Deployment lock timing.** Evidence commits made after the first baseline
+  advance `origin/main`. Refresh `/root/ragweld-deployment-commit` once after
+  the Task 2 checkpoint and immediately before cloning; then clone and compare
+  as the `ragweld` owner. Do not add a root global `safe.directory` exception
+  for the service-owned repository.
 
 ---
 
