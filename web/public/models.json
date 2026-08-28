@@ -1,6 +1,6 @@
 {
   "currency": "USD",
-  "last_updated": "2026-08-27",
+  "last_updated": "2026-08-28",
   "sources": [
     "https://openai.com/api/pricing/ (2026-02-07)",
     "https://www.anthropic.com/pricing (2026-02-07)",
@@ -10,7 +10,7 @@
     "https://mistral.ai/pricing (2025-11-29)",
     "https://api-docs.deepseek.com/quick_start/pricing (2025-11-29)",
     "https://jina.ai/embeddings/ (2025-11-29)",
-    "https://openrouter.ai/api/v1/models (2026-08-27)"
+    "https://openrouter.ai/api/v1/models (2026-08-28)"
   ],
   "models": [
     {
@@ -1363,8 +1363,8 @@
       ],
       "unit": "1k_tokens",
       "context": 163840,
-      "input_per_1k": 0.00026,
-      "output_per_1k": 0.00038,
+      "input_per_1k": 0.000269,
+      "output_per_1k": 0.0004,
       "base_url": "https://openrouter.ai/api/v1",
       "display_name": "DeepSeek: DeepSeek V3.2",
       "gateway_alias": "deepseek.deepseek-v3.2",
@@ -1403,8 +1403,8 @@
       ],
       "unit": "1k_tokens",
       "context": 1048576,
-      "input_per_1k": 7.798e-05,
-      "output_per_1k": 0.00015596,
+      "input_per_1k": 8.68e-05,
+      "output_per_1k": 0.0001736,
       "base_url": "https://openrouter.ai/api/v1",
       "display_name": "DeepSeek: DeepSeek V4 Flash 0423",
       "gateway_alias": "deepseek.deepseek-v4-flash",
@@ -1423,8 +1423,8 @@
       ],
       "unit": "1k_tokens",
       "context": 1310720,
-      "input_per_1k": 5e-05,
-      "output_per_1k": 0.0001,
+      "input_per_1k": 6e-05,
+      "output_per_1k": 0.00012,
       "base_url": "https://openrouter.ai/api/v1",
       "display_name": "DeepSeek: DeepSeek V4 Flash 0731",
       "gateway_alias": "deepseek.deepseek-v4-flash-0731",
@@ -1464,8 +1464,8 @@
       ],
       "unit": "1k_tokens",
       "context": 1048576,
-      "input_per_1k": 0.00087,
-      "output_per_1k": 0.00174,
+      "input_per_1k": 0.000761946,
+      "output_per_1k": 0.001523892,
       "base_url": "https://openrouter.ai/api/v1",
       "display_name": "DeepSeek: DeepSeek V4 Pro 0423",
       "gateway_alias": "deepseek.deepseek-v4-pro",
@@ -1484,13 +1484,14 @@
       ],
       "unit": "1k_tokens",
       "context": 1048576,
-      "input_per_1k": 0.001122,
-      "output_per_1k": 0.003366,
+      "input_per_1k": 0.00066,
+      "output_per_1k": 0.00198,
       "base_url": "https://openrouter.ai/api/v1",
       "display_name": "DeepSeek: DeepSeek V4 Pro 0813",
       "gateway_alias": "deepseek.deepseek-v4-pro-0813",
       "gateway_upstream": "openrouter/deepseek/deepseek-v4-pro-0813",
       "supports_vision": false,
+      "notes": "[auto-refresh] pricing_tiered=true",
       "selection_roles": [],
       "selection_status": "catalog_only",
       "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
@@ -2185,7 +2186,7 @@
         "GEN"
       ],
       "unit": "1k_tokens",
-      "context": 262144,
+      "context": 131072,
       "input_per_1k": 8e-05,
       "output_per_1k": 0.00045,
       "base_url": "https://openrouter.ai/api/v1",
@@ -2693,7 +2694,7 @@
         "GEN"
       ],
       "unit": "1k_tokens",
-      "context": 256000,
+      "context": 262144,
       "input_per_1k": 0.00074,
       "output_per_1k": 0.00296,
       "base_url": "https://openrouter.ai/api/v1",
@@ -3388,6 +3389,26 @@
     },
     {
       "provider": "mistralai",
+      "family": "codestral-2508:batch",
+      "model": "mistralai/codestral-2508:batch",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 256000,
+      "input_per_1k": 0.0003,
+      "output_per_1k": 0.0009,
+      "base_url": "https://openrouter.ai/api/v1",
+      "display_name": "Mistral: Codestral 2508 (batch)",
+      "gateway_alias": "mistralai.codestral-2508.batch",
+      "gateway_upstream": "openrouter/mistralai/codestral-2508:batch",
+      "supports_vision": false,
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
+    },
+    {
+      "provider": "mistralai",
       "family": "devstral-2512",
       "model": "mistralai/devstral-2512",
       "components": [
@@ -3448,26 +3469,6 @@
     },
     {
       "provider": "mistralai",
-      "family": "ministral-8b",
-      "model": "mistralai/ministral-8b",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 128000,
-      "input_per_1k": 0.00011,
-      "output_per_1k": 0.00011,
-      "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "Mistral: Ministral 8B",
-      "gateway_alias": "mistralai.ministral-8b",
-      "gateway_upstream": "openrouter/mistralai/ministral-8b",
-      "supports_vision": false,
-      "selection_roles": [],
-      "selection_status": "catalog_only",
-      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
-    },
-    {
-      "provider": "mistralai",
       "family": "ministral-8b-2512",
       "model": "mistralai/ministral-8b-2512",
       "components": [
@@ -3481,6 +3482,26 @@
       "display_name": "Mistral: Ministral 3 8B 2512",
       "gateway_alias": "mistralai.ministral-8b-2512",
       "gateway_upstream": "openrouter/mistralai/ministral-8b-2512",
+      "supports_vision": true,
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
+    },
+    {
+      "provider": "mistralai",
+      "family": "ministral-8b-2512:batch",
+      "model": "mistralai/ministral-8b-2512:batch",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 262144,
+      "input_per_1k": 0.00015,
+      "output_per_1k": 0.00015,
+      "base_url": "https://openrouter.ai/api/v1",
+      "display_name": "Mistral: Ministral 3 8B 2512 (batch)",
+      "gateway_alias": "mistralai.ministral-8b-2512.batch",
+      "gateway_upstream": "openrouter/mistralai/ministral-8b-2512:batch",
       "supports_vision": true,
       "selection_roles": [],
       "selection_status": "catalog_only",
@@ -3548,6 +3569,26 @@
     },
     {
       "provider": "mistralai",
+      "family": "mistral-large-2512:batch",
+      "model": "mistralai/mistral-large-2512:batch",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 262144,
+      "input_per_1k": 0.0005,
+      "output_per_1k": 0.0015,
+      "base_url": "https://openrouter.ai/api/v1",
+      "display_name": "Mistral: Mistral Large 3 2512 (batch)",
+      "gateway_alias": "mistralai.mistral-large-2512.batch",
+      "gateway_upstream": "openrouter/mistralai/mistral-large-2512:batch",
+      "supports_vision": true,
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
+    },
+    {
+      "provider": "mistralai",
       "family": "mistral-medium-3",
       "model": "mistralai/mistral-medium-3",
       "components": [
@@ -3588,6 +3629,26 @@
     },
     {
       "provider": "mistralai",
+      "family": "mistral-medium-3-5:batch",
+      "model": "mistralai/mistral-medium-3-5:batch",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 262144,
+      "input_per_1k": 0.00075,
+      "output_per_1k": 0.00375,
+      "base_url": "https://openrouter.ai/api/v1",
+      "display_name": "Mistral: Mistral Medium 3.5 (batch)",
+      "gateway_alias": "mistralai.mistral-medium-3-5.batch",
+      "gateway_upstream": "openrouter/mistralai/mistral-medium-3-5:batch",
+      "supports_vision": true,
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
+    },
+    {
+      "provider": "mistralai",
       "family": "mistral-medium-3.1",
       "model": "mistralai/mistral-medium-3.1",
       "components": [
@@ -3601,6 +3662,26 @@
       "display_name": "Mistral: Mistral Medium 3.1",
       "gateway_alias": "mistralai.mistral-medium-3.1",
       "gateway_upstream": "openrouter/mistralai/mistral-medium-3.1",
+      "supports_vision": true,
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
+    },
+    {
+      "provider": "mistralai",
+      "family": "mistral-medium-3.1:batch",
+      "model": "mistralai/mistral-medium-3.1:batch",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 131072,
+      "input_per_1k": 0.0004,
+      "output_per_1k": 0.002,
+      "base_url": "https://openrouter.ai/api/v1",
+      "display_name": "Mistral: Mistral Medium 3.1 (batch)",
+      "gateway_alias": "mistralai.mistral-medium-3.1.batch",
+      "gateway_upstream": "openrouter/mistralai/mistral-medium-3.1:batch",
       "supports_vision": true,
       "selection_roles": [],
       "selection_status": "catalog_only",
@@ -3688,6 +3769,26 @@
     },
     {
       "provider": "mistralai",
+      "family": "mistral-small-2603:batch",
+      "model": "mistralai/mistral-small-2603:batch",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 262144,
+      "input_per_1k": 0.00015,
+      "output_per_1k": 0.0006,
+      "base_url": "https://openrouter.ai/api/v1",
+      "display_name": "Mistral: Mistral Small 4 (batch)",
+      "gateway_alias": "mistralai.mistral-small-2603.batch",
+      "gateway_upstream": "openrouter/mistralai/mistral-small-2603:batch",
+      "supports_vision": true,
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
+    },
+    {
+      "provider": "mistralai",
       "family": "mistral-small-3.1-24b-instruct",
       "model": "mistralai/mistral-small-3.1-24b-instruct",
       "components": [
@@ -3754,7 +3855,7 @@
         "GEN"
       ],
       "unit": "1k_tokens",
-      "context": 32000,
+      "context": 32768,
       "input_per_1k": 0.0001,
       "output_per_1k": 0.0003,
       "base_url": "https://openrouter.ai/api/v1",
@@ -3898,26 +3999,6 @@
       "display_name": "MoonshotAI: Kimi K2.7 Code",
       "gateway_alias": "moonshotai.kimi-k2.7-code",
       "gateway_upstream": "openrouter/moonshotai/kimi-k2.7-code",
-      "supports_vision": true,
-      "selection_roles": [],
-      "selection_status": "catalog_only",
-      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
-    },
-    {
-      "provider": "moonshotai",
-      "family": "kimi-k2.7-code:batch",
-      "model": "moonshotai/kimi-k2.7-code:batch",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 262144,
-      "input_per_1k": 0.00095,
-      "output_per_1k": 0.004,
-      "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "MoonshotAI: Kimi K2.7 Code (batch)",
-      "gateway_alias": "moonshotai.kimi-k2.7-code.batch",
-      "gateway_upstream": "openrouter/moonshotai/kimi-k2.7-code:batch",
       "supports_vision": true,
       "selection_roles": [],
       "selection_status": "catalog_only",
@@ -4191,9 +4272,9 @@
         "GEN"
       ],
       "unit": "1k_tokens",
-      "context": 512288,
-      "input_per_1k": 0.0006,
-      "output_per_1k": 0.0036,
+      "context": 262144,
+      "input_per_1k": 0.0005,
+      "output_per_1k": 0.0022,
       "base_url": "https://openrouter.ai/api/v1",
       "display_name": "NVIDIA: Nemotron 3 Ultra",
       "gateway_alias": "nvidia.nemotron-3-ultra-550b-a55b",
@@ -4272,8 +4353,8 @@
       ],
       "unit": "1k_tokens",
       "context": 262144,
-      "input_per_1k": 8e-05,
-      "output_per_1k": 0.0002,
+      "input_per_1k": 0.0001,
+      "output_per_1k": 0.00025,
       "base_url": "https://openrouter.ai/api/v1",
       "display_name": "NVIDIA: Nemotron 3.5 Lightning",
       "gateway_alias": "nvidia.nemotron-3.5-lightning",
@@ -4385,26 +4466,6 @@
     },
     {
       "provider": "openai",
-      "family": "gpt-3.5-turbo:batch",
-      "model": "openai/gpt-3.5-turbo:batch",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 16385,
-      "input_per_1k": 0.00025,
-      "output_per_1k": 0.00075,
-      "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "OpenAI: GPT-3.5 Turbo (batch)",
-      "gateway_alias": "openai.gpt-3.5-turbo.batch",
-      "gateway_upstream": "openrouter/openai/gpt-3.5-turbo:batch",
-      "supports_vision": false,
-      "selection_roles": [],
-      "selection_status": "catalog_only",
-      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
-    },
-    {
-      "provider": "openai",
       "family": "gpt-4",
       "model": "openai/gpt-4",
       "components": [
@@ -4465,26 +4526,6 @@
     },
     {
       "provider": "openai",
-      "family": "gpt-4-turbo:batch",
-      "model": "openai/gpt-4-turbo:batch",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 128000,
-      "input_per_1k": 0.005,
-      "output_per_1k": 0.015,
-      "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "OpenAI: GPT-4 Turbo (batch)",
-      "gateway_alias": "openai.gpt-4-turbo.batch",
-      "gateway_upstream": "openrouter/openai/gpt-4-turbo:batch",
-      "supports_vision": true,
-      "selection_roles": [],
-      "selection_status": "catalog_only",
-      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
-    },
-    {
-      "provider": "openai",
       "family": "gpt-4.1",
       "model": "openai/gpt-4.1",
       "components": [
@@ -4525,26 +4566,6 @@
     },
     {
       "provider": "openai",
-      "family": "gpt-4.1-mini:batch",
-      "model": "openai/gpt-4.1-mini:batch",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 1047576,
-      "input_per_1k": 0.0002,
-      "output_per_1k": 0.0008,
-      "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "OpenAI: GPT-4.1 Mini (batch)",
-      "gateway_alias": "openai.gpt-4.1-mini.batch",
-      "gateway_upstream": "openrouter/openai/gpt-4.1-mini:batch",
-      "supports_vision": true,
-      "selection_roles": [],
-      "selection_status": "catalog_only",
-      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
-    },
-    {
-      "provider": "openai",
       "family": "gpt-4.1-nano",
       "model": "openai/gpt-4.1-nano",
       "components": [
@@ -4558,46 +4579,6 @@
       "display_name": "OpenAI: GPT-4.1 Nano",
       "gateway_alias": "openai.gpt-4.1-nano",
       "gateway_upstream": "openrouter/openai/gpt-4.1-nano",
-      "supports_vision": true,
-      "selection_roles": [],
-      "selection_status": "catalog_only",
-      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
-    },
-    {
-      "provider": "openai",
-      "family": "gpt-4.1-nano:batch",
-      "model": "openai/gpt-4.1-nano:batch",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 1047576,
-      "input_per_1k": 5e-05,
-      "output_per_1k": 0.0002,
-      "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "OpenAI: GPT-4.1 Nano (batch)",
-      "gateway_alias": "openai.gpt-4.1-nano.batch",
-      "gateway_upstream": "openrouter/openai/gpt-4.1-nano:batch",
-      "supports_vision": true,
-      "selection_roles": [],
-      "selection_status": "catalog_only",
-      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
-    },
-    {
-      "provider": "openai",
-      "family": "gpt-4.1:batch",
-      "model": "openai/gpt-4.1:batch",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 1047576,
-      "input_per_1k": 0.001,
-      "output_per_1k": 0.004,
-      "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "OpenAI: GPT-4.1 (batch)",
-      "gateway_alias": "openai.gpt-4.1.batch",
-      "gateway_upstream": "openrouter/openai/gpt-4.1:batch",
       "supports_vision": true,
       "selection_roles": [],
       "selection_status": "catalog_only",
@@ -4725,46 +4706,6 @@
     },
     {
       "provider": "openai",
-      "family": "gpt-4o-mini:batch",
-      "model": "openai/gpt-4o-mini:batch",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 128000,
-      "input_per_1k": 7.5e-05,
-      "output_per_1k": 0.0003,
-      "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "OpenAI: GPT-4o-mini (batch)",
-      "gateway_alias": "openai.gpt-4o-mini.batch",
-      "gateway_upstream": "openrouter/openai/gpt-4o-mini:batch",
-      "supports_vision": true,
-      "selection_roles": [],
-      "selection_status": "catalog_only",
-      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
-    },
-    {
-      "provider": "openai",
-      "family": "gpt-4o:batch",
-      "model": "openai/gpt-4o:batch",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 128000,
-      "input_per_1k": 0.00125,
-      "output_per_1k": 0.005,
-      "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "OpenAI: GPT-4o (batch)",
-      "gateway_alias": "openai.gpt-4o.batch",
-      "gateway_upstream": "openrouter/openai/gpt-4o:batch",
-      "supports_vision": true,
-      "selection_roles": [],
-      "selection_status": "catalog_only",
-      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
-    },
-    {
-      "provider": "openai",
       "family": "gpt-5",
       "model": "openai/gpt-5",
       "components": [
@@ -4778,26 +4719,6 @@
       "display_name": "OpenAI: GPT-5",
       "gateway_alias": "openai.gpt-5",
       "gateway_upstream": "openrouter/openai/gpt-5",
-      "supports_vision": true,
-      "selection_roles": [],
-      "selection_status": "catalog_only",
-      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
-    },
-    {
-      "provider": "openai",
-      "family": "gpt-5-codex:batch",
-      "model": "openai/gpt-5-codex:batch",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 400000,
-      "input_per_1k": 0.000625,
-      "output_per_1k": 0.005,
-      "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "OpenAI: GPT-5 Codex (batch)",
-      "gateway_alias": "openai.gpt-5-codex.batch",
-      "gateway_upstream": "openrouter/openai/gpt-5-codex:batch",
       "supports_vision": true,
       "selection_roles": [],
       "selection_status": "catalog_only",
@@ -4865,26 +4786,6 @@
     },
     {
       "provider": "openai",
-      "family": "gpt-5-mini:batch",
-      "model": "openai/gpt-5-mini:batch",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 400000,
-      "input_per_1k": 0.000125,
-      "output_per_1k": 0.001,
-      "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "OpenAI: GPT-5 Mini (batch)",
-      "gateway_alias": "openai.gpt-5-mini.batch",
-      "gateway_upstream": "openrouter/openai/gpt-5-mini:batch",
-      "supports_vision": true,
-      "selection_roles": [],
-      "selection_status": "catalog_only",
-      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
-    },
-    {
-      "provider": "openai",
       "family": "gpt-5-nano",
       "model": "openai/gpt-5-nano",
       "components": [
@@ -4905,26 +4806,6 @@
     },
     {
       "provider": "openai",
-      "family": "gpt-5-nano:batch",
-      "model": "openai/gpt-5-nano:batch",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 400000,
-      "input_per_1k": 2.5e-05,
-      "output_per_1k": 0.0002,
-      "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "OpenAI: GPT-5 Nano (batch)",
-      "gateway_alias": "openai.gpt-5-nano.batch",
-      "gateway_upstream": "openrouter/openai/gpt-5-nano:batch",
-      "supports_vision": true,
-      "selection_roles": [],
-      "selection_status": "catalog_only",
-      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
-    },
-    {
-      "provider": "openai",
       "family": "gpt-5-pro",
       "model": "openai/gpt-5-pro",
       "components": [
@@ -4938,26 +4819,6 @@
       "display_name": "OpenAI: GPT-5 Pro",
       "gateway_alias": "openai.gpt-5-pro",
       "gateway_upstream": "openrouter/openai/gpt-5-pro",
-      "supports_vision": true,
-      "selection_roles": [],
-      "selection_status": "catalog_only",
-      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
-    },
-    {
-      "provider": "openai",
-      "family": "gpt-5-pro:batch",
-      "model": "openai/gpt-5-pro:batch",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 400000,
-      "input_per_1k": 0.0075,
-      "output_per_1k": 0.06,
-      "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "OpenAI: GPT-5 Pro (batch)",
-      "gateway_alias": "openai.gpt-5-pro.batch",
-      "gateway_upstream": "openrouter/openai/gpt-5-pro:batch",
       "supports_vision": true,
       "selection_roles": [],
       "selection_status": "catalog_only",
@@ -5045,26 +4906,6 @@
     },
     {
       "provider": "openai",
-      "family": "gpt-5.1:batch",
-      "model": "openai/gpt-5.1:batch",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 400000,
-      "input_per_1k": 0.000625,
-      "output_per_1k": 0.005,
-      "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "OpenAI: GPT-5.1 (batch)",
-      "gateway_alias": "openai.gpt-5.1.batch",
-      "gateway_upstream": "openrouter/openai/gpt-5.1:batch",
-      "supports_vision": true,
-      "selection_roles": [],
-      "selection_status": "catalog_only",
-      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
-    },
-    {
-      "provider": "openai",
       "family": "gpt-5.2",
       "model": "openai/gpt-5.2",
       "components": [
@@ -5138,46 +4979,6 @@
       "display_name": "OpenAI: GPT-5.2 Pro",
       "gateway_alias": "openai.gpt-5.2-pro",
       "gateway_upstream": "openrouter/openai/gpt-5.2-pro",
-      "supports_vision": true,
-      "selection_roles": [],
-      "selection_status": "catalog_only",
-      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
-    },
-    {
-      "provider": "openai",
-      "family": "gpt-5.2-pro:batch",
-      "model": "openai/gpt-5.2-pro:batch",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 400000,
-      "input_per_1k": 0.0105,
-      "output_per_1k": 0.084,
-      "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "OpenAI: GPT-5.2 Pro (batch)",
-      "gateway_alias": "openai.gpt-5.2-pro.batch",
-      "gateway_upstream": "openrouter/openai/gpt-5.2-pro:batch",
-      "supports_vision": true,
-      "selection_roles": [],
-      "selection_status": "catalog_only",
-      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
-    },
-    {
-      "provider": "openai",
-      "family": "gpt-5.2:batch",
-      "model": "openai/gpt-5.2:batch",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 400000,
-      "input_per_1k": 0.000875,
-      "output_per_1k": 0.007,
-      "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "OpenAI: GPT-5.2 (batch)",
-      "gateway_alias": "openai.gpt-5.2.batch",
-      "gateway_upstream": "openrouter/openai/gpt-5.2:batch",
       "supports_vision": true,
       "selection_roles": [],
       "selection_status": "catalog_only",
@@ -5266,26 +5067,6 @@
     },
     {
       "provider": "openai",
-      "family": "gpt-5.4-mini:batch",
-      "model": "openai/gpt-5.4-mini:batch",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 400000,
-      "input_per_1k": 0.000375,
-      "output_per_1k": 0.00225,
-      "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "OpenAI: GPT-5.4 Mini (batch)",
-      "gateway_alias": "openai.gpt-5.4-mini.batch",
-      "gateway_upstream": "openrouter/openai/gpt-5.4-mini:batch",
-      "supports_vision": true,
-      "selection_roles": [],
-      "selection_status": "catalog_only",
-      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
-    },
-    {
-      "provider": "openai",
       "family": "gpt-5.4-nano",
       "model": "openai/gpt-5.4-nano",
       "components": [
@@ -5306,26 +5087,6 @@
     },
     {
       "provider": "openai",
-      "family": "gpt-5.4-nano:batch",
-      "model": "openai/gpt-5.4-nano:batch",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 400000,
-      "input_per_1k": 0.0001,
-      "output_per_1k": 0.000625,
-      "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "OpenAI: GPT-5.4 Nano (batch)",
-      "gateway_alias": "openai.gpt-5.4-nano.batch",
-      "gateway_upstream": "openrouter/openai/gpt-5.4-nano:batch",
-      "supports_vision": true,
-      "selection_roles": [],
-      "selection_status": "catalog_only",
-      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
-    },
-    {
-      "provider": "openai",
       "family": "gpt-5.4-pro",
       "model": "openai/gpt-5.4-pro",
       "components": [
@@ -5339,48 +5100,6 @@
       "display_name": "OpenAI: GPT-5.4 Pro",
       "gateway_alias": "openai.gpt-5.4-pro",
       "gateway_upstream": "openrouter/openai/gpt-5.4-pro",
-      "supports_vision": true,
-      "notes": "[auto-refresh] pricing_tiered=true",
-      "selection_roles": [],
-      "selection_status": "catalog_only",
-      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
-    },
-    {
-      "provider": "openai",
-      "family": "gpt-5.4-pro:batch",
-      "model": "openai/gpt-5.4-pro:batch",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 1050000,
-      "input_per_1k": 0.015,
-      "output_per_1k": 0.09,
-      "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "OpenAI: GPT-5.4 Pro (batch)",
-      "gateway_alias": "openai.gpt-5.4-pro.batch",
-      "gateway_upstream": "openrouter/openai/gpt-5.4-pro:batch",
-      "supports_vision": true,
-      "notes": "[auto-refresh] pricing_tiered=true",
-      "selection_roles": [],
-      "selection_status": "catalog_only",
-      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
-    },
-    {
-      "provider": "openai",
-      "family": "gpt-5.4:batch",
-      "model": "openai/gpt-5.4:batch",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 1050000,
-      "input_per_1k": 0.00125,
-      "output_per_1k": 0.0075,
-      "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "OpenAI: GPT-5.4 (batch)",
-      "gateway_alias": "openai.gpt-5.4.batch",
-      "gateway_upstream": "openrouter/openai/gpt-5.4:batch",
       "supports_vision": true,
       "notes": "[auto-refresh] pricing_tiered=true",
       "selection_roles": [],
@@ -5431,48 +5150,6 @@
     },
     {
       "provider": "openai",
-      "family": "gpt-5.5-pro:batch",
-      "model": "openai/gpt-5.5-pro:batch",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 1050000,
-      "input_per_1k": 0.015,
-      "output_per_1k": 0.09,
-      "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "OpenAI: GPT-5.5 Pro (batch)",
-      "gateway_alias": "openai.gpt-5.5-pro.batch",
-      "gateway_upstream": "openrouter/openai/gpt-5.5-pro:batch",
-      "supports_vision": true,
-      "notes": "[auto-refresh] pricing_tiered=true",
-      "selection_roles": [],
-      "selection_status": "catalog_only",
-      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
-    },
-    {
-      "provider": "openai",
-      "family": "gpt-5.5:batch",
-      "model": "openai/gpt-5.5:batch",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 1050000,
-      "input_per_1k": 0.0025,
-      "output_per_1k": 0.015,
-      "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "OpenAI: GPT-5.5 (batch)",
-      "gateway_alias": "openai.gpt-5.5.batch",
-      "gateway_upstream": "openrouter/openai/gpt-5.5:batch",
-      "supports_vision": true,
-      "notes": "[auto-refresh] pricing_tiered=true",
-      "selection_roles": [],
-      "selection_status": "catalog_only",
-      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
-    },
-    {
-      "provider": "openai",
       "family": "gpt-5.6-luna",
       "model": "openai/gpt-5.6-luna",
       "components": [
@@ -5507,48 +5184,6 @@
       "display_name": "OpenAI: GPT-5.6 Luna Pro",
       "gateway_alias": "openai.gpt-5.6-luna-pro",
       "gateway_upstream": "openrouter/openai/gpt-5.6-luna-pro",
-      "supports_vision": true,
-      "notes": "[auto-refresh] pricing_tiered=true",
-      "selection_roles": [],
-      "selection_status": "catalog_only",
-      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
-    },
-    {
-      "provider": "openai",
-      "family": "gpt-5.6-luna-pro:batch",
-      "model": "openai/gpt-5.6-luna-pro:batch",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 1050000,
-      "input_per_1k": 0.0001,
-      "output_per_1k": 0.0006,
-      "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "OpenAI: GPT-5.6 Luna Pro (batch)",
-      "gateway_alias": "openai.gpt-5.6-luna-pro.batch",
-      "gateway_upstream": "openrouter/openai/gpt-5.6-luna-pro:batch",
-      "supports_vision": true,
-      "notes": "[auto-refresh] pricing_tiered=true",
-      "selection_roles": [],
-      "selection_status": "catalog_only",
-      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
-    },
-    {
-      "provider": "openai",
-      "family": "gpt-5.6-luna:batch",
-      "model": "openai/gpt-5.6-luna:batch",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 1050000,
-      "input_per_1k": 0.0001,
-      "output_per_1k": 0.0006,
-      "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "OpenAI: GPT-5.6 Luna (batch)",
-      "gateway_alias": "openai.gpt-5.6-luna.batch",
-      "gateway_upstream": "openrouter/openai/gpt-5.6-luna:batch",
       "supports_vision": true,
       "notes": "[auto-refresh] pricing_tiered=true",
       "selection_roles": [],
@@ -5599,48 +5234,6 @@
     },
     {
       "provider": "openai",
-      "family": "gpt-5.6-sol-pro:batch",
-      "model": "openai/gpt-5.6-sol-pro:batch",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 1050000,
-      "input_per_1k": 0.001,
-      "output_per_1k": 0.005,
-      "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "OpenAI: GPT-5.6 Sol Pro (batch)",
-      "gateway_alias": "openai.gpt-5.6-sol-pro.batch",
-      "gateway_upstream": "openrouter/openai/gpt-5.6-sol-pro:batch",
-      "supports_vision": true,
-      "notes": "[auto-refresh] pricing_tiered=true",
-      "selection_roles": [],
-      "selection_status": "catalog_only",
-      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
-    },
-    {
-      "provider": "openai",
-      "family": "gpt-5.6-sol:batch",
-      "model": "openai/gpt-5.6-sol:batch",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 1050000,
-      "input_per_1k": 0.001,
-      "output_per_1k": 0.005,
-      "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "OpenAI: GPT-5.6 Sol (batch)",
-      "gateway_alias": "openai.gpt-5.6-sol.batch",
-      "gateway_upstream": "openrouter/openai/gpt-5.6-sol:batch",
-      "supports_vision": true,
-      "notes": "[auto-refresh] pricing_tiered=true",
-      "selection_roles": [],
-      "selection_status": "catalog_only",
-      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
-    },
-    {
-      "provider": "openai",
       "family": "gpt-5.6-terra",
       "model": "openai/gpt-5.6-terra",
       "components": [
@@ -5677,68 +5270,6 @@
       "gateway_upstream": "openrouter/openai/gpt-5.6-terra-pro",
       "supports_vision": true,
       "notes": "[auto-refresh] pricing_tiered=true",
-      "selection_roles": [],
-      "selection_status": "catalog_only",
-      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
-    },
-    {
-      "provider": "openai",
-      "family": "gpt-5.6-terra-pro:batch",
-      "model": "openai/gpt-5.6-terra-pro:batch",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 1050000,
-      "input_per_1k": 0.001,
-      "output_per_1k": 0.006,
-      "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "OpenAI: GPT-5.6 Terra Pro (batch)",
-      "gateway_alias": "openai.gpt-5.6-terra-pro.batch",
-      "gateway_upstream": "openrouter/openai/gpt-5.6-terra-pro:batch",
-      "supports_vision": true,
-      "notes": "[auto-refresh] pricing_tiered=true",
-      "selection_roles": [],
-      "selection_status": "catalog_only",
-      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
-    },
-    {
-      "provider": "openai",
-      "family": "gpt-5.6-terra:batch",
-      "model": "openai/gpt-5.6-terra:batch",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 1050000,
-      "input_per_1k": 0.001,
-      "output_per_1k": 0.006,
-      "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "OpenAI: GPT-5.6 Terra (batch)",
-      "gateway_alias": "openai.gpt-5.6-terra.batch",
-      "gateway_upstream": "openrouter/openai/gpt-5.6-terra:batch",
-      "supports_vision": true,
-      "notes": "[auto-refresh] pricing_tiered=true",
-      "selection_roles": [],
-      "selection_status": "catalog_only",
-      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
-    },
-    {
-      "provider": "openai",
-      "family": "gpt-5:batch",
-      "model": "openai/gpt-5:batch",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 400000,
-      "input_per_1k": 0.000625,
-      "output_per_1k": 0.005,
-      "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "OpenAI: GPT-5 (batch)",
-      "gateway_alias": "openai.gpt-5.batch",
-      "gateway_upstream": "openrouter/openai/gpt-5:batch",
-      "supports_vision": true,
       "selection_roles": [],
       "selection_status": "catalog_only",
       "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
@@ -5905,46 +5436,6 @@
     },
     {
       "provider": "openai",
-      "family": "o1-pro:batch",
-      "model": "openai/o1-pro:batch",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 200000,
-      "input_per_1k": 0.075,
-      "output_per_1k": 0.3,
-      "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "OpenAI: o1-pro (batch)",
-      "gateway_alias": "openai.o1-pro.batch",
-      "gateway_upstream": "openrouter/openai/o1-pro:batch",
-      "supports_vision": true,
-      "selection_roles": [],
-      "selection_status": "catalog_only",
-      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
-    },
-    {
-      "provider": "openai",
-      "family": "o1:batch",
-      "model": "openai/o1:batch",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 200000,
-      "input_per_1k": 0.0075,
-      "output_per_1k": 0.03,
-      "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "OpenAI: o1 (batch)",
-      "gateway_alias": "openai.o1.batch",
-      "gateway_upstream": "openrouter/openai/o1:batch",
-      "supports_vision": true,
-      "selection_roles": [],
-      "selection_status": "catalog_only",
-      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
-    },
-    {
-      "provider": "openai",
       "family": "o3",
       "model": "openai/o3",
       "components": [
@@ -6005,46 +5496,6 @@
     },
     {
       "provider": "openai",
-      "family": "o3-mini-high:batch",
-      "model": "openai/o3-mini-high:batch",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 200000,
-      "input_per_1k": 0.00055,
-      "output_per_1k": 0.0022,
-      "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "OpenAI: o3 Mini High (batch)",
-      "gateway_alias": "openai.o3-mini-high.batch",
-      "gateway_upstream": "openrouter/openai/o3-mini-high:batch",
-      "supports_vision": false,
-      "selection_roles": [],
-      "selection_status": "catalog_only",
-      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
-    },
-    {
-      "provider": "openai",
-      "family": "o3-mini:batch",
-      "model": "openai/o3-mini:batch",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 200000,
-      "input_per_1k": 0.00055,
-      "output_per_1k": 0.0022,
-      "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "OpenAI: o3 Mini (batch)",
-      "gateway_alias": "openai.o3-mini.batch",
-      "gateway_upstream": "openrouter/openai/o3-mini:batch",
-      "supports_vision": false,
-      "selection_roles": [],
-      "selection_status": "catalog_only",
-      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
-    },
-    {
-      "provider": "openai",
       "family": "o3-pro",
       "model": "openai/o3-pro",
       "components": [
@@ -6058,46 +5509,6 @@
       "display_name": "OpenAI: o3 Pro",
       "gateway_alias": "openai.o3-pro",
       "gateway_upstream": "openrouter/openai/o3-pro",
-      "supports_vision": true,
-      "selection_roles": [],
-      "selection_status": "catalog_only",
-      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
-    },
-    {
-      "provider": "openai",
-      "family": "o3-pro:batch",
-      "model": "openai/o3-pro:batch",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 200000,
-      "input_per_1k": 0.01,
-      "output_per_1k": 0.04,
-      "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "OpenAI: o3 Pro (batch)",
-      "gateway_alias": "openai.o3-pro.batch",
-      "gateway_upstream": "openrouter/openai/o3-pro:batch",
-      "supports_vision": true,
-      "selection_roles": [],
-      "selection_status": "catalog_only",
-      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
-    },
-    {
-      "provider": "openai",
-      "family": "o3:batch",
-      "model": "openai/o3:batch",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 200000,
-      "input_per_1k": 0.001,
-      "output_per_1k": 0.004,
-      "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "OpenAI: o3 (batch)",
-      "gateway_alias": "openai.o3.batch",
-      "gateway_upstream": "openrouter/openai/o3:batch",
       "supports_vision": true,
       "selection_roles": [],
       "selection_status": "catalog_only",
@@ -6138,46 +5549,6 @@
       "display_name": "OpenAI: o4 Mini High",
       "gateway_alias": "openai.o4-mini-high",
       "gateway_upstream": "openrouter/openai/o4-mini-high",
-      "supports_vision": true,
-      "selection_roles": [],
-      "selection_status": "catalog_only",
-      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
-    },
-    {
-      "provider": "openai",
-      "family": "o4-mini-high:batch",
-      "model": "openai/o4-mini-high:batch",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 200000,
-      "input_per_1k": 0.00055,
-      "output_per_1k": 0.0022,
-      "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "OpenAI: o4 Mini High (batch)",
-      "gateway_alias": "openai.o4-mini-high.batch",
-      "gateway_upstream": "openrouter/openai/o4-mini-high:batch",
-      "supports_vision": true,
-      "selection_roles": [],
-      "selection_status": "catalog_only",
-      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
-    },
-    {
-      "provider": "openai",
-      "family": "o4-mini:batch",
-      "model": "openai/o4-mini:batch",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 200000,
-      "input_per_1k": 0.00055,
-      "output_per_1k": 0.0022,
-      "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "OpenAI: o4 Mini (batch)",
-      "gateway_alias": "openai.o4-mini.batch",
-      "gateway_upstream": "openrouter/openai/o4-mini:batch",
       "supports_vision": true,
       "selection_roles": [],
       "selection_status": "catalog_only",
@@ -7052,8 +6423,8 @@
       ],
       "unit": "1k_tokens",
       "context": 262144,
-      "input_per_1k": 0.00026,
-      "output_per_1k": 0.00208,
+      "input_per_1k": 0.00029,
+      "output_per_1k": 0.0024,
       "base_url": "https://openrouter.ai/api/v1",
       "display_name": "Qwen: Qwen3.5-122B-A10B",
       "gateway_alias": "qwen.qwen3.5-122b-a10b",
@@ -7385,6 +6756,26 @@
       "display_name": "Qwen: Qwen3.8 2.4T A95B",
       "gateway_alias": "qwen.qwen3.8-2.4t-a95b",
       "gateway_upstream": "openrouter/qwen/qwen3.8-2.4t-a95b",
+      "supports_vision": false,
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
+    },
+    {
+      "provider": "qwen",
+      "family": "qwen3.8-2.4t-a95b:batch",
+      "model": "qwen/qwen3.8-2.4t-a95b:batch",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 1010000,
+      "input_per_1k": 0.002,
+      "output_per_1k": 0.006,
+      "base_url": "https://openrouter.ai/api/v1",
+      "display_name": "Qwen: Qwen3.8 2.4T A95B (batch)",
+      "gateway_alias": "qwen.qwen3.8-2.4t-a95b.batch",
+      "gateway_upstream": "openrouter/qwen/qwen3.8-2.4t-a95b:batch",
       "supports_vision": false,
       "selection_roles": [],
       "selection_status": "catalog_only",
@@ -7814,6 +7205,26 @@
       "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
+      "provider": "tencent",
+      "family": "hy4-preview",
+      "model": "tencent/hy4-preview",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 1048576,
+      "input_per_1k": 0.000834,
+      "output_per_1k": 0.002501,
+      "base_url": "https://openrouter.ai/api/v1",
+      "display_name": "Tencent: Hy4 preview",
+      "gateway_alias": "tencent.hy4-preview",
+      "gateway_upstream": "openrouter/tencent/hy4-preview",
+      "supports_vision": false,
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
+    },
+    {
       "provider": "thedrummer",
       "family": "cydonia-24b-v4.1",
       "model": "thedrummer/cydonia-24b-v4.1",
@@ -7828,26 +7239,6 @@
       "display_name": "TheDrummer: Cydonia 24B V4.1",
       "gateway_alias": "thedrummer.cydonia-24b-v4.1",
       "gateway_upstream": "openrouter/thedrummer/cydonia-24b-v4.1",
-      "supports_vision": false,
-      "selection_roles": [],
-      "selection_status": "catalog_only",
-      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
-    },
-    {
-      "provider": "thedrummer",
-      "family": "rocinante-12b",
-      "model": "thedrummer/rocinante-12b",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 65536,
-      "input_per_1k": 0.00025,
-      "output_per_1k": 0.0005,
-      "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "TheDrummer: Rocinante 12B",
-      "gateway_alias": "thedrummer.rocinante-12b",
-      "gateway_upstream": "openrouter/thedrummer/rocinante-12b",
       "supports_vision": false,
       "selection_roles": [],
       "selection_status": "catalog_only",
@@ -8678,7 +8069,7 @@
         "GEN"
       ],
       "unit": "1k_tokens",
-      "context": 1048576,
+      "context": 1310720,
       "input_per_1k": 0.0014,
       "output_per_1k": 0.0044,
       "base_url": "https://openrouter.ai/api/v1",
