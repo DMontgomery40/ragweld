@@ -39,7 +39,7 @@ def _run(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedP
         )
 
 
-def _compose_config(*files: str) -> dict[str, Any]:
+def _compose_config(*files: str, env: dict[str, str] | None = None) -> dict[str, Any]:
     if shutil.which("docker") is None:
         pytest.skip("docker CLI is unavailable")
     version = _run("docker", "compose", "version")
@@ -50,7 +50,7 @@ def _compose_config(*files: str) -> dict[str, Any]:
     for file_name in files:
         args.extend(["-f", file_name])
     args.extend(["config", "--format", "json"])
-    result = _run(*args)
+    result = _run(*args, env=env)
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
     assert isinstance(payload, dict)
@@ -422,14 +422,63 @@ def test_docker_service_allowlists_match_frontend_and_managed_compose_services()
     assert match is not None
     frontend_services = set(re.findall(r"'([^']+)'", match.group(1)))
 
-    config = _compose_config("docker-compose.yml", "infra/docker-compose.observability.yml")
-    managed_services = {
-        name
+    docker_subtab_source = (ROOT / "web" / "src" / "components" / "Infrastructure" / "DockerSubtab.tsx").read_text(
+        encoding="utf-8"
+    )
+    services_subtab_source = (
+        ROOT / "web" / "src" / "components" / "Infrastructure" / "ServicesSubtab.tsx"
+    ).read_text(encoding="utf-8")
+
+    config = _compose_config(
+        "docker-compose.yml",
+        "infra/docker-compose.observability.yml",
+        "deploy/proxmox/docker-compose.yml",
+        env={
+            "GRAFANA_ADMIN_PASSWORD": "contract-only",
+            "LANGFUSE_OIDC_CLIENT_SECRET": "contract-only",
+        },
+    )
+    managed_services_by_name = {
+        name: service
         for name, service in config["services"].items()
         if service.get("labels", {}).get("io.ragweld.managed") == "true"
     }
+    expected_services = {
+        *managed_services_by_name,
+        "caddy",
+        "authelia",
+        "cloudflared",
+    }
+    managed_services = set(managed_services_by_name)
+    expected_labels = {
+        "caddy": "Caddy Secure Ingress",
+        "authelia": "Authelia Authentication",
+        "cloudflared": "Cloudflare Tunnel",
+    }
 
-    assert set(_DOCKER_SERVICES) == frontend_services == managed_services
+    for service_name, label in expected_labels.items():
+        assert managed_services_by_name[service_name]["labels"]["io.ragweld.managed"] == "true"
+        assert f"{service_name}: '{label}'" in docker_subtab_source
+        assert f"{service_name}: '{label}'" in services_subtab_source
+
+    secure_ingress_group = re.search(
+        r"title:\s*'Secure Ingress'.*?services:\s*\[(.*?)\]",
+        services_subtab_source,
+        re.DOTALL,
+    )
+    assert secure_ingress_group is not None
+    assert set(re.findall(r"'([^']+)'", secure_ingress_group.group(1))) == {
+        "caddy",
+        "authelia",
+        "cloudflared",
+    }
+
+    assert managed_services == {
+        name
+        for name in expected_services
+    }
+
+    assert set(_DOCKER_SERVICES) == frontend_services == managed_services == expected_services
 
 
 def test_generation_gateway_topology_is_pinned_local_and_has_no_paid_fallback() -> None:

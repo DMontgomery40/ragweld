@@ -22,6 +22,12 @@ const SERVICE_GROUPS: Array<{
     services: ['api', 'postgres-exporter'],
   },
   {
+    title: 'Secure Ingress',
+    description:
+      'Public edge ingress, authentication, and tunnel services for protected operator access in the Proxmox deployment overlay.',
+    services: ['caddy', 'authelia', 'cloudflared'],
+  },
+  {
     title: 'Gateway and serving',
     description:
       'The only supported generation path: LiteLLM routes model aliases upstream. The local alias targets the host local-model server (vllm-metal on 127.0.0.1:58080, started by ./start.sh), not a container.',
@@ -62,6 +68,9 @@ const SERVICE_LABELS: Record<RagweldDockerService, string> = {
   promtail: 'Promtail',
   api: 'API container (optional)',
   tempo: 'Tempo',
+  caddy: 'Caddy Secure Ingress',
+  authelia: 'Authelia Authentication',
+  cloudflared: 'Cloudflare Tunnel',
   alloy: 'Grafana Alloy',
   litellm: 'LiteLLM Gateway',
   qdrant: 'Qdrant Vector Store',
