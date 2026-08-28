@@ -2,7 +2,9 @@
 
 Date: 2026-08-28
 
-Status: full source/Plex/LXC/runtime/recovery/corpus gates complete; authoritative DNS activation, external browser acceptance, and final guardrail/review closeout pending
+Status: Linux runtime, capacity, logical backup, Docling responsiveness, Mac
+evacuation, and temporary public ingress complete; `ragweld.com` registrar
+activation and the signed-in curious-user browser drive remain pending
 
 ## Scope
 
@@ -11,7 +13,139 @@ Ragweld deployment to `pve1` and now tracks the predecessor Plex migration
 gate. Detailed Plex/PBS/NFS evidence lives in
 `docs/exec-plans/active/plex-return-to-pve-2026-08-27.md`.
 
-## Current source state
+## Final execution addendum — 2026-08-28
+
+This section is the current source of truth. Later user instructions explicitly
+superseded the original copy-only Mac rule: all Ragweld ignored/runtime data was
+to be preserved on Linux and then removed from the Mac. No private data was
+published to Git.
+
+### Published and deployed source
+
+- W75/W80/W81 source, tests, and deployment artifacts were published in
+  `0458f5058e08222f80ef07ca30eda93a625e36bf`.
+- Tracked handoff/docs/agent material was published through
+  `3004aad9cfb80f2c15ef37a3ed49b5c8f9632fe5`.
+- The temporary `ragweld.dtmont.com` Caddy/Authelia contract was published in
+  `f60c440ee0eca63387fa5bd14d82d389726322b8`.
+- The concurrent docs-autopilot hardening lane was stopped, verified, and
+  published in `de6085d36d25194fa089c63bdd3befd15794509f`.
+- Before this evidence-only update, local `main`, `origin/main`, LXC100
+  `/opt/ragweld`, and `/etc/ragweld/deployment-commit` all matched `de6085d3`.
+- The Mac then had one branch (`main`), one worktree, no tracked or ignored
+  changes, no Ragweld Vite/backend/docs worker, and no `colima-ragweld` profile
+  or Docker context.
+
+### Source verification and review
+
+- Exact pre-teardown source gate: `1241 passed, 98 skipped, 7 warnings` in
+  `253.15s`; docs ownership, banned patterns, generated types, LiteLLM
+  371-alias lockstep, frontend lint/build, and `git diff --check` passed.
+- Exact staged synthetic source candidate
+  `0557794a033f47416d32afc9dc69c5565e429d81` received an independent GPT-5.6
+  verdict `ACCEPTED` with no actionable P1/P2.
+- The later docs-autopilot lane passed its two focused files: `25 passed` in
+  `10.90s`. Both plan-generation smokes quoted all 92 docs pages; the normal
+  plan included 138 diffs and reported 262 omitted for budget, while bootstrap
+  included 114 and reported 286 omitted. The repository
+  `OPENROUTER_API_KEY` secret was installed before publication.
+- GitNexus classified that docs-autopilot lane HIGH because 49 symbols affect
+  10 docs-CI flows. It does not touch the serving runtime. Patch paths remain
+  allowlisted, incomplete provider responses fail closed, bad context is
+  rejected, and `git apply --recount --index` is covered by a real repository
+  regression.
+- After Mac runtime removal, the full suite honestly reports
+  `1229 passed, 105 skipped, 15 failed`: four index-replay tests require local
+  Postgres and eleven Compose/runtime-contract tests require the deliberately
+  removed local Docker/Colima/env topology. The focused changed lane remains
+  green; local infrastructure was not recreated to manufacture a full-suite
+  green result.
+- The user explicitly ordered the active paid generation/test and speculative
+  review stopped. Those processes were terminated and were not restarted; the
+  earlier paid GLM reviews remain historical evidence, not a new final rerun.
+
+### Capacity and recovery
+
+- pve1 `pve/data` has the scoped `ragweld-thinpool` profile attached with
+  `thin_pool_autoextend_threshold=80`, `thin_pool_autoextend_percent=1`, and
+  `seg_monitor=monitored`.
+- Final audit measured `8.86%` data, `0.53%` metadata, and LXC100 root at
+  `56G/295G` (`20%`). The five-minute capacity timer is enabled/active, its
+  latest service result is success, and all production state files are `ok`.
+- The non-destructive fake-delivery matrix proved warn, unchanged dedupe,
+  critical, recovery, guest-probe failure, dedupe, and recovery transitions;
+  the final normal live run was clean.
+- Logical backup `/srv/ragweld/backups/20260828T223712Z` is root-only, about
+  `138M`, and contains verified Postgres, Neo4j, MLflow, Langfuse
+  Postgres/ClickHouse/MinIO, and both Qdrant collection artifacts. Every entry
+  in `SHA256SUMS` passed, no `.incomplete-*` directory remains, and both live
+  Qdrant snapshot inventories returned zero residue.
+- `ragweld-logical-backup.timer` is enabled/active for the weekly run. The
+  existing enabled `backup-pbs-cluster` job still covers VMID100 on
+  `pbs-beelink`; no PBS job was created or changed during logical-backup work.
+
+### Real Docling responsiveness proof
+
+- Temporary corpus `acceptance-docling-20260828` contained the first two real
+  pages of the Apollo 11 mission report. Estimate: one file, 62,260 bytes,
+  about 15,565 tokens / 35 chunks, local Hugging Face embeddings, $0 external
+  cost.
+- The counted force-reindex run was
+  `20260828T230708_90174b3bb8`, from `23:07:08Z` to `23:07:15Z`. It completed
+  with one file, eight chunks, 3,131 tokens, model
+  `BAAI/bge-small-en-v1.5`, 384 dimensions, and no error.
+- While Docling reported
+  `current_file=A11_MissionReport_pages_1_2.pdf`, `/api/health` remained HTTP
+  200 at 1.9–2.5 ms and `/api/corpora` remained HTTP 200 at 2.2–6.5 ms.
+- The real corpus DELETE API returned `{"ok":true}`. The corpus now returns
+  404, zero matching Qdrant collections remain, the exact temp PDF/directory
+  were removed, readiness is 200, and the registry again contains only
+  `nasa-apollo-11` and `epstein-files-public`. The empty per-corpus lineage lock
+  is retained intentionally by the lock design to prevent inode-swap races.
+
+### Mac data evacuation and cleanup
+
+All archives and extracted trees are root-private under
+`/srv/ragweld/mac-archive/2026-08-28-from-mac`. Every archive passed format and
+SHA verification; all sidecars now use the deployed basename and pass
+`sha256sum -c` in place.
+
+- initial ignored tree: `d0d9db26fab0140e3facb5acfcf2b59a1dc8826c7ba535b71c733625fe5eb0d7`
+- post-clean delta: `39aa1e245dafd85ab9b2f595261b48cc2808082b5d787926e6f680785236781d`
+- final delta: `ec6f6aefcbcf9a83e23ef21b74b3016e30fc0d27bae8e71cc5d3ded8f1905aaf`
+- stopped `colima-ragweld` profile:
+  `d898b297548b86463bd28d3a6f81ca2a51b5cb73e935b2b035931c9ad6742729`
+- late regenerated runtime/test delta (37 exact ignored paths, 53,498 archive
+  entries, 1.5G extracted):
+  `b8c0f4209942c34de46ca7bc2f9f9a80fd5cca0e7646404f409ebd78315f01b2`
+- detached synthetic review worktree bundle:
+  `561c8bf5948c16b911c8478d28e3d75db16b6b7c5dc202350187eca21702355c`
+  preserving unique commit `0abf6cf6d9075a8b13219db16704daef7d5340f6`
+
+The clean detached review worktree was removed only after the complete-history
+bundle verified on Linux. The owning Claude session, its OpenRouter docs
+generator, its read-only Codex reviewer, and the stale Vite server were stopped
+before the late archive was created.
+
+### Public ingress
+
+- Netlify support has the request to move `ragweld.com` from its current NS1
+  nameservers to Cloudflare's `chance.ns.cloudflare.com` and
+  `kenia.ns.cloudflare.com`; the Cloudflare zone remains pending until Netlify
+  acts.
+- Temporary records `ragweld.dtmont.com` and
+  `ragweld-auth.dtmont.com` are proxied Tunnel records to `ragweld-pve1`.
+  Google DNS-over-HTTPS returned both A and AAAA answers for each hostname.
+- External HTTPS reaches the tunnel: the app returns 302 to the exact temporary
+  Authelia host, and the auth host returns 200. The in-app Browser rendered the
+  real Authelia login page. No auth bypass or loop was observed.
+- Two accidental nested records created by the zone-scoped cloudflared CLI
+  were immediately deleted before the correct `dtmont.com` records were added.
+- The signed-in curious-user walkthrough remains pending user credential entry;
+  passwords/OTPs are never handled by the agent. Companion `*.ragweld.com`
+  surfaces remain pending the Netlify registrar change.
+
+## Historical source state before the final execution addendum
 
 - Local branch/worktree canon: one local branch (`main`) and one worktree
   (`/Users/davidmontgomery/ragweld`)
@@ -379,26 +513,25 @@ on the stopped LXC for inspection.
   recovery, and probe-failure email/journal transitions. Host installation and
   forced non-destructive live verification remain before closeout.
 
-### Current verification candidate
+### Final verification classification
 
-- docs ownership, banned-pattern, generated-type, LiteLLM 371-alias lockstep,
-  and `git diff --check` gates: pass;
-- latest proven staged-source full backend suite before the final review fix
-  wave: `1235 passed, 98 skipped, 7 warnings`;
-- that staged count is now superseded because the final review fix wave added
-  new Docling/capacity regressions and source changes;
-- final full-suite rerun and exact source hash are still required before
-  commit, publish, or deploy. The controller will record the post-fix count and
-  published hash after the closeout rerun.
+- The superseding exact full source gate is `1241 passed, 98 skipped, 7
+  warnings`; the later changed docs-autopilot lane is `25 passed`.
+- Current standard validators are green: docs ownership, banned patterns,
+  generated types, LiteLLM 371-alias lockstep, and `git diff --check`.
+- The current Mac-wide suite is intentionally dependency-incomplete after the
+  authorized teardown: `1229 passed, 105 skipped, 15 failed` for missing local
+  Postgres/Docker/Colima. That is recorded as topology evidence, not repaired by
+  recreating the retired Mac runtime.
 
 ## Ready / not ready
 
 Ready:
 
-- local source verification
-- direct-main publication complete
-- external adversarial review of record, with its actionable findings closed in
-  committed source
+- direct-main publication and exact-hash LXC deployment
+- exact full source gate before Mac teardown plus focused green verification of
+  the later docs-autopilot lane
+- independent GPT-5.6 source review with no actionable P1/P2
 - rollout planning from the corrected pve1 design
 - Plex Tasks 1-3 complete: fresh PBS backups, verified NFSv4 bridge, offline
   root-disk migration to `.173`, guest-side NFS proof, and reboot acceptance
@@ -415,11 +548,24 @@ Ready:
 - Task 7 clean public-corpus materialization, sequential text/PDF indexing,
   cited paid chat, Docling runtime correction, and live token-accounting proof
   complete
+- pve1 80/1 thin-pool profile, five-minute capacity guard, and full synthetic
+  transition matrix complete
+- logical backup and weekly timer complete with all checksums and zero snapshot
+  residue
+- real Docling conversion proved nonblocking and its temporary corpus was
+  removed through the product API
+- every Mac ignored/runtime state and the unique detached review commit is
+  preserved root-private on Linux; Mac source/runtime state is clean
+- `ragweld.dtmont.com` and `ragweld-auth.dtmont.com` resolve and reach the live
+  tunnel/Caddy/Authelia chain
 
 Not yet done:
 
-- Netlify registrar nameserver switch and Cloudflare zone activation
+- Netlify support must complete the `ragweld.com` registrar nameserver switch
+  before the original Cloudflare zone activates
 - signed-in external browser/SSO acceptance across the protected workbench and
   companion UIs
-- W75 thin-pool/guest-volume alert and autoextend guardrails
-- final independent GPT-5.6 plus paid GLM adversarial closeout and publication
+- the full Mac suite cannot be green without recreating the explicitly retired
+  local Postgres/Docker/Colima topology
+- no new paid GLM closeout was run after the user ordered the active generator,
+  test, and speculative review stopped

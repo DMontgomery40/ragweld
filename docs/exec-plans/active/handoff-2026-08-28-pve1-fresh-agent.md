@@ -15,6 +15,57 @@ Status delta for the reviewed local source candidate after that timestamp:
   awaiting final rerun, commit, push, and pve1 deployment proof; they are not
   still-open implementation tasks on the live instance.
 
+## Execution result addendum — current through 2026-08-28 17:25 MDT
+
+This addendum supersedes the stale-state statements below. Preserve the body as
+the executed acceptance specification and historical command record. Exact
+evidence is in
+`docs/exec-plans/active/pve1-ragweld-deployment-2026-08-27.md`.
+
+- The user explicitly superseded the original copy-only Mac rule: all Ragweld
+  ignored/runtime data was preserved root-private on Linux, then removed from
+  the Mac. No secret or private data was committed.
+- Published/deployed milestones are `0458f505` (capacity/Docling source),
+  `3004aad9` (tracked handoff/agent material), `f60c440e` (temporary
+  `dtmont.com` ingress), and `de6085d3` (concurrent docs-autopilot hardening).
+- Mac `main` and `origin/main` matched before this evidence-only update; the Mac
+  had one branch, one worktree, no tracked or ignored state, no Ragweld local
+  services/workers, and no `colima-ragweld` profile/context.
+- LXC100 checkout and `/etc/ragweld/deployment-commit` matched `de6085d3`;
+  `ragweld.service`, API readiness, Caddy, Authelia, and cloudflared were green.
+- Exact source gate before teardown: `1241 passed, 98 skipped, 7 warnings`.
+  The later docs-autopilot lane is `25 passed`; standard validators remain
+  green. A Mac-wide rerun after teardown reports 15 dependency failures because
+  local Postgres/Docker/Colima were intentionally removed; do not rebuild them
+  merely to change that evidence.
+- The final exact staged source candidate received GPT-5.6 verdict `ACCEPTED`
+  with no actionable P1/P2. The user ordered the active paid generation/test
+  and speculative review stopped; no new paid GLM rerun was performed.
+- pve1 capacity profile/guard is live: scoped 80/1 profile, monitored thin pool,
+  five-minute timer, clean normal state, and warn/dedupe/critical/recovery/probe
+  synthetic paths all proved with fake delivery.
+- Root-only logical backup `/srv/ragweld/backups/20260828T223712Z` passed all
+  checksums with no incomplete directory or Qdrant snapshot residue; its weekly
+  timer is enabled. The existing PBS VMID100 job is unchanged.
+- Real Docling run `20260828T230708_90174b3bb8` completed with eight chunks and
+  3,131 tokens while health stayed 1.9–2.5 ms and corpus reads 2.2–6.5 ms. Its
+  temporary corpus was deleted through the real API; only the two approved
+  public corpora remain.
+- All Mac state is under
+  `/srv/ragweld/mac-archive/2026-08-28-from-mac`, including initial/delta
+  archives, the stopped Colima profile, a late 1.5G regenerated-state delta,
+  and a verified Git bundle for unique detached review commit `0abf6cf6`.
+  Every sidecar passes `sha256sum -c` in place.
+- Netlify support has the `ragweld.com` nameserver-change request. Until that
+  completes, `https://ragweld.dtmont.com` is live through
+  `https://ragweld-auth.dtmont.com`; Google DNS sees A+AAAA, the app redirects
+  to the correct Authelia host, and the login page renders in the in-app
+  Browser.
+- Remaining external gates: Netlify must activate the original Cloudflare zone,
+  and the user must enter Authelia credentials so the signed-in curious-user
+  walkthrough and companion-UI acceptance can finish. Agents never handle the
+  password/OTP.
+
 ---
 
 `/goal` Continue and finish the permanent, clean, full Ragweld instance on
