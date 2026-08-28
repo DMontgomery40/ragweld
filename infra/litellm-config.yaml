@@ -467,6 +467,10 @@ model_list:
   litellm_params:
     model: openrouter/inclusionai/ling-3.0-flash
     api_key: os.environ/OPENROUTER_API_KEY
+- model_name: inclusionai.ling-3.0-flash-fin.free
+  litellm_params:
+    model: openrouter/inclusionai/ling-3.0-flash-fin:free
+    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: kwaipilot.kat-coder-air-v2.5
   litellm_params:
     model: openrouter/kwaipilot/kat-coder-air-v2.5
@@ -1383,6 +1387,10 @@ model_list:
   litellm_params:
     model: openrouter/qwen/qwen3.8-27b
     api_key: os.environ/OPENROUTER_API_KEY
+- model_name: qwen.qwen3.8-flash
+  litellm_params:
+    model: openrouter/qwen/qwen3.8-flash
+    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3.8-max
   litellm_params:
     model: openrouter/qwen/qwen3.8-max
@@ -1422,10 +1430,6 @@ model_list:
 - model_name: sao10k.l3.3-euryale-70b
   litellm_params:
     model: openrouter/sao10k/l3.3-euryale-70b
-    api_key: os.environ/OPENROUTER_API_KEY
-- model_name: stealth.ox-alpha
-  litellm_params:
-    model: openrouter/stealth/ox-alpha
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: stepfun.step-3.5-flash
   litellm_params:
@@ -1587,10 +1591,6 @@ model_list:
   litellm_params:
     model: openrouter/z-ai/glm-5.2
     api_key: os.environ/OPENROUTER_API_KEY
-- model_name: z-ai.glm-5.2.batch
-  litellm_params:
-    model: openrouter/z-ai/glm-5.2:batch
-    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: z-ai.glm-5.2.free
   litellm_params:
     model: openrouter/z-ai/glm-5.2:free
@@ -1598,6 +1598,10 @@ model_list:
 - model_name: z-ai.glm-5.3
   litellm_params:
     model: openrouter/z-ai/glm-5.3
+    api_key: os.environ/OPENROUTER_API_KEY
+- model_name: z-ai.glm-5.3-flash
+  litellm_params:
+    model: openrouter/z-ai/glm-5.3-flash
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: z-ai.glm-5v-turbo
   litellm_params:
