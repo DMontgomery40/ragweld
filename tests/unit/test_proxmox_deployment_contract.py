@@ -1469,14 +1469,21 @@ def test_proxmox_plex_nfs_mount_units_use_hard_automount_contract() -> None:
     assert "What=192.168.68.171:/srv/media" in mount_source
     assert "Where=/srv/media" in mount_source
     assert "Type=nfs4" in mount_source
-    assert "Options=_netdev,hard,noatime,x-systemd.automount" in mount_source
+    assert "Options=_netdev,hard,noatime" in mount_source
+    assert "x-systemd.automount" not in mount_source
+    assert "[Install]" not in mount_source
+    assert "WantedBy=" not in mount_source
     assert re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", mount_source) == ["192.168.68.171"]
+
+    combined_source = mount_source + automount_source
 
     assert "[Automount]" in automount_source
     assert "Where=/srv/media" in automount_source
     assert "TimeoutIdleSec=60" in automount_source
+    assert "[Install]" in automount_source
+    assert "WantedBy=multi-user.target" in automount_source
+    assert combined_source.count("WantedBy=multi-user.target") == 1
 
-    combined_source = mount_source + automount_source
     forbidden_fragments = (
         "soft",
         "nolock",

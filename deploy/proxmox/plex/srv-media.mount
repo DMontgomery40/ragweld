@@ -7,7 +7,4 @@ Wants=network-online.target
 What=192.168.68.171:/srv/media
 Where=/srv/media
 Type=nfs4
-Options=_netdev,hard,noatime,x-systemd.automount
-
-[Install]
-WantedBy=multi-user.target
+Options=_netdev,hard,noatime
