@@ -142,13 +142,16 @@ exists.
 - Frontend: build `web/dist` once and serve it with Caddy. Do not use the Vite
   development server as the permanent public process.
 - Backend: run the existing host-mode FastAPI service under the systemd-owned
-  launcher, bound to LXC loopback. This preserves the current localhost-only
-  Docker control boundary without mounting the host Docker socket into an API
-  container. Caddy runs as an LXC system service, proxies `/api/*` to loopback,
-  and serves the `/web/` SPA with history fallback.
-- Identity and tunnel: run Authelia in the deployment Compose overlay and run
-  `cloudflared` as an LXC system service. Caddy reaches Authelia and all
-  published companion UIs only through their loopback-bound ports.
+  launcher, bound to `0.0.0.0` inside the LXC via `SERVER_HOST=0.0.0.0`. The
+  LXC firewall, not loopback, is the network boundary. This keeps Docker
+  control on the guest itself without mounting the Proxmox host Docker socket
+  into an API container. Caddy proxies `/api/*` to the guest listener and the
+  Flyte callback uses the Docker default-bridge gateway
+  (`http://172.17.0.1:58012`), which `start-runtime.sh` verifies before launch.
+- Identity and tunnel: run Authelia, Caddy, and `cloudflared` as deployment
+  Compose services owned by the same systemd-launched runtime. Caddy reaches
+  Authelia and the published companion UIs only through local guest listeners
+  and the deployment overlay routes.
 - Full stack: Postgres, Qdrant, Neo4j, LiteLLM, MLflow, Flyte, Grafana,
   Prometheus, Loki, Promtail, Tempo, Alloy, Mimir, Pyroscope, Alertmanager, and
   the complete Langfuse service group.

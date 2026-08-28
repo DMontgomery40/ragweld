@@ -325,6 +325,27 @@ the conversation instead of rendering the stable error fields intentionally.
 - Do not present a failed request as a normal Assistant message.
 - Preserve the important truth that generation did not run.
 
+## Unconfirmed P2: Admin/Basic can enter a React update loop
+
+### Observation (2026-08-28)
+
+An independent browser reviewer intermittently saw repeated
+`Maximum update depth exceeded` console errors on `Admin > Basic`, followed
+once by a config-control-plane load failure. The controller did not reproduce
+this during the isolated Retrieval/Training pass, and the scoped reviewer found
+no causal link to the public-link legibility/target-lane fix in `9d834fcf`.
+
+### Required follow-up evidence
+
+- Reproduce from a clean page load with the browser console captured.
+- Record the exact click/state transition immediately before the first React
+  error and whether config polling or a store write repeats.
+- Identify the component/effect cycle before editing; do not suppress the
+  console error or weaken config refresh behavior.
+- After a fix, rerun Admin/Basic at desktop and phone widths without request
+  interception and prove the console remains clean through at least two config
+  refresh intervals.
+
 ## Acceptance pass for the follow-up session
 
 1. Open `/web` and `/web/`; both reach the real app.

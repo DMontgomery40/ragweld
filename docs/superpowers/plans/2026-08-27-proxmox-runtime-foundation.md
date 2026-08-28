@@ -723,6 +723,142 @@ git add deploy/proxmox/plex tests/unit/test_proxmox_deployment_contract.py
 git commit -m "feat(deploy): add scoped plex media bridge"
 ```
 
+### Task 6b: Operator watchdog fixes (injected by David, 2026-08-28)
+
+I reviewed Tasks 1-5 against the real repo contracts and the sibling rollout
+plan. The running list with evidence is
+`docs/exec-plans/active/watchdog-proxmox-foundation-2026-08-28.md`; update the
+status of each `W` item there as you close it. This task must complete before
+Task 7. Same rules as every other task: red test first, real code paths, exact
+staging, no fallbacks.
+
+**Files:**
+- Modify: `deploy/proxmox/Caddyfile`
+- Modify: `deploy/proxmox/docker-compose.yml`
+- Modify: `deploy/proxmox/render_config.py`
+- Modify: `deploy/proxmox/start-runtime.sh`
+- Modify: `start.sh` (honor `SERVER_HOST` for the uvicorn bind; run GitNexus impact first)
+- Modify: `tests/unit/test_proxmox_deployment_contract.py`
+- Modify: `tests/unit/test_runtime_launch_contract.py` (bind contract)
+
+- [ ] **Step 1 (W1): Force the https scheme toward Authelia**
+
+Caddy rewrites untrusted `X-Forwarded-Proto` to the scheme it received, which is
+`http` from cloudflared. Authelia's `IssuerURL()` rejects anything but `https`,
+so OIDC discovery and the ForwardAuth redirect break. In `require_owner` add
+`header_up X-Forwarded-Proto https` inside `forward_auth`, and add the same
+`header_up` to the `auth.ragweld.com` `reverse_proxy`. Extend the brace-balanced
+Caddy parser test so every block that reaches `127.0.0.1:59091` carries it.
+
+- [ ] **Step 2 (W2): Let the seeded Langfuse owner log in over OIDC**
+
+Bootstrap seeds a credentials user with the same email Authelia asserts, signup
+is disabled, and account linking is not enabled, so Auth.js returns
+`OAuthAccountNotLinked`. Add `AUTH_CUSTOM_ALLOW_ACCOUNT_LINKING: "true"` to the
+`langfuse` overlay environment and assert it in the compose contract test.
+
+- [ ] **Step 3 (W3): Make the host API reachable from Linux containers**
+
+On Linux Docker `host-gateway` is the bridge IP, not loopback, so
+`infra/prometheus.yml` scraping `host.docker.internal:58012` and the Flyte
+execute-callback both fail against `--host 127.0.0.1`. Decision: `start.sh`
+binds uvicorn to `${SERVER_HOST:-127.0.0.1}` (bootstrap already writes
+`SERVER_HOST` to `runtime.env`; change that value to `0.0.0.0` for the LXC),
+the renderer sets
+`training.ragweld_agent_flyte_callback_base_url = "http://172.17.0.1:58012"`
+(correction 2026-08-28, W20: Flyte task pods resolve through the sandbox's k3s
+CoreDNS and cannot see `host.docker.internal`; the Docker default-bridge
+gateway is what they can reach — the 2026-08-22 Flyte slice hit exactly this on
+Colima), `start-runtime.sh` preflight asserts
+`docker network inspect bridge -f '{{(index .IPAM.Config 0).Gateway}}'` equals
+that host and dies otherwise, and the LXC firewall remains the boundary. Run
+`node .gitnexus/run.cjs impact` on the touched `start.sh` function first. Tests:
+`start.sh --check` echoes the `SERVER_HOST` bind; renderer test asserts the
+callback URL; a start-runtime test with a fake `docker network inspect`
+returning a different gateway proves the fail-closed path; keep the Mac default
+at `127.0.0.1`.
+
+Also in this step (W21, W22): while the MLflow link builder is open, persist
+`tracking_experiment_id` on `AgentTrainRun` from `MlflowRunHandle.experiment_id`
+and build the console link from it instead of parsing `artifacts_uri`; and set
+`alloy.environment.ALLOY_FARO_CORS_ORIGIN: https://me.ragweld.com` in the
+overlay so the Faro receiver's allowlist matches the real origin.
+
+- [ ] **Step 4 (W9, W10): Grafana public root URL and Caddy catch-all**
+
+Overlay: `GF_SERVER_ROOT_URL: "https://grafana.ragweld.com"` on `grafana`.
+Caddyfile: final `handle { respond 404 }` in the `me.ragweld.com` block so
+unmatched paths do not return an empty `200`. Cover both in the contract tests.
+
+- [ ] **Step 5 (W6, W5): Preflight the lifecycle prerequisites honestly**
+
+`start-runtime.sh` must fail with a clear message when `lsof` is missing
+(`start.sh`/`stop.sh` hard-require it) instead of restart-looping under
+systemd. Keep `credentials.json` as the required tunnel file name; the rollout
+plan now renames the generated `<UUID>.json` to it.
+
+- [ ] **Step 6 (W7, ruled): Split browser-facing URLs from server-side endpoints**
+
+Decided 2026-08-28: take the full fix, not the blanking shortcut.
+`tracing.langfuse_base_url` and `training.ragweld_agent_mlflow_tracking_url`
+are emitted to the browser as links but are also the server-side endpoints;
+`tracing.faro_base_url` is loaded by every remote page. Pydantic-first:
+1. Add `tracing.langfuse_public_base_url` and
+   `training.ragweld_agent_mlflow_console_base_url` to the domain configs
+   (default `""`; when empty the link builders fall back to nothing, never to
+   the server-side URL), add glossary entries, run
+   `uv run scripts/generate_types.py`, and route `langfuse_trace_url`
+   (`server/observability/runtime.py`) and the MLflow `TraceExternalLink`
+   (`server/training/control_plane.py`) through the new fields. Run GitNexus
+   impact on both functions first.
+2. Add a Caddy route on `me.ragweld.com`: `handle /faro/collect` →
+   `reverse_proxy 127.0.0.1:52347` (behind `require_owner`), and cover it in
+   the parser test's allowlist.
+3. Renderer sets `tracing.langfuse_public_base_url = "https://langfuse.ragweld.com"`,
+   `training.ragweld_agent_mlflow_console_base_url = "https://mlflow.ragweld.com"`,
+   and `tracing.faro_base_url = "https://me.ragweld.com/faro/collect"`; extend
+   the whole-model renderer invariant test accordingly.
+4. Contract tests: a trace-link test that proves the public field is used for
+   the browser link while ingestion still targets the loopback field.
+
+- [ ] **Step 7 (W12): Repair the GitNexus index before the final scope check**
+
+Run `node .gitnexus/run.cjs analyze --force` once, then re-run
+`detect-changes --scope staged` for this task. Do not carry the "graph noise"
+ruling into Task 7.
+
+- [ ] **Step 7b (W8, W24 — added 2026-08-28 03:15): Truthful probes and local link values**
+
+1. `server/observability/status.py` `_check_url`: stop following redirects; a
+   3xx whose `Location` host differs from the probed host returns
+   `(None, "redirected to <host>; protected ingress cannot be probed from the API")`
+   so Grafana/Faro show *unverified* on pve1 instead of false-green via the
+   Authelia portal. Real local-HTTP-server test (302 to another host → `ok is
+   None`); keep the 405/415 POST-only rule. Run GitNexus impact on
+   `_check_url` first.
+2. Checked-in `tribrid_config.json`: add
+   `tracing.langfuse_public_base_url = "http://127.0.0.1:53000"` and
+   `training.ragweld_agent_mlflow_console_base_url = "http://127.0.0.1:55500"`
+   so the Mac workbench keeps its links under the no-fallback rule; pin both
+   in `tests/unit/test_clean_start_defaults.py`. Record in the handoff that
+   the Mac's stored global config needs the same two values set once through
+   the Config UI.
+
+- [ ] **Step 8: Verify and commit**
+
+```bash
+bash -n deploy/proxmox/start-runtime.sh deploy/proxmox/stop-runtime.sh deploy/proxmox/bootstrap-secrets.sh
+uv run pytest -q tests/unit/test_proxmox_deployment_contract.py tests/unit/test_runtime_launch_contract.py tests/unit/test_runtime_lifecycle.py
+LANGFUSE_OIDC_CLIENT_SECRET=contract-only GRAFANA_ADMIN_PASSWORD=contract-only LANGFUSE_POSTGRES_PASSWORD=contract-only CLICKHOUSE_PASSWORD=contract-only REDIS_AUTH=contract-only LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID=contract-only LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY=contract-only docker compose --project-name ragweld -f docker-compose.yml -f infra/docker-compose.observability.yml -f deploy/proxmox/docker-compose.yml config --format json >/dev/null
+node .gitnexus/run.cjs detect-changes --scope staged --repo ragweld --limit 200
+git add deploy/proxmox/Caddyfile deploy/proxmox/docker-compose.yml deploy/proxmox/render_config.py deploy/proxmox/start-runtime.sh deploy/proxmox/bootstrap-secrets.sh start.sh tests/unit/test_proxmox_deployment_contract.py tests/unit/test_runtime_launch_contract.py
+git commit -m "fix(deploy): close watchdog findings before publication"
+```
+
+Then mark each closed `W` item `FIXED <commit>` in the watchdog file. Task 7
+Step 1 must run the full `pytest -q` on this tree (W13); do not cite the Task 5
+count.
+
 ### Task 7: Final foundation verification and direct publication
 
 **Files:**
@@ -763,6 +899,11 @@ rendering with production environment values loaded.
 - [ ] **Step 3: Run independent adversarial review once**
 
 Run one high-reasoning review against the complete source diff. The prompt must ask for concrete P1/P2 correctness, security, secret-handling, auth-bypass, rollback, and fake-green findings. Do not start an unbounded review loop. Fix actionable findings, rerun only the affected tests, and record dispositions.
+
+Operator additions (David, 2026-08-28; see watchdog W18/W19):
+- Seed the reviewer with `docs/exec-plans/active/watchdog-proxmox-foundation-2026-08-28.md` as an extra `=====` block and require an explicit disposition per `W` item (confirmed / refuted with evidence / already fixed at `<commit>`), in addition to its own findings.
+- Write the report and trace to `.superpowers/sdd/2026-08-27-proxmox-runtime-foundation/glm-review-<base>..<head>.md` and `.jsonl`; record both paths and the verdict in the ledger.
+- "Rerun only the affected tests" means every test module that references any staged path: `git diff --cached --name-only | xargs -I{} grep -rl -- "{}" tests | sort -u | xargs uv run pytest -q`. The same rule applies to every fix round in this plan from now on.
 
 - [ ] **Step 4: Verify final Git scope**
 

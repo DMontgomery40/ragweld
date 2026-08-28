@@ -24,6 +24,44 @@
 - Use the in-app Browser for Cloudflare/DNS work and rendered acceptance. The user performs any password or OTP entry.
 - Stop at the current rollback checkpoint on any backup, mount, auth, readiness, indexing, or browser blocker.
 
+## Operator corrections (David, 2026-08-28)
+
+From `docs/exec-plans/active/watchdog-proxmox-foundation-2026-08-28.md`. These
+override the conflicting steps below until the steps themselves are rewritten.
+
+- **W4 — bootstrap needs an empty `/etc/ragweld`.** `bootstrap-secrets.sh`
+  fails closed on any existing entry and replaces the directory wholesale. Task
+  2 Step 5 must push `deployment-commit` to `/root/ragweld-deployment-commit`
+  inside the guest (not `/etc/ragweld/`), and Task 3 Step 5 must create the
+  owner password file at `/root/ragweld-owner-password` (mode `0600`). Run
+  bootstrap, then move both files into `/etc/ragweld/` as `ragweld:ragweld`
+  `0600`. Task 3 Step 4's equality check reads the new path.
+- **W5 — tunnel credential name.** `start-runtime.sh` requires
+  `/etc/ragweld/cloudflared/credentials.json`. After Task 5 Step 5, copy the
+  generated `<UUID>.json` to `credentials.json` (keep the original), and in
+  `config.yml` use the container path `credentials-file:
+  /etc/cloudflared/credentials.json`.
+- **W6 — install `lsof`.** Add `lsof` to the Task 3 Step 1 apt list;
+  `start.sh`/`stop.sh` exit without it and the unit would restart-loop.
+- **W3 — API bind.** After foundation Task 6b lands, `runtime.env` carries
+  `SERVER_HOST=0.0.0.0` inside the LXC and the LXC firewall is the boundary.
+  Task 2 Step 6's "58000/58012 not reachable from LAN" proof becomes mandatory
+  evidence, not optional.
+- **W7 — link split landed (`e2a2b9da`).** The renderer sets
+  `tracing.langfuse_public_base_url`, `training.ragweld_agent_mlflow_console_base_url`,
+  and `tracing.faro_base_url=https://me.ragweld.com/faro/collect`; acceptance
+  #12 is testable as written. Record the three rendered values (no secrets) in
+  the evidence file.
+- **W20 — Flyte callback evidence.** The rendered config carries
+  `training.ragweld_agent_flyte_callback_base_url=http://172.17.0.1:58012` and
+  `start-runtime.sh` refuses to start unless
+  `docker network inspect bridge -f '{{(index .IPAM.Config 0).Gateway}}'`
+  returns that host. Capture that inspect output in the evidence file before
+  Task 5 Step 7; if the LXC's Docker daemon uses a custom `bip`, re-render
+  with the real gateway rather than editing the daemon.
+- **W17 — Cloudflare limits.** Note the 100 MB request-body and ~100 s idle
+  response limits in the evidence file; corpus seeding stays rsync.
+
 ---
 
 ### Task 1: Lock source and revalidate pve1 capacity
