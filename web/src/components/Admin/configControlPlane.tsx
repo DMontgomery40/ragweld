@@ -70,6 +70,79 @@ const CHIP_BASE: CSSProperties = {
   fontWeight: 700,
 };
 
+const WRAP_ANYWHERE_STYLE: CSSProperties = {
+  minWidth: 0,
+  overflowWrap: 'anywhere',
+  wordBreak: 'break-word',
+};
+
+const FIELD_HEADER_STYLE: CSSProperties = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  gap: 12,
+  alignItems: 'flex-start',
+  flexWrap: 'wrap',
+  width: '100%',
+  minWidth: 0,
+};
+
+const FIELD_CONTROL_ROW_STYLE: CSSProperties = {
+  display: 'flex',
+  gap: 10,
+  alignItems: 'center',
+  flexWrap: 'wrap',
+  width: '100%',
+  minWidth: 0,
+};
+
+const FIELD_TRAILING_ROW_STYLE: CSSProperties = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  gap: 12,
+  alignItems: 'center',
+  flexWrap: 'wrap',
+  width: '100%',
+  minWidth: 0,
+};
+
+const FIELD_INPUT_STYLE: CSSProperties = {
+  flex: '1 1 240px',
+  minWidth: 0,
+  width: '100%',
+  maxWidth: '100%',
+  padding: '9px 12px',
+  borderRadius: 8,
+  background: 'var(--bg)',
+  border: '1px solid var(--line)',
+  color: 'var(--fg)',
+};
+
+const FIELD_TEXTAREA_STYLE: CSSProperties = {
+  width: '100%',
+  maxWidth: '100%',
+  minWidth: 0,
+  padding: 12,
+  borderRadius: 10,
+  border: '1px solid var(--line)',
+  background: 'var(--bg)',
+  color: 'var(--fg)',
+  fontFamily: 'var(--font-mono)',
+  fontSize: 12,
+};
+
+const ACTION_BUTTON_STYLE: CSSProperties = {
+  padding: '8px 12px',
+  borderRadius: 8,
+  border: '1px solid var(--line)',
+  background: 'var(--bg-elev2)',
+  color: 'var(--fg)',
+  fontWeight: 700,
+  cursor: 'pointer',
+  flex: '0 0 auto',
+  maxWidth: '100%',
+  alignSelf: 'flex-start',
+};
+
 const STATE_TONES: Record<string, { fg: string; bg: string; border: string }> = {
   ready: { fg: 'var(--ok)', bg: 'rgba(var(--ok-rgb), 0.12)', border: 'rgba(var(--ok-rgb), 0.28)' },
   degraded: { fg: 'var(--warn)', bg: 'rgba(var(--warn-rgb), 0.12)', border: 'rgba(var(--warn-rgb), 0.28)' },
@@ -244,28 +317,32 @@ export function ConfigFieldEditor({
         void commit();
       }}
       disabled={saving}
-      style={{
-        padding: '8px 12px',
-        borderRadius: 8,
-        border: '1px solid var(--line)',
-        background: 'var(--bg-elev2)',
-        color: 'var(--fg)',
-        fontWeight: 700,
-        cursor: 'pointer',
-      }}
+      style={ACTION_BUTTON_STYLE}
     >
       {saving ? 'Saving…' : 'Save'}
     </button>
   );
 
   return (
-    <div style={{ ...CARD_STYLE, padding: 14 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'start' }}>
-        <div style={{ minWidth: 0 }}>
+    <div data-config-path={field.path} style={{ ...CARD_STYLE, padding: 14, width: '100%', minWidth: 0 }}>
+      <div style={FIELD_HEADER_STYLE}>
+        <div style={{ ...WRAP_ANYWHERE_STYLE, flex: '1 1 240px' }}>
           <div style={{ fontWeight: 700, color: 'var(--fg)' }}>{field.label}</div>
-          <div style={{ marginTop: 4, fontSize: 12, color: 'var(--fg-muted)', fontFamily: 'var(--font-mono)' }}>{field.path}</div>
+          <div
+            style={{
+              ...WRAP_ANYWHERE_STYLE,
+              marginTop: 4,
+              fontSize: 12,
+              color: 'var(--fg-muted)',
+              fontFamily: 'var(--font-mono)',
+            }}
+          >
+            {field.path}
+          </div>
           {field.description ? (
-            <div style={{ marginTop: 8, fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.5 }}>{field.description}</div>
+            <div style={{ ...WRAP_ANYWHERE_STYLE, marginTop: 8, fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
+              {field.description}
+            </div>
           ) : null}
           {metaChips}
         </div>
@@ -274,13 +351,13 @@ export function ConfigFieldEditor({
             type="button"
             onClick={() => onOpenRaw(field.section)}
             style={{
+              ...WRAP_ANYWHERE_STYLE,
               padding: '6px 10px',
               borderRadius: 8,
               border: '1px solid var(--line)',
               background: 'transparent',
               color: 'var(--fg-muted)',
               cursor: 'pointer',
-              whiteSpace: 'nowrap',
             }}
           >
             Open Raw
@@ -290,7 +367,7 @@ export function ConfigFieldEditor({
 
       <div style={{ marginTop: 12 }}>
         {field.type === 'boolean' ? (
-          <label className="toggle">
+          <label className="toggle" style={{ ...WRAP_ANYWHERE_STYLE, width: '100%' }}>
             <input
               type="checkbox"
               checked={Boolean(currentValue)}
@@ -303,22 +380,16 @@ export function ConfigFieldEditor({
             <span className="toggle-track" aria-hidden="true">
               <span className="toggle-thumb"></span>
             </span>
-            <span className="toggle-label">{Boolean(currentValue) ? 'Enabled' : 'Disabled'}</span>
+            <span className="toggle-label" style={WRAP_ANYWHERE_STYLE}>
+              {Boolean(currentValue) ? 'Enabled' : 'Disabled'}
+            </span>
           </label>
         ) : field.enum_values && field.enum_values.length > 0 ? (
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div style={FIELD_CONTROL_ROW_STYLE}>
             <select
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
-              style={{
-                flex: '1 1 240px',
-                minWidth: 220,
-                padding: '9px 12px',
-                borderRadius: 8,
-                background: 'var(--bg)',
-                border: '1px solid var(--line)',
-                color: 'var(--fg)',
-              }}
+              style={FIELD_INPUT_STYLE}
             >
               {field.enum_values.map((value) => (
                 <option key={value} value={value}>
@@ -335,38 +406,23 @@ export function ConfigFieldEditor({
               onChange={(event) => setDraft(event.target.value)}
               spellCheck={false}
               rows={8}
-              style={{
-                width: '100%',
-                padding: 12,
-                borderRadius: 10,
-                border: '1px solid var(--line)',
-                background: 'var(--bg)',
-                color: 'var(--fg)',
-                fontFamily: 'var(--font-mono)',
-                fontSize: 12,
-              }}
+              style={FIELD_TEXTAREA_STYLE}
             />
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', marginTop: 10 }}>
-              <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>Current: {formatValuePreview(currentValue)}</div>
+            <div style={{ ...FIELD_TRAILING_ROW_STYLE, marginTop: 10 }}>
+              <div style={{ ...WRAP_ANYWHERE_STYLE, fontSize: 12, color: 'var(--fg-muted)', flex: '1 1 220px' }}>
+                Current: {formatValuePreview(currentValue)}
+              </div>
               {saveButton}
             </div>
           </div>
         ) : (
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div style={FIELD_CONTROL_ROW_STYLE}>
             <input
               type={field.type === 'integer' || field.type === 'number' ? 'number' : 'text'}
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
               step={field.type === 'integer' ? '1' : 'any'}
-              style={{
-                flex: '1 1 240px',
-                minWidth: 220,
-                padding: '9px 12px',
-                borderRadius: 8,
-                background: 'var(--bg)',
-                border: '1px solid var(--line)',
-                color: 'var(--fg)',
-              }}
+              style={FIELD_INPUT_STYLE}
             />
             {saveButton}
           </div>
@@ -374,13 +430,13 @@ export function ConfigFieldEditor({
       </div>
 
       {field.secret_dependency_ids && field.secret_dependency_ids.length > 0 ? (
-        <div style={{ marginTop: 10, fontSize: 12, color: 'var(--fg-muted)' }}>
+        <div style={{ ...WRAP_ANYWHERE_STYLE, marginTop: 10, fontSize: 12, color: 'var(--fg-muted)' }}>
           Secret dependencies: {field.secret_dependency_ids.join(', ')}
         </div>
       ) : null}
 
-      {fieldError ? <div style={{ marginTop: 10, fontSize: 12, color: 'var(--err)' }}>{fieldError}</div> : null}
-      {status ? <div style={{ marginTop: 10, fontSize: 12, color: 'var(--ok)' }}>{status}</div> : null}
+      {fieldError ? <div style={{ ...WRAP_ANYWHERE_STYLE, marginTop: 10, fontSize: 12, color: 'var(--err)' }}>{fieldError}</div> : null}
+      {status ? <div style={{ ...WRAP_ANYWHERE_STYLE, marginTop: 10, fontSize: 12, color: 'var(--ok)' }}>{status}</div> : null}
     </div>
   );
 }

@@ -26,7 +26,7 @@ export function ConfigBasicsSubtab({ onOpenRaw }: ConfigBasicsSubtabProps) {
 
   if (error) {
     return (
-      <div className="settings-section">
+      <div className="settings-section" style={{ minWidth: 0 }}>
         <div style={{ color: 'var(--err)', marginBottom: 12 }}>Unable to load configuration control plane: {error}</div>
         <button type="button" onClick={() => { void reload(); }}>Retry</button>
       </div>
@@ -34,15 +34,15 @@ export function ConfigBasicsSubtab({ onOpenRaw }: ConfigBasicsSubtabProps) {
   }
 
   return (
-    <div className="settings-section">
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', marginBottom: 20 }}>
-        <div>
+    <div className="settings-section" style={{ minWidth: 0 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', marginBottom: 20, minWidth: 0, width: '100%' }}>
+        <div style={{ minWidth: 0, flex: '1 1 320px' }}>
           <h2 style={{ marginBottom: 8 }}>Configuration Center</h2>
-          <p className="small" style={{ maxWidth: 860 }}>
+          <p className="small" style={{ maxWidth: 860, minWidth: 0, overflowWrap: 'anywhere' }}>
             Curated operator controls for the locked OSS stack. Every field here comes from the backend registry, and every integration card reflects live readiness rather than hand-maintained UI copy.
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'start', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'start', flexWrap: 'wrap', minWidth: 0 }}>
           <button
             type="button"
             onClick={() => {
@@ -63,7 +63,7 @@ export function ConfigBasicsSubtab({ onOpenRaw }: ConfigBasicsSubtabProps) {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gap: 18 }}>
+      <div style={{ display: 'grid', gap: 18, minWidth: 0 }}>
         {CONFIG_SURFACES.map((surface) => {
           const fields = fieldsForSurface(registry, surface.id, 'basic');
           const integrations = integrationsForSurface(readiness, surface.id);
@@ -75,14 +75,17 @@ export function ConfigBasicsSubtab({ onOpenRaw }: ConfigBasicsSubtabProps) {
                 border: '1px solid var(--line)',
                 borderRadius: 14,
                 padding: 18,
+                minWidth: 0,
               }}
             >
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', marginBottom: 14 }}>
-                <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', marginBottom: 14, minWidth: 0, width: '100%' }}>
+                <div style={{ minWidth: 0, flex: '1 1 280px' }}>
                   <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--fg)' }}>{surface.title}</div>
-                  <div style={{ marginTop: 6, fontSize: 13, color: 'var(--fg-muted)', maxWidth: 760 }}>{surface.description}</div>
+                  <div style={{ marginTop: 6, fontSize: 13, color: 'var(--fg-muted)', maxWidth: 760, minWidth: 0, overflowWrap: 'anywhere' }}>
+                    {surface.description}
+                  </div>
                 </div>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'start' }}>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'start', minWidth: 0 }}>
                   {integrations.map((integration) => (
                     <span key={integration.id} style={stateChipStyle(integration.state)}>
                       {integration.label}: {integration.state}
@@ -92,7 +95,7 @@ export function ConfigBasicsSubtab({ onOpenRaw }: ConfigBasicsSubtabProps) {
               </div>
 
               {integrations.length > 0 ? (
-                <div style={{ display: 'grid', gap: 10, marginBottom: 16 }}>
+                <div style={{ display: 'grid', gap: 10, marginBottom: 16, minWidth: 0 }}>
                   {integrations.map((integration) => (
                     <div
                       key={integration.id}
@@ -101,14 +104,15 @@ export function ConfigBasicsSubtab({ onOpenRaw }: ConfigBasicsSubtabProps) {
                         borderRadius: 10,
                         border: '1px solid var(--line)',
                         background: 'var(--bg)',
+                        minWidth: 0,
                       }}
                     >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-                        <div style={{ fontWeight: 700, color: 'var(--fg)' }}>{integration.label}</div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', minWidth: 0, width: '100%' }}>
+                        <div style={{ fontWeight: 700, color: 'var(--fg)', minWidth: 0, overflowWrap: 'anywhere' }}>{integration.label}</div>
                         <span style={stateChipStyle(integration.state)}>{integration.state}</span>
                       </div>
                       {integration.operator_hint ? (
-                        <div style={{ marginTop: 8, fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
+                        <div style={{ marginTop: 8, fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.5, minWidth: 0, overflowWrap: 'anywhere' }}>
                           {integration.operator_hint}
                         </div>
                       ) : null}
@@ -118,7 +122,7 @@ export function ConfigBasicsSubtab({ onOpenRaw }: ConfigBasicsSubtabProps) {
               ) : null}
 
               {fields.length > 0 ? (
-                <div style={{ display: 'grid', gap: 12 }}>
+                <div style={{ display: 'grid', gap: 12, minWidth: 0 }}>
                   {fields.map((field) => (
                     <ConfigFieldEditor
                       key={field.path}
