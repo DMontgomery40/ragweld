@@ -73,7 +73,7 @@ override the conflicting steps below until the steps themselves are rewritten.
 - Consumes: published deployment foundation and post-Plex cluster state.
 - Produces: deployment commit, resource baseline, and LXC creation authorization evidence.
 
-- [ ] **Step 1: Verify Git publication and canon**
+- [x] **Step 1: Verify Git publication and canon**
 
 ```bash
 git fetch origin
@@ -86,7 +86,7 @@ git worktree list --porcelain
 
 Expected: `main == origin/main`, one local branch, one worktree, and only the previously identified user-owned local files outside the deployment diff.
 
-- [ ] **Step 2: Run exact source gates on the deployment commit**
+- [x] **Step 2: Run exact source gates on the deployment commit**
 
 ```bash
 uv run python scripts/check_docs_ownership.py

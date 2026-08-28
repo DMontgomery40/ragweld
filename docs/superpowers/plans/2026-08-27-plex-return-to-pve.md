@@ -22,6 +22,36 @@
 - Treat every stop/migrate/start command as a rollback checkpoint and record its exit status.
 - Do not remove the source backup, NFS bridge, or source-node rollback notes during this plan.
 
+## Operator corrections (David, 2026-08-28 07:10)
+
+From `docs/exec-plans/active/watchdog-proxmox-foundation-2026-08-28.md`
+(W37-W40). These override the conflicting steps below.
+
+- **W37 — the automount must be live when the container starts.** Before
+  Task 2, land a foundation follow-up commit setting `TimeoutIdleSec=0` in
+  `deploy/proxmox/plex/srv-media.automount` (with the contract test updated).
+  Task 2 Step 3 also installs a `.173` drop-in
+  `/etc/systemd/system/pve-guests.service.d/srv-media.conf` containing
+  `[Unit]` `After=srv-media.automount network-online.target` and `[Service]`
+  `ExecStartPre=/bin/sh -c 'ls /srv/media >/dev/null && findmnt -t nfs4 /srv/media'`,
+  then `systemctl daemon-reload`. Task 3 Step 5 runs
+  `findmnt -t nfs4 /srv/media` on `.173` immediately before `pct start 4214`
+  and afterwards proves `pct exec 4214 -- findmnt -t nfs4 /srv/media`
+  (fstype `nfs4`, never `autofs`). Reason: an LXC bind mount created while
+  the automount is expired or untriggered captures the autofs stub and the
+  container sees an empty media tree.
+- **W38 — `shared=1` is a precondition, not an assumption.** Task 1 Step 2
+  records the actual `mp1` line. If `shared=1` is absent, add an explicit
+  Task 3 Step 0: `pct set 4214 -mp1 /srv/media,mp=/srv/media,shared=1`
+  (metadata only; rollback is `shared=0`), before the migrate.
+- **W39 — pve1 host firewall.** Task 2 Step 2 first runs `pve-firewall status`
+  on pve1; if enabled, add `IN ACCEPT -source 192.168.68.173 -p tcp -dport 2049`
+  to `/etc/pve/nodes/pve1/host.fw` before the `.173` mount, and record it as
+  part of the bridge to remove later.
+- **W40 — probe paths.** Task 4 Step 3 derives the three probe paths and the
+  container UID from the Task 1 Step 3 inventory instead of the hardcoded
+  `/tv`, `/movies`, `/downloads` mappings.
+
 ---
 
 ### Task 1: Capture immutable preflight evidence and a fresh PBS backup

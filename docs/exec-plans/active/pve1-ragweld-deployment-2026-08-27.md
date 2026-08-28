@@ -2,7 +2,7 @@
 
 Date: 2026-08-28
 
-Status: source gate verified locally; Proxmox mutation not started
+Status: source gate verified and published; Proxmox mutation not started
 
 ## Scope
 
@@ -15,11 +15,12 @@ rollout plan expects to exist before the first Proxmox mutation.
 
 - Local branch/worktree canon: one local branch (`main`) and one worktree
   (`/Users/davidmontgomery/ragweld`)
-- Verified application tip before the docs closeout publication:
+- Verified application tip for the runtime/deployment surface:
   `dc42075a0f19a4f41dc28ea58d77f98985f4855a`
   (`fix(deploy): close final foundation review findings`)
-- Remote baseline before publication: `origin/main`
-  `0b106b28825a4a9bb88c171660330557c2432ee3`
+- Published closeout tip: `40c11299263f7a4a56bb855ec911642902ab82ff`
+  (`docs(deploy): record proxmox foundation closeout`)
+- Local `main` and `origin/main` now match at `40c11299263f7a4a56bb855ec911642902ab82ff`
 - User-owned local dirt intentionally excluded from publication:
   `AGENTS.md`, `CLAUDE.md`, and untracked `.claude/skills/`
 
@@ -61,6 +62,16 @@ servers, local database sockets, and Chromium launch/cleanup paths needed by
 several real tests. The repo-local result above is the authoritative source
 gate.
 
+### Post-push GitNexus scope refresh
+
+- Forced re-index completed on 2026-08-28:
+  `node .gitnexus/run.cjs analyze --force`
+- Fresh compare against `origin/main` after the push:
+  `node .gitnexus/run.cjs detect-changes --scope compare --base-ref origin/main --repo ragweld --limit 300`
+  -> `2 files, 14 symbols, 0 affected execution flows, risk low`
+- The remaining diff is only the intentionally local `AGENTS.md` / `CLAUDE.md`
+  GitNexus instruction block. No product/runtime source remains unpublished.
+
 ## Browser evidence
 
 ### Verified
@@ -72,7 +83,7 @@ gate.
   `web/tests/e2e/exhaustive/admin_config_center_mobile.spec.ts` against the
   isolated current-code lane (`PLAYWRIGHT_WEB_BASE_URL=http://127.0.0.1:55174/web`,
   frontend `55174` -> backend `58013`): `1 passed` in `5.7s`
-- Live in-app browser verification confirmed both dedicated public-link hints:
+- The same real browser spec verifies both dedicated public-link hints:
   - Retrieval hint text:
     `Browser links use this; ingestion/tracking uses the local URL.`
   - Training hint text:
@@ -93,17 +104,15 @@ gate.
   truthful degraded `200` and the Admin mobile spec passes. The browser failure
   on `58012` is therefore runtime drift, not current source truth.
 
-### Residual frontend note
+### Admin/Basic browser note
 
-- Watchdog `W33` records an intermittent Admin/Basic browser issue observed
-  during the same review window: repeated `Maximum update depth exceeded`
-  console errors and one transient config-control-plane load failure.
-- Fresh manual mobile re-open of `/web/admin?subtab=basic` rendered
-  `Configuration Center` successfully, and the backend log showed repeated
-  `200 OK` responses for `/api/config/registry` and `/api/config/readiness`
-  during the later checks.
-- Because the issue was not yet reduced to a proved root cause, it was logged
-  instead of being folded into the Proxmox foundation closeout.
+- The earlier Admin/Basic failure is no longer treated as an unexplained UI
+  residual. Watchdog `W33` was traced to the stale live lane's scoped
+  config-readiness `500`, and `90c621d9` fixes the current source tree to
+  return a truthful degraded `200` instead.
+- The passing isolated-lane mobile spec above is the current-source proof.
+  Any future update-loop report on a healthy readiness response is a new
+  product bug, not an unresolved Proxmox foundation blocker.
 
 ## Deployment-shape facts now verified in source
 
@@ -123,12 +132,12 @@ gate.
 Ready:
 
 - local source verification
-- direct-main publication prep
+- direct-main publication complete
 - external adversarial review of record, with its actionable findings closed in
   committed source
 - rollout planning from the corrected pve1 design
+- next remote rollout step is ready to start at Task 1 Step 3
 
 Not yet done:
 
-- final docs closeout commit and push to `origin/main`
 - any Proxmox, DNS, Cloudflare, Plex, or pve1 mutation

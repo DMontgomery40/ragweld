@@ -16,6 +16,24 @@ in the doer's uncommitted Task 6b working tree and match the directives
 closed at `23080334` (reviewer caught the independently-installable `.mount`
 unit; good catch, I had skipped it as harmless).
 
+## Closeout (2026-08-28 07:00)
+
+Foundation published: `main == origin/main == 40c11299` (non-force push of
+the reviewed series `0b106b28..40c11299`). Final gate on the `dc42075a` tree:
+`1219 passed, 98 skipped`; validators, lint, build green; external review of
+record `glm-review-0b106b28..9d834fcf.md` (REFUTED-narrow, every finding
+since closed); failed one-shot reports renamed `*-failed.md`. Every W item is
+`FIXED <commit>`, `FIXED IN PLAN` (W4/W5/W6-rollout — verified live at rollout
+Tasks 3/5), or an accepted `NOTE` (W11, W12, W16, W17, W30, W32, plus the
+deferred GLM P3-2/P3-4/P3-5). This list stays open for the rollout and Plex
+plans; new items continue the numbering.
+
+Score-keeping for the next plan: 36 items, 6 P1s at the start, all closed
+before publication; three defects the doer caught that I missed or
+under-rated (`.mount` installability, the observability-card Langfuse link,
+the readiness 500 behind W33); two of mine that were wrong on a detail (W3's
+`host.docker.internal`, W25's first attribution).
+
 ## P1 — will break deployment or an acceptance criterion
 
 ### W1 `FIXED e2a2b9da` — Authelia receives `X-Forwarded-Proto: http` from Caddy
@@ -208,20 +226,29 @@ unit; good catch, I had skipped it as harmless).
 
 ## Process / hygiene
 
-### W12 `OPEN` — GitNexus signal was dismissed six times instead of repaired
+### W12 `FIXED 2026-08-28 post-push refresh` — GitNexus signal was dismissed six times instead of repaired
 
 - Tasks 2-5 each ruled CRITICAL/178-186 impact as "graph noise". My
   debugging notes record the actual cause (incremental FTS corruption) and
   the fix: `node .gitnexus/run.cjs analyze --force`. Run it once before Task
   7's `detect-changes --scope compare --base-ref origin/main` so the final
   scope check is real.
+- Resolution: after publication, `analyze --force` completed and the fresh
+  compare against `origin/main` dropped to the actual current state:
+  `2 files, 14 symbols, 0 affected execution flows, risk low`, all in the
+  intentionally local `AGENTS.md` / `CLAUDE.md` GitNexus block. The earlier
+  branch-wide CRITICAL signal was stale-index noise, not a live closeout risk.
 
-### W13 `OPEN` — full-suite evidence was inherited, not re-run
+### W13 `FIXED 40c11299` — full-suite evidence was inherited, not re-run
 
 - Task 3 and Task 4 worker runs recorded `pytest -q` aborting (Docling
   fatal, 8 failing modules) and the controller substituted its own host run.
   Task 5's "1194 passed" is the last real run. Task 7 must run the full
   gate itself on the final tree, not cite earlier counts.
+- Resolution: the final local source gate was re-run for real and recorded in
+  the closeout evidence: `1219 passed, 98 skipped, 7 warnings in 255.43s`,
+  plus green repo validators, frontend lint/build, and the real browser proof
+  for the W31 and W33 surfaces.
 
 ### W14 `NOTE` — my dirty `AGENTS.md` reverts the handoff pointer
 
@@ -502,8 +529,10 @@ unit; good catch, I had skipped it as harmless).
      `message.reasoning` / `reasoning_content`, and if still empty send one
      more user turn "Emit the final bounded report now; no more tool calls"
      with a large `max_tokens`, before raising;
-  3. run it with `nohup ... &` and poll the trace file; a 1.3 M-token
-     reviewer deserves a 20-minute wall budget, not a foreground wait.
+  3. run it in the background and poll the trace file; a 1.3 M-token reviewer
+     gets up to one hour for each model response and no short total-job cutoff.
+     Tool rounds continue until the reviewer emits its bounded final report or
+     the provider returns a genuine terminal failure. Silence is not failure.
 - 06:20 evidence for the root cause: both one-shot outputs
   (`glm-review-0b106b28..c7993372.md`, `glm-review-9d834fcf..c7993372.md`)
   contain the literal `None` — the verdict JSON shows `finish_reason:
@@ -512,10 +541,9 @@ unit; good catch, I had skipped it as harmless).
   writer then serialized `None`. Neither file is review evidence; do not cite
   them. The tool-using rerun is the one that counts.
 - Publication rule (mine): do not push without either the GLM report on disk
-  or an explicit ledger line from me waiving it. If the fixed harness fails
-  once more within the 20-minute budget, push with the internal review only,
-  record the failure verbatim in the evidence file, and run GLM at the
-  deployment-acceptance gate (already planned as the second gate).
+  or an explicit ledger line from me waiving it. Do not terminate a healthy
+  review because it crosses an arbitrary wall-clock budget; preserve every
+  checkpoint and allow the tool-using run to finish naturally.
 
 ### W36 `FIXED dc42075a` — GLM P3 batch: five one-line hygiene fixes worth one commit, three deferred
 
@@ -554,6 +582,62 @@ viewer identity is ever added). Note: GLM also pointed out the W23 numbering
 gap; there was never a W23 — nothing lost.
 
 ### W14 `FIXED (working tree)` — my `AGENTS.md` handoff pointer regression is repaired (session13 restored; GitNexus block kept).
+
+## Plex plan pre-read (2026-08-28 07:10, before any live step)
+
+### W37 `OPEN` (P1 for the Plex plan) — automount idle expiry + LXC bind mount = empty media at container start
+
+- `deploy/proxmox/plex/srv-media.automount` sets `TimeoutIdleSec=60`
+  (systemd's default is 0 = never expire). LXC 4214 consumes `/srv/media`
+  as `mp1: /srv/media,mp=/srv/media` — a bind mount created at `pct start`
+  with private propagation. If the NFS filesystem is not mounted at that
+  instant (expired after 60 s idle, or never triggered since a `.173`
+  reboot because `pve-guests.service` starts containers before anything
+  stats `/srv/media`), the container binds the autofs stub and sees an empty
+  tree; later host-side automounts do not propagate into it. Plex/arr start
+  with no media — Task 3 Step 6's rollback trigger — and it recurs on every
+  reboot.
+- Better way (three small pieces, all reversible):
+  1. Foundation follow-up commit: `TimeoutIdleSec=0` in
+     `srv-media.automount` (+ update the contract test), so the mount never
+     expires once triggered.
+  2. `.173` drop-in `/etc/systemd/system/pve-guests.service.d/srv-media.conf`:
+     `[Unit] After=srv-media.automount network-online.target` and
+     `[Service] ExecStartPre=/bin/sh -c 'ls /srv/media >/dev/null && findmnt -t nfs4 /srv/media'`
+     so containers cannot start before the NFS mount is live (fails closed
+     if pve1 is down — the spec asked for hard failure).
+  3. Plex plan Task 3 Step 5: run `findmnt -t nfs4 /srv/media` on `.173`
+     immediately before `pct start 4214`, and after start prove
+     `pct exec 4214 -- findmnt -t nfs4 /srv/media` (fstype must be `nfs4`,
+     not `autofs`).
+
+### W38 `OPEN` (P2) — `pct migrate` needs `shared=1` on the bind mount; the plan assumes it
+
+- Task 1 Step 2 "expects" `mp1: /srv/media,mp=/srv/media,shared=1`, but the
+  spec's verified state only says "bind mount". Proxmox refuses to migrate a
+  container with a non-shared bind mount. Better way: Task 1 records the
+  actual `mp1` line; if `shared=1` is absent, add
+  `pct set 4214 -mp1 /srv/media,mp=/srv/media,shared=1` as an explicit,
+  metadata-only Task 3 Step 0 with its own rollback (`shared=0`).
+
+### W39 `OPEN` (P2) — pve1 host firewall not checked for NFS
+
+- Task 2 Step 2 starts `nfs-server` on pve1 but never checks
+  `pve-firewall status` / the host ruleset. If the datacenter or host
+  firewall is enabled with default input DROP, `.173` cannot reach tcp/2049
+  and Task 2 Step 3's mount hangs (hard mount) instead of failing. Better
+  way: Task 2 Step 2 adds `pve-firewall status` + `pve-firewall localnet`;
+  if enabled, add a host rule `IN ACCEPT -source 192.168.68.173 -p tcp
+  -dport 2049` in `/etc/pve/nodes/pve1/host.fw` before mounting, and record
+  it as a bridge component to remove with the bridge.
+
+### W40 `NOTE` (P3) — Task 4 probe paths are hardcoded
+
+- Step 3 assumes `/tv`→`/srv/media/tv-sonarr`, `/movies`→`/srv/media/radarr`,
+  `/downloads`→`/srv/media/downloads`. Task 1 Step 3 already inventories the
+  real container mounts; derive the probe paths from that inventory (and
+  the container UID) so a differently-mapped library does not read as a
+  write failure.
 
 ## Low / rollout-time reminders
 
