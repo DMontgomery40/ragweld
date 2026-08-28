@@ -18,6 +18,9 @@ session:
     - domain: ragweld.com
       authelia_url: https://auth.ragweld.com
       default_redirection_url: https://me.ragweld.com/web/
+    - domain: dtmont.com
+      authelia_url: https://ragweld-auth.dtmont.com
+      default_redirection_url: https://ragweld.dtmont.com/web/
 
 authentication_backend:
   password_reset:
@@ -36,6 +39,7 @@ access_control:
   rules:
     - domain:
         - me.ragweld.com
+        - ragweld.dtmont.com
         - grafana.ragweld.com
         - langfuse.ragweld.com
         - mlflow.ragweld.com

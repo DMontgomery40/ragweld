@@ -18,7 +18,34 @@ http://auth.ragweld.com:58000 {
     }
 }
 
+http://ragweld-auth.dtmont.com:58000 {
+    reverse_proxy 127.0.0.1:59091 {
+        header_up X-Forwarded-Proto https
+    }
+}
+
 http://me.ragweld.com:58000 {
+    import require_owner
+    handle /api/* {
+        reverse_proxy 127.0.0.1:58012
+    }
+    handle /faro/collect {
+        uri strip_prefix /faro
+        reverse_proxy 127.0.0.1:52347
+    }
+    handle_path /web/* {
+        root * /srv/web
+        try_files {path} /index.html
+        file_server
+    }
+    redir /web /web/
+    redir / /web/
+    handle {
+        respond 404
+    }
+}
+
+http://ragweld.dtmont.com:58000 {
     import require_owner
     handle /api/* {
         reverse_proxy 127.0.0.1:58012

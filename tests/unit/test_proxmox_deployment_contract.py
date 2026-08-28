@@ -222,7 +222,9 @@ def _assert_caddy_contract(source: str) -> None:
 
     expected_sites = {
         "http://auth.ragweld.com:58000",
+        "http://ragweld-auth.dtmont.com:58000",
         "http://me.ragweld.com:58000",
+        "http://ragweld.dtmont.com:58000",
         "http://grafana.ragweld.com:58000",
         "http://langfuse.ragweld.com:58000",
         "http://mlflow.ragweld.com:58000",
@@ -241,7 +243,11 @@ def _assert_caddy_contract(source: str) -> None:
     assert "copy_headers Remote-User Remote-Groups Remote-Email Remote-Name" in require_owner
     assert "header_up X-Forwarded-Proto https" in require_owner
 
-    for header in expected_sites - {"http://auth.ragweld.com:58000"}:
+    auth_headers = {
+        "http://auth.ragweld.com:58000",
+        "http://ragweld-auth.dtmont.com:58000",
+    }
+    for header in expected_sites - auth_headers:
         assert "import require_owner" in blocks[header], header
 
     def block_targets(block: str) -> set[str]:
@@ -250,11 +256,12 @@ def _assert_caddy_contract(source: str) -> None:
             for match in re.finditer(r"^\s*reverse_proxy\s+([^\s{]+)", block, flags=re.MULTILINE)
         }
 
-    auth_block = blocks["http://auth.ragweld.com:58000"]
-    assert "import require_owner" not in auth_block
-    assert "reverse_proxy 127.0.0.1:59091" in auth_block
-    assert "header_up X-Forwarded-Proto https" in auth_block
-    assert block_targets(auth_block) == {"127.0.0.1:59091"}
+    for header in auth_headers:
+        auth_block = blocks[header]
+        assert "import require_owner" not in auth_block
+        assert "reverse_proxy 127.0.0.1:59091" in auth_block
+        assert "header_up X-Forwarded-Proto https" in auth_block
+        assert block_targets(auth_block) == {"127.0.0.1:59091"}
 
     me_block = blocks["http://me.ragweld.com:58000"]
     assert "handle /api/* {" in me_block
@@ -271,6 +278,24 @@ def _assert_caddy_contract(source: str) -> None:
     assert "handle {" in me_block
     assert "respond 404" in me_block
     assert block_targets(me_block) == {"127.0.0.1:58012", "127.0.0.1:52347"}
+
+    temporary_app_block = blocks["http://ragweld.dtmont.com:58000"]
+    for required_directive in (
+        "handle /api/* {",
+        "reverse_proxy 127.0.0.1:58012",
+        "handle /faro/collect {",
+        "uri strip_prefix /faro",
+        "reverse_proxy 127.0.0.1:52347",
+        "handle_path /web/* {",
+        "root * /srv/web",
+        "try_files {path} /index.html",
+        "file_server",
+        "redir /web /web/",
+        "redir / /web/",
+        "respond 404",
+    ):
+        assert required_directive in temporary_app_block
+    assert block_targets(temporary_app_block) == {"127.0.0.1:58012", "127.0.0.1:52347"}
 
     assert block_targets(blocks["http://grafana.ragweld.com:58000"]) == {"127.0.0.1:3301"}
     assert block_targets(blocks["http://langfuse.ragweld.com:58000"]) == {"127.0.0.1:53000"}
@@ -868,6 +893,7 @@ def test_proxmox_authelia_configuration_is_owner_only_and_deny_by_default() -> N
         {
             "domain": [
                 "me.ragweld.com",
+                "ragweld.dtmont.com",
                 "grafana.ragweld.com",
                 "langfuse.ragweld.com",
                 "mlflow.ragweld.com",
@@ -882,7 +908,12 @@ def test_proxmox_authelia_configuration_is_owner_only_and_deny_by_default() -> N
             "domain": "ragweld.com",
             "authelia_url": "https://auth.ragweld.com",
             "default_redirection_url": "https://me.ragweld.com/web/",
-        }
+        },
+        {
+            "domain": "dtmont.com",
+            "authelia_url": "https://ragweld-auth.dtmont.com",
+            "default_redirection_url": "https://ragweld.dtmont.com/web/",
+        },
     ]
     assert payload["authentication_backend"]["password_reset"]["disable"] is True
     assert payload["authentication_backend"]["password_change"]["disable"] is True
