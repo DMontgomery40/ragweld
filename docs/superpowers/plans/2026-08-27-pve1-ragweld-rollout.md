@@ -59,7 +59,22 @@ override the conflicting steps below until the steps themselves are rewritten.
   returns that host. Capture that inspect output in the evidence file before
   Task 5 Step 7; if the LXC's Docker daemon uses a custom `bip`, re-render
   with the real gateway rather than editing the daemon.
-- **W54 — export the zone; do not rebuild it from `dig`.** Task 5 Step 1's five
+- **W54 (revised 2026-08-28 with the authoritative Netlify API inventory) —
+  public `dig` and Cloudflare quick-scan both missed live records.** The logged-in
+  Netlify CLI `getDnsZones` response is the source of truth for the existing
+  zone. It reports seven source records: managed `NETLIFY` + `NETLIFYv6` pairs
+  for the apex, `www`, and `deepseek-mcp`, plus
+  `bird-data.ragweld.com A 169.197.22.5`. There is no MX, apex TXT, `_dmarc`,
+  CAA, or DKIM record. Cloudflare's quick scan found only the eight concrete
+  A/AAAA answers for apex and `www`; it omitted both service subdomains.
+  Before delegation, preserve all logical records: retain the scanned apex/www
+  A/AAAA records, add DNS-only `deepseek-mcp CNAME ragweld.netlify.app`, and add
+  DNS-only `bird-data A 169.197.22.5`. The rollback nameservers are
+  `dns1-4.p04.nsone.net`; the assigned Cloudflare nameservers are
+  `chance.ns.cloudflare.com` and `kenia.ns.cloudflare.com`. Task 5 Step 1 must
+  use the authenticated Netlify export, not a guessed list of `dig` names.
+  ~~Original text below.~~
+- **W54 (original) — export the zone; do not rebuild it from `dig`.** Task 5 Step 1's five
   `dig` queries cannot enumerate DNS — they only answer for names already
   known — so DKIM (`<selector>._domainkey`), DMARC (`_dmarc`), CAA, and any
   verification or service subdomain would be lost silently at delegation, and
@@ -547,7 +562,7 @@ Unauthenticated requests to `me`, `grafana`, `langfuse`, `mlflow`, and `flyte` h
 
 - [ ] **Step 5: Send one paid gateway smoke request**
 
-Use LiteLLM at `127.0.0.1:54000/v1`, model `openai.gpt-5.4-mini`, prompt `Reply with OK only.`, `temperature=0`, `max_tokens=8`, retry zero, and no fallback. Record response ID, resolved model, token usage, and cost only. Do not record the key or headers.
+Use LiteLLM at `127.0.0.1:54000/v1`, model `openai.gpt-5.6-terra`, prompt `Reply with OK only.`, `temperature=0`, `max_tokens=8`, retry zero, and no fallback. Record response ID, resolved model, token usage, and cost only. Do not record the key or headers.
 
 ```bash
 set -a
@@ -556,7 +571,7 @@ set +a
 curl -fsS --retry 0 http://127.0.0.1:54000/v1/chat/completions \
   -H "Authorization: Bearer ${LITELLM_API_KEY}" \
   -H 'Content-Type: application/json' \
-  -d '{"model":"openai.gpt-5.4-mini","messages":[{"role":"user","content":"Reply with OK only."}],"temperature":0,"max_tokens":8}' \
+  -d '{"model":"openai.gpt-5.6-terra","messages":[{"role":"user","content":"Reply with OK only."}],"temperature":0,"max_tokens":8}' \
   | jq '{id, model, usage, answer: .choices[0].message.content}'
 ```
 

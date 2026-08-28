@@ -94,16 +94,16 @@ PROXMOX_PRODUCTION_SERVICES = [
     "caddy",
 ]
 PRODUCTION_DEFAULTS = {
-    ("generation", "gen_model"): "openai.gpt-5.4-mini",
-    ("generation", "enrich_model"): "openai.gpt-5.4-mini",
-    ("chat", "litellm", "default_model"): "openai.gpt-5.4-mini",
-    ("chat", "multimodal", "vision_model_override"): "openai.gpt-5.4-mini",
+    ("generation", "gen_model"): "openai.gpt-5.6-terra",
+    ("generation", "enrich_model"): "openai.gpt-5.6-terra",
+    ("chat", "litellm", "default_model"): "openai.gpt-5.6-terra",
+    ("chat", "multimodal", "vision_model_override"): "openai.gpt-5.6-terra",
     ("chat", "vllm", "enabled"): False,
     ("embedding", "embedding_backend"): "provider",
     ("embedding", "embedding_type"): "huggingface",
     ("embedding", "embedding_model"): "BAAI/bge-small-en-v1.5",
     ("embedding", "embedding_dim"): 384,
-    ("ui", "chat_default_model"): "openai.gpt-5.4-mini",
+    ("ui", "chat_default_model"): "openai.gpt-5.6-terra",
     ("ui", "runtime_mode"): "production",
     ("ui", "open_browser"): False,
     ("ui", "grafana_base_url"): "https://grafana.ragweld.com",
@@ -115,8 +115,8 @@ PRODUCTION_DEFAULTS = {
     ("training", "ragweld_agent_flyte_callback_base_url"): "http://172.17.0.1:58012",
     ("training", "ragweld_agent_mlflow_tracking_url"): "http://127.0.0.1:55500",
     ("training", "ragweld_agent_mlflow_console_base_url"): "https://mlflow.ragweld.com",
-    ("evaluation", "ragas_judge_model"): "openai.gpt-5.4-mini",
-    ("evaluation", "promptfoo_grader_model"): "openai.gpt-5.4-mini",
+    ("evaluation", "ragas_judge_model"): "openai.gpt-5.6-terra",
+    ("evaluation", "promptfoo_grader_model"): "openai.gpt-5.6-terra",
 }
 
 
@@ -551,6 +551,29 @@ def test_proxmox_renderer_writes_validated_production_defaults_atomically(tmp_pa
     assert validated.model_dump(mode="json") == expected.model_dump(mode="json")
     assert output.stat().st_mode & 0o777 == 0o600
     assert sorted(path.name for path in tmp_path.iterdir()) == [output.name]
+
+
+def test_proxmox_production_policy_never_routes_defaults_or_smoke_to_gpt_5_4() -> None:
+    renderer_source = SCRIPT.read_text(encoding="utf-8")
+    rollout_source = PROXMOX_ROLLOUT_PLAN.read_text(encoding="utf-8")
+    model_default_keys = {
+        "gen_model",
+        "enrich_model",
+        "default_model",
+        "vision_model_override",
+        "chat_default_model",
+        "ragas_judge_model",
+        "promptfoo_grader_model",
+    }
+    model_defaults = {
+        value
+        for path, value in PRODUCTION_DEFAULTS.items()
+        if path[-1] in model_default_keys
+    }
+
+    assert "gpt-5.4" not in renderer_source
+    assert "gpt-5.4" not in rollout_source
+    assert model_defaults == {"openai.gpt-5.6-terra"}
 
 
 def test_proxmox_renderer_preserves_source_bytes(tmp_path: Path) -> None:

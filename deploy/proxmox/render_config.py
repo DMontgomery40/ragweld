@@ -9,7 +9,7 @@ from pathlib import Path
 
 from server.models.tribrid_config_model import TriBridConfig
 
-PRODUCTION_MODEL_ALIAS = "openai.gpt-5.4-mini"
+PRODUCTION_MODEL_ALIAS = "openai.gpt-5.6-terra"
 PRODUCTION_EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
 PRODUCTION_GRAFANA_URL = "https://grafana.ragweld.com"
 PRODUCTION_LANGFUSE_PUBLIC_URL = "https://langfuse.ragweld.com"
