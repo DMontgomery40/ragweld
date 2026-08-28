@@ -2180,7 +2180,7 @@ export function RetrievalSubtab() {
                       />
                       <div
                         data-testid="retrieval-langfuse-public-base-url-hint"
-                        style={{ fontSize: '11px', color: 'var(--fg-muted)', lineHeight: 1.4, marginTop: 6 }}
+                        style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.4, marginTop: 6 }}
                       >
                         {PUBLIC_BROWSER_LINK_HINT}
                       </div>

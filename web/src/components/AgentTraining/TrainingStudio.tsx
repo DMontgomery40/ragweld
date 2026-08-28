@@ -252,6 +252,8 @@ export function TrainingStudio() {
     'training.ragweld_agent_tracking_backend',
     'local'
   );
+  const targetLaneConfigured = workflowBackend === 'flyte' || trackingBackend === 'mlflow' || ragweldBackend === 'unsloth';
+  const [targetLaneOpen, setTargetLaneOpen] = useState(targetLaneConfigured);
   const [ragweldBaseModel, setRagweldBaseModel] = useConfigField<string>(
     'training.ragweld_agent_base_model',
     'mlx-community/Qwen3-4B-Instruct-2507-4bit'
@@ -370,6 +372,10 @@ export function TrainingStudio() {
   useEffect(() => {
     if (!config) void loadConfig();
   }, [config, loadConfig]);
+
+  useEffect(() => {
+    if (targetLaneConfigured) setTargetLaneOpen(true);
+  }, [targetLaneConfigured]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1275,8 +1281,19 @@ export function TrainingStudio() {
                 </div>
               </div>
 
-              <details className="studio-details" open={workflowBackend === 'flyte' || trackingBackend === 'mlflow' || ragweldBackend === 'unsloth'}>
-                <summary data-testid="learning-agent-target-lane-summary">Flyte + MLflow + Unsloth target lane</summary>
+              <details
+                className="studio-details"
+                open={targetLaneOpen}
+              >
+                <summary
+                  data-testid="learning-agent-target-lane-summary"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    setTargetLaneOpen((open) => !open);
+                  }}
+                >
+                  Flyte + MLflow + Unsloth target lane
+                </summary>
                 <div className="studio-form-grid two">
                   <div className="input-group">
                     <label>Flyte admin base URL</label>
@@ -1322,7 +1339,7 @@ export function TrainingStudio() {
                     />
                     <div
                       data-testid="learning-agent-mlflow-console-base-url-hint"
-                      style={{ fontSize: '11px', color: 'var(--fg-muted)', lineHeight: 1.4, marginTop: 6 }}
+                      style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.4, marginTop: 6 }}
                     >
                       {PUBLIC_BROWSER_LINK_HINT}
                     </div>
