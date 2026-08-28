@@ -2414,7 +2414,7 @@ operation, thread-safe, no global mutation. And `_ACTIVE_RUNS` is written only
 at 179 and 2323 and read at 3383, none of which are inside an offloaded
 callee, so the per-corpus fence itself is not exposed to the new concurrency.
 
-### W86 `FIXED (working tree)` P2 — the capacity guard's *metadata* threshold is the one with no behavioural test, and it guards the worse failure
+### W86 `FIXED (0458f505)` P2 — the capacity guard's *metadata* threshold is the one with no behavioural test, and it guards the worse failure
 
 **First, credit, because it changes how this finding should be read.** The new
 +149 lines in `tests/unit/test_proxmox_deployment_contract.py` are the opposite
@@ -2476,7 +2476,7 @@ and the same for `guest_root 75 90` and `pool_data 70 85`.
 cases. Give the metadata case its own state dir and its own env rather than
 editing the shared `base_env`.
 
-### W87 `FIXED (working tree)` P3 — the successful `df` parse is the one measurement path no test executes
+### W87 `FIXED (0458f505)` P3 — the successful `df` parse is the one measurement path no test executes
 
 Asymmetric coverage between the guard's two probes.
 
@@ -2515,7 +2515,7 @@ already-parsed value is a useful seam, but every test that uses it steps over
 the parsing it was meant to exercise. When a script has both a probe and a
 parse, at least one test per probe must go through the real command shape.
 
-### W88 `FIXED (working tree)` P2 — W83 was solved with a better outer control than I asked for; the inner invariant is still missing
+### W88 `FIXED (0458f505)` P2 — W83 was solved with a better outer control than I asked for; the inner invariant is still missing
 
 The doer did not take my `threading.Lock` and did something more interesting.
 `server/api/index.py:115` adds `_DOCLING_EXTRACTION_LOCK = asyncio.Lock()`, and
@@ -2760,7 +2760,7 @@ assertion of a real defect, not a regression, and it goes green when the
 `threading.Lock` lands in `text_extractors.py`. Do not "fix" it by weakening
 the assertion.
 
-### W95 `FIXED (working tree)` P2 — one stale test double, three symptoms, and a green test that is green for the wrong reason
+### W95 `FIXED (0458f505)` P2 — one stale test double, three symptoms, and a green test that is green for the wrong reason
 
 **Diagnosis of the current red suite.** `uv run pytest -q` reports three
 failures. Two are the doer's deliberate red-first work in progress. The third
@@ -2849,7 +2849,7 @@ and `with _DOCLING_CONVERTER_LOCK:` at 26 — the module-local invariant I asked
 for in W88, alongside the `asyncio.Lock` policy they added for W83. The
 thread-safety test that measured seven duplicate converters now passes.
 
-### W97 `FIXED (working tree) — residual in W102` P2 — the new cancellation-safe lock can leak itself, and the leak is a permanent ingestion deadlock
+### W97 `FIXED (0458f505)` P2 — the new cancellation-safe lock can leak itself, and the leak is a permanent ingestion deadlock
 
 **First: the design is good and I would not have written it as well.** The
 obvious implementation of "serialize Docling" is
@@ -3042,7 +3042,7 @@ you find most likely — the fix is four lines and costs nothing.
 The fix remains as filed in W97: move `create_task` and `add_done_callback`
 inside a `try` with `except BaseException: _release_lock(); raise`.
 
-### W102 `OPEN` P3 — W97's fix is better than what I asked for, and the leak window is now one line wide instead of closed
+### W102 `FIXED (0458f505)` P3 — W97's fix is better than what I asked for, and the leak window is now one line wide instead of closed
 
 **What they added that I did not think of.** My prescription was just
 `try: create_task; add_done_callback / except BaseException: _release_lock(); raise`.
@@ -3102,6 +3102,84 @@ clarity than it buys safety.
 **Still open and unchanged:** W98 (consume the orphan's exception in the
 done-callback), W90 (`--conflict-exit-code 0` unasserted), W91
 (`Persistent=true` inert but pinned as contract).
+
+## Published: 0458f505 — gate green, focus moves to the host
+
+`fix(deploy): harden pve1 capacity and indexing` is committed **and pushed**;
+`HEAD == origin/main == 0458f505`, 0 ahead / 0 behind, working tree clean.
+Full gate at that commit: `check_docs_ownership`, `check_banned`,
+`validate_types`, `generate_litellm_config --check` all PASS, and
+`uv run pytest -q` gives **1241 passed, 98 skipped**.
+
+W102 landed, and the restructure goes past the one-line change I asked for: a
+single `try` now spans `to_thread` → `create_task` → `add_done_callback` →
+`await shield`, with a `callback_registered` flag and a `finally` that decides
+release from `(worker is None, worker.done(), callback_registered)`. I traced
+every reachable path — normal success, caller cancelled mid-await, `to_thread`
+raising, `create_task` raising, `add_done_callback` raising — and they are all
+correct. The one that matters most is right: **on cancellation the lock is not
+released**, so the done-callback frees it only once the orphan thread actually
+finishes, and nothing can race an in-flight OCR job.
+
+Everything from W80 to W102 is now closed except W90, W91 and W98, none of
+which block anything. The remaining risk has moved off the code and onto the
+host, so that is where these next two live.
+
+### W103 `OPEN` P3 — pin the locale before the guard parses numbers on a real host
+
+`host-capacity-guard.sh` parses `lvs` output through
+`is_number`, whose regex is `^[0-9]+([.][0-9]+)?$` — a hard-coded `.` decimal
+separator. There is no locale pin anywhere in the script.
+
+Under a comma-decimal locale, `lvs` emits `71,0`, `is_number` rejects it, and
+the guard takes the probe-failure branch. That does not crash and does not
+alert on capacity — it alerts "pve/data storage probe" **forever**, so you lose
+thin-pool monitoring while believing it is running. Silent loss of the thing
+the guard exists to provide.
+
+Honest likelihood: **low.** systemd services do not inherit an interactive
+user's locale, and Proxmox hosts normally run `en_US.UTF-8` or C, both of which
+use `.`. But the fix is one line at the top of the script —
+`export LC_ALL=C` — and it removes the entire class for a script whose whole
+job is scraping numbers out of tool output. Cheap insurance, not a redesign.
+
+### W104 `OPEN` P2 — verify `root@pam` has an email *before* enabling the timer, or the first run fails and keeps failing
+
+`resolve_alert_email` falls back to `pveum user list --output-format json` and
+extracts root@pam's address with
+`str(row.get("email") or "")` — which yields an **empty string** when the field
+is absent, and exits 0. The emptiness is caught later by the address regex,
+which calls `die`.
+
+So if `root@pam` has no email configured, the guard exits 1 on **every** timer
+firing, every five minutes, indefinitely. The unit sits permanently failed and
+no capacity alert is ever delivered — and because `--conflict-exit-code 0`
+makes genuine skips exit 0, a persistently failed unit is precisely the signal
+that would otherwise mean something real.
+
+This is the most likely thing to go wrong on first install, and it is not a
+code defect — the fail-closed behaviour is correct, and `die` does log to the
+journal so local visibility survives. It is a **precondition to check before
+enabling the timer**:
+
+```bash
+pveum user list --output-format json | python3 -c \
+  "import json,sys; print([r.get('email') for r in json.load(sys.stdin) if r.get('userid')=='root@pam'])"
+```
+
+If that prints `[None]` or `['']`, either set the address in the Proxmox UI
+(Datacenter → Permissions → Users → root@pam) or put
+`Environment=RAGWELD_CAPACITY_ALERT_EMAIL=…` in the service unit. The PVE ISO
+installer does prompt for an administrator email, so it is probably populated
+on pve1 — but "probably" is worth one command when the failure mode is silent
+non-monitoring.
+
+**Add both to the install step as a preflight**, so enabling the timer is
+gated on a real successful run rather than on `systemctl enable` returning 0.
+That is the general point for this phase: every test so far has driven the
+guard through fake `pveum`, `pct` and `lvs`. The first contact with real ones
+happens on pve1, and the install step should prove one real invocation before
+trusting the schedule.
 
 ## Low / rollout-time reminders
 

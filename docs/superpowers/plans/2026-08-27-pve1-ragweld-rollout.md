@@ -26,6 +26,57 @@
 
 ## Operator corrections (David, 2026-08-28)
 
+### 0458f505 is published and green — two preflight checks before the guard goes on pve1
+
+Good commit. `HEAD == origin/main == 0458f505`, tree clean, and the full gate is
+green at it: all four validators pass and `uv run pytest -q` gives 1241 passed,
+98 skipped. W102's restructure went past the one-line fix I asked for — one
+`try` spanning `to_thread` → `create_task` → `add_done_callback` →
+`await shield`, with `callback_registered` driving the `finally`. I traced every
+reachable path and they are all correct, including the one that matters: on
+cancellation the lock is *not* released, so the done-callback frees it only
+after the orphan thread finishes and nothing can race an in-flight OCR job.
+
+W90, W91 and W98 are all that remain from the code phase and none of them block
+anything. Sweep them whenever. The risk has moved to the host, so these two are
+about the install.
+
+**W104 (do this first) — confirm `root@pam` has an email before enabling the
+timer.** `resolve_alert_email` extracts it with `str(row.get("email") or "")`,
+which returns empty when the field is unset and exits 0; the empty value is
+then caught by the address regex, which calls `die`. So an unset address means
+the guard exits 1 on every firing, every five minutes, forever — unit
+permanently failed, no capacity alert ever delivered. That is especially bad
+here because `--conflict-exit-code 0` makes real skips exit 0, so a failed unit
+is exactly the signal that would otherwise mean something genuine. Check it in
+one command:
+
+```bash
+pveum user list --output-format json | python3 -c \
+  "import json,sys; print([r.get('email') for r in json.load(sys.stdin) if r.get('userid')=='root@pam'])"
+```
+
+`[None]` or `['']` means either set it in Datacenter → Permissions → Users →
+root@pam, or add `Environment=RAGWELD_CAPACITY_ALERT_EMAIL=…` to the unit. The
+PVE installer does prompt for an admin email so it is probably set, but this is
+the single most likely first-run failure and it costs one command to rule out.
+
+**W103 (one line) — `export LC_ALL=C` at the top of the guard.** `is_number`
+hard-codes a `.` decimal separator and nothing pins the locale. Under a
+comma-decimal locale `lvs` prints `71,0`, the check fails, and the guard takes
+the probe-failure branch — so it alerts "storage probe failed" forever and you
+lose thin-pool monitoring while believing it is running. Likelihood is genuinely
+low (systemd does not inherit an interactive locale, and PVE runs `en_US.UTF-8`
+or C), but it is one line and it removes the whole class for a script whose job
+is scraping numbers out of tool output.
+
+**And the general point for this phase:** every test so far has driven the guard
+through fake `pveum`, `pct` and `lvs`. First contact with the real ones happens
+on pve1. Gate enabling the timer on one proven real invocation —
+`systemctl start ragweld-capacity-guard.service` then check the journal and the
+state files — rather than on `systemctl enable` returning 0.
+
+
 ### W102 — your W97 fix beat my prescription; one line still sits outside the guard
 
 Two things you added that I had not thought of, both correct. You `close()` the
