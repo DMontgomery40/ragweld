@@ -59,6 +59,26 @@ override the conflicting steps below until the steps themselves are rewritten.
   returns that host. Capture that inspect output in the evidence file before
   Task 5 Step 7; if the LXC's Docker daemon uses a custom `bip`, re-render
   with the real gateway rather than editing the daemon.
+- **W54 — export the zone; do not rebuild it from `dig`.** Task 5 Step 1's five
+  `dig` queries cannot enumerate DNS — they only answer for names already
+  known — so DKIM (`<selector>._domainkey`), DMARC (`_dmarc`), CAA, and any
+  verification or service subdomain would be lost silently at delegation, and
+  lost mail auth shows up days later as spam-foldering rather than as an
+  outage. Before Step 2: export the full zone from the current provider
+  (BIND export or the complete record list) into the evidence appendix, import
+  that file into Cloudflare rather than hand-recreating records, and diff
+  name/type/value and record count against the export before changing
+  nameservers — stop if they differ. If no export is available, additionally
+  query `CAA`, `_dmarc`, each mail-provider DKIM selector, and every hostname
+  in the provider dashboard, and record an explicit "no mail on this domain"
+  if that is the truth. Lower TTLs to 300s at the current provider first so
+  rollback is minutes. Record the exact original nameserver pair beside the
+  export; reverting means restoring those two values and nothing else.
+- **W53 — obsolete after the physical media move.** Plex media is now local to
+  `.173`; pve1 no longer runs NFS or participates in Plex I/O. Do not install
+  the proposed NFS OOM guard and do not reduce LXC 100 to 20 GiB for that old
+  coupling. Keep the approved 24 GiB LXC allocation, then re-check real pve1
+  headroom after the full stack starts.
 - **W17 — Cloudflare limits.** Note the 100 MB request-body and ~100 s idle
   response limits in the evidence file; corpus seeding stays rsync.
 

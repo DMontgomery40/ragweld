@@ -1,7 +1,7 @@
 # Ragweld Personal Proxmox Deployment Design
 
 **Date:** 2026-08-27  
-**Status:** Approved architecture; implementation not yet started  
+**Status:** Approved architecture; implementation in progress
 **Target:** Permanent personal Ragweld instance on `pve1` (`192.168.68.171`)
 
 ## 1. Outcome
@@ -24,9 +24,9 @@ selected public corpora copied from the Mac.
   largest safe memory allocation while Home Assistant remains on that node.
 - Move LXC 4214 (Plex and the arr suite) back to `pve` (`192.168.68.173`) before
   making the Intel render device exclusive to Ragweld.
-- Preserve Plex media where it physically lives on `pve1`; temporarily present
-  it to `pve` over a LAN-only NFS mount. A later physical disk move can remove
-  this temporary dependency.
+- Plex media was physically moved to `pve` (`.173`) on 2026-08-28. It is now a
+  local ext4 mount there; the temporary LAN-only NFS dependency has been
+  removed from both nodes.
 - Leave Home Assistant VM 120 on `pve1` until `pve3` is upgraded to a compatible
   Proxmox version; do not attempt a backward PVE 9.2 to PVE 8.4 migration.
 - Use Cloudflare authoritative DNS and Cloudflare Tunnel. Temporary disturbance
@@ -48,8 +48,8 @@ mutation:
 | --- | --- |
 | `pve1` | PVE 9.2.2, i5-13500H, 16 logical CPUs, 31 GiB RAM, about 792 GiB free on `local-lvm` |
 | `pve1` GPU | Intel render device at `/dev/dri/renderD128` |
-| LXC 4214 | Privileged Docker LXC on `pve1`; 16 cores, 32 GB cap; Plex/arr; `/srv/media` bind mount; `/dev/dri` passthrough |
-| Plex media | About 7.3 TB on `plex-vg`, mounted at `pve1:/srv/media`; about 5.4 TB used |
+| LXC 4214 | Privileged Docker LXC on `pve` (`.173`); 16 cores, 32 GB cap; Plex/arr; local `/srv/media` bind mount; `/dev/dri` passthrough |
+| Plex media | About 7.3 TB on `plex-vg`, mounted locally at `.173:/srv/media`; about 5.4 TB used |
 | VM 120 | HAOS on `pve1`; 8 cores, 16 GB cap; about 4.2 GiB observed use |
 | `pve` / `.173` | PVE 9.2.2, Core Ultra 5 125H, 18 logical CPUs, 31 GiB RAM, about 797 GiB free on `local-lvm` |
 | `pve` GPU | Intel Arc-class render device at `/dev/dri/renderD128`; already shared with Scrypted LXC 1043 |

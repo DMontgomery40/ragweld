@@ -10,6 +10,14 @@ updated in place. IDs are stable.
 Status legend: `OPEN` (needs a fix), `DECIDE` (needs my call, then a fix),
 `NOTE` (record only), `FIXED <commit>`.
 
+**ID allocation (added 2026-08-28 08:20 after a collision).** The doer and I
+both appended `W44`/`W45` within the same ten minutes, for different findings;
+the doer's are committed at `809386f8` and keep those numbers. Mine were
+renumbered to `W51`/`W52`. From here: **the doer mints W44-W49, I mint W51+**.
+Numbers are never reused or reassigned once written down, even when that leaves
+gaps — a stale reference in a plan or ledger must always resolve to the same
+finding.
+
 Sweep 2026-08-28 03:15: W1, W2, W3, W6, W9, W10, W20, W21, W22 are implemented
 in the doer's uncommitted Task 6b working tree and match the directives
 (reviewed diff-by-diff); they flip to `FIXED <commit>` when committed. Task 6
@@ -752,7 +760,7 @@ gap; there was never a W23 — nothing lost.
   its render device; the host and 4214 guest both reported the NFS source as
   `nfs4`; all 12 media containers returned and Gluetun was healthy.
 
-### W44 `OPEN` (P1 for the Plex plan) — nothing checks `onboot`, so the reboot proof can pass while Plex stays down after every real reboot
+### W51 `SATISFIED by live reboot evidence 2026-08-28` (renumbered from a duplicate W44 — see the ID-collision note) — nothing checked `onboot`, so the reboot proof could have passed while Plex stayed down
 
 - `onboot` appears nowhere in the plan, the Task 1 `pct config 4214` inventory,
   or the Task 2 evidence. Proxmox defaults `onboot` to `0`, and the Task 1
@@ -776,8 +784,16 @@ gap; there was never a W23 — nothing lost.
   3. The W43 reboot acceptance must assert `pct status 4214` is `running`
      **and** `pct exec 4214 -- findmnt -t nfs4 /srv/media` before it counts.
      Without the running assertion the test is vacuous.
+- Closed by evidence, not by argument: the Task 4 boot-order section records
+  `onboot=1` on 103/1043/4214 **before** the reboot, an actual reboot of `pve`
+  (boot time `2026-08-28 08:10:43`), all three LXCs back to `running`, matching
+  host and guest NFSv4 views, Scrypted still holding `renderD128`, all 12
+  containers back, and all nine LAN checks responding. That is exactly the
+  non-vacuous form this item asked for. My premise that `onboot` would default
+  to `0` was wrong for this container — the check was still worth demanding,
+  since nothing in the plan or the Task 1 inventory had established it.
 
-### W45 `NOTE` (P3, Plex rollback hygiene) — restoring the fstab backup re-adds the stale absent-UUID line
+### W52 `WITHDRAWN — my framing was wrong (see W57)` (P3; renumbered from a duplicate W45) — restoring the fstab backup re-adds the stale absent-UUID line
 
 - Task 2 disabled one `.173` fstab line targeting `/srv/media` for absent UUID
   `5ddacfd6-…` and saved `/etc/fstab.ragweld-pre-nfs-20260828`. The recorded
@@ -788,6 +804,230 @@ gap; there was never a W23 — nothing lost.
   leaves the disabled line disabled and notes the backup as reference only).
   State it in the evidence file's rollback section so a later operator does
   not faithfully restore a landmine.
+
+### W53 `OBSOLETE as of 2026-08-28 14:30Z` (superseded by W55: pve1 no longer serves Plex, so the memory coupling is gone and LXC 100 may keep its full 24 GiB) — the Plex bridge just made pve1's stability a Plex dependency, and the next plan deliberately loads pve1 to ~91% memory
+
+- Neither plan owns this, because it only exists once both have run. Plex now
+  reads its entire library over `hard` NFS from pve1
+  (`srv-media.mount:10` `Options=_netdev,hard,noatime`). `hard` means a server
+  that stops answering does not return `EIO` — client processes block in
+  uninterruptible sleep, so Plex/arr hang unkillably rather than erroring.
+- Onto that same node the rollout plan puts LXC 100 at `--memory 24576
+  --swap 8192 --cores 16 --cpuunits 10000` (rollout plan `:149`), beside HAOS
+  VM 120's 16 GB cap, on a 31 GiB node. Caps total 40 GiB on 31 GiB; the
+  approved overcommit rests on HAOS's observed ~4.2 GiB, leaving roughly
+  28.2 GiB committed of 31. A Ragweld indexing run, a Docling PDF pass, or the
+  Flyte sandbox spiking into its cap puts pve1 under memory pressure — and the
+  kernel OOM killer does not know that `nfsd` is holding up the household's
+  Plex. Symptom on `.173` would be every media container wedged in D-state,
+  which reads as a Plex failure with no Plex cause.
+- Better way (three cheap, independent guards; none requires re-architecting):
+  1. **Protect the exporter.** On pve1:
+     `systemctl edit nfs-server` with `[Service]` `OOMScoreAdjust=-1000`, so
+     the media bridge is the last thing the kernel reclaims. Record it as a
+     bridge component alongside the export.
+  2. **Make Ragweld the first victim, not the node.** Give LXC 100 a memory
+     cap that leaves real headroom and mark it as the preferred OOM target:
+     drop to `--memory 20480` (still ample beside HAOS's real 4.2 GiB) or add
+     a `.173`-style startup order plus `pct set 100 --startup order=3`, and
+     verify `free -h` headroom on pve1 **after** the stack is up, not only at
+     provisioning time (rollout Task 1 Step 3 checks it before).
+  3. **Document the expected freeze.** A deliberate pve1 reboot — which the
+     rollout plan will cause — freezes Plex for the duration and then
+     recovers, by design of `hard`. Put that in the rollout evidence so nobody
+     force-reboots `.173` or force-kills wedged containers mid-window, which
+     is what turns a five-minute freeze into a corrupted download client.
+- Sequencing note: the cheapest moment for guards 1 and 2 is rollout Task 2
+  (LXC creation), before any Ragweld data exists.
+
+### W54 `OPEN` (P1 for the rollout plan) — the DNS inventory can only find records we already know the names of; email auth and any service verification would be lost silently
+
+- Task 5 Step 1 inventories with five `dig` queries (`NS`, `A`, apex `CNAME`,
+  `MX`, apex `TXT`) and Step 2 says "recreate all discovered DNS records".
+  `dig` is a *lookup*, not an enumeration: it can only answer for names
+  supplied to it, and DNS has no listing operation. Everything below is
+  invisible to that method and is lost the moment the registrar delegates to
+  Cloudflare:
+  - **DKIM** at `<selector>._domainkey.ragweld.com` and **DMARC** at
+    `_dmarc.ragweld.com` — subdomains, so apex `TXT` never sees them. Losing
+    them does not bounce mail; it silently degrades deliverability, so outbound
+    mail starts landing in spam days later with no obvious connection to a DNS
+    change made during a Plex migration weekend.
+  - **CAA** — not queried at all. Lost CAA is a quiet security regression;
+    a mis-recreated one blocks certificate issuance for the new hostnames.
+  - Any other subdomain record: `_acme-challenge`, provider
+    domain-verification CNAMEs, `mail`/`autodiscover`, a staging host.
+- Better way — one action that is exhaustive by construction, instead of five
+  guesses:
+  1. **Export the zone from the current provider before touching anything.**
+     Whatever holds the zone today (Netlify DNS or the registrar) offers a
+     full record list or BIND zone export in its UI. Save the export verbatim
+     into the evidence file's appendix — it is also the rollback source.
+  2. **Import that zone file into Cloudflare** (Cloudflare's zone-add flow
+     accepts a BIND import) rather than hand-recreating records. Then diff:
+     record count and every name/type/value must match the export before the
+     nameserver change, and the plan stops if they do not.
+  3. If no export exists, enumerate deliberately before delegating:
+     `dig +short CAA ragweld.com`, `dig +short TXT _dmarc.ragweld.com`,
+     `dig +short TXT <selector>._domainkey.ragweld.com` for each selector the
+     mail provider lists, plus `dig +short CNAME` for every hostname named in
+     the provider's dashboard. Record "no mail on this domain" explicitly if
+     that is the answer — an explicit negative is evidence; silence is not.
+  4. **Lower TTLs to 300s at the current provider before the cutover** so a
+     rollback is minutes rather than hours.
+- Rollback (spec §12 asks for it; the plan should carry the literal values):
+  record the exact original nameserver pair beside the export, and state that
+  reverting means restoring those two nameservers at the registrar — nothing
+  else.
+
+### W55 `CLOSED BY CODEX LIVE EXECUTION 2026-08-28 — DO NOT EXECUTE; record only` (P1) — the Plex disks moved to `.173`; the bridge was torn down, not repaired
+
+**Coordination.** David moved the disks physically at ~14:30Z and asked only
+that someone own it. Codex has the live-infra authority and the destructive-op
+approval path, so **Codex executes this**; this watchdog session verified the
+state read-only and wrote the procedure, and will not run teardown commands.
+If Codex has already started, this section is reference only — do not run any
+step twice.
+
+**Verified live state (watchdog, read-only, 14:30-14:34Z).** No emergency:
+nothing is running against the dead path and nothing is writing.
+- `.173`: `sda` + `sdb` present; `plex-vg` complete and healthy (2 PVs,
+  VSize 7.28T, VFree 0); `plex--vg-plex--lv` ext4 — **not mounted**.
+- `.173`: `/srv/media` is **still the NFS mount to `192.168.68.171`**
+  (`nfs4`, `hard`, vers=4.2) behind the direct automount.
+- `.173`: **LXC 4214 is stopped**; Scrypted 1043 running; **no D-state
+  processes**; root fs 94G, 68G used, 22G free.
+- `pve1`: `plex-vg` is **gone from LVM** (`vgs` shows only `pve`), yet
+  `/srv/media` is still mounted as `/dev/mapper/plex--vg-plex--lv ext4
+  rw,relatime,**emergency_ro**` — a zombie mount whose block device vanished —
+  and it is **still exported** to `.173`.
+- Data looks intact; the media was never copied, only the enclosure moved.
+
+**Why this is a teardown, not a repair.** Spec §10 already anticipated it:
+"A later physical disk move can remove this temporary dependency… document the
+later physical media-disk return to `.173` as the cleanup that removes the
+bridge." That move just happened early. Repairing the export would reintroduce
+a network hop between `.173` and its own local disks.
+
+**Ordered procedure — each step is a checkpoint; stop and report on any surprise.**
+
+1. **Confirm the safe window.** `pct status 4214` is `stopped`. Do not start it
+   until step 7. (If it is running, stop it first — its media path is dead.)
+2. **`.173` — remove the bridge client.**
+   `systemctl stop srv-media.automount srv-media.mount`; if the unmount hangs
+   because the server filesystem is dead, `umount -f /srv/media` then
+   `umount -l /srv/media`. `systemctl disable srv-media.automount`; remove
+   `/etc/systemd/system/srv-media.mount` and `srv-media.automount`; remove
+   `/etc/systemd/system/pve-container@4214.service.d/srv-media.conf`;
+   `systemctl daemon-reload`. Confirm `findmnt /srv/media` is empty.
+3. **`pve1` — stop being a storage server.** `exportfs -ua`; remove
+   `/etc/exports.d/ragweld-media.exports` and `/etc/nfs.conf.d/99-ragweld.conf`;
+   `systemctl disable --now nfs-server`; `umount -l /srv/media` to clear the
+   `emergency_ro` zombie; confirm `findmnt /srv/media` is empty. This also
+   **retires W53** — pve1 is no longer in Plex's data path.
+4. **`.173` — activate and CHECK the filesystem before any writable mount.**
+   `vgchange -ay plex-vg`, then a **read-only dry run first**:
+   `e2fsck -n /dev/mapper/plex--vg-plex--lv`. The filesystem was mounted `rw`
+   when the disks were pulled and went `emergency_ro`, so it is unclean by
+   definition. If the dry run shows only journal recovery, proceed with
+   `e2fsck -p`. **If it reports real structural damage, stop and report before
+   mounting rw** — 5.4 TB of media is worth one careful step.
+5. **`.173` — mount it locally, keeping the W42 guard.** Leave the underlying
+   `/srv/media` directory at mode `0555` (it still makes a missing mount fail
+   loudly). Get `blkid -s UUID -o value /dev/mapper/plex--vg-plex--lv` and
+   install a **local** `srv-media.mount` unit (`What=/dev/disk/by-uuid/<UUID>`,
+   `Type=ext4`, `Options=defaults,noatime`) — no automount needed for a local
+   device — plus `WantedBy=multi-user.target`.
+6. **Keep the W37/W43 protection in the new topology.** Reinstate
+   `/etc/systemd/system/pve-container@4214.service.d/srv-media.conf` with
+   `Requires=srv-media.mount` and `After=srv-media.mount`. The trap is
+   identical for a local mount: a bind taken before the mount exists captures
+   an empty directory. Scoping stays per-container so Scrypted is unaffected.
+7. **Verify, then start.** `findmnt -t ext4 /srv/media` (~7.3T, ~5.4T used),
+   top-level listing matches the pre-move inventory, then `pct start 4214` and
+   prove `pct exec 4214 -- findmnt /srv/media` shows the **ext4 device** — not
+   `autofs`, not `nfs4`. Then the Task 4 service/write/transcode acceptance.
+8. **Reboot `.173` once** and re-verify 1043 running, 4214 running, and the
+   guest-side ext4 mount — the W43/W51 boot-order proof, now for local disk.
+9. **Record and decide.** Update the evidence file with the new topology; mark
+   W53 obsolete; decide the fate of the 31.6 GB quarantine
+   `/srv/media-local-pre-nfs-20260828` now that `.173` root is at 76%.
+
+**Rollback.** The pre-migration PBS backup of 4214 is still the container
+rollback and the media was never copied. If the array will not mount cleanly on
+`.173`, power down, return the disks to pve1, `vgchange -ay` there, and restore
+the two saved bridge units — the teardown above is reversible precisely because
+nothing is deleted.
+
+### W56 `RESOLVED by the same event` (P1, process deadlock) — Codex is blocked on a human proof the disk move made impossible, so W55 will never start on its own
+
+- The Plex evidence file ends: "A signed-in user must finish the remaining
+  direct-play and forced lower-quality transcode interaction… **This is the
+  only remaining Plex-plan acceptance item before starting Ragweld LXC
+  provisioning.**" Codex has been idle ~30 minutes waiting on exactly that.
+- David cannot perform it. LXC 4214 is stopped, and if started its library
+  path is the dead NFS mount to a node with no disks. So Codex waits for a
+  human, the human cannot act, W55 never begins — and because that proof is
+  written as the gate before Ragweld provisioning, the **entire rollout is
+  transitively blocked** by a circular dependency neither side can see from
+  its own position. Codex will not self-diagnose this: from where it sits,
+  "waiting on the operator" is a legitimate state.
+- Better way (pure re-sequencing, no scope change):
+  1. The visual Plex proof is **not** a precondition of W55 — it is a
+     *consequence* of it. It moves to after W55 step 7 (container started on
+     the local ext4 mount), where it can actually succeed.
+  2. Codex proceeds with W55 **now**, without waiting for David. The steps
+     that need his approval are the destructive ones inside W55, which its
+     own sandbox flow already prompts for — that is the right place for a
+     human gate, not an impossible UI interaction.
+  3. Ragweld LXC provisioning stays gated on Plex acceptance, but that gate is
+     now "W55 complete **and** the visual proof done", in that order.
+- General lesson worth keeping: when an agent's only remaining item is "waiting
+  on the operator", something must periodically re-validate that the operator
+  can still act. A blocked-on-human state is invisible to the blocked agent and
+  looks identical to progress from outside.
+
+### W57 `VERIFIED LIVE` — what the local-media transition proved and what remains
+
+**Executed and verified live by Codex, both nodes.** David physically moved the
+two drives; Codex performed the shutdown, bridge teardown, filesystem recovery,
+local mount activation, service probes, and reboot proof. Two implementation
+details improve on the original sketch:
+
+- The `pve-container@4214.service.d` drop-in was rewritten for local disk as
+  `RequiresMountsFor=/srv/media` + `After=local-fs.target`, plus **two**
+  `ExecStartPre` guards — one asserting the mountpoint is `ext4`, one asserting
+  the source is exactly `/dev/mapper/plex--vg-plex--lv`. That is stronger than
+  the `Requires=srv-media.mount` I proposed: it survives the unit being renamed
+  or replaced, and it pins the device identity, not just the fact of a mount.
+- Persistence is a plain `fstab` UUID entry with `nofail`. That pairing is
+  right: `nofail` keeps `.173` bootable if the array ever fails, while the
+  container guard still refuses to start 4214 onto an empty tree. Availability
+  for the node, fail-closed for the workload.
+
+State: `.173` `/srv/media` = local ext4 `rw`, 7.3T/5.4T, `Filesystem state:
+clean`; bridge units retired; 4214 running with the guest seeing the real
+device; 12 containers up. pve1: no exports, `nfs-server` inactive and disabled,
+config files retired, zombie mount cleared, and the stale zero-open device map
+removed.
+
+**The filesystem gate ran in full.** `e2fsck -f -n` completed all five passes,
+found no structural corruption, and reported only optional extent-tree
+optimization. `e2fsck -p` then replayed the pending journal and returned the
+filesystem clean before read-write mounting.
+
+**Reboot proof is closed.** `.173` rebooted at `08:59:22 MDT`; Grafana 103,
+Scrypted 1043, and Plex 4214 all autostarted. Host and guest showed the exact
+local ext4 device, no NFS mount returned, all 12 media containers were healthy,
+the expected app probes responded, and Scrypted Python/Node processes held
+active render-device file descriptors.
+
+**Still open:**
+1. **The signed-in Plex direct-play / hardware-transcode proof** — now
+   genuinely possible and still the visual acceptance item.
+2. **The 31.6 GB quarantine** `/srv/media-local-pre-nfs-20260828` on `.173`'s
+   root. Reconcile it against the live media tree before any deletion; it was
+   deliberately left untouched.
 
 ## Low / rollout-time reminders
 

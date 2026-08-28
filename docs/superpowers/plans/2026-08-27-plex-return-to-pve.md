@@ -2,9 +2,23 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Move Plex and the arr suite in LXC 4214 from `pve1` back to `pve` (`192.168.68.173`) while keeping the physically attached pve1 media intact and writable through a narrowly scoped NFSv4 bridge.
+> ## SUPERSEDED — 2026-08-28: DISKS MOVED TO `.173`, TRANSITION COMPLETE
+>
+> The Plex disks were physically moved into `.173` and Codex completed the
+> local-mount recovery and transition on both nodes with full live verification.
+> **Tasks 2 and 3 of this plan are dead** — the NFS bridge is
+> torn down on both sides and `/srv/media` on `.173` is the local ext4 array
+> via `fstab` UUID `5ddacfd6-…`. Do not execute them; do not execute W55
+> either, which is now a record rather than a procedure.
+>
+> The local-topology reboot, service/write probes, and Scrypted shared-GPU proof
+> are complete. Still live from this plan: the signed-in Plex
+> direct-play/hardware-transcode proof. See `W55`/`W57` in
+> `docs/exec-plans/active/watchdog-proxmox-foundation-2026-08-28.md`.
 
-**Architecture:** Back up first, export only `pve1:/srv/media` to the exact `.173` client, mount it at the same host path on `.173`, then perform an offline Proxmox LXC root-disk migration. Preserve VMID, IP, bind path, Docker state, and rollback capability; share the `.173` Intel render device with Scrypted.
+**Goal:** Move Plex and the arr suite in LXC 4214 from `pve1` back to `pve` (`192.168.68.173`), then keep its physically relocated media local to `.173`.
+
+**Architecture:** The migration temporarily used a single-client NFS bridge. The final live architecture mounts `plex-vg/plex-lv` locally at `.173:/srv/media`, bind-mounts that path into 4214 with an exact-device fail-closed start guard, and shares the `.173` Intel render device with Scrypted.
 
 **Tech Stack:** Proxmox VE 9.2.2, PBS, privileged LXC, NFSv4, systemd mount units, Docker, Plex, Sonarr, Radarr, qBittorrent, Intel Quick Sync.
 
@@ -74,7 +88,7 @@ From `docs/exec-plans/active/watchdog-proxmox-foundation-2026-08-28.md`
   before acceptance. Any hit stops the plan. If an init genuinely needs root
   ownership on one subtree, the fix is a targeted `no_root_squash` for that
   path with an explicit ruling — never a blanket export relaxation.
-- **W44 — decide and assert `onboot` before the reboot proof.** `onboot` is
+- **W51 (was a duplicate W44) — decide and assert `onboot` before the reboot proof.** SATISFIED by the 2026-08-28 live reboot evidence; retained for the record and for any future node move. `onboot` is
   absent from the Task 1 inventory and Proxmox defaults it to `0`, so the
   per-container drop-in and its automount ordering may never run at boot.
   Task 1 Step 2 records the live `onboot` value; before the W43 reboot test,
@@ -84,7 +98,7 @@ From `docs/exec-plans/active/watchdog-proxmox-foundation-2026-08-28.md`
   operator decision to keep manual starts. The reboot acceptance must assert
   `pct status 4214` is `running` **and** the guest-side `findmnt -t nfs4`;
   without the running assertion the reboot test passes while Plex is down.
-- **W45 — do not faithfully restore the stale fstab line.** The bridge
+- **W52 (was a duplicate W45) — do not faithfully restore the stale fstab line.** The bridge
   rollback says to restore `/etc/fstab.ragweld-pre-nfs-20260828`, which would
   re-add the disabled entry for absent UUID `5ddacfd6-…` pointed at
   `/srv/media`. Restore the backup minus that line, or treat the backup as

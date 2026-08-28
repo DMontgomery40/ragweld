@@ -1,8 +1,26 @@
 # Plex return-to-pve execution evidence
 
-Status: Tasks 1-3 and non-visual Task 4 acceptance verified; signed-in Plex playback/transcode proof pending
+Status: Physical media return, local-mount recovery, and post-reboot non-visual acceptance verified; signed-in Plex playback/transcode proof pending
 
 Plan: `docs/superpowers/plans/2026-08-27-plex-return-to-pve.md`
+
+## Current topology (supersedes the bridge below)
+
+On 2026-08-28 the two Plex media drives were physically moved from `pve1`
+(`.171`) to `pve` (`.173`). The NFS sections below remain as execution history,
+not current instructions. The live topology is now:
+
+- `.173:/srv/media` is the local `ext4` filesystem
+  `/dev/mapper/plex--vg-plex--lv`, UUID
+  `5ddacfd6-1309-4c2c-8bb8-890bbef8546d`, mounted `rw` from `fstab`;
+- LXC 4214 remains on `.173` with
+  `mp1: /srv/media,mp=/srv/media,shared=1`;
+- its instance-only systemd guard uses `RequiresMountsFor=/srv/media`, requires
+  `ext4`, and pins the exact device source before the container may start;
+- `.171` has no Plex device mapping, media mount, active export, or active NFS
+  server; and
+- the previous NFS unit/config files were retained under dated root-owned
+  retirement directories for rollback, not left active.
 
 ## Locked source state
 
@@ -232,3 +250,59 @@ expected surface:
   runs, capture Plex's hardware-transcode indicator and sanitized `.173`
   video-engine activity. This is the only remaining Plex-plan acceptance
   item before starting Ragweld LXC provisioning.
+
+## Physical media return and local-mount acceptance
+
+The operator physically connected both 4 TB Plex drives to `.173`. Codex then
+performed the live recovery and validation; this was not a read-only or manual
+operator transition.
+
+### Safe cutover and filesystem recovery
+
+- LXC 4214 was shut down cleanly before the mount topology changed.
+- `.173` identified both expected LVM PVs, the complete `plex-vg`, the 7.28 TiB
+  `plex-lv`, and the expected ext4 UUID. The LV had open count `0` and was not
+  locally mounted.
+- The stale hard-NFS client was stopped first. `.171` then stopped and disabled
+  NFS, retired the exact Ragweld export/config files, unmounted the disconnected
+  `emergency_ro` filesystem record, and removed its zero-open stale device map.
+- A full no-write `e2fsck -f -n` completed all five passes. It reported no
+  structural corruption and only optional extent-tree narrowing suggestions.
+  Because the journal recovery flag remained, `e2fsck -p` replayed the journal
+  and returned the filesystem clean.
+- A temporary read-only mount proved the expected 7.3 TB filesystem, 5.4 TB
+  used, 1.5 TB available, and a readable 19-entry top level before any
+  read-write activation.
+
+### Permanent local mount and fail-closed start
+
+- `.173:/etc/fstab` again owns the exact UUID mount. The obsolete NFS mount and
+  automount units are retired, not active.
+- The LXC 4214 drop-in now uses `RequiresMountsFor=/srv/media` and two fatal
+  pre-start checks: `/srv/media` must be `ext4` and its source must be exactly
+  `/dev/mapper/plex--vg-plex--lv`. `nofail` therefore keeps the node bootable
+  if the USB array is absent while the Plex workload still fails closed rather
+  than binding the empty underlying directory.
+- Host and guest both report the same local ext4 device, `rw`. Sonarr, Radarr,
+  and qBittorrent write/delete probes succeeded through their real container
+  paths. All probe files were removed.
+- All 12 containers ran; Gluetun reached `healthy`; Plex, Sonarr, Radarr, and
+  qBittorrent HTTP probes returned expected responses. Plex sees
+  `/dev/dri/renderD128`.
+
+### Local-topology reboot proof
+
+- `.173` rebooted once after the local-mount cutover; the new boot began at
+  `2026-08-28 08:59:22 MDT`.
+- Grafana 103, Scrypted 1043, and Plex 4214 all returned to `running`.
+- Host and LXC 4214 both reported the exact local ext4 device at `/srv/media`;
+  no NFSv4 mount existed.
+- All 12 Plex/arr containers returned and Gluetun was healthy. The expected
+  Plex/Sonarr/Radarr/qBittorrent HTTP responses returned.
+- Scrypted held active file descriptors on `renderD128` from its Python and
+  Node processes after reboot. Plex retained the same render-device access.
+
+The only remaining Plex acceptance is the signed-in visual direct-play and
+forced lower-quality hardware-transcode interaction. The preserved 31.6 GB
+`/srv/media-local-pre-nfs-20260828` quarantine is intentionally untouched until
+its contents are reconciled; it is not part of the mounted Plex array.
