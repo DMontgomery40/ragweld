@@ -1,0 +1,73 @@
+services:
+  grafana:
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD}"
+
+  langfuse:
+    environment:
+      NEXTAUTH_URL: "https://langfuse.ragweld.com"
+      AUTH_CUSTOM_CLIENT_ID: "langfuse"
+      AUTH_CUSTOM_CLIENT_SECRET: "${LANGFUSE_OIDC_CLIENT_SECRET:?set LANGFUSE_OIDC_CLIENT_SECRET}"
+      AUTH_CUSTOM_ISSUER: "https://auth.ragweld.com"
+      AUTH_CUSTOM_NAME: "Ragweld"
+      AUTH_CUSTOM_SCOPE: "openid email profile groups"
+      AUTH_CUSTOM_FETCH_USERINFO: "true"
+      AUTH_DISABLE_USERNAME_PASSWORD: "true"
+      AUTH_DISABLE_SIGNUP: "true"
+
+  authelia:
+    image: authelia/authelia:4.39.20
+    labels:
+      io.ragweld.managed: "true"
+    restart: unless-stopped
+    environment:
+      X_AUTHELIA_CONFIG_FILTERS: template
+      AUTHELIA_SESSION_SECRET_FILE: /run/secrets/authelia_session
+      AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE: /run/secrets/authelia_storage
+      AUTHELIA_IDENTITY_PROVIDERS_OIDC_HMAC_SECRET_FILE: /run/secrets/authelia_oidc_hmac
+    ports:
+      - "127.0.0.1:59091:9091"
+    volumes:
+      - ./deploy/proxmox/authelia/configuration.yml:/config/configuration.yml:ro
+      - /etc/ragweld/authelia/users_database.yml:/config/users_database.yml:ro
+      - /etc/ragweld/authelia/oidc-rsa.pem:/config/oidc-rsa.pem:ro
+      - /etc/ragweld/authelia/state:/state
+    secrets:
+      - authelia_session
+      - authelia_storage
+      - authelia_oidc_hmac
+
+  caddy:
+    image: caddy:2.11.4-alpine
+    labels:
+      io.ragweld.managed: "true"
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./deploy/proxmox/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./web/dist:/srv/web:ro
+    depends_on:
+      authelia:
+        condition: service_started
+
+  cloudflared:
+    image: cloudflare/cloudflared:2026.7.2
+    labels:
+      io.ragweld.managed: "true"
+    restart: unless-stopped
+    user: "0:0"
+    network_mode: host
+    command: ["tunnel", "--no-autoupdate", "--config", "/etc/cloudflared/config.yml", "run"]
+    volumes:
+      - /etc/ragweld/cloudflared:/etc/cloudflared:ro
+    depends_on:
+      caddy:
+        condition: service_started
+
+secrets:
+  authelia_session:
+    file: /etc/ragweld/authelia/session-secret
+  authelia_storage:
+    file: /etc/ragweld/authelia/storage-encryption-key
+  authelia_oidc_hmac:
+    file: /etc/ragweld/authelia/oidc-hmac-secret

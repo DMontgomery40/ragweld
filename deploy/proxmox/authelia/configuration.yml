@@ -1,0 +1,76 @@
+log:
+  level: info
+
+server:
+  endpoints:
+    authz:
+      forward-auth:
+        implementation: ForwardAuth
+        authn_strategies:
+          - name: HeaderAuthorization
+            schemes:
+              - Basic
+            scheme_basic_cache_lifespan: 0
+          - name: CookieSession
+
+session:
+  cookies:
+    - domain: ragweld.com
+      authelia_url: https://auth.ragweld.com
+      default_redirection_url: https://me.ragweld.com/web/
+
+authentication_backend:
+  password_reset:
+    disable: true
+  password_change:
+    disable: true
+  file:
+    path: /config/users_database.yml
+
+storage:
+  local:
+    path: /state/db.sqlite3
+
+access_control:
+  default_policy: deny
+  rules:
+    - domain:
+        - me.ragweld.com
+        - grafana.ragweld.com
+        - langfuse.ragweld.com
+        - mlflow.ragweld.com
+        - flyte.ragweld.com
+      policy: one_factor
+      subject:
+        - group:owners
+
+identity_providers:
+  oidc:
+    jwks:
+      - key_id: langfuse-rs256
+        algorithm: RS256
+        use: sig
+        key: '{{ secret "/config/oidc-rsa.pem" | mindent 12 "|" | msquote }}'
+    clients:
+      - client_id: langfuse
+        client_name: Langfuse
+        client_secret: '{{ secret "/etc/ragweld/authelia/langfuse-client-secret-digest" }}'
+        public: false
+        authorization_policy: one_factor
+        redirect_uris:
+          - https://langfuse.ragweld.com/api/auth/callback/custom
+        scopes:
+          - openid
+          - profile
+          - email
+          - groups
+        response_types:
+          - code
+        grant_types:
+          - authorization_code
+        token_endpoint_auth_method: client_secret_basic
+        id_token_signed_response_alg: RS256
+
+notifier:
+  filesystem:
+    filename: /state/notification.txt

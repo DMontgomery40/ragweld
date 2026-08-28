@@ -1,0 +1,50 @@
+{
+    admin off
+    auto_https off
+    default_bind 127.0.0.1
+}
+
+(require_owner) {
+    forward_auth 127.0.0.1:59091 {
+        uri /api/authz/forward-auth
+        copy_headers Remote-User Remote-Groups Remote-Email Remote-Name
+    }
+}
+
+http://auth.ragweld.com:58000 {
+    reverse_proxy 127.0.0.1:59091
+}
+
+http://me.ragweld.com:58000 {
+    import require_owner
+    handle /api/* {
+        reverse_proxy 127.0.0.1:58012
+    }
+    handle_path /web/* {
+        root * /srv/web
+        try_files {path} /index.html
+        file_server
+    }
+    redir /web /web/
+    redir / /web/
+}
+
+http://grafana.ragweld.com:58000 {
+    import require_owner
+    reverse_proxy 127.0.0.1:3301
+}
+
+http://langfuse.ragweld.com:58000 {
+    import require_owner
+    reverse_proxy 127.0.0.1:53000
+}
+
+http://mlflow.ragweld.com:58000 {
+    import require_owner
+    reverse_proxy 127.0.0.1:55500
+}
+
+http://flyte.ragweld.com:58000 {
+    import require_owner
+    reverse_proxy 127.0.0.1:30080
+}

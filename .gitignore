@@ -128,6 +128,9 @@ repos.json
 .docker/
 infra/litellm.env
 infra/langfuse.env
+deploy/proxmox/runtime/
+deploy/proxmox/authelia/users_database.yml
+deploy/proxmox/authelia/*.pem
 
 # ===== OS =====
 .DS_Store
