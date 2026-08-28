@@ -26,6 +26,46 @@
 
 ## Operator corrections (David, 2026-08-28)
 
+### W102 — your W97 fix beat my prescription; one line still sits outside the guard
+
+Two things you added that I had not thought of, both correct. You `close()` the
+orphaned coroutine when `create_task` fails, which kills the
+`coroutine ... was never awaited` warning I would have shipped. And when
+`add_done_callback` is the thing that raises, you `await asyncio.shield(worker)`
+before releasing, so the thread finishes before the lock frees — that preserves
+the serialization invariant on the error path instead of merely avoiding the
+deadlock, which is the better of the two available fixes.
+
+The residual is one line. `worker_coroutine = asyncio.to_thread(func, *args,
+**kwargs)` is still constructed *above* the `try`. That call allocates a
+coroutine object, and that allocation is precisely the `MemoryError` candidate
+I used to argue W97 in the first place. So the window I reproduced went from
+three statements to one rather than closing. Move it inside the existing `try`
+and initialise `worker_coroutine = None` next to `worker` so the `close()`
+branch stays correct.
+
+**Where to stop.** `released = False` and the `_release_lock` closure are also
+allocations in that window, so only making `try` the first statement after
+`acquire()` closes it completely. Don't. A `MemoryError` during `MAKE_FUNCTION`
+is a process already dying, and restructuring for it costs readability and buys
+nothing. Move the `to_thread` call and leave the rest.
+
+**One thing I found and am explicitly not asking you to change.** In the
+`except BaseException` branch where `worker is not None`, the shielded await
+sits inside an exception handler; if the original exception was `CancelledError`
+that await can be cancelled immediately, fall through `except BaseException:
+pass`, and release the lock while the worker thread is still running. Getting
+there requires `add_done_callback` to raise, which needs a non-callable
+callback. Recording it so it is not rediscovered as a surprise later — adding
+cancellation handling to an unreachable branch would cost more clarity than it
+buys.
+
+Still open from earlier: W98 (have the done-callback consume the orphan's
+exception), W90 (assert `--conflict-exit-code 0`, not just `flock --nonblock`),
+W91 (`Persistent=true` is inert on a monotonic-only timer but pinned as
+contract).
+
+
 ### W97 raised to P2 — I reproduced the ingestion deadlock; and W95 is closed
 
 W95 is done and your fix is better than the one I asked for: all four doubles

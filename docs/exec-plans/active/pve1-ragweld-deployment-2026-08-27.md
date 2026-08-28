@@ -356,7 +356,14 @@ on the stopped LXC for inspection.
     held authoritative usage. The candidate now propagates the gateway usage
     through both chat transports using the canonical trace-cost parser; a real
     local LiteLLM-compatible gateway regression covers snake_case and camelCase
-    usage payloads. Live pve1 redeploy proof remains required before closeout.
+    usage payloads.
+  - published commit `c2a8e83b7009b661d2c2e109cea12f42cfb48ff1`
+    was fast-forwarded into the clean LXC checkout and restarted through the
+    systemd lifecycle. A post-deploy paid email query returned the cited answer
+    `cam you speak now?` with ten sources. `ChatResponse.tokens_used`, the
+    `chat.response` trace event, and the authoritative trace cost summary all
+    agreed on 1,110 tokens for run
+    `c3008395-1a4c-4ba9-9574-44ba0db44edf`; provider cost was `$0.003154`.
 
 ### Post-corpus capacity measurement (W75)
 
@@ -364,18 +371,25 @@ on the stopped LXC for inspection.
 - `vm-100-disk-0`: 15.67% Data.
 - `pve/data`: 6.94% Data / 0.46% Meta.
 - The first corpus moved thin-pool Data% by only 0.02 percentage points.
-  Capacity is not a blocker; the injected volume/pool alerts and LVM
-  autoextend settings remain pending independent review before closeout.
+  Capacity is not a blocker.
+- Independent GPT-5.6 review rejected the injected 10% autoextend: it would
+  request about 79.4 GiB against only 16.00 GiB of VG free space. The tested
+  candidate uses a pve/data-only LVM metadata profile at 80% / 1% and a
+  host-level five-minute systemd guard for deduplicated warning, critical,
+  recovery, and probe-failure email/journal transitions. Host installation and
+  forced non-destructive live verification remain before closeout.
 
 ### Current verification candidate
 
 - docs ownership, banned-pattern, generated-type, LiteLLM 371-alias lockstep,
   and `git diff --check` gates: pass;
-- full backend suite: `1225 passed, 98 skipped, 7 warnings` in `308.01s`;
-- GitNexus unstaged scope: 11 files / 32 symbols, 12 affected execution flows,
-  risk `high`; the changed chat paths therefore require live pve1 proof before
-  this candidate is accepted. The scope also includes preserved user-owned
-  instruction changes that will not be staged.
+- latest proven staged-source full backend suite before the final review fix
+  wave: `1235 passed, 98 skipped, 7 warnings`;
+- that staged count is now superseded because the final review fix wave added
+  new Docling/capacity regressions and source changes;
+- final full-suite rerun and exact source hash are still required before
+  commit, publish, or deploy. The controller will record the post-fix count and
+  published hash after the closeout rerun.
 
 ## Ready / not ready
 
@@ -398,6 +412,9 @@ Ready:
   ingress boundary proved against live listeners
 - Task 3 runtime bootstrap, immutable source/build, clean secrets, provider
   allowlist, production config, and persistent non-root GPU access complete
+- Task 7 clean public-corpus materialization, sequential text/PDF indexing,
+  cited paid chat, Docling runtime correction, and live token-accounting proof
+  complete
 
 Not yet done:
 
@@ -405,6 +422,4 @@ Not yet done:
 - signed-in external browser/SSO acceptance across the protected workbench and
   companion UIs
 - W75 thin-pool/guest-volume alert and autoextend guardrails
-- live pve1 proof that `ChatResponse.tokens_used` matches authoritative trace
-  usage after the candidate is deployed
 - final independent GPT-5.6 plus paid GLM adversarial closeout and publication
