@@ -512,10 +512,10 @@ def test_secure_ingress_ui_contract_marks_missing_services_deployment_only() -> 
         services_subtab_source,
     )
 
-    assert deployment_only_detail in docker_subtab_source
+    assert docker_subtab_source.count(deployment_only_detail) == 1
     assert services_subtab_detail in services_subtab_source
 
-    assert "!container && deploymentOnly && (" in docker_subtab_source
+    assert "!container && deploymentOnly && (" not in docker_subtab_source
     assert "!container && !deploymentOnly && (" in docker_subtab_source
     assert "container ? '○ Stopped' : '— Missing'" not in docker_subtab_source
 

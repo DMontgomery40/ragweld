@@ -191,11 +191,6 @@ export function DockerSubtab() {
                 </div>
 
                 <div style={{ display: 'flex', gap: '8px', marginTop: '14px', flexWrap: 'wrap' }}>
-                  {!container && deploymentOnly && (
-                    <span className="small">
-                      Created by the Proxmox deployment overlay; not expected in the default local topology.
-                    </span>
-                  )}
                   {!container && !deploymentOnly && (
                     <span className="small">
                       Run <code>{service === 'api' ? './start.sh --docker-backend' : ['postgres', 'neo4j'].includes(service) ? './start.sh' : './start.sh --with-observability'}</code> to create it.
