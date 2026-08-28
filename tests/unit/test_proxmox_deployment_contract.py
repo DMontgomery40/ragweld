@@ -20,6 +20,7 @@ from cryptography.hazmat.primitives.kdf.argon2 import Argon2id
 from server.models.tribrid_config_model import TriBridConfig
 
 ROOT = Path(__file__).resolve().parents[2]
+BASE_COMPOSE = ROOT / "docker-compose.yml"
 SCRIPT = ROOT / "deploy" / "proxmox" / "render_config.py"
 SOURCE_CONFIG = ROOT / "tribrid_config.json"
 PROXMOX_DIR = ROOT / "deploy" / "proxmox"
@@ -30,6 +31,7 @@ PROXMOX_START_RUNTIME = PROXMOX_DIR / "start-runtime.sh"
 PROXMOX_STOP_RUNTIME = PROXMOX_DIR / "stop-runtime.sh"
 PROXMOX_BOOTSTRAP_SECRETS = PROXMOX_DIR / "bootstrap-secrets.sh"
 PROXMOX_SERVICE_UNIT = PROXMOX_DIR / "ragweld.service"
+PROXMOX_ROLLOUT_PLAN = ROOT / "docs" / "superpowers" / "plans" / "2026-08-27-pve1-ragweld-rollout.md"
 PROXMOX_SECRET_ROOT_ENV = "RAGWELD_ETC_ROOT"
 PROXMOX_CONTRACT_ENV = {
     "GRAFANA_ADMIN_PASSWORD": "contract-only",
@@ -803,7 +805,21 @@ http://prometheus.ragweld.com:58000 {
 
 
 def test_proxmox_authelia_configuration_is_owner_only_and_deny_by_default() -> None:
-    payload = yaml.safe_load(PROXMOX_AUTHELIA_CONFIG.read_text(encoding="utf-8"))
+    source = PROXMOX_AUTHELIA_CONFIG.read_text(encoding="utf-8")
+    jwks_key_template = '{{ secret "/config/oidc-rsa.pem" | mindent 10 "|" | msquote }}'
+
+    multiline_secret_lines = [
+        line.strip()
+        for line in source.splitlines()
+        if "{{ secret " in line and "| mindent " in line and "| msquote" in line
+    ]
+    assert multiline_secret_lines
+    assert all(line.split(":", 1)[1].strip().startswith("{{ secret ") for line in multiline_secret_lines)
+    assert all(line.split(":", 1)[1].strip().endswith(" }}") for line in multiline_secret_lines)
+
+    yaml_surrogate = source.replace(f"key: {jwks_key_template}", f"key: '{jwks_key_template}'")
+    assert yaml_surrogate != source
+    payload = yaml.safe_load(yaml_surrogate)
 
     assert payload["access_control"]["default_policy"] == "deny"
     assert payload["access_control"]["rules"] == [
@@ -855,9 +871,23 @@ def test_proxmox_authelia_configuration_is_owner_only_and_deny_by_default() -> N
             "key_id": "langfuse-rs256",
             "algorithm": "RS256",
             "use": "sig",
-            "key": "{{ secret \"/config/oidc-rsa.pem\" | mindent 12 \"|\" | msquote }}",
+            "key": jwks_key_template,
         }
     ]
+
+
+def test_flyte_gets_a_container_scoped_kmsg_sink_without_host_kernel_exposure() -> None:
+    payload = yaml.safe_load(BASE_COMPOSE.read_text(encoding="utf-8"))
+    flyte = payload["services"]["flyte"]
+    source = PROXMOX_ROLLOUT_PLAN.read_text(encoding="utf-8")
+
+    assert flyte["privileged"] is True
+    assert flyte["devices"] == ["/dev/null:/dev/kmsg"]
+    assert "--dev2 path=/dev/kmsg" not in source
+    assert "open /dev/kmsg: no such file or directory" in source
+    assert "docker inspect ragweld-flyte-1 --format '{{json .HostConfig.Devices}}'" in source
+    assert "docker exec ragweld-flyte-1 test -c /dev/kmsg" in source
+    assert "docker exec ragweld-flyte-1 kubectl get nodes" in source
 
 
 def test_proxmox_lifecycle_artifacts_exist_and_use_strict_shell_contract() -> None:
@@ -935,7 +965,30 @@ def test_proxmox_lifecycle_start_runtime_runs_exact_compose_allowlist_and_host_f
     docker_lines = [line for line in lines if line.startswith("docker ")]
     assert docker_lines
     assert any("network inspect bridge" in line for line in docker_lines)
+    validate_index = next(index for index, line in enumerate(docker_lines) if " run " in line)
+    validate_tokens = shlex.split(docker_lines[validate_index])
+    assert validate_tokens == [
+        "docker",
+        "compose",
+        "--project-name",
+        "ragweld",
+        "-f",
+        "docker-compose.yml",
+        "-f",
+        "infra/docker-compose.observability.yml",
+        "-f",
+        "deploy/proxmox/docker-compose.yml",
+        "run",
+        "--rm",
+        "--no-deps",
+        "authelia",
+        "authelia",
+        "validate-config",
+        "--config",
+        "/config/configuration.yml",
+    ]
     compose_up = next(line for line in docker_lines if " up " in line)
+    assert validate_index < docker_lines.index(compose_up)
     tokens = shlex.split(compose_up)
     assert tokens[:14] == [
         "docker",
@@ -963,6 +1016,48 @@ def test_proxmox_lifecycle_start_runtime_runs_exact_compose_allowlist_and_host_f
         repo_path = repo / relative_path
         assert repo_path.is_symlink(), relative_path
         assert repo_path.resolve() == secret_root / secret_name
+
+
+def test_proxmox_lifecycle_start_runtime_fails_closed_when_authelia_rejects_config_before_compose_up(
+    tmp_path: Path,
+) -> None:
+    repo, log_path = _materialize_proxmox_runtime_repo(tmp_path)
+    secret_root = _build_secret_root(tmp_path, include_tunnel=False)
+    _write_executable(
+        tmp_path / "bin" / "docker",
+        """#!/usr/bin/env bash
+set -euo pipefail
+printf 'docker %s\\n' "$*" >> "$FAKE_TOOL_LOG"
+if [[ "${1:-} ${2:-}" == "network inspect" ]]; then
+  printf '172.17.0.1\\n'
+  exit 0
+fi
+if [[ " $* " == *" run --rm --no-deps authelia "* ]]; then
+  exit 64
+fi
+exit 0
+""",
+    )
+
+    result = _run_shell_script(
+        repo / "deploy" / "proxmox" / "start-runtime.sh",
+        cwd=repo,
+        env={
+            PROXMOX_SECRET_ROOT_ENV: str(secret_root),
+            "RAGWELD_SKIP_TUNNEL": "1",
+            "FAKE_TOOL_LOG": str(log_path),
+            "PATH": f"{tmp_path / 'bin'}:{os.environ['PATH']}",
+        },
+    )
+
+    assert result.returncode == 64
+    docker_lines = [
+        line
+        for line in log_path.read_text(encoding="utf-8").splitlines()
+        if line.startswith("docker ")
+    ]
+    assert any(" run --rm --no-deps authelia " in f" {line} " for line in docker_lines)
+    assert all(" up " not in line for line in docker_lines)
 
 
 def test_proxmox_lifecycle_start_runtime_fails_closed_on_insecure_secret_mode_before_compose(
@@ -1440,6 +1535,9 @@ if [[ "${{1:-}}" == "compose" && "${{2:-}}" == "version" ]]; then
   exec {shlex.quote(docker_path)} "$@"
 fi
 if [[ "${{1:-}}" == "compose" ]]; then
+  if [[ " $* " == *" run --rm --no-deps authelia "* ]]; then
+    exit 0
+  fi
   passthrough=()
   for arg in "$@"; do
     if [[ "$arg" == "up" || "$arg" == "stop" ]]; then

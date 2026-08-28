@@ -225,6 +225,8 @@ main() {
   for file_path in "${COMPOSE_FILES[@]}"; do
     compose_args+=(-f "$file_path")
   done
+  "${compose_args[@]}" run --rm --no-deps authelia \
+    authelia validate-config --config /config/configuration.yml
   compose_args+=(up -d --wait)
   compose_args+=("${services[@]}")
   "${compose_args[@]}"

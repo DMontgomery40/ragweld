@@ -193,6 +193,10 @@ services:
     labels:
       io.ragweld.managed: "true"
     privileged: true
+    # k3s/kubelet opens /dev/kmsg for logging. A null-backed character device
+    # satisfies that contract without exposing the LXC or Proxmox kernel log.
+    devices:
+      - "/dev/null:/dev/kmsg"
     environment:
       SANDBOX: "1"
       KUBERNETES_API_PORT: "30086"

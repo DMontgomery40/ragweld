@@ -79,6 +79,19 @@ override the conflicting steps below until the steps themselves are rewritten.
   the proposed NFS OOM guard and do not reduce LXC 100 to 20 GiB for that old
   coupling. Keep the approved 24 GiB LXC allocation, then re-check real pve1
   headroom after the full stack starts.
+- **W64 (P1, blocking) — Authelia's OIDC key template is YAML-quoted and cannot
+  parse.** `ragweld.service` fails at `compose up --wait` because
+  `ragweld-authelia-1` crash-loops with `'identity_providers.oidc.jwks[0].key'
+  could not decode to a schema.CryptographicKey: illegal base64 data at input
+  byte 0`. The filter is enabled and the PEM is valid; the bug is in repo source
+  `deploy/proxmox/authelia/configuration.yml:53`, where the template is wrapped
+  in single quotes. `mindent N "|"` is meant to emit a block scalar, so the
+  quotes collapse it to a one-line string. Drop them:
+  `key: {{ secret "/config/oidc-rsa.pem" | mindent 10 "|" | msquote }}`, and fix
+  the contract test at `tests/unit/test_proxmox_deployment_contract.py:864-869`
+  which currently pins the broken string as the expected value. Then add a real
+  `authelia validate-config` test against the pinned image so config that
+  Authelia cannot load fails in CI rather than on the node.
 - **W62 — trim the provider-key allowlist before copying.** Verified on the
   Mac: `OPENROUTER_API_KEY` (len 73, in `infra/litellm.env`) and
   `OPENAI_API_KEY` (len 167, in `.env`) are real and will copy correctly — the
@@ -157,6 +170,13 @@ override the conflicting steps below until the steps themselves are rewritten.
   `dev1 ... gid=<guest-video-gid>`, reboot the LXC, and prove the `ragweld`
   user can read and write both devices. On this guest the verified IDs are
   render `992` and video `44`.
+- **Live Flyte nested-k3s correction — use a container-scoped log sink.** The
+  bundled Flyte sandbox reached a healthy k3s control plane but kubelet exited
+  with `open /dev/kmsg: no such file or directory`. Do **not** pass pve1's real
+  kernel-message device into the privileged LXC. Map `/dev/null:/dev/kmsg` only
+  on the already-privileged Flyte container. The pinned image has been proven
+  live with that mapping: its nested k3s node reached `Ready` while pve1's
+  `/dev/kmsg` remained outside the LXC boundary.
 - **Live SSH correction — restart the socket-activated service.** Debian 13's
   `ssh.socket` owns port 22. A SIGHUP `systemctl reload ssh` passed `sshd -t`
   but then sshd failed to re-bind the systemd-owned socket. Use
@@ -260,18 +280,18 @@ Expected: exit 0 and a new stopped LXC 100 only.
 - [ ] **Step 4: Pass both Intel DRM devices**
 
 ```bash
-ssh -i /Users/davidmontgomery/.ssh/proxmox_portable_backup_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes root@192.168.68.171 'pct set 100 --dev0 path=/dev/dri/renderD128,mode=0660 --dev1 path=/dev/dri/card0,mode=0660; pct config 100'
+ssh -i /Users/davidmontgomery/.ssh/proxmox_portable_backup_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes root@192.168.68.171 'pct set 100 --dev0 path=/dev/dri/renderD128,mode=0660,gid=992 --dev1 path=/dev/dri/card0,mode=0660,gid=44; pct config 100'
 ```
 
-Expected: both exact device entries present; no Plex/media bind mount and no Proxmox socket mount.
+Expected: both exact device entries present; no `/dev/kmsg`, Plex/media bind mount, or Proxmox socket mount. The pinned Debian 13 template uses guest GIDs render `992` and video `44`; verify them before first application start and stop if the image differs.
 
 - [ ] **Step 5: Start and validate LXC resources**
 
 ```bash
-ssh -i /Users/davidmontgomery/.ssh/proxmox_portable_backup_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes root@192.168.68.171 'pct start 100; pct exec 100 -- nproc; pct exec 100 -- free -h; pct exec 100 -- df -h /; pct exec 100 -- ls -l /dev/dri; pct exec 100 -- ip -4 addr show dev eth0'
+ssh -i /Users/davidmontgomery/.ssh/proxmox_portable_backup_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes root@192.168.68.171 'pct start 100; pct exec 100 -- nproc; pct exec 100 -- free -h; pct exec 100 -- df -h /; pct exec 100 -- ls -l /dev/dri; pct exec 100 -- stat -c "%n uid=%u gid=%g mode=%a" /dev/dri/renderD128 /dev/dri/card0; pct exec 100 -- ip -4 addr show dev eth0'
 ```
 
-Expected: 16 CPUs, roughly 24 GiB cap, 300 GiB thin root, both DRM devices, and a LAN IP. Record the IP and reserve it in the router/DHCP system if the current homelab already uses reservations; do not invent a static address inside Debian.
+Expected: 16 CPUs, roughly 24 GiB cap, 300 GiB thin root, both DRM devices with the expected guest group ownership, and a LAN IP. Record the IP and reserve it in the router/DHCP system if the current homelab already uses reservations; do not invent a static address inside Debian.
 
 Keep the bootstrap target absent and push the locked commit into guest root:
 
@@ -505,9 +525,12 @@ and host-mode API while omitting only cloudflared.
 ```bash
 docker compose --project-name ragweld -f /opt/ragweld/docker-compose.yml -f /opt/ragweld/infra/docker-compose.observability.yml -f /opt/ragweld/deploy/proxmox/docker-compose.yml ps
 docker stats --no-stream
+docker inspect ragweld-flyte-1 --format '{{json .HostConfig.Devices}}'
+docker exec ragweld-flyte-1 test -c /dev/kmsg
+docker exec ragweld-flyte-1 kubectl get nodes
 ```
 
-Expected: every required service running/healthy, including Flyte and the full Langfuse dependency group; no vLLM container; total memory remains below the LXC cap with headroom.
+Expected: every required service running/healthy, including Flyte and the full Langfuse dependency group; no vLLM container; total memory remains below the LXC cap with headroom. Flyte's only device mapping is `/dev/null` to `/dev/kmsg`, that path is a character device inside the container, and the nested k3s node reports `Ready`.
 
 - [ ] **Step 3: Verify API liveness and readiness**
 

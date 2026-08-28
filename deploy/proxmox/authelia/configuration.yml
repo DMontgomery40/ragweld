@@ -50,7 +50,7 @@ identity_providers:
       - key_id: langfuse-rs256
         algorithm: RS256
         use: sig
-        key: '{{ secret "/config/oidc-rsa.pem" | mindent 12 "|" | msquote }}'
+        key: {{ secret "/config/oidc-rsa.pem" | mindent 10 "|" | msquote }}
     clients:
       - client_id: langfuse
         client_name: Langfuse
