@@ -15,7 +15,7 @@ Status delta for the reviewed local source candidate after that timestamp:
   awaiting final rerun, commit, push, and pve1 deployment proof; they are not
   still-open implementation tasks on the live instance.
 
-## Execution result addendum — current through 2026-08-28 17:25 MDT
+## Execution result addendum — current through 2026-08-28 17:34 MDT
 
 This addendum supersedes the stale-state statements below. Preserve the body as
 the executed acceptance specification and historical command record. Exact
@@ -27,11 +27,12 @@ evidence is in
   the Mac. No secret or private data was committed.
 - Published/deployed milestones are `0458f505` (capacity/Docling source),
   `3004aad9` (tracked handoff/agent material), `f60c440e` (temporary
-  `dtmont.com` ingress), and `de6085d3` (concurrent docs-autopilot hardening).
-- Mac `main` and `origin/main` matched before this evidence-only update; the Mac
-  had one branch, one worktree, no tracked or ignored state, no Ragweld local
-  services/workers, and no `colima-ragweld` profile/context.
-- LXC100 checkout and `/etc/ragweld/deployment-commit` matched `de6085d3`;
+  `dtmont.com` ingress), `de6085d3` (concurrent docs-autopilot hardening), and
+  `f7ba79bd` (first final execution evidence update).
+- Mac `main` and `origin/main` matched `f7ba79bd` before this evidence-only
+  update; the Mac had one branch, one worktree, no tracked or ignored state, no
+  Ragweld local services/workers, and no `colima-ragweld` profile/context.
+- LXC100 checkout and `/etc/ragweld/deployment-commit` matched `f7ba79bd`;
   `ragweld.service`, API readiness, Caddy, Authelia, and cloudflared were green.
 - Exact source gate before teardown: `1241 passed, 98 skipped, 7 warnings`.
   The later docs-autopilot lane is `25 passed`; standard validators remain
@@ -40,7 +41,10 @@ evidence is in
   merely to change that evidence.
 - The final exact staged source candidate received GPT-5.6 verdict `ACCEPTED`
   with no actionable P1/P2. The user ordered the active paid generation/test
-  and speculative review stopped; no new paid GLM rerun was performed.
+  and speculative review stopped; no new paid GLM rerun was performed. A
+  resumed external Claude session later restarted its generator, reviewer, and
+  full test; all three process groups and their owning session were stopped
+  again before final cleanup.
 - pve1 capacity profile/guard is live: scoped 80/1 profile, monitored thin pool,
   five-minute timer, clean normal state, and warn/dedupe/critical/recovery/probe
   synthetic paths all proved with fake delivery.
@@ -54,8 +58,11 @@ evidence is in
 - All Mac state is under
   `/srv/ragweld/mac-archive/2026-08-28-from-mac`, including initial/delta
   archives, the stopped Colima profile, a late 1.5G regenerated-state delta,
-  and a verified Git bundle for unique detached review commit `0abf6cf6`.
-  Every sidecar passes `sha256sum -c` in place.
+  the ultimate post-restart delta (35 exact ignored paths, 53,483 archive
+  entries, 1,493,829,632 uncompressed bytes, SHA-256
+  `0b0688462f828a0a20175173828f600ee2ab19858bccbc0cfc3cc91f2d3e2ba5`), and a
+  verified Git bundle for unique detached review commit `0abf6cf6`. Every
+  sidecar passes `sha256sum -c` in place.
 - Netlify support has the `ragweld.com` nameserver-change request. Until that
   completes, `https://ragweld.dtmont.com` is live through
   `https://ragweld-auth.dtmont.com`; Google DNS sees A+AAAA, the app redirects

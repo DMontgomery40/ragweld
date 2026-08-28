@@ -30,8 +30,10 @@ published to Git.
   `f60c440ee0eca63387fa5bd14d82d389726322b8`.
 - The concurrent docs-autopilot hardening lane was stopped, verified, and
   published in `de6085d36d25194fa089c63bdd3befd15794509f`.
+- The first final execution evidence update was published in
+  `f7ba79bd1ac844172141f46c917c173ad1b7305e`.
 - Before this evidence-only update, local `main`, `origin/main`, LXC100
-  `/opt/ragweld`, and `/etc/ragweld/deployment-commit` all matched `de6085d3`.
+  `/opt/ragweld`, and `/etc/ragweld/deployment-commit` all matched `f7ba79bd`.
 - The Mac then had one branch (`main`), one worktree, no tracked or ignored
   changes, no Ragweld Vite/backend/docs worker, and no `colima-ragweld` profile
   or Docker context.
@@ -61,8 +63,11 @@ published to Git.
   green; local infrastructure was not recreated to manufacture a full-suite
   green result.
 - The user explicitly ordered the active paid generation/test and speculative
-  review stopped. Those processes were terminated and were not restarted; the
-  earlier paid GLM reviews remain historical evidence, not a new final rerun.
+  review stopped. Those processes were terminated. A resumed external Claude
+  session later restarted its docs generator, read-only reviewer, and full
+  pytest; the owning session and all three process groups were stopped again,
+  their regenerated ignored state was archived on Linux, and no paid GLM rerun
+  was accepted as new final evidence. Earlier paid reviews remain historical.
 
 ### Capacity and recovery
 
@@ -118,14 +123,20 @@ SHA verification; all sidecars now use the deployed basename and pass
 - late regenerated runtime/test delta (37 exact ignored paths, 53,498 archive
   entries, 1.5G extracted):
   `b8c0f4209942c34de46ca7bc2f9f9a80fd5cca0e7646404f409ebd78315f01b2`
+- ultimate post-restart delta (35 exact ignored paths, 53,483 archive entries,
+  1,493,829,632 uncompressed bytes, 370,555,696 compressed bytes):
+  `0b0688462f828a0a20175173828f600ee2ab19858bccbc0cfc3cc91f2d3e2ba5`
 - detached synthetic review worktree bundle:
   `561c8bf5948c16b911c8478d28e3d75db16b6b7c5dc202350187eca21702355c`
   preserving unique commit `0abf6cf6d9075a8b13219db16704daef7d5340f6`
 
 The clean detached review worktree was removed only after the complete-history
-bundle verified on Linux. The owning Claude session, its OpenRouter docs
-generator, its read-only Codex reviewer, and the stale Vite server were stopped
-before the late archive was created.
+bundle verified on Linux. The original owning Claude session, its OpenRouter
+docs generator, its read-only Codex reviewer, and the stale Vite server were
+stopped before the late archive was created. When a resumed Claude session
+later restarted generator/reviewer/test groups, those were stopped too; the
+ultimate delta above was verified and extracted root-private on Linux before
+the exact ignored paths were removed from the Mac again.
 
 ### Public ingress
 
