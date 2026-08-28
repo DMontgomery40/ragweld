@@ -12,6 +12,23 @@ from typing import Any
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
+PROXMOX_PRODUCTION_COMPOSE = "deploy/proxmox/docker-compose.yml"
+PROXMOX_PRODUCTION_CONTRACT_ENV = {
+    "GRAFANA_ADMIN_PASSWORD": "contract-only",
+    "LANGFUSE_OIDC_CLIENT_SECRET": "contract-only",
+    "LANGFUSE_POSTGRES_PASSWORD": "contract-langfuse-postgres",
+    "CLICKHOUSE_PASSWORD": "contract-langfuse-clickhouse",
+    "REDIS_AUTH": "contract-langfuse-redis",
+    "LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID": "contract-langfuse-minio-user",
+    "LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY": "contract-langfuse-minio-password",
+}
+
+
+def _required_compose_env_keys(path: Path) -> set[str]:
+    return {
+        match.group(1)
+        for match in re.finditer(r"\$\{([A-Z0-9_]+):\?set \1\}", path.read_text(encoding="utf-8"))
+    }
 
 
 def _run(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -46,11 +63,21 @@ def _compose_config(*files: str, env: dict[str, str] | None = None) -> dict[str,
     if version.returncode != 0:
         pytest.skip("docker compose plugin is unavailable")
 
+    merged_env: dict[str, str] = {}
+    if PROXMOX_PRODUCTION_COMPOSE in files:
+        required_keys = _required_compose_env_keys(ROOT / PROXMOX_PRODUCTION_COMPOSE)
+        assert required_keys == set(PROXMOX_PRODUCTION_CONTRACT_ENV), (
+            "update PROXMOX_PRODUCTION_CONTRACT_ENV to match required deploy/proxmox/docker-compose.yml keys"
+        )
+        merged_env.update(PROXMOX_PRODUCTION_CONTRACT_ENV)
+    if env:
+        merged_env.update(env)
+
     args = ["docker", "compose", "--project-name", "ragweld"]
     for file_name in files:
         args.extend(["-f", file_name])
     args.extend(["config", "--format", "json"])
-    result = _run(*args, env=env)
+    result = _run(*args, env=merged_env or None)
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
     assert isinstance(payload, dict)
@@ -414,6 +441,10 @@ def test_active_observability_urls_match_namespaced_loopback_ports() -> None:
     assert "http://127.0.0.1:3100" not in _loki_candidate_urls()
 
 
+def test_proxmox_production_contract_env_covers_every_required_overlay_interpolation() -> None:
+    assert _required_compose_env_keys(ROOT / PROXMOX_PRODUCTION_COMPOSE) == set(PROXMOX_PRODUCTION_CONTRACT_ENV)
+
+
 def test_docker_service_allowlists_match_frontend_and_managed_compose_services() -> None:
     from server.api.docker import _DOCKER_SERVICES
 
@@ -433,10 +464,6 @@ def test_docker_service_allowlists_match_frontend_and_managed_compose_services()
         "docker-compose.yml",
         "infra/docker-compose.observability.yml",
         "deploy/proxmox/docker-compose.yml",
-        env={
-            "GRAFANA_ADMIN_PASSWORD": "contract-only",
-            "LANGFUSE_OIDC_CLIENT_SECRET": "contract-only",
-        },
     )
     managed_services_by_name = {
         name: service
