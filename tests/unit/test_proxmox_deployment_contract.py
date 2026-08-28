@@ -1628,7 +1628,8 @@ def test_proxmox_plex_nfs_mount_units_use_hard_automount_contract() -> None:
 
     assert "[Automount]" in automount_source
     assert "Where=/srv/media" in automount_source
-    assert "TimeoutIdleSec=60" in automount_source
+    assert "TimeoutIdleSec=0" in automount_source
+    assert "TimeoutIdleSec=60" not in automount_source
     assert "[Install]" in automount_source
     assert "WantedBy=multi-user.target" in automount_source
     assert combined_source.count("WantedBy=multi-user.target") == 1
