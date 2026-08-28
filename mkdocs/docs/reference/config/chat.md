@@ -26,25 +26,24 @@
 [Config API & workflow](../../configuration.md){ .md-button }
 [Glossary](../../glossary.md){ .md-button }
 
-**Total parameters**: 74
+**Total parameters**: 64
 
 ??? info "Group index"
     - `(root)`
     - `benchmark`
     - `image_gen`
-    - `local_models`
+    - `litellm`
     - `multimodal`
-    - `openrouter`
     - `recall`
     - `recall_gate`
+    - `vllm`
 
 ## `(root)`
 
 | JSON key | Env key(s) | Type | Default | Constraints | Summary |
 |---------|------------|------|---------|-------------|---------|
-| `chat.default_corpus_ids` | — | `list[str]` | `["epstein-files-1"]` | — | Default checked user-facing corpus IDs for new conversations. |
-| `chat.max_tokens` | — | `int` | `4096` | ≥ 100, ≤ 16384 | — |
-| `chat.openai_protocol` | — | `Literal["auto", "responses", "chat_completions"]` | `"auto"` | allowed="auto", "responses", "chat_completions" | Protocol for OpenAI cloud_direct calls. 'auto' routes codex-only models to Responses. |
+| `chat.default_corpus_ids` | — | `list[str]` | `["recall_default"]` | — | Default checked user-facing corpus IDs for new conversations. |
+| `chat.max_tokens` | — | `int` | `512` | ≥ 100, ≤ 16384 | — |
 | `chat.send_shortcut` | — | `str` | `"ctrl+enter"` | — | — |
 | `chat.show_source_dropdown` | — | `bool` | `true` | — | — |
 | `chat.system_prompt_base` | — | `str` | `"You are a helpful assistant."` | — | — |
@@ -82,18 +81,13 @@
 | `chat.image_gen.replicate_model` | — | `str` | `""` | — | — |
 | `chat.image_gen.use_lightning_lora` | — | `bool` | `true` | — | — |
 
-## `local_models`
+## `litellm`
 
 | JSON key | Env key(s) | Type | Default | Constraints | Summary |
 |---------|------------|------|---------|-------------|---------|
-| `chat.local_models.auto_detect` | — | `bool` | `true` | — | — |
-| `chat.local_models.default_chat_model` | — | `str` | `"qwen3:8b"` | — | — |
-| `chat.local_models.default_embedding_model` | — | `str` | `"nomic-embed-text"` | — | — |
-| `chat.local_models.default_vision_model` | — | `str` | `"qwen3-vl:8b"` | — | — |
-| `chat.local_models.fallback_to_cloud` | — | `bool` | `true` | — | — |
-| `chat.local_models.gpu_memory_limit_gb` | — | `float` | `0` | ≥ 0 | — |
-| `chat.local_models.health_check_interval` | — | `int` | `30` | ≥ 10, ≤ 300 | — |
-| `chat.local_models.providers` | — | `list[LocalProviderEntry]` | `"[LocalProviderEntry(name='Ollama', provider_type='ollama', base_url='http://127.0.0.1:11434', enabled=True, priority=0), LocalProviderEntry(name='llama.cpp', provider_type='llamacpp', base_url='http://127.0.0.1:8080', enabled=True, priority=1)]"` | — | — |
+| `chat.litellm.base_url` | — | `str` | `"http://127.0.0.1:54000/v1"` | — | — |
+| `chat.litellm.default_model` | — | `str` | `"ragweld-local"` | — | — |
+| `chat.litellm.enabled` | — | `bool` | `true` | — | — |
 
 ## `multimodal`
 
@@ -105,17 +99,6 @@
 | `chat.multimodal.supported_formats` | — | `list[str]` | `["png", "jpg", "jpeg", "gif", "webp"]` | — | — |
 | `chat.multimodal.vision_enabled` | — | `bool` | `true` | — | — |
 | `chat.multimodal.vision_model_override` | — | `str` | `""` | — | Force model for vision. Empty=use chat model if it supports vision. |
-
-## `openrouter`
-
-| JSON key | Env key(s) | Type | Default | Constraints | Summary |
-|---------|------------|------|---------|-------------|---------|
-| `chat.openrouter.api_key` | — | `str` | `""` | — | — |
-| `chat.openrouter.base_url` | — | `str` | `"https://openrouter.ai/api/v1"` | — | — |
-| `chat.openrouter.default_model` | — | `str` | `"anthropic/claude-sonnet-4"` | — | — |
-| `chat.openrouter.enabled` | — | `bool` | `false` | — | — |
-| `chat.openrouter.fallback_models` | — | `list[str]` | `["openai/gpt-4o", "google/gemini-2.0-flash"]` | — | — |
-| `chat.openrouter.site_name` | — | `str` | `"TriBridRAG"` | — | — |
 
 ## `recall`
 
@@ -130,7 +113,6 @@
 | `chat.recall.graph_enabled` | — | `bool` | `false` | — | Enable Recall graph indexing + retrieval (experimental). |
 | `chat.recall.index_delay_seconds` | — | `int` | `5` | ≥ 1, ≤ 60 | — |
 | `chat.recall.max_history_tokens` | — | `int` | `4096` | ≥ 512, ≤ 32768 | — |
-| `chat.recall.vector_backend` | — | `str` | `"pgvector"` | pattern=^(pgvector\|neo4j)$ | pgvector recommended (already running). |
 
 ## `recall_gate`
 
@@ -151,3 +133,11 @@
 | `chat.recall_gate.skip_when_rag_active` | — | `bool` | `false` | — | Skip Recall when RAG corpora are checked. Assumes user wants code context, not chat history. Default False — let both contribute. |
 | `chat.recall_gate.standard_recency_weight` | — | `float` | `0.3` | ≥ 0.0, ≤ 1.0 | Default recency weight for Recall (recent messages often more relevant). |
 | `chat.recall_gate.standard_top_k` | — | `int` | `5` | ≥ 1, ≤ 20 | top_k for standard Recall queries. |
+
+## `vllm`
+
+| JSON key | Env key(s) | Type | Default | Constraints | Summary |
+|---------|------------|------|---------|-------------|---------|
+| `chat.vllm.base_url` | — | `str` | `"http://127.0.0.1:58080/v1"` | — | — |
+| `chat.vllm.default_model` | — | `str` | `"mlx-community/Qwen3.8-27B-4bit"` | — | — |
+| `chat.vllm.enabled` | — | `bool` | `true` | — | — |

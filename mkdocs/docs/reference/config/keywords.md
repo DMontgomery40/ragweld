@@ -35,7 +35,7 @@
 
 | JSON key | Env key(s) | Type | Default | Constraints | Summary |
 |---------|------------|------|---------|-------------|---------|
-| `keywords.keywords_auto_generate` | `KEYWORDS_AUTO_GENERATE` | `int` | `1` | ≥ 0, ≤ 1 | Auto-generate keywords |
+| `keywords.keywords_auto_generate` | `KEYWORDS_AUTO_GENERATE` | `bool` | `true` | — | Auto-generate keywords |
 | `keywords.keywords_boost` | `KEYWORDS_BOOST` | `float` | `1.3` | ≥ 1.0, ≤ 3.0 | Score boost for keyword matches |
 | `keywords.keywords_max_per_repo` | `KEYWORDS_MAX_PER_REPO` | `int` | `50` | ≥ 10, ≤ 500 | Max discriminative keywords per repo |
 | `keywords.keywords_min_freq` | `KEYWORDS_MIN_FREQ` | `int` | `3` | ≥ 1, ≤ 10 | Min frequency for keyword |

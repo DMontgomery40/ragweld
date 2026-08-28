@@ -35,9 +35,9 @@
 
 | JSON key | Env key(s) | Type | Default | Constraints | Summary |
 |---------|------------|------|---------|-------------|---------|
-| `semantic_cache.bypass_if_images` | `SEMANTIC_CACHE_BYPASS_IF_IMAGES` | `int` | `1` | ≥ 0, ≤ 1 | Bypass chat generation cache when images are attached. |
+| `semantic_cache.bypass_if_images` | `SEMANTIC_CACHE_BYPASS_IF_IMAGES` | `bool` | `true` | — | Bypass chat generation cache when images are attached. |
 | `semantic_cache.chat_history_window` | `SEMANTIC_CACHE_CHAT_HISTORY_WINDOW` | `int` | `6` | ≥ 0, ≤ 50 | Number of prior conversation turns included in chat cache fingerprint. |
-| `semantic_cache.enabled` | `SEMANTIC_CACHE_ENABLED` | `int` | `0` | ≥ 0, ≤ 1 | Enable semantic cache reads/writes (0=off, 1=on). |
+| `semantic_cache.enabled` | `SEMANTIC_CACHE_ENABLED` | `bool` | `false` | — | Enable semantic cache reads/writes. |
 | `semantic_cache.max_entries` | `SEMANTIC_CACHE_MAX_ENTRIES` | `int` | `5000` | ≥ 100, ≤ 500000 | Maximum cache rows to retain per scope/endpoint. |
 | `semantic_cache.max_temperature_for_write` | `SEMANTIC_CACHE_MAX_TEMPERATURE_FOR_WRITE` | `float` | `0.5` | ≥ 0.0, ≤ 2.0 | Skip generation-cache writes when temperature exceeds this value. |
 | `semantic_cache.min_query_chars` | `SEMANTIC_CACHE_MIN_QUERY_CHARS` | `int` | `3` | ≥ 1, ≤ 200 | Minimum query length before cache is eligible. |

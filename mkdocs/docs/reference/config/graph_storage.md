@@ -26,7 +26,7 @@
 [Config API & workflow](../../configuration.md){ .md-button }
 [Glossary](../../glossary.md){ .md-button }
 
-**Total parameters**: 14
+**Total parameters**: 12
 
 ??? info "Group index"
     - `(root)`
@@ -44,10 +44,8 @@
 | `graph_storage.neo4j_database` | `NEO4J_DATABASE` | `str` | `"neo4j"` | — | Neo4j database name |
 | `graph_storage.neo4j_database_mode` | — | `Literal["shared", "per_corpus"]` | `"shared"` | allowed="shared", "per_corpus" | Database isolation mode: 'shared' uses a single Neo4j database (Community-compatible), 'per_corpus' uses a separate Neo4j database per corpus (Enterprise multi-database). |
 | `graph_storage.neo4j_database_prefix` | — | `str` | `"tribrid_"` | — | Prefix for per-corpus Neo4j database names when neo4j_database_mode='per_corpus'. |
-| `graph_storage.neo4j_password` | `NEO4J_PASSWORD` | `str` | `""` | — | Neo4j password (defaults to NEO4J_PASSWORD env var when unset) |
 | `graph_storage.neo4j_uri` | `NEO4J_URI` | `str` | `"bolt://localhost:7687"` | — | Neo4j connection URI (bolt:// or neo4j://) |
 | `graph_storage.neo4j_user` | `NEO4J_USER` | `str` | `"neo4j"` | — | Neo4j username |
-| `graph_storage.neo4j_vector_query_mode` | `NEO4J_VECTOR_QUERY_MODE` | `Literal["auto", "procedure", "search"]` | `"auto"` | allowed="auto", "procedure", "search" | Neo4j chunk-vector query mode. 'auto' prefers runtime-safe defaults and only uses SEARCH where supported. |
 | `graph_storage.relationship_types` | — | `list[str]` | `["calls", "imports", "inherits", "contains", "references"]` | — | Relationship types to extract |
 
 ### Details (glossary)

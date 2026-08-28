@@ -1,6 +1,6 @@
 {
   "currency": "USD",
-  "last_updated": "2026-08-26",
+  "last_updated": "2026-08-27",
   "sources": [
     "https://openai.com/api/pricing/ (2026-02-07)",
     "https://www.anthropic.com/pricing (2026-02-07)",
@@ -10,7 +10,7 @@
     "https://mistral.ai/pricing (2025-11-29)",
     "https://api-docs.deepseek.com/quick_start/pricing (2025-11-29)",
     "https://jina.ai/embeddings/ (2025-11-29)",
-    "https://openrouter.ai/api/v1/models (2026-08-26)"
+    "https://openrouter.ai/api/v1/models (2026-08-27)"
   ],
   "models": [
     {
@@ -1403,8 +1403,8 @@
       ],
       "unit": "1k_tokens",
       "context": 1048576,
-      "input_per_1k": 8.106e-05,
-      "output_per_1k": 0.00016212,
+      "input_per_1k": 7.798e-05,
+      "output_per_1k": 0.00015596,
       "base_url": "https://openrouter.ai/api/v1",
       "display_name": "DeepSeek: DeepSeek V4 Flash 0423",
       "gateway_alias": "deepseek.deepseek-v4-flash",
@@ -1423,8 +1423,8 @@
       ],
       "unit": "1k_tokens",
       "context": 1310720,
-      "input_per_1k": 6e-05,
-      "output_per_1k": 0.00012,
+      "input_per_1k": 5e-05,
+      "output_per_1k": 0.0001,
       "base_url": "https://openrouter.ai/api/v1",
       "display_name": "DeepSeek: DeepSeek V4 Flash 0731",
       "gateway_alias": "deepseek.deepseek-v4-flash-0731",
@@ -2576,6 +2576,26 @@
       "display_name": "Ling-3.0-flash",
       "gateway_alias": "inclusionai.ling-3.0-flash",
       "gateway_upstream": "openrouter/inclusionai/ling-3.0-flash",
+      "supports_vision": false,
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
+    },
+    {
+      "provider": "inclusionai",
+      "family": "ling-3.0-flash-fin:free",
+      "model": "inclusionai/ling-3.0-flash-fin:free",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 262144,
+      "input_per_1k": 0.0,
+      "output_per_1k": 0.0,
+      "base_url": "https://openrouter.ai/api/v1",
+      "display_name": "Ling 3.0 Flash Fin (free)",
+      "gateway_alias": "inclusionai.ling-3.0-flash-fin.free",
+      "gateway_upstream": "openrouter/inclusionai/ling-3.0-flash-fin:free",
       "supports_vision": false,
       "selection_roles": [],
       "selection_status": "catalog_only",
@@ -3872,7 +3892,7 @@
       ],
       "unit": "1k_tokens",
       "context": 262144,
-      "input_per_1k": 0.00067,
+      "input_per_1k": 0.00066,
       "output_per_1k": 0.0034,
       "base_url": "https://openrouter.ai/api/v1",
       "display_name": "MoonshotAI: Kimi K2.7 Code",
@@ -6568,8 +6588,8 @@
       ],
       "unit": "1k_tokens",
       "context": 262144,
-      "input_per_1k": 9e-05,
-      "output_per_1k": 0.00055,
+      "input_per_1k": 8.75e-05,
+      "output_per_1k": 0.00035,
       "base_url": "https://openrouter.ai/api/v1",
       "display_name": "Qwen: Qwen3 235B A22B Instruct 2507",
       "gateway_alias": "qwen.qwen3-235b-a22b-2507",
@@ -7214,8 +7234,8 @@
       ],
       "unit": "1k_tokens",
       "context": 262144,
-      "input_per_1k": 0.00014,
-      "output_per_1k": 0.001,
+      "input_per_1k": 0.0001,
+      "output_per_1k": 0.0009,
       "base_url": "https://openrouter.ai/api/v1",
       "display_name": "Qwen: Qwen3.6 35B A3B",
       "gateway_alias": "qwen.qwen3.6-35b-a3b",
@@ -7385,6 +7405,26 @@
       "display_name": "Qwen: Qwen3.8 27B",
       "gateway_alias": "qwen.qwen3.8-27b",
       "gateway_upstream": "openrouter/qwen/qwen3.8-27b",
+      "supports_vision": true,
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
+    },
+    {
+      "provider": "qwen",
+      "family": "qwen3.8-flash",
+      "model": "qwen/qwen3.8-flash",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 1000000,
+      "input_per_1k": 0.00015,
+      "output_per_1k": 0.00047,
+      "base_url": "https://openrouter.ai/api/v1",
+      "display_name": "Qwen: Qwen3.8 Flash",
+      "gateway_alias": "qwen.qwen3.8-flash",
+      "gateway_upstream": "openrouter/qwen/qwen3.8-flash",
       "supports_vision": true,
       "selection_roles": [],
       "selection_status": "catalog_only",
@@ -7613,26 +7653,6 @@
       "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
     },
     {
-      "provider": "stealth",
-      "family": "ox-alpha",
-      "model": "stealth/ox-alpha",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 1048576,
-      "input_per_1k": 0.0,
-      "output_per_1k": 0.0,
-      "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "Ox Alpha",
-      "gateway_alias": "stealth.ox-alpha",
-      "gateway_upstream": "openrouter/stealth/ox-alpha",
-      "supports_vision": true,
-      "selection_roles": [],
-      "selection_status": "catalog_only",
-      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
-    },
-    {
       "provider": "stepfun",
       "family": "step-3.5-flash",
       "model": "stepfun/step-3.5-flash",
@@ -7761,8 +7781,8 @@
       ],
       "unit": "1k_tokens",
       "context": 262144,
-      "input_per_1k": 0.000132,
-      "output_per_1k": 0.000528,
+      "input_per_1k": 8.25e-05,
+      "output_per_1k": 0.00033,
       "base_url": "https://openrouter.ai/api/v1",
       "display_name": "Tencent: Hy3",
       "gateway_alias": "tencent.hy3",
@@ -8479,8 +8499,8 @@
       ],
       "unit": "1k_tokens",
       "context": 204800,
-      "input_per_1k": 0.0005,
-      "output_per_1k": 0.002,
+      "input_per_1k": 0.00043,
+      "output_per_1k": 0.00175,
       "base_url": "https://openrouter.ai/api/v1",
       "display_name": "Z.ai: GLM 4.6",
       "gateway_alias": "z-ai.glm-4.6",
@@ -8632,26 +8652,6 @@
     },
     {
       "provider": "z-ai",
-      "family": "glm-5.2:batch",
-      "model": "z-ai/glm-5.2:batch",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 1048575,
-      "input_per_1k": 0.0014,
-      "output_per_1k": 0.0044,
-      "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "Z.ai: GLM 5.2 (batch)",
-      "gateway_alias": "z-ai.glm-5.2.batch",
-      "gateway_upstream": "openrouter/z-ai/glm-5.2:batch",
-      "supports_vision": false,
-      "selection_roles": [],
-      "selection_status": "catalog_only",
-      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
-    },
-    {
-      "provider": "z-ai",
       "family": "glm-5.2:free",
       "model": "z-ai/glm-5.2:free",
       "components": [
@@ -8686,6 +8686,26 @@
       "gateway_alias": "z-ai.glm-5.3",
       "gateway_upstream": "openrouter/z-ai/glm-5.3",
       "supports_vision": false,
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
+    },
+    {
+      "provider": "z-ai",
+      "family": "glm-5.3-flash",
+      "model": "z-ai/glm-5.3-flash",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 1310720,
+      "input_per_1k": 7.5e-05,
+      "output_per_1k": 0.00025,
+      "base_url": "https://openrouter.ai/api/v1",
+      "display_name": "Z.ai: GLM 5.3 Flash",
+      "gateway_alias": "z-ai.glm-5.3-flash",
+      "gateway_upstream": "openrouter/z-ai/glm-5.3-flash",
+      "supports_vision": true,
       "selection_roles": [],
       "selection_status": "catalog_only",
       "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."

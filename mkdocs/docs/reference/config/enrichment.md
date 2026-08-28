@@ -35,9 +35,9 @@
 
 | JSON key | Env key(s) | Type | Default | Constraints | Summary |
 |---------|------------|------|---------|-------------|---------|
-| `enrichment.chunk_summaries_enrich_default` | `CHUNK_SUMMARIES_ENRICH_DEFAULT` | `int` | `1` | ≥ 0, ≤ 1 | Enable chunk_summary enrichment by default |
+| `enrichment.chunk_summaries_enrich_default` | `CHUNK_SUMMARIES_ENRICH_DEFAULT` | `bool` | `true` | — | Enable chunk_summary enrichment by default |
 | `enrichment.chunk_summaries_max` | `CHUNK_SUMMARIES_MAX` | `int` | `100` | ≥ 10, ≤ 1000 | Max chunk_summaries to generate |
-| `enrichment.enrich_code_chunks` | `ENRICH_CODE_CHUNKS` | `int` | `1` | ≥ 0, ≤ 1 | Enable chunk enrichment |
+| `enrichment.enrich_code_chunks` | `ENRICH_CODE_CHUNKS` | `bool` | `true` | — | Enable chunk enrichment |
 | `enrichment.enrich_max_chars` | `ENRICH_MAX_CHARS` | `int` | `1000` | ≥ 100, ≤ 5000 | Max chars for enrichment prompt |
 | `enrichment.enrich_min_chars` | `ENRICH_MIN_CHARS` | `int` | `50` | ≥ 10, ≤ 500 | Min chars for enrichment |
 | `enrichment.enrich_timeout` | `ENRICH_TIMEOUT` | `int` | `30` | ≥ 5, ≤ 120 | Enrichment timeout (seconds) |

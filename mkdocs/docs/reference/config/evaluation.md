@@ -26,7 +26,7 @@
 [Config API & workflow](../../configuration.md){ .md-button }
 [Glossary](../../glossary.md){ .md-button }
 
-**Total parameters**: 8
+**Total parameters**: 14
 
 ??? info "Group index"
     - `(root)`
@@ -38,8 +38,14 @@
 | `evaluation.baseline_path` | `BASELINE_PATH` | `str` | `"data/evals/eval_baseline.json"` | — | Baseline results path |
 | `evaluation.eval_dataset_path` | `EVAL_DATASET_PATH` | `str` | `"data/evaluation_dataset.json"` | — | Evaluation dataset path |
 | `evaluation.eval_multi_m` | `EVAL_MULTI_M` | `int` | `10` | ≥ 1, ≤ 20 | Multi-query variants for evaluation |
+| `evaluation.judge_max_tokens` | `EVAL_JUDGE_MAX_TOKENS` | `int` | `4096` | ≥ 256, ≤ 16000 | Output token budget for eval judges: the Ragas judge alias and the Promptfoo llm-rubric grader. Independent of chat.max_tokens because faithfulness statement lists and reasoning-capable aliases need more room than a chat answer; a truncated verdict fails the run closed. |
 | `evaluation.ndcg_at_10_k` | — | `int` | `10` | ≥ 1, ≤ 200 | K used for ndcg_at_10 metric (default 10). |
 | `evaluation.precision_at_5_k` | — | `int` | `5` | ≥ 1, ≤ 200 | K used for precision_at_5 metric (default 5). |
+| `evaluation.promptfoo_grader_model` | `PROMPTFOO_GRADER_MODEL` | `str` | `""` | — | LiteLLM alias used by Promptfoo llm-rubric assertions; empty uses the chat default alias. |
+| `evaluation.ragas_enabled` | `RAGAS_ENABLED` | `bool` | `false` | — | Run Ragas generation-quality scoring (faithfulness, answer relevancy) during eval runs. Each entry is answered through the LiteLLM gateway and judged by the configured judge alias. |
+| `evaluation.ragas_judge_model` | `RAGAS_JUDGE_MODEL` | `str` | `""` | — | LiteLLM alias used as the Ragas judge; empty uses the chat default alias. |
+| `evaluation.ragas_judge_timeout_s` | `RAGAS_JUDGE_TIMEOUT_S` | `int` | `600` | ≥ 30, ≤ 3600 | Per-request timeout for Ragas judge calls through LiteLLM. Local CPU serving needs minutes; a timeout fails the eval run closed rather than skipping scores. |
+| `evaluation.ragas_metrics` | — | `list[str]` | `["faithfulness", "answer_relevancy"]` | — | Ragas metrics to compute per eval entry (faithfulness, answer_relevancy). |
 | `evaluation.recall_at_10_k` | — | `int` | `10` | ≥ 1, ≤ 200 | K used for recall_at_10 metric (default 10). |
 | `evaluation.recall_at_20_k` | — | `int` | `20` | ≥ 1, ≤ 200 | K used for recall_at_20 metric (default 20). |
 | `evaluation.recall_at_5_k` | — | `int` | `5` | ≥ 1, ≤ 200 | K used for recall_at_5 metric (default 5). |

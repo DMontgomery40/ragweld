@@ -26,7 +26,7 @@
 [Config API & workflow](../../configuration.md){ .md-button }
 [Glossary](../../glossary.md){ .md-button }
 
-**Total parameters**: 11
+**Total parameters**: 7
 
 ??? info "Group index"
     - `(root)`
@@ -35,16 +35,12 @@
 
 | JSON key | Env key(s) | Type | Default | Constraints | Summary |
 |---------|------------|------|---------|-------------|---------|
-| `docker.dev_backend_port` | `DEV_BACKEND_PORT` | `int` | `8012` | ≥ 1024, ≤ 65535 | Port for dev backend (Uvicorn) |
-| `docker.dev_frontend_port` | `DEV_FRONTEND_PORT` | `int` | `5173` | ≥ 1024, ≤ 65535 | Port for dev frontend (Vite) |
-| `docker.dev_stack_restart_timeout` | `DEV_STACK_RESTART_TIMEOUT` | `int` | `30` | ≥ 5, ≤ 120 | Timeout for dev stack restart operations (seconds) |
+| `docker.dev_backend_port` | `DEV_BACKEND_PORT` | `int` | `58012` | ≥ 1024, ≤ 65535 | Port for dev backend (Uvicorn) |
+| `docker.dev_frontend_port` | `DEV_FRONTEND_PORT` | `int` | `55173` | ≥ 1024, ≤ 65535 | Port for dev frontend (Vite) |
 | `docker.docker_container_action_timeout` | `DOCKER_CONTAINER_ACTION_TIMEOUT` | `int` | `30` | ≥ 5, ≤ 120 | Timeout for Docker container actions (start/stop/restart) |
 | `docker.docker_container_list_timeout` | `DOCKER_CONTAINER_LIST_TIMEOUT` | `int` | `10` | ≥ 1, ≤ 60 | Timeout for Docker container list (seconds) |
-| `docker.docker_host` | `DOCKER_HOST` | `str` | `""` | — | Docker socket URL (e.g., unix:///var/run/docker.sock). Leave empty for auto-detection. |
-| `docker.docker_infra_down_timeout` | `DOCKER_INFRA_DOWN_TIMEOUT` | `int` | `30` | ≥ 10, ≤ 120 | Timeout for Docker infrastructure down command (seconds) |
-| `docker.docker_infra_up_timeout` | `DOCKER_INFRA_UP_TIMEOUT` | `int` | `60` | ≥ 30, ≤ 300 | Timeout for Docker infrastructure up command (seconds) |
 | `docker.docker_logs_tail` | `DOCKER_LOGS_TAIL` | `int` | `100` | ≥ 10, ≤ 1000 | Default number of log lines to tail from containers |
-| `docker.docker_logs_timestamps` | `DOCKER_LOGS_TIMESTAMPS` | `int` | `1` | ≥ 0, ≤ 1 | Include timestamps in Docker logs (1=yes, 0=no) |
+| `docker.docker_logs_timestamps` | `DOCKER_LOGS_TIMESTAMPS` | `bool` | `true` | — | Include timestamps in Docker logs |
 | `docker.docker_status_timeout` | `DOCKER_STATUS_TIMEOUT` | `int` | `5` | ≥ 1, ≤ 30 | Timeout for Docker status check (seconds) |
 
 ### Details (glossary)
@@ -76,34 +72,6 @@
     - [docker container ls](https://docs.docker.com/reference/cli/docker/container/ls/)
     - [docker ps](https://docs.docker.com/reference/cli/docker/ps/)
     - [Docker contexts](https://docs.docker.com/engine/context/working-with-contexts/)
-
-??? info "`docker.docker_infra_down_timeout` (`DOCKER_INFRA_DOWN_TIMEOUT`) — Infrastructure Down Timeout"
-    **Category**: `infrastructure`
-
-    Controls how long the orchestrator waits for compose shutdown to complete before treating stop as failed. In RAG stacks this protects stateful services such as Postgres and vector stores, which need time to flush write-ahead logs and close files cleanly. If set too low, forced termination can leave partial writes, slower recovery, or integrity checks on restart; if set too high, rollback and local iteration become sluggish. Tune this from measured shutdown duration under heavy ingest and keep headroom for worst-case disk latency.
-
-    **Badges**:
-    - Infrastructure shutdown
-
-    **Links**:
-    - [Docker Compose down](https://docs.docker.com/reference/cli/docker/compose/down/)
-    - [Compose stop_grace_period](https://docs.docker.com/reference/compose-file/services/#stop_grace_period)
-    - [Docker daemon reference](https://docs.docker.com/engine/daemon/)
-    - [Decomposing Docker Container Startup Performance (2026)](https://arxiv.org/abs/2602.15214)
-
-??? info "`docker.docker_infra_up_timeout` (`DOCKER_INFRA_UP_TIMEOUT`) — Infrastructure Up Timeout"
-    **Category**: `infrastructure`
-
-    Defines the maximum wait for infrastructure startup readiness. During first boot or after image updates, pulls, migrations, and service warm-up can dominate startup time in a RAG environment. If the timeout is too short, healthy services may be marked failed before they pass health checks; if too long, real boot failures surface late and slow feedback loops. Set this from observed cold-start timings and revisit it when adding heavy dependencies such as observability or graph services.
-
-    **Badges**:
-    - Infrastructure startup
-
-    **Links**:
-    - [Docker Compose up](https://docs.docker.com/reference/cli/docker/compose/up/)
-    - [Compose healthcheck](https://docs.docker.com/reference/compose-file/services/#healthcheck)
-    - [Docker daemon reference](https://docs.docker.com/engine/daemon/)
-    - [Decomposing Docker Container Startup Performance (2026)](https://arxiv.org/abs/2602.15214)
 
 ??? info "`docker.docker_logs_tail` (`DOCKER_LOGS_TAIL`) — Log Lines to Tail"
     **Category**: `infrastructure`

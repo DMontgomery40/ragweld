@@ -26,7 +26,7 @@
 [Config API & workflow](../../configuration.md){ .md-button }
 [Glossary](../../glossary.md){ .md-button }
 
-**Total parameters**: 17
+**Total parameters**: 26
 
 ??? info "Group index"
     - `(root)`
@@ -35,22 +35,31 @@
 
 | JSON key | Env key(s) | Type | Default | Constraints | Summary |
 |---------|------------|------|---------|-------------|---------|
-| `tracing.alert_include_resolved` | `ALERT_INCLUDE_RESOLVED` | `int` | `1` | ≥ 0, ≤ 1 | Include resolved alerts |
+| `tracing.alert_include_resolved` | `ALERT_INCLUDE_RESOLVED` | `bool` | `true` | — | Include resolved alerts |
 | `tracing.alert_notify_severities` | `ALERT_NOTIFY_SEVERITIES` | `str` | `"critical,warning"` | — | Alert severities to notify |
 | `tracing.alert_webhook_timeout` | `ALERT_WEBHOOK_TIMEOUT` | `int` | `5` | ≥ 1, ≤ 30 | Alert webhook timeout (seconds) |
-| `tracing.langchain_endpoint` | `LANGCHAIN_ENDPOINT` | `str` | `"https://api.smith.langchain.com"` | — | LangChain/LangSmith API endpoint |
-| `tracing.langchain_project` | `LANGCHAIN_PROJECT` | `str` | `"tribrid"` | — | LangChain project name |
-| `tracing.langchain_tracing_v2` | `LANGCHAIN_TRACING_V2` | `int` | `0` | ≥ 0, ≤ 1 | Enable LangChain v2 tracing |
-| `tracing.langtrace_api_host` | `LANGTRACE_API_HOST` | `str` | `""` | — | LangTrace API host |
-| `tracing.langtrace_project_id` | `LANGTRACE_PROJECT_ID` | `str` | `""` | — | LangTrace project ID |
+| `tracing.alertmanager_base_url` | `ALERTMANAGER_BASE_URL` | `str` | `""` | — | Alertmanager base URL used for wake-up path status checks |
+| `tracing.alloy_base_url` | `ALLOY_BASE_URL` | `str` | `""` | — | Grafana Alloy base URL used for collector status checks |
+| `tracing.cost_tracking_enabled` | `COST_TRACKING_ENABLED` | `bool` | `true` | — | Enable online request cost attribution in traces |
+| `tracing.faro_base_url` | `FARO_BASE_URL` | `str` | `""` | — | Grafana Faro or collector base URL used for frontend telemetry status checks |
+| `tracing.langfuse_base_url` | `LANGFUSE_BASE_URL` | `str` | `""` | — | Langfuse base URL |
+| `tracing.langfuse_enabled` | `LANGFUSE_ENABLED` | `bool` | `false` | — | Enable Langfuse generation observations |
+| `tracing.langfuse_project` | `LANGFUSE_PROJECT` | `str` | `"ragweld"` | — | Langfuse project label for traces and generations |
 | `tracing.log_level` | `LOG_LEVEL` | `str` | `"INFO"` | pattern=^(DEBUG\|INFO\|WARNING\|ERROR)$ | Logging level |
-| `tracing.metrics_enabled` | `METRICS_ENABLED` | `int` | `1` | ≥ 0, ≤ 1 | Enable metrics collection |
-| `tracing.prometheus_port` | `PROMETHEUS_PORT` | `int` | `9090` | ≥ 1024, ≤ 65535 | Prometheus metrics port |
-| `tracing.trace_auto_ls` | `TRACE_AUTO_LS` | `int` | `1` | ≥ 0, ≤ 1 | Auto-enable LangSmith tracing |
+| `tracing.metrics_enabled` | `METRICS_ENABLED` | `bool` | `true` | — | Enable metrics collection |
+| `tracing.mimir_base_url` | `MIMIR_BASE_URL` | `str` | `""` | — | Grafana Mimir base URL used for metrics backend status checks |
+| `tracing.opencost_base_url` | `OPENCOST_BASE_URL` | `str` | `""` | — | OpenCost base URL used for cost and capacity status checks |
+| `tracing.otel_export_enabled` | `OTEL_EXPORT_ENABLED` | `bool` | `true` | — | Enable OTLP export for traces |
+| `tracing.otel_service_name` | `OTEL_SERVICE_NAME` | `str` | `"ragweld-api"` | — | Service name used for emitted OTel spans |
+| `tracing.otlp_endpoint` | `OTLP_ENDPOINT` | `str` | `""` | — | OTLP HTTP endpoint for trace export |
+| `tracing.otlp_headers` | `OTLP_HEADERS` | `str` | `""` | — | Comma-separated OTLP headers (k=v) for the exporter |
+| `tracing.prometheus_base_url` | `PROMETHEUS_BASE_URL` | `str` | `""` | — | Prometheus base URL used for the alert-rule feed and operator deep links (Prometheus scrapes and remote-writes to Mimir) |
+| `tracing.pyroscope_base_url` | `PYROSCOPE_BASE_URL` | `str` | `""` | — | Grafana Pyroscope base URL used for profiling status checks |
+| `tracing.tempo_base_url` | `TEMPO_BASE_URL` | `str` | `""` | — | Tempo or Grafana explore base URL used for trace deep links |
 | `tracing.trace_retention` | `TRACE_RETENTION` | `int` | `50` | ≥ 10, ≤ 500 | Number of traces to retain |
 | `tracing.trace_sampling_rate` | `TRACE_SAMPLING_RATE` | `float` | `1.0` | ≥ 0.0, ≤ 1.0 | Trace sampling rate (0.0-1.0) |
-| `tracing.tracing_enabled` | `TRACING_ENABLED` | `int` | `1` | ≥ 0, ≤ 1 | Enable distributed tracing |
-| `tracing.tracing_mode` | `TRACING_MODE` | `str` | `"langsmith"` | pattern=^(langsmith\|local\|none\|off)$ | Tracing backend mode |
+| `tracing.tracing_enabled` | `TRACING_ENABLED` | `bool` | `true` | — | Enable distributed tracing |
+| `tracing.tracing_mode` | `TRACING_MODE` | `str` | `"local"` | pattern=^(local\|otel\|otel_langfuse\|off)$ | Observability mode |
 | `tracing.tribrid_log_path` | `TRIBRID_LOG_PATH` | `str` | `"data/logs/queries.jsonl"` | — | Query log file path |
 
 ### Details (glossary)
@@ -58,7 +67,7 @@
 ??? info "`tracing.alert_include_resolved` (`ALERT_INCLUDE_RESOLVED`) — Alert Include Resolved"
     **Category**: `general`
 
-    `ALERT_INCLUDE_RESOLVED` controls whether the alert pipeline emits a second notification when an incident transitions from firing to resolved. In this stack, keeping it enabled (`1`, default) gives on-call responders explicit closure signals, which helps reconcile incident timelines and downstream ticket automation. Disabling it (`0`) reduces message volume but removes recovery-state visibility, so unresolved-looking alerts can persist in chat channels or incident tools even after the condition clears. Use `1` when you rely on auditability and MTTR measurement, and only disable it if notification fatigue is materially harming response quality.
+    `ALERT_INCLUDE_RESOLVED` controls whether the alert pipeline emits a second notification when an incident transitions from firing to resolved. In this stack, keeping it enabled (default) gives on-call responders explicit closure signals, which helps reconcile incident timelines and downstream ticket automation. Disabling it reduces message volume but removes recovery-state visibility, so unresolved-looking alerts can persist in chat channels or incident tools even after the condition clears. Enable it when you rely on auditability and MTTR measurement, and only disable it if notification fatigue is materially harming response quality.
 
     **Links**:
     - [Root Cause Analysis Method Based on Large Language Models with Residual Connection Structures (arXiv)](https://arxiv.org/abs/2602.08804)
@@ -91,75 +100,83 @@
     - [Stripe Webhooks](https://docs.stripe.com/webhooks)
     - [MDN AbortSignal.timeout](https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal/timeout_static)
 
-??? info "`tracing.langchain_endpoint` (`LANGCHAIN_ENDPOINT`) — LangChain Endpoint"
-    **Category**: `general`
+??? info "`tracing.alertmanager_base_url` (`ALERTMANAGER_BASE_URL`) — Alertmanager Base URL"
+    **Category**: `infrastructure`
 
-    Specifies the base URL where LangSmith trace payloads are sent. This is critical in enterprise setups that route telemetry through regional gateways, private networks, or controlled egress proxies. Endpoint and key must match the same deployment; otherwise you can see authentication failures, timeouts, or fragmented projects across environments. Validate endpoint reachability with health checks before enabling full tracing volume in production. Keeping endpoint configuration explicit per environment reduces surprise during incident response and migration.
+    ALERTMANAGER_BASE_URL points ragweld at the Prometheus Alertmanager that receives alert rules fired by Prometheus (infra/prometheus-rules.yml). The always-firing RagweldWatchdog alert proves the delivery pipe end to end; its absence from Alertmanager means rule evaluation or routing is broken. Readiness is probed at /-/ready.
 
     **Badges**:
-    - Telemetry routing
+    - alerting
 
     **Links**:
-    - [AgentSight: A Monitoring and Risk Mitigation Framework for LLM-based Agents](https://arxiv.org/abs/2508.02736)
-    - [LangSmith Environment Variables](https://docs.langchain.com/langsmith/env-var)
-    - [Trace with LangChain](https://docs.langchain.com/langsmith/trace-with-langchain)
-    - [OpenTelemetry SDK Environment Variables](https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/)
+    - [Alertmanager](https://prometheus.io/docs/alerting/latest/alertmanager/)
 
-??? info "`tracing.langchain_project` (`LANGCHAIN_PROJECT`) — LangChain Project"
+??? info "`tracing.alloy_base_url` (`ALLOY_BASE_URL`) — Alloy Base URL"
+    **Category**: `infrastructure`
+
+    ALLOY_BASE_URL identifies the Grafana Alloy collector instance used in the local or deployed observability path. Ragweld uses it for readiness checks and operator hints, so point it at the collector operators should verify first when OTLP export is enabled.
+
+    **Badges**:
+    - Collector status
+
+    **Links**:
+    - [Grafana Alloy](https://grafana.com/docs/alloy/latest/)
+
+??? info "`tracing.cost_tracking_enabled` (`COST_TRACKING_ENABLED`) — Cost Tracking Enabled"
     **Category**: `general`
 
-    Defines the project namespace under which traces are grouped in LangSmith dashboards and analytics. For RAG systems, stable project naming is essential for comparing retrieval quality, latency, and failure patterns across environments like dev, staging, and prod. Frequent renaming fragments trend history and makes incident forensics harder because related runs are no longer co-located. Use a predictable naming convention that encodes environment and service boundary without excessive granularity. Good project hygiene turns traces into operational evidence rather than isolated run logs.
+    COST_TRACKING_ENABLED turns on best-effort online request cost attribution in the workbench trace path. When enabled, ragweld prefers provider or gateway cost truth and falls back to catalog-derived estimates when only token counts are available. Keep it on when operators need to compare quality, latency, and spend together during debugging or tuning.
+
+    **Badges**:
+    - Cost visibility
+
+    **Links**:
+    - [OpenTelemetry Traces](https://opentelemetry.io/docs/concepts/signals/traces/)
+
+??? info "`tracing.faro_base_url` (`FARO_BASE_URL`) — Faro Base URL"
+    **Category**: `infrastructure`
+
+    FARO_BASE_URL is the frontend RUM collector endpoint (the Alloy faro.receiver /collect URL). When set, the workbench initializes the Faro Web SDK on boot and ships browser errors, web vitals, and session events; Alloy labels them service_name=ragweld-web and forwards logs to Loki. The status probe treats an HTTP 405/415 to GET as listener-present because the intake is POST-only.
+
+    **Badges**:
+    - RUM
+
+    **Links**:
+    - [Grafana Faro](https://grafana.com/oss/faro/)
+
+??? info "`tracing.langfuse_base_url` (`LANGFUSE_BASE_URL`) — Langfuse Base URL"
+    **Category**: `infrastructure`
+
+    LANGFUSE_BASE_URL points ragweld at the Langfuse deployment used for generation-level observability. Set it to your self-hosted or managed Langfuse instance so the workbench can deep-link from a request trace into prompt and generation drilldown. If this URL is wrong or missing, Langfuse mode should be treated as not ready.
+
+    **Badges**:
+    - LLM tracing
+
+    **Links**:
+    - [Langfuse Self-Hosting](https://langfuse.com/docs/deployment/self-host)
+
+??? info "`tracing.langfuse_enabled` (`LANGFUSE_ENABLED`) — Langfuse Enabled"
+    **Category**: `general`
+
+    LANGFUSE_ENABLED controls whether ragweld enriches generation spans with Langfuse-native prompt, usage, and cost metadata. Enable it when operators need prompt/generation drilldown in addition to raw OpenTelemetry traces. Keep it off if you want pure OTel export without external LLM-native observation.
+
+    **Badges**:
+    - LLM observability
+
+    **Links**:
+    - [Langfuse Documentation](https://langfuse.com/docs)
+    - [OpenTelemetry Traces](https://opentelemetry.io/docs/concepts/signals/traces/)
+
+??? info "`tracing.langfuse_project` (`LANGFUSE_PROJECT`) — Langfuse Project"
+    **Category**: `general`
+
+    LANGFUSE_PROJECT labels the generation traces emitted into Langfuse. Use a stable environment-aware name so operators can compare prompt, cost, and failure patterns without fragmenting trace history across arbitrary project names.
 
     **Badges**:
     - Namespace hygiene
 
     **Links**:
-    - [RAGVUE: RAG Validation and Unified Evaluation](https://arxiv.org/abs/2601.04196)
-    - [LangSmith Observability](https://docs.langchain.com/langsmith/observability)
-    - [LangSmith Evaluation Concepts](https://docs.langchain.com/langsmith/evaluation-concepts)
-    - [LangSmith Documentation](https://docs.langchain.com/langsmith)
-
-??? info "`tracing.langchain_tracing_v2` (`LANGCHAIN_TRACING_V2`) — LangChain Tracing"
-    **Category**: `general`
-
-    Enables the modern LangSmith tracing path that captures structured run trees for model calls, tools, retrievers, and chain steps. In RAG pipelines this visibility is essential for understanding where latency and quality degrade, especially when retrieval and generation are orchestrated through multiple components. Turning tracing on without controls can add overhead, so production setups often apply sampling and metadata policies. Before exporting traces externally, ensure prompt and document payload redaction aligns with data governance requirements. Treat this switch as operational instrumentation, not just a debugging toggle.
-
-    **Badges**:
-    - Tracing pipeline
-
-    **Links**:
-    - [AgentSight: A Monitoring and Risk Mitigation Framework for LLM-based Agents](https://arxiv.org/abs/2508.02736)
-    - [Trace with LangChain](https://docs.langchain.com/langsmith/trace-with-langchain)
-    - [LangSmith Observability](https://docs.langchain.com/langsmith/observability)
-    - [OpenTelemetry Traces](https://opentelemetry.io/docs/concepts/signals/traces/)
-
-??? info "`tracing.langtrace_api_host` (`LANGTRACE_API_HOST`) — LangTrace API Host"
-    **Category**: `infrastructure`
-
-    Base endpoint for Langtrace ingestion and control APIs. This setting determines where traces from retrieval, reranking, and generation are delivered, so it effectively controls data residency, network path, and tenant routing for observability. Use an explicit host per environment and verify protocol, TLS, and region alignment before enabling high-volume tracing, especially when moving between cloud and self-hosted collectors. Host/key/project mismatches are a common cause of silent trace loss, so validate this alongside credentials during rollout.
-
-    **Badges**:
-    - Trace routing
-
-    **Links**:
-    - [AgentSight: AI Agent Observability (arXiv)](https://arxiv.org/abs/2508.02736)
-    - [Langtrace Documentation](https://docs.langtrace.ai/)
-    - [Langtrace OTEL Configuration](https://docs.langtrace.ai/supported-integrations/otel-support/otel-configuration)
-    - [OpenTelemetry Traces](https://opentelemetry.io/docs/concepts/signals/traces/)
-
-??? info "`tracing.langtrace_project_id` (`LANGTRACE_PROJECT_ID`) — LangTrace Project ID"
-    **Category**: `general`
-
-    Logical project namespace used by Langtrace to partition telemetry from different applications or environments. In practice, it is the boundary that keeps retrieval experiments, reranker tuning runs, and production traffic from mixing in the same dashboard and skewing metrics. Assign stable project IDs per environment and per major product surface so trace analytics remain comparable over time and access controls stay clean. If this is mis-set, traces may appear to vanish when they are actually being written to a different project bucket.
-
-    **Badges**:
-    - Project scoping
-
-    **Links**:
-    - [AgentSight: AI Agent Observability (arXiv)](https://arxiv.org/abs/2508.02736)
-    - [Langtrace Documentation](https://docs.langtrace.ai/)
-    - [Langtrace Integrations Overview](https://docs.langtrace.ai/supported-integrations/overview)
-    - [OpenTelemetry Traces](https://opentelemetry.io/docs/concepts/signals/traces/)
+    - [Langfuse Documentation](https://langfuse.com/docs)
 
 ??? info "`tracing.log_level` (`LOG_LEVEL`) — Log Level"
     **Category**: `general`
@@ -183,27 +200,92 @@
     - [OpenTelemetry Metrics API Spec](https://opentelemetry.io/docs/specs/otel/metrics/api/)
     - [Grafana Alerting Documentation](https://grafana.com/docs/grafana/latest/alerting/)
 
-??? info "`tracing.prometheus_port` (`PROMETHEUS_PORT`) — Prometheus Port"
+??? info "`tracing.mimir_base_url` (`MIMIR_BASE_URL`) — Mimir Base URL"
     **Category**: `infrastructure`
 
-    Port used to expose the metrics endpoint that Prometheus scrapes (typically `/metrics`). If this value is wrong, observability breaks quietly: the application can be healthy while dashboards, alerts, and SLO calculations go blind. Configure it together with scrape jobs, network policy, and service discovery labels so monitoring remains consistent across environments. In production, validate this by checking target health in Prometheus and ensuring metric cardinality and scrape intervals match system load.
+    MIMIR_BASE_URL points ragweld at the Grafana Mimir deployment that keeps long-range metrics. Prometheus forwards every sample it ingests to Mimir over remote write, so Mimir answers PromQL for retention windows Prometheus itself no longer holds. Readiness is probed at /ready; when the URL is empty the component reports disabled, never healthy.
+
+    **Badges**:
+    - metrics
 
     **Links**:
-    - [PromAssistant: Prompting for Time-Series Monitoring with PromQL (arXiv 2025)](https://arxiv.org/abs/2503.03114)
-    - [Prometheus Configuration Reference](https://prometheus.io/docs/prometheus/latest/configuration/configuration/)
-    - [Prometheus Exposition Formats](https://prometheus.io/docs/instrumenting/exposition_formats/)
-    - [Prometheus Querying Basics](https://prometheus.io/docs/prometheus/latest/querying/basics/)
+    - [Grafana Mimir](https://grafana.com/oss/mimir/)
 
-??? info "`tracing.trace_auto_ls` (`TRACE_AUTO_LS`) — Auto-open LangSmith"
+??? info "`tracing.otel_export_enabled` (`OTEL_EXPORT_ENABLED`) — OTel Export Enabled"
     **Category**: `general`
 
-    TRACE_AUTO_LS controls whether the UI should automatically open a LangSmith run view after request completion. It does not change retrieval quality directly, but it changes debugging speed by reducing the friction between an anomalous response and its trace evidence. Keep it enabled in active tuning sessions where fast trace inspection matters, and disable it in high-throughput workflows where constant context switching is distracting. If this flag is enabled while external tracing is disabled, the expected behavior should degrade gracefully to local trace views rather than broken deep-links.
+    OTEL_EXPORT_ENABLED turns canonical OpenTelemetry export on or off for live request traces. When enabled alongside a valid OTLP endpoint, ragweld emits correlated spans that can be inspected outside the local workbench buffer. Keep this enabled for shared environments where operators need cross-service trace continuity, and disable it only when you intentionally want local-only observability.
+
+    **Badges**:
+    - Observability
 
     **Links**:
-    - [AgentTrace: Comprehensive Tracing for AI Agents (arXiv 2026)](https://arxiv.org/abs/2602.10133)
-    - [LangSmith Observability Quickstart](https://docs.langchain.com/langsmith/observability-quickstart)
-    - [LangSmith Environment Variables](https://docs.langchain.com/langsmith/env-var)
-    - [LangSmith Trace with OpenTelemetry](https://docs.langchain.com/langsmith/trace-with-opentelemetry)
+    - [OpenTelemetry Exporters](https://opentelemetry.io/docs/concepts/signals/traces/#exporters)
+    - [OTLP Exporter Configuration](https://opentelemetry.io/docs/languages/sdk-configuration/otlp-exporter/)
+
+??? info "`tracing.otel_service_name` (`OTEL_SERVICE_NAME`) — OTel Service Name"
+    **Category**: `general`
+
+    OTEL_SERVICE_NAME sets the service identity attached to emitted spans. Stable service naming makes Tempo searches, Grafana dashboards, and cross-service correlation reliable across environments. Treat this as part of your observability contract, not as an arbitrary label.
+
+    **Badges**:
+    - Trace identity
+
+    **Links**:
+    - [OpenTelemetry Resources](https://opentelemetry.io/docs/concepts/resources/)
+
+??? info "`tracing.otlp_endpoint` (`OTLP_ENDPOINT`) — OTLP Endpoint"
+    **Category**: `infrastructure`
+
+    OTLP_ENDPOINT is the HTTP destination used for canonical trace export from the ragweld API. Point it at Grafana Alloy or another collector that can forward traces into Tempo and the rest of your observability fabric. If this value is blank while OTel export mode is enabled, traces stay local and operators lose end-to-end external drilldown.
+
+    **Badges**:
+    - Trace routing
+
+    **Links**:
+    - [OTLP Specification](https://opentelemetry.io/docs/specs/otlp/)
+    - [Grafana Alloy](https://grafana.com/docs/alloy/latest/)
+
+??? info "`tracing.otlp_headers` (`OTLP_HEADERS`) — OTLP Headers"
+    **Category**: `general`
+
+    OTLP_HEADERS carries any required authentication or tenant-routing headers for the OTLP exporter. Use it when the collector path sits behind auth or multi-tenant gateways, and keep the values consistent with the endpoint you configured. Header mismatches are a common cause of silent export failures.
+
+    **Badges**:
+    - Transport auth
+
+    **Links**:
+    - [OTLP Exporter Configuration](https://opentelemetry.io/docs/languages/sdk-configuration/otlp-exporter/)
+
+??? info "`tracing.prometheus_base_url` (`PROMETHEUS_BASE_URL`) — Prometheus Base URL"
+    **Category**: `infrastructure`
+
+    PROMETHEUS_BASE_URL points ragweld at the Prometheus server that scrapes the API, gateway, local model and exporters and forwards every sample to Mimir over remote write. Prometheus also evaluates infra/prometheus-rules.yml, so this URL is where the Monitoring surface reads the live alert rules (state, severity, expression, for-duration) and where the Open Prometheus link lands. When the URL is empty the alert-rule feed reports unconfigured instead of showing an empty rule list.
+
+    **Links**:
+    - [Prometheus alerting rules](https://prometheus.io/docs/prometheus/latest/configuration/alerting_rules/)
+
+??? info "`tracing.pyroscope_base_url` (`PYROSCOPE_BASE_URL`) — Pyroscope Base URL"
+    **Category**: `infrastructure`
+
+    PYROSCOPE_BASE_URL points ragweld at the Grafana Pyroscope server used for continuous profiling. When set, the host API attaches the Pyroscope agent at startup and pushes ragweld-api CPU profiles; the component status reports both server readiness (/ready) and the truthful host-agent state. Empty means profiling is off and the component reports disabled.
+
+    **Badges**:
+    - profiling
+
+    **Links**:
+    - [Grafana Pyroscope](https://grafana.com/oss/pyroscope/)
+
+??? info "`tracing.tempo_base_url` (`TEMPO_BASE_URL`) — Tempo Base URL"
+    **Category**: `infrastructure`
+
+    TEMPO_BASE_URL is the trace lookup base used for deep-linking canonical request traces into Tempo or Grafana Explore. Set it to a URL operators can actually open from the workbench so trace ids become actionable drilldown links instead of inert metadata.
+
+    **Badges**:
+    - Trace drilldown
+
+    **Links**:
+    - [Grafana Tempo Documentation](https://grafana.com/docs/tempo/latest/)
 
 ??? info "`tracing.trace_retention` (`TRACE_RETENTION`) — Trace Retention"
     **Category**: `general`
@@ -214,7 +296,6 @@
     - [GraphTracer: Tracing Dynamic Dataflow in Agentic AI Systems (arXiv 2025)](https://arxiv.org/abs/2510.10581)
     - [Elasticsearch Index Lifecycle Management (ILM)](https://www.elastic.co/guide/en/elasticsearch/reference/current/index-lifecycle-management.html)
     - [OpenSearch Index State Management (ISM)](https://docs.opensearch.org/latest/im-plugin/ism/index/)
-    - [LangSmith Data Purging and Compliance](https://docs.langchain.com/langsmith/data-purging-compliance)
 
 ??? info "`tracing.trace_sampling_rate` (`TRACE_SAMPLING_RATE`) — Trace Sampling Rate"
     **Category**: `general`
@@ -229,7 +310,6 @@
     - [AgentTrace: Comprehensive Tracing for AI Agents (arXiv 2026)](https://arxiv.org/abs/2602.10133)
     - [OpenTelemetry Trace SDK (samplers and processors)](https://opentelemetry.io/docs/specs/otel/trace/sdk/)
     - [OpenTelemetry Trace API](https://opentelemetry.io/docs/specs/otel/trace/api/)
-    - [LangSmith Trace with OpenTelemetry](https://docs.langchain.com/langsmith/trace-with-opentelemetry)
 
 ??? info "`tracing.tracing_enabled` (`TRACING_ENABLED`) — Tracing Enabled"
     **Category**: `general`
@@ -240,18 +320,16 @@
     - [AgentTrace: Comprehensive Tracing for AI Agents (arXiv 2026)](https://arxiv.org/abs/2602.10133)
     - [OpenTelemetry Trace API](https://opentelemetry.io/docs/specs/otel/trace/api/)
     - [OpenTelemetry Trace SDK](https://opentelemetry.io/docs/specs/otel/trace/sdk/)
-    - [LangSmith Observability Concepts](https://docs.langchain.com/langsmith/observability-concepts)
 
 ??? info "`tracing.tracing_mode` (`TRACING_MODE`) — Tracing Mode"
     **Category**: `general`
 
-    TRACING_MODE selects the trace backend behavior (for example local-only, external export, or disabled pathways in mixed environments). This mode determines where spans are emitted, which metadata is attached, and how operators inspect runs during incident triage. Choose a mode that matches deployment stage: local views for rapid iteration, full OpenTelemetry export for shared production observability, and controlled fallback modes for constrained environments. Ensure mode changes are tested with synthetic requests so trace continuity does not break across upgrades.
+    TRACING_MODE selects how request traces are handled in ragweld: local workbench buffering, canonical OpenTelemetry export, OpenTelemetry plus Langfuse generation observability, or fully off. This mode determines which headers and deep links appear in the UI, where spans are emitted, and whether operators can correlate a live request across FastAPI, retrieval, provider routing, and external observability backends. Keep mode changes explicit and test them with live requests so trace continuity, cost attribution, and drilldown links stay trustworthy across environments.
 
     **Links**:
     - [AgentTrace: Comprehensive Tracing for AI Agents (arXiv 2026)](https://arxiv.org/abs/2602.10133)
-    - [LangSmith Trace with OpenTelemetry](https://docs.langchain.com/langsmith/trace-with-opentelemetry)
     - [OpenTelemetry Trace SDK](https://opentelemetry.io/docs/specs/otel/trace/sdk/)
-    - [LangSmith Observability Concepts](https://docs.langchain.com/langsmith/observability-concepts)
+    - [Grafana Tempo Documentation](https://grafana.com/docs/tempo/latest/)
 
 ??? info "`tracing.tribrid_log_path` (`TRIBRID_LOG_PATH`) — Reranker Log Path"
     **Category**: `general`

@@ -39,8 +39,8 @@
 | `fusion.method` | `FUSION_METHOD` | `Literal["rrf", "weighted"]` | `"rrf"` | allowed="rrf", "weighted" | Fusion method: 'rrf' (Reciprocal Rank Fusion) or 'weighted' (score-based) |
 | `fusion.normalize_scores` | `FUSION_NORMALIZE_SCORES` | `bool` | `true` | — | Normalize scores to [0,1] before fusion |
 | `fusion.rrf_k` | `FUSION_RRF_K` | `int` | `60` | ≥ 1, ≤ 200 | RRF smoothing constant (higher = more weight to top ranks) |
-| `fusion.sparse_weight` | `FUSION_SPARSE_WEIGHT` | `float` | `0.3` | ≥ 0.0, ≤ 1.0 | Weight for sparse BM25/FTS search results |
-| `fusion.vector_weight` | `FUSION_VECTOR_WEIGHT` | `float` | `0.4` | ≥ 0.0, ≤ 1.0 | Weight for vector search results (pgvector) |
+| `fusion.sparse_weight` | `FUSION_SPARSE_WEIGHT` | `float` | `0.3` | ≥ 0.0, ≤ 1.0 | Weight for sparse (Qdrant/bm25) search results |
+| `fusion.vector_weight` | `FUSION_VECTOR_WEIGHT` | `float` | `0.4` | ≥ 0.0, ≤ 1.0 | Weight for vector search results (Qdrant dense) |
 
 ### Details (glossary)
 

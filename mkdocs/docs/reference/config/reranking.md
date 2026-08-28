@@ -36,15 +36,15 @@
 | JSON key | Env key(s) | Type | Default | Constraints | Summary |
 |---------|------------|------|---------|-------------|---------|
 | `reranking.rerank_input_snippet_chars` | `RERANK_INPUT_SNIPPET_CHARS` | `int` | `700` | ≥ 200, ≤ 2000 | Snippet chars for reranking input |
-| `reranking.reranker_cloud_model` | `RERANKER_CLOUD_MODEL` | `str` | `"rerank-v3.5"` | — | Cloud reranker model name when mode=cloud (runtime-selectable today: Cohere models). |
-| `reranking.reranker_cloud_provider` | `RERANKER_CLOUD_PROVIDER` | `str` | `"cohere"` | — | Cloud reranker provider when mode=cloud. Runtime-selectable today: cohere. |
+| `reranking.reranker_cloud_model` | `RERANKER_CLOUD_MODEL` | `str` | `"openai.gpt-4.1-nano"` | — | Cloud reranker model when mode=cloud: a LiteLLM gateway alias for provider 'litellm' (a cheap non-reasoning instruct model is ideal), or a Cohere rerank model id for provider 'cohere'. |
+| `reranking.reranker_cloud_provider` | `RERANKER_CLOUD_PROVIDER` | `str` | `"litellm"` | pattern=^(litellm\|cohere)$ | Cloud reranker provider when mode=cloud: 'litellm' scores candidates listwise through a LiteLLM gateway alias (no local model, no extra credential); 'cohere' calls the Cohere rerank API (COHERE_API_KEY). |
 | `reranking.reranker_cloud_top_n` | `RERANKER_CLOUD_TOP_N` | `int` | `50` | ≥ 1, ≤ 200 | Number of candidates to rerank (cloud mode) |
-| `reranking.reranker_mode` | `RERANKER_MODE` | `str` | `"none"` | pattern=^(cloud\|local\|learning\|none)$ | Reranker mode: 'cloud' (Cohere/Voyage/Jina API), 'learning' (MLX Qwen3 LoRA learning reranker), 'none' (disabled). Legacy values 'local'/'hf' normalize to 'learning'. |
+| `reranking.reranker_mode` | `RERANKER_MODE` | `str` | `"none"` | pattern=^(cloud\|learning\|none)$ | Reranker mode: 'cloud' (LiteLLM gateway alias or Cohere API), 'learning' (MLX Qwen3 LoRA learning reranker), 'none' (disabled). Stale values such as 'local'/'hf' fail validation and must be migrated. |
 | `reranking.reranker_timeout` | `RERANKER_TIMEOUT` | `int` | `10` | ≥ 5, ≤ 60 | Reranker API timeout (seconds) |
 | `reranking.tribrid_reranker_alpha` | `TRIBRID_RERANKER_ALPHA` | `float` | `0.7` | ≥ 0.0, ≤ 1.0 | Blend weight for reranker scores |
 | `reranking.tribrid_reranker_batch` | `TRIBRID_RERANKER_BATCH` | `int` | `16` | ≥ 1, ≤ 128 | Reranker batch size |
 | `reranking.tribrid_reranker_maxlen` | `TRIBRID_RERANKER_MAXLEN` | `int` | `512` | ≥ 128, ≤ 2048 | Max token length for reranker |
-| `reranking.tribrid_reranker_reload_on_change` | `TRIBRID_RERANKER_RELOAD_ON_CHANGE` | `int` | `0` | ≥ 0, ≤ 1 | Hot-reload on model change |
+| `reranking.tribrid_reranker_reload_on_change` | `TRIBRID_RERANKER_RELOAD_ON_CHANGE` | `bool` | `false` | — | Hot-reload on model change |
 | `reranking.tribrid_reranker_reload_period_sec` | `TRIBRID_RERANKER_RELOAD_PERIOD_SEC` | `int` | `60` | ≥ 10, ≤ 600 | Reload check period (seconds) |
 | `reranking.tribrid_reranker_topn` | `TRIBRID_RERANKER_TOPN` | `int` | `50` | ≥ 10, ≤ 200 | Number of candidates to rerank (learning mode) |
 
@@ -68,7 +68,7 @@
 ??? info "`reranking.reranker_cloud_model` (`RERANKER_CLOUD_MODEL`) — Cloud Model"
     **Category**: `reranking`
 
-    Specifies the provider model ID used for cloud reranking, such as a Cohere, Voyage, or Jina reranker family variant. This parameter directly controls tradeoffs between multilingual support, context length handling, pricing, and latency. Model IDs are provider-scoped, so the same string is not portable across providers; keep explicit provider-model pairing in configuration and tests. When changing models, re-baseline ranking metrics and failure behavior because score distributions and calibration can shift materially even when APIs look identical.
+    The model the cloud reranker calls: a LiteLLM gateway alias for provider `litellm` (a cheap non-reasoning instruct model such as openai.gpt-4.1-nano keeps the listwise scoring fast and deterministic), or a Cohere rerank model id for provider `cohere`. This parameter directly controls the quality/latency/cost tradeoff of the rerank stage; the scores it returns are min-max normalized and blended with the fusion score by the reranker alpha.
 
     **Badges**:
     - Provider-scoped
@@ -82,7 +82,7 @@
 ??? info "`reranking.reranker_cloud_provider` (`RERANKER_CLOUD_PROVIDER`) — Cloud Rerank Provider"
     **Category**: `reranking`
 
-    Determines which external vendor handles reranking when cloud mode is enabled. Provider choice affects auth, rate limits, billing units, token limits, and model availability, so swapping providers is a behavior change, not just a credential change. Keep provider-specific defaults explicit (timeouts, top-N caps, retry policy) and validate with provider-specific regression queries. For production stability, monitor provider error classes separately so fallback rules can distinguish auth/config issues from transient throttling.
+    Determines which remote service scores candidates when reranker mode is cloud. `litellm` (default) sends the query and the top-N candidate snippets in one request to a LiteLLM gateway alias and reads back a JSON array of 0-10 relevance scores in candidate order; it reuses the gateway credential, loads no local model, and is billed at the alias' token prices. `cohere` calls the Cohere rerank API with COHERE_API_KEY. Provider choice affects auth, rate limits, billing units and latency; a provider that cannot run (no gateway, unknown alias, missing key) is reported as a skipped rerank, never faked.
 
     **Badges**:
     - Requires API key
@@ -111,7 +111,7 @@
 ??? info "`reranking.reranker_mode` (`RERANKER_MODE`) — Reranker Mode"
     **Category**: `reranking`
 
-    Global switch for reranking behavior, typically `none`, `learning`, or `cloud`. Use `none` for lowest latency baselines, `learning` for locally trainable behavior, and `cloud` for managed cross-encoder quality with external dependencies. Because this mode changes the scoring path after retrieval, it can change user-visible answers even when retrieval is identical. Lock this setting per environment and benchmark each mode against shared evaluation sets before promoting to production.
+    Global switch for reranking behavior: `none` passes retrieval order through, `cloud` rescores the top-N candidates through a remote service (the LiteLLM gateway alias or Cohere), and `learning` uses the locally trained MLX Qwen3 LoRA reranker. Use `none` for lowest-latency baselines and `cloud` when you want a stronger ordering without loading a model on the host; every search logs whether the rerank was applied, skipped (with the reason) or failed.
 
     **Badges**:
     - Controls reranking behavior
