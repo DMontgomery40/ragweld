@@ -82,7 +82,7 @@ unit; good catch, I had skipped it as harmless).
   renderer sets the callback URL and that `start.sh --check` echoes the
   `SERVER_HOST` bind.
 
-### W4 `OPEN` — Rollout plan violates bootstrap's "empty root" precondition
+### W4 `FIXED dc42075a` (rollout Task 2 Step 5 / Task 3 Steps 4-5 rewritten: `/root` staging, `test ! -e /etc/ragweld` guard, `mv` + `chown`/`chmod` after bootstrap; GLM P1-2 confirmed the corrections block alone was not enough) — Rollout plan violates bootstrap's "empty root" precondition
 
 - Where: `deploy/proxmox/bootstrap-secrets.sh`
   (`ensure_target_root_is_uninitialized`) vs
@@ -100,7 +100,7 @@ unit; good catch, I had skipped it as harmless).
   `0600`), or bootstrap tolerates a pre-existing root containing only an
   allowlist of non-secret files. Pick one and test it.
 
-### W5 `OPEN` — cloudflared credential filename mismatch
+### W5 `FIXED dc42075a` (rollout Task 5 resolves the tunnel id via `tunnel list --output json`, copies `<UUID>.json` to `credentials.json`, container path in `config.yml`; verify live at rollout Task 5) — cloudflared credential filename mismatch
 
 - Where: `deploy/proxmox/start-runtime.sh` (`REQUIRED_TUNNEL_FILES` =
   `cloudflared/config.yml`, `cloudflared/credentials.json`) vs rollout Task 5
@@ -112,7 +112,7 @@ unit; good catch, I had skipped it as harmless).
   reads the `credentials-file:` line from `config.yml`). Add the container
   path requirement to the rollout text.
 
-### W6 `FIXED e2a2b9da` — `lsof` is required and never installed
+### W6 `FIXED e2a2b9da + dc42075a` (`lsof` preflight plus rollout apt line; GLM P2-1) — `lsof` is required and never installed
 
 - Where: `start.sh:357` / `stop.sh` (`require_process_inspector`), rollout
   Task 3 Step 1 apt list.
@@ -301,7 +301,7 @@ unit; good catch, I had skipped it as harmless).
   are discovered from the overlay, not hand-listed, so the next `:?` addition
   cannot desynchronize two tests.
 
-### W19 `ADOPTED (Task 7 brief 04:24; closes when the files exist)` — the paid GLM adversarial review has no durable, findable output
+### W19 `ADOPTED; first run failed — see W35` — the paid GLM adversarial review has no durable, findable output
 
 - `glm_review_agent.py` writes `--report`/`--trace` wherever the caller
   points them; nothing has been written yet (the reviews so far were subagent
@@ -449,7 +449,7 @@ unit; good catch, I had skipped it as harmless).
   Add the resolved API base URL to the Playwright report header so a lane
   swap is visible in the evidence, not only in prose.
 
-### W33 `NOTE` (independent browser observation; controller has not reproduced it) — intermittent Admin/Basic React update loop
+### W33 `FIXED 90c621d9` (reproduced as scoped readiness 500, not a React loop; real de-indexing-corpus regression plus Admin mobile/browser proof) — intermittent Admin/Basic React update loop
 
 - During the independent W31 browser review, the Admin/Basic page
   intermittently emitted repeated `Maximum update depth exceeded` console
@@ -459,6 +459,99 @@ unit; good catch, I had skipped it as harmless).
 - Preserve this for the Task 7 internal and GLM reviewers. Do not fold an
   unproven fix into W31. If reproducible, route it to the existing frontend
   findings plan with the console trace and exact state transition that loops.
+- David, 06:55: agreed with `90c621d9` — the degraded readiness branches omitted `configured`/`reachable`, the partial `IntegrationReadiness` 500'd the Config Center bootstrap, and the retry cycle is what surfaced as `Maximum update depth exceeded`. Keep the harness below as the regression check if the loop ever reappears with a healthy readiness endpoint.
+- David, 06:05: cheap reproduction harness — run
+  `admin_config_center_mobile.spec.ts` 5x with `page.on('console', ...)`
+  collecting `error` entries and fail the run on `Maximum update depth
+  exceeded`; the console entry seen at 11:37:49Z pointed into
+  `/web/node_modules/...` (Vite dev React), so reproduce against the dev
+  server, not the built bundle. First suspects: `useConfigField` per card
+  inside `ConfigBasicsSubtab` re-subscribing on every registry refresh, and
+  the new `useEffect` auto-open in `TrainingStudio` if `targetLaneConfigured`
+  flips each render. Next product session, not this closeout.
+
+### W34 `FIXED 6a6567a3` (probe local, publish `langfuse_public_base_url`; API test with local `:9` vs public https) — the observability status card still links to the local Langfuse URL
+
+- `server/observability/status.py:318` `langfuse_url = config.tracing.langfuse_base_url`
+  is used for the reachability probe (correct: local) and then passed as
+  `url=langfuse_url` and `links=_make_links("Langfuse", langfuse_url, ...)`
+  (`status.py:469-482`). On pve1 the Observability card's "Langfuse" link is
+  `http://127.0.0.1:53000` for a remote browser — the exact class W7 was
+  meant to close; I grepped `langfuse_trace_url` and stopped one builder short.
+- Better way: probe `langfuse_base_url`, publish `langfuse_public_base_url`:
+  `url=public or None`, `links=_make_links("Langfuse", public, ...)`, with
+  `configured` still derived from the local URL + client blockers. Extend
+  `tests/api/test_observability_endpoints.py` to assert the Langfuse component
+  `url`/link equals the public field while `configured` follows the local
+  one. Sweep rule for the fix: `grep -rn "langfuse_base_url\|mlflow_tracking_url" server | grep -v Field(`
+  and classify every hit as probe/ingest (local) or link (public) in the
+  commit message so this cannot recur one builder at a time.
+
+### W35 `FIXED (harness) — review of record delivered` (`glm-review-0b106b28..9d834fcf.md`, 18 rounds, 43 tool calls, $0.064, verdict REFUTED-narrow with every W dispositioned) — the tool-using GLM run discarded six minutes of paid trace and the fallback stalled
+
+- `glm_review_agent.py` writes `--trace`/`--report` only after the loop
+  returns; the 11:53-11:59 run ended in `RuntimeError("reviewer returned no
+  final report")` (final message had no tool calls and empty `content`), so
+  every tool round was lost. The one-shot fallback pushed the whole 275 KB
+  bundle into a single prompt and was killed at ~90 s (the harness the
+  controller had already rejected as "summary-only" is now the plan).
+- Better way (three small harness edits, then rerun in the background):
+  1. append each round to the `.jsonl` as it happens (open once, write per
+     round, flush) so a failed run still leaves evidence;
+  2. when the final message has empty `content`, first look for
+     `message.reasoning` / `reasoning_content`, and if still empty send one
+     more user turn "Emit the final bounded report now; no more tool calls"
+     with a large `max_tokens`, before raising;
+  3. run it with `nohup ... &` and poll the trace file; a 1.3 M-token
+     reviewer deserves a 20-minute wall budget, not a foreground wait.
+- 06:20 evidence for the root cause: both one-shot outputs
+  (`glm-review-0b106b28..c7993372.md`, `glm-review-9d834fcf..c7993372.md`)
+  contain the literal `None` — the verdict JSON shows `finish_reason:
+  "length"`, `content: null`, and the whole budget spent in `reasoning`. A
+  thinking model with a small `max_tokens` never reaches the answer; the
+  writer then serialized `None`. Neither file is review evidence; do not cite
+  them. The tool-using rerun is the one that counts.
+- Publication rule (mine): do not push without either the GLM report on disk
+  or an explicit ledger line from me waiving it. If the fixed harness fails
+  once more within the 20-minute budget, push with the internal review only,
+  record the failure verbatim in the evidence file, and run GLM at the
+  deployment-acceptance gate (already planned as the second gate).
+
+### W36 `FIXED dc42075a` — GLM P3 batch: five one-line hygiene fixes worth one commit, three deferred
+
+GLM's tool-using pass (`glm-review-0b106b28..9d834fcf.md`) found no new
+correctness/secret/auth defect in the committed surface; its P1-1 was W34
+(already `6a6567a3`), P1-2/P2-1 were my rollout-plan text (fixed 06:35), P2-2
+is W13 (final full gate on the final tree). Of its eight P3s I verified and
+adopt five for the single fix wave — each is a one-liner with an existing
+test to extend:
+
+1. `tests/unit/test_proxmox_deployment_contract.py:1548,1609` —
+   `rf"(?m)^\\s*{command}\\b"` in a raw f-string is a literal-backslash
+   regex; verified `re.search` never matches a plain `mount -a` line, so the
+   forbidden-command scans pass vacuously. Fix: single backslashes; add one
+   positive control (a poisoned sample must fail).
+2. `deploy/proxmox/bootstrap-secrets.sh:236` writes `SERVER_PORT=58012`, but
+   `start.sh:9` binds on `BACKEND_PORT`; an operator changing it is silently
+   ignored. Fix: write `BACKEND_PORT` (keep `SERVER_PORT` only if a consumer
+   exists; none in `server/`).
+3. `deploy/proxmox/start-runtime.sh` preflight validates the rendered config
+   only for the Flyte callback host; a truncated/invalid file passes and fails
+   inside uvicorn under `Restart=on-failure`. Fix: `TriBridConfig.model_validate`
+   in the same preflight python, fail closed with the validation error.
+4. `deploy/proxmox/bootstrap-secrets.sh:122` `shutil.rmtree(..., ignore_errors=True)`
+   can leave a secret-bearing `.ragweld-bootstrap.*` staging dir in `/etc`
+   silently. Fix: drop `ignore_errors`, print the path on failure.
+5. `.env.example:59` still advertises the dead `CONFIG_FILE` key (W15).
+
+Deferred with a reason: P3-2 (`RAGWELD_CONFIG_PATH` written from
+`DEFAULT_ETC_ROOT` under a test-only override — harmless until the seam is
+real), P3-4 (`_resume_mlflow_tracking` returns `None` when `tracking_run_id`
+is empty — unreachable via `start_train_run`; hardening only), P3-5
+(`_ensure_local_request` admits everything behind Caddy — consistent with the
+single-owner model; document in spec §6 in the docs commit, and revisit if a
+viewer identity is ever added). Note: GLM also pointed out the W23 numbering
+gap; there was never a W23 — nothing lost.
 
 ### W14 `FIXED (working tree)` — my `AGENTS.md` handoff pointer regression is repaired (session13 restored; GitNexus block kept).
 

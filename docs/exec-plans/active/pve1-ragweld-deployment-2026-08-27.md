@@ -16,8 +16,8 @@ rollout plan expects to exist before the first Proxmox mutation.
 - Local branch/worktree canon: one local branch (`main`) and one worktree
   (`/Users/davidmontgomery/ragweld`)
 - Verified application tip before the docs closeout publication:
-  `9d834fcf76d5f3de354b66470393323e170e9b85`
-  (`fix(web): keep public link controls readable and reachable`)
+  `dc42075a0f19a4f41dc28ea58d77f98985f4855a`
+  (`fix(deploy): close final foundation review findings`)
 - Remote baseline before publication: `origin/main`
   `0b106b28825a4a9bb88c171660330557c2432ee3`
 - User-owned local dirt intentionally excluded from publication:
@@ -39,14 +39,27 @@ Executed on 2026-08-28 from `/Users/davidmontgomery/ragweld`.
 
 - Unsandboxed `UV_CACHE_DIR=/Users/davidmontgomery/ragweld/.uv-cache uv run pytest -q`
   completed green on 2026-08-28:
-  `1217 passed, 97 skipped, 7 warnings` in `238.47s`
-- Focused unsandboxed rerun of the families that failed inside the managed
-  sandbox proved the earlier reds were harness-induced, not product regressions:
-  `80 passed, 1 skipped` in `101.05s`
+  `1219 passed, 98 skipped, 7 warnings` in `255.43s`
+- The current full-gate count is higher than the earlier pre-closeout run
+  because the W34 observability regression and the stale-corpus config-readiness
+  regression each gained a permanent test.
+
+### External adversarial review of record
+
+- Paid OpenRouter GLM review of record:
+  `.superpowers/sdd/2026-08-27-proxmox-runtime-foundation/glm-review-0b106b28..9d834fcf.md`
+  with verdict `REFUTED` on the pre-closeout candidate.
+- Actioned outcomes now closed in committed source:
+  - `6a6567a3`: W34 Langfuse public-link fix
+  - `90c621d9`: stale-corpus config-readiness `500` -> truthful degraded `200`
+  - `dc42075a`: W36 deployment-script/test hygiene wave plus rollout-plan rewrite
+- The two one-shot `None` artifacts were renamed `*-failed.md` and are not
+  cited as review evidence.
 
 Reason for the unsandboxed rerun: the managed sandbox blocked localhost test
-servers and Chromium launch/cleanup paths needed by several real tests. The
-repo-local result above is the authoritative source gate.
+servers, local database sockets, and Chromium launch/cleanup paths needed by
+several real tests. The repo-local result above is the authoritative source
+gate.
 
 ## Browser evidence
 
@@ -55,12 +68,30 @@ repo-local result above is the authoritative source gate.
 - Real Playwright pass on
   `web/tests/e2e/exhaustive/public_link_fields.spec.ts` against the live local
   app (`PLAYWRIGHT_WEB_BASE_URL=http://127.0.0.1:55173/web`): `1 passed`
+- Real Playwright pass on
+  `web/tests/e2e/exhaustive/admin_config_center_mobile.spec.ts` against the
+  isolated current-code lane (`PLAYWRIGHT_WEB_BASE_URL=http://127.0.0.1:55174/web`,
+  frontend `55174` -> backend `58013`): `1 passed` in `5.7s`
 - Live in-app browser verification confirmed both dedicated public-link hints:
   - Retrieval hint text:
     `Browser links use this; ingestion/tracking uses the local URL.`
   - Training hint text:
     `Browser links use this; ingestion/tracking uses the local URL.`
   - Computed font size for both hints: `12px`
+
+### Runtime drift note
+
+- The long-lived live host lane (`55173` -> `58012`) is not the current source
+  tip. Its backend is a manually launched non-reloading uvicorn process
+  (`server.main:app --host 127.0.0.1 --port 58012`) that still serves the
+  pre-`90c621d9` stale-corpus bug.
+- On that stale lane, a browser session scoped to
+  `pytest_resume_mlflow_0f3d3c67` reproduces:
+  - `GET /api/config/readiness?corpus_id=pytest_resume_mlflow_0f3d3c67` -> `500`
+  - `GET /api/index/pytest_resume_mlflow_0f3d3c67/stats` -> `503`
+- On the isolated current-code lane, the same scoped readiness request returns a
+  truthful degraded `200` and the Admin mobile spec passes. The browser failure
+  on `58012` is therefore runtime drift, not current source truth.
 
 ### Residual frontend note
 
@@ -93,11 +124,11 @@ Ready:
 
 - local source verification
 - direct-main publication prep
-- paid adversarial review on the final local publication candidate
+- external adversarial review of record, with its actionable findings closed in
+  committed source
 - rollout planning from the corrected pve1 design
 
 Not yet done:
 
 - final docs closeout commit and push to `origin/main`
-- paid GLM adversarial report for the final published diff
 - any Proxmox, DNS, Cloudflare, Plex, or pve1 mutation
