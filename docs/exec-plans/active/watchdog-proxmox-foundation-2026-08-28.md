@@ -585,15 +585,14 @@ gap; there was never a W23 — nothing lost.
 
 ## Plex plan pre-read (2026-08-28 07:10, before any live step)
 
-### W37 `FIXED b421d203 (publication gate pending)` — automount idle expiry + LXC bind mount = empty media at container start
+### W37 `FIXED AND PUBLISHED b421d203` — automount idle expiry + LXC bind mount = empty media at container start
 
 - `deploy/proxmox/plex/srv-media.automount` sets `TimeoutIdleSec=60`
   (systemd's default is 0 = never expire). LXC 4214 consumes `/srv/media`
   as `mp1: /srv/media,mp=/srv/media` — a bind mount created at `pct start`
   with private propagation. If the NFS filesystem is not mounted at that
   instant (expired after 60 s idle, or never triggered since a `.173`
-  reboot because `pve-guests.service` starts containers before anything
-  stats `/srv/media`), the container binds the autofs stub and sees an empty
+  reboot before the path is traversed), the container binds the autofs stub and sees an empty
   tree; later host-side automounts do not propagate into it. Plex/arr start
   with no media — Task 3 Step 6's rollback trigger — and it recurs on every
   reboot.
@@ -601,18 +600,20 @@ gap; there was never a W23 — nothing lost.
   1. Foundation follow-up commit: `TimeoutIdleSec=0` in
      `srv-media.automount` (+ update the contract test), so the mount never
      expires once triggered.
-  2. `.173` drop-in `/etc/systemd/system/pve-guests.service.d/srv-media.conf`:
-     `[Unit] After=srv-media.automount network-online.target` and
-     `[Service] ExecStartPre=/bin/sh -c 'ls /srv/media >/dev/null && findmnt -t nfs4 /srv/media'`
-     so containers cannot start before the NFS mount is live (fails closed
-     if pve1 is down — the spec asked for hard failure).
+  2. `.173` drop-in
+     `/etc/systemd/system/pve-container@4214.service.d/srv-media.conf` requires
+     and orders after `srv-media.automount`, then runs a fatal, bounded
+     `ExecStartPre` that traverses the path and requires `nfs4`. This gates
+     Plex 4214 only; global `pve-guests.service` and Scrypted 1043 remain
+     independent (W43).
   3. Plex plan Task 3 Step 5: run `findmnt -t nfs4 /srv/media` on `.173`
      immediately before `pct start 4214`, and after start prove
      `pct exec 4214 -- findmnt -t nfs4 /srv/media` (fstype must be `nfs4`,
      not `autofs`).
 - Controller RED/GREEN evidence 2026-08-28: the exact contract test failed
   against `TimeoutIdleSec=60`, then passed after the template moved to
-  `TimeoutIdleSec=0`. Publish this two-file change before Plex Task 2.
+  `TimeoutIdleSec=0`. The two-file fix was published as `b421d203` before
+  Plex Task 2.
 
 ### W38 `SATISFIED by live preflight 2026-08-28` — `pct migrate` needs `shared=1` on the bind mount; the plan assumes it
 
@@ -651,6 +652,101 @@ gap; there was never a W23 — nothing lost.
   recorded in `plex-return-to-pve-2026-08-27.md`. All four media containers
   explicitly carry `PUID=1000` and `PGID=1000`; Task 4 uses those observed
   values rather than hardcoded guesses.
+
+### W44 `FIXED LIVE; preserved for rollback` — stale `.173` fstab entry and real data occupied the NFS mountpoint
+
+- `.173:/etc/fstab` still targeted absent ext4 UUID
+  `5ddacfd6-1309-4c2c-8bb8-890bbef8546d` at `/srv/media`; systemd generated
+  an inactive conflicting mount unit from it.
+- The plain root-disk directory below that path held 145 files / 31.6 GB.
+  Mounting NFS over it would have hidden real data.
+- Live correction: preserve the exact fstab at
+  `/etc/fstab.ragweld-pre-nfs-20260828`, disable only the absent-UUID line,
+  rename the directory on the same filesystem to
+  `/srv/media-local-pre-nfs-20260828`, and create a new empty mountpoint.
+  Nothing was deleted. The quarantine remains until migration acceptance.
+
+### W45 `FIXED LIVE AND IN PLAN` — Debian 13 omitted `/etc/exports.d`; `stat` did not trigger the direct automount
+
+- The first server activation failed closed before writing Ragweld config
+  because Debian's package did not create `/etc/exports.d`, although
+  `exports(5)` supports it. The plan now creates the standard directory first.
+- On `.173`, `stat /srv/media` inspected the autofs node but did not traverse
+  it, leaving the NFS mount inactive. Bounded `ls /srv/media` is the verified
+  trigger and is now used by installation, retrigger proof, and the
+  `pve-container@4214.service` pre-start guard.
+
+### W41 `FIXED LIVE AND IN PLAN` — prove `root_squash` before the migration commits to it
+
+- Today LXC 4214 writes `/srv/media` as a **local** bind mount, so container
+  uid 0 writes succeed. After the bridge it is NFS with `root_squash`, and
+  uid 0 writes become `nobody` → `EACCES`. The container is privileged
+  (`unprivileged: 0`), so uid 0 inside is uid 0 on `.173` and is squashed.
+- The first proposed negative test was incorrect: pve1's export root is owned
+  by `1000:1000` and mode `0777`, so the anonymous uid can create a file even
+  when squashing works. Write failure is not the invariant.
+- Controller proof: a root-created `.ragweld-root-squash-probe` appeared on
+  both `.173` and pve1 as `65534:65534`, proving root maps to the anonymous
+  identity. The exact probe was removed. Task 2 now asserts that ownership.
+- Task 4 still greps Plex/Sonarr/Radarr/qBittorrent logs for permission/chown
+  signatures before acceptance. Any hit is stop-and-investigate; never relax
+  the whole export to `no_root_squash`.
+
+### W42 `FIXED LIVE AND IN PLAN` — an unmounted `/srv/media` silently absorbs writes onto `.173`'s root disk
+
+- Preflight recorded `.173:/srv/media` as "a plain root-owned directory and
+  is not mounted". Task 2 Step 3 mounts over it. Whenever the NFS mount is
+  absent — before the first trigger, during a pve1 outage, after a failed
+  remount — writes to that path land on the **underlying local directory** on
+  `.173`'s `local-lvm` root filesystem. They succeed, so nothing alerts;
+  they are invisible once the mount returns; and a busy qBittorrent can fill
+  the root disk of the node now hosting Plex. Same family as W37: the path
+  looks right, the data goes somewhere else.
+- Better way (one command, before the mount, in Task 2 Step 3):
+  ```bash
+  "${PVE_SSH[@]}" root@192.168.68.173 'test -z "$(ls -A /srv/media)" || { echo "UNEXPECTED: underlying /srv/media is not empty"; exit 1; }; chmod 0555 /srv/media; stat -c "%a" /srv/media'
+  ```
+  An empty, mode-`0555` underlying directory makes a missing mount fail loudly
+  (`EACCES`) instead of writing to the wrong disk; the NFS root's own
+  permissions govern once mounted, so nothing changes in the working state.
+  Record the `0555` in the evidence file as a bridge component, and note that
+  removing the bridge later means unmounting **and** restoring the mode.
+- Live proof: the NFS units were stopped, the empty underlying directory was
+  changed to mode `0555`, and an explicit UID/GID 1000 write was denied. The
+  NFSv4 mount was then retriggered and returned active.
+
+### W43 `FIXED LIVE AND IN PLAN; reboot acceptance pending` — the original W37 drop-in would hold Scrypted's cameras hostage to pve1
+
+- Correcting a directive I wrote. W37 part 2 told Task 2 Step 3 to add
+  `ExecStartPre=/bin/sh -c 'ls /srv/media >/dev/null && findmnt -t nfs4 /srv/media'`
+  to `pve-guests.service` on `.173`. That unit starts **every** autostarting
+  guest on the node, and `.173` also runs Scrypted LXC 1043 (the camera
+  workload, per spec §3 and the plan's own Task 4 Step 5). As written:
+  - pve1 down at `.173` boot → `ExecStartPre` fails → `pve-guests.service`
+    fails → **Scrypted never starts**, cameras stay dark, and the cause is a
+    media mount for a different container;
+  - worse, the mount is `hard`, so a pve1 that is reachable-but-not-serving
+    makes the bare `ls` block indefinitely and hangs the boot instead of
+    failing. A media bridge must not become a single point of failure for an
+    unrelated guest.
+- The non-fatal global workaround was also rejected: it protects Scrypted but
+  permits Plex 4214 to start against an autofs stub. Proxmox has the correct
+  per-guest ownership seam:
+  ```ini
+  # /etc/systemd/system/pve-container@4214.service.d/srv-media.conf
+  [Unit]
+  Requires=srv-media.automount
+  After=srv-media.automount network-online.target
+  [Service]
+  ExecStartPre=/usr/bin/timeout 60 /bin/sh -c 'ls /srv/media >/dev/null 2>&1 && findmnt -t nfs4 /srv/media >/dev/null'
+  ```
+- This gate is fatal and bounded for 4214 only. Live `systemctl show` proves
+  the drop-in attaches to `pve-container@4214.service`; global
+  `pve-guests.service` has no drop-in; Scrypted 1043 remained running.
+- Also add to Task 4 Step 5 (Scrypted health): reboot `.173` once after the
+  bridge is live and confirm both 1043 and 4214 come back with media
+  present — the boot-order path is the one this trap lives in, and it is
+  never exercised by the migration steps themselves.
 
 ## Low / rollout-time reminders
 
