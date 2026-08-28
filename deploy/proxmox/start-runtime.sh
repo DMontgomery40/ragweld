@@ -146,10 +146,13 @@ read_rendered_flyte_callback_host() {
   "$ROOT_DIR/.venv/bin/python" -c '
 import json
 import sys
+from pathlib import Path
 from urllib.parse import urlsplit
 
-payload = json.load(open(sys.argv[1], encoding="utf-8"))
-url = str(((payload.get("training") or {}).get("ragweld_agent_flyte_callback_base_url")) or "").strip()
+from server.models.tribrid_config_model import TriBridConfig
+
+payload = TriBridConfig.model_validate_json(Path(sys.argv[1]).read_text(encoding="utf-8"))
+url = str(payload.training.ragweld_agent_flyte_callback_base_url or "").strip()
 if not url:
     raise SystemExit("training.ragweld_agent_flyte_callback_base_url is empty in the rendered config")
 host = urlsplit(url).hostname or ""
@@ -162,7 +165,7 @@ print(host)
 require_bridge_gateway_matches_rendered_callback() {
   local callback_host bridge_gateway
   callback_host="$(read_rendered_flyte_callback_host "$ETC_ROOT/tribrid_config.json")" \
-    || die "Unable to read training.ragweld_agent_flyte_callback_base_url from $ETC_ROOT/tribrid_config.json"
+    || die "Unable to validate rendered config and read training.ragweld_agent_flyte_callback_base_url from $ETC_ROOT/tribrid_config.json"
   bridge_gateway="$(docker network inspect bridge -f '{{(index .IPAM.Config 0).Gateway}}' 2>/dev/null | tr -d '[:space:]')"
   [[ -n "$bridge_gateway" ]] || die "docker bridge gateway could not be resolved; verify the default bridge before starting the Proxmox runtime"
   [[ "$callback_host" == "$bridge_gateway" ]] || die "training.ragweld_agent_flyte_callback_base_url host (${callback_host}) must match the docker bridge gateway (${bridge_gateway})"

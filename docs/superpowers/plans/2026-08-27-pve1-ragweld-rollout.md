@@ -29,7 +29,7 @@
 From `docs/exec-plans/active/watchdog-proxmox-foundation-2026-08-28.md`. These
 override the conflicting steps below until the steps themselves are rewritten.
 
-- **W4 — bootstrap needs an empty `/etc/ragweld`.** `bootstrap-secrets.sh`
+- **W4 — bootstrap needs an empty `/etc/ragweld` (steps rewritten 2026-08-28 06:35; this note is now descriptive).** `bootstrap-secrets.sh`
   fails closed on any existing entry and replaces the directory wholesale. Task
   2 Step 5 must push `deployment-commit` to `/root/ragweld-deployment-commit`
   inside the guest (not `/etc/ragweld/`), and Task 3 Step 5 must create the
@@ -41,7 +41,7 @@ override the conflicting steps below until the steps themselves are rewritten.
   generated `<UUID>.json` to `credentials.json` (keep the original), and in
   `config.yml` use the container path `credentials-file:
   /etc/cloudflared/credentials.json`.
-- **W6 — install `lsof`.** Add `lsof` to the Task 3 Step 1 apt list;
+- **W6 — install `lsof` (added to the Task 3 Step 1 apt line 2026-08-28 06:35).**
   `start.sh`/`stop.sh` exit without it and the unit would restart-loop.
 - **W3 — API bind.** After foundation Task 6b lands, `runtime.env` carries
   `SERVER_HOST=0.0.0.0` inside the LXC and the LXC firewall is the boundary.
@@ -167,11 +167,15 @@ ssh -i /Users/davidmontgomery/.ssh/proxmox_portable_backup_ed25519 -o Identities
 
 Expected: 16 CPUs, roughly 24 GiB cap, 300 GiB thin root, both DRM devices, and a LAN IP. Record the IP and reserve it in the router/DHCP system if the current homelab already uses reservations; do not invent a static address inside Debian.
 
-Create the secret root and push the locked commit into the guest:
+Keep the bootstrap target absent and push the locked commit into guest root:
 
 ```bash
-ssh -i /Users/davidmontgomery/.ssh/proxmox_portable_backup_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes root@192.168.68.171 'pct exec 100 -- install -d -m 0700 /etc/ragweld; pct push 100 /root/ragweld-deployment-commit /etc/ragweld/deployment-commit --perms 0600'
+ssh -i /Users/davidmontgomery/.ssh/proxmox_portable_backup_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes root@192.168.68.171 'pct push 100 /root/ragweld-deployment-commit /root/ragweld-deployment-commit --perms 0600; pct exec 100 -- test ! -e /etc/ragweld'
 ```
+
+Expected: `/root/ragweld-deployment-commit` exists inside LXC 100 at mode
+`0600`, while `/etc/ragweld` does not exist yet. Bootstrap owns the first
+creation of `/etc/ragweld`; pre-populating it makes bootstrap fail closed.
 
 - [ ] **Step 6: Enable only LAN SSH access**
 
@@ -225,7 +229,7 @@ Run package updates separately, then install:
 
 ```bash
 apt-get update
-apt-get install -y ca-certificates curl git gnupg jq openssl rsync sudo uidmap fuse-overlayfs python3 python3-venv build-essential pciutils vainfo
+apt-get install -y ca-certificates curl git gnupg jq lsof openssl rsync sudo uidmap fuse-overlayfs python3 python3-venv build-essential pciutils vainfo
 ```
 
 Install Docker Engine and the Compose plugin from Docker's official Debian
@@ -279,13 +283,13 @@ usermod -aG docker,render,video ragweld
 install -d -o ragweld -g ragweld -m 0755 /opt/ragweld /srv/ragweld/corpora
 sudo -u ragweld git clone --branch main --single-branch https://github.com/DMontgomery40/ragweld.git /opt/ragweld
 DEPLOY_COMMIT="$(git -C /opt/ragweld rev-parse origin/main)"
-test "$DEPLOY_COMMIT" = "$(cat /etc/ragweld/deployment-commit)"
+test "$DEPLOY_COMMIT" = "$(cat /root/ragweld-deployment-commit)"
 test "$(git -C /opt/ragweld rev-parse main)" = "$DEPLOY_COMMIT"
 test "$(git -C /opt/ragweld branch --show-current)" = main
 ```
 
 Before cloning, Task 1 writes its full 40-character commit to
-`/etc/ragweld/deployment-commit` mode `0600`. The equality check prevents a
+`/root/ragweld-deployment-commit` mode `0600`. The equality check prevents a
 moving branch from changing the selected deployment source.
 
 - [ ] **Step 4: Install dependencies and build the production frontend**
@@ -299,13 +303,22 @@ test -f /opt/ragweld/web/dist/index.html
 
 - [ ] **Step 5: Generate new platform secrets on the LXC**
 
-Create `/etc/ragweld/owner-password` mode `0600` containing a new high-entropy bootstrap passphrase without printing it. Run:
+Create `/root/ragweld-owner-password` mode `0600` containing a new high-entropy
+bootstrap passphrase without printing it. Confirm `/etc/ragweld` still does not
+exist, then run:
 
 ```bash
-/opt/ragweld/deploy/proxmox/bootstrap-secrets.sh david /etc/ragweld/owner-password
+test ! -e /etc/ragweld
+/opt/ragweld/deploy/proxmox/bootstrap-secrets.sh david /root/ragweld-owner-password
+mv /root/ragweld-deployment-commit /etc/ragweld/deployment-commit
+mv /root/ragweld-owner-password /etc/ragweld/owner-password
+chown ragweld:ragweld /etc/ragweld/deployment-commit /etc/ragweld/owner-password
+chmod 0600 /etc/ragweld/deployment-commit /etc/ragweld/owner-password
 ```
 
 The script creates new Postgres, Neo4j, LiteLLM, Langfuse, Authelia, and OIDC material. It must not reuse Mac database/auth secrets.
+Only after bootstrap succeeds do the deployment-commit and owner-password files
+move into the initialized secret root.
 
 Keep the bootstrap passphrase out of tool output and evidence. Immediately
 before Task 6, disclose it once to the owner in the private task response, then
@@ -482,6 +495,9 @@ docker run --rm --user 0:0 --network host -v /etc/ragweld/cloudflared:/root/.clo
 docker run --rm --user 0:0 --network host -v /etc/ragweld/cloudflared:/root/.cloudflared cloudflare/cloudflared:2026.7.2 tunnel route dns ragweld-pve1 langfuse.ragweld.com
 docker run --rm --user 0:0 --network host -v /etc/ragweld/cloudflared:/root/.cloudflared cloudflare/cloudflared:2026.7.2 tunnel route dns ragweld-pve1 mlflow.ragweld.com
 docker run --rm --user 0:0 --network host -v /etc/ragweld/cloudflared:/root/.cloudflared cloudflare/cloudflared:2026.7.2 tunnel route dns ragweld-pve1 flyte.ragweld.com
+TUNNEL_ID="$(docker run --rm --user 0:0 --network host -v /etc/ragweld/cloudflared:/root/.cloudflared cloudflare/cloudflared:2026.7.2 tunnel list --name ragweld-pve1 --output json | jq -r '.[0].id')"
+test -n "$TUNNEL_ID" && test "$TUNNEL_ID" != null
+cp "/etc/ragweld/cloudflared/${TUNNEL_ID}.json" /etc/ragweld/cloudflared/credentials.json
 chown -R ragweld:ragweld /etc/ragweld/cloudflared
 chmod 0700 /etc/ragweld/cloudflared
 chmod 0600 /etc/ragweld/cloudflared/*
@@ -489,7 +505,13 @@ chmod 0600 /etc/ragweld/cloudflared/*
 
 - [ ] **Step 6: Write the exact local tunnel configuration**
 
-Create `/etc/ragweld/cloudflared/config.yml` mode `0600` with the generated tunnel UUID, its exact credentials JSON path, six hostname entries each targeting `http://127.0.0.1:58000`, and a final `http_status:404` catchall. No wildcard route is allowed.
+Create `/etc/ragweld/cloudflared/config.yml` mode `0600` with the generated
+tunnel UUID and the exact container-visible line
+`credentials-file: /etc/cloudflared/credentials.json`, six hostname entries
+each targeting `http://127.0.0.1:58000`, and a final `http_status:404` catchall.
+No wildcard route is allowed. Keep the original `<UUID>.json`; the owned runtime
+preflight consumes the normalized host file `credentials.json` mounted at the
+container path above.
 
 - [ ] **Step 7: Enable systemd and prove external auth denial**
 

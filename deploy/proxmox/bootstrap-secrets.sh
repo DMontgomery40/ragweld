@@ -119,7 +119,14 @@ from pathlib import Path
 import shutil
 import sys
 
-shutil.rmtree(Path(sys.argv[1]), ignore_errors=True)
+target = Path(sys.argv[1])
+try:
+    shutil.rmtree(target)
+except FileNotFoundError:
+    pass
+except Exception as exc:
+    print(f"Failed to remove secret staging directory {target}: {exc}", file=sys.stderr)
+    raise
 PY
 }
 
@@ -233,7 +240,7 @@ NEO4J_URI=bolt://127.0.0.1:7687
 NEO4J_USER=neo4j
 NEO4J_PASSWORD=$neo4j_password
 SERVER_HOST=0.0.0.0
-SERVER_PORT=58012
+BACKEND_PORT=58012
 DEBUG=false
 GRAFANA_URL=http://127.0.0.1:3301
 PROMETHEUS_URL=http://127.0.0.1:59090

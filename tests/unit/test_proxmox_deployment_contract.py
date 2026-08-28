@@ -423,6 +423,7 @@ exit 0
 exec {shlex.quote(str(real_python))} "$@"
 """,
     )
+    (repo / "server").symlink_to(ROOT / "server", target_is_directory=True)
     (repo / "web" / "dist").mkdir(parents=True, exist_ok=True)
     (repo / "web" / "dist" / "index.html").write_text("<!doctype html>\n", encoding="utf-8")
     (repo / "infra").mkdir(parents=True, exist_ok=True)
@@ -482,7 +483,7 @@ def _build_secret_root(tmp_path: Path, *, include_tunnel: bool) -> Path:
                 "LANGFUSE_PUBLIC_KEY=pk-lf-runtime",
                 "LANGFUSE_SECRET_KEY=sk-lf-runtime",
                 "SERVER_HOST=0.0.0.0",
-                "SERVER_PORT=58012",
+                "BACKEND_PORT=58012",
                 "METRICS_ENABLED=true",
                 "TRACING_ENABLED=true",
                 "",
@@ -1044,6 +1045,41 @@ def test_proxmox_lifecycle_start_runtime_fails_closed_when_bridge_gateway_differ
     assert (not log_path.exists()) or all(" up " not in line for line in log_path.read_text(encoding="utf-8").splitlines())
 
 
+def test_proxmox_lifecycle_start_runtime_rejects_an_invalid_rendered_config_before_compose(
+    tmp_path: Path,
+) -> None:
+    assert PROXMOX_START_RUNTIME.is_file()
+    repo, log_path = _materialize_proxmox_runtime_repo(tmp_path)
+    secret_root = _build_secret_root(tmp_path, include_tunnel=False)
+    _write_private_file(
+        secret_root / "tribrid_config.json",
+        json.dumps(
+            {
+                "embedding": {"embedding_dim": 0},
+                "training": {
+                    "ragweld_agent_flyte_callback_base_url": "http://172.17.0.1:58012",
+                },
+            }
+        )
+        + "\n",
+    )
+
+    result = _run_shell_script(
+        repo / "deploy" / "proxmox" / "start-runtime.sh",
+        cwd=repo,
+        env={
+            PROXMOX_SECRET_ROOT_ENV: str(secret_root),
+            "RAGWELD_SKIP_TUNNEL": "1",
+            "FAKE_TOOL_LOG": str(log_path),
+            "PATH": f"{tmp_path / 'bin'}:{os.environ['PATH']}",
+        },
+    )
+
+    assert result.returncode != 0
+    assert "rendered config" in result.stderr.lower()
+    assert (not log_path.exists()) or all(" up " not in line for line in log_path.read_text(encoding="utf-8").splitlines())
+
+
 def test_proxmox_lifecycle_start_runtime_refuses_conflicting_repo_env_paths(tmp_path: Path) -> None:
     assert PROXMOX_START_RUNTIME.is_file()
     repo, log_path = _materialize_proxmox_runtime_repo(tmp_path)
@@ -1120,6 +1156,9 @@ def test_proxmox_secret_bootstrap_generates_owner_only_runtime_material_and_exac
     tmp_path: Path,
 ) -> None:
     assert PROXMOX_BOOTSTRAP_SECRETS.is_file()
+    bootstrap_source = PROXMOX_BOOTSTRAP_SECRETS.read_text(encoding="utf-8")
+    assert "ignore_errors=True" not in bootstrap_source
+    assert "Failed to remove secret staging directory" in bootstrap_source
     repo, _ = _materialize_proxmox_runtime_repo(tmp_path)
     password = "owner-secret-for-bootstrap"
     password_file = tmp_path / "owner-password"
@@ -1166,7 +1205,7 @@ def test_proxmox_secret_bootstrap_generates_owner_only_runtime_material_and_exac
         "LANGFUSE_PUBLIC_KEY",
         "LANGFUSE_SECRET_KEY",
         "SERVER_HOST",
-        "SERVER_PORT",
+        "BACKEND_PORT",
         "METRICS_ENABLED",
         "TRACING_ENABLED",
     } <= set(runtime_env)
@@ -1174,6 +1213,8 @@ def test_proxmox_secret_bootstrap_generates_owner_only_runtime_material_and_exac
     assert runtime_env["LANGFUSE_SECRET_KEY"].startswith("sk-lf-")
     assert runtime_env["LITELLM_API_KEY"].startswith("sk-ragweld-")
     assert runtime_env["SERVER_HOST"] == "0.0.0.0"
+    assert runtime_env["BACKEND_PORT"] == "58012"
+    assert "SERVER_PORT" not in runtime_env
     for forbidden_key in (
         "OPENAI_API_KEY",
         "OPENROUTER_API_KEY",
@@ -1545,7 +1586,9 @@ def test_proxmox_plex_nfs_export_is_scoped_to_one_client_without_broad_access() 
     for fragment in forbidden_fragments:
         assert fragment not in source
     for command in ("mkfs", "fdisk", "mount", "curl", "wget", "ssh"):
-        assert re.search(rf"(?m)^\\s*{command}\\b", source) is None
+        command_pattern = rf"(?m)^\s*{command}\b"
+        assert re.search(command_pattern, source) is None
+        assert re.search(command_pattern, f"{command} --poison\n") is not None
 
 
 def test_proxmox_plex_nfs_conf_is_v4_only() -> None:
@@ -1606,4 +1649,6 @@ def test_proxmox_plex_nfs_mount_units_use_hard_automount_contract() -> None:
     for fragment in forbidden_fragments:
         assert fragment not in combined_source
     for command in ("mount", "umount", "mkfs", "fdisk", "parted", "curl", "wget", "ssh", "scp", "rsync"):
-        assert re.search(rf"(?m)^\\s*{command}\\b", combined_source) is None
+        command_pattern = rf"(?m)^\s*{command}\b"
+        assert re.search(command_pattern, combined_source) is None
+        assert re.search(command_pattern, f"{command} --poison\n") is not None
