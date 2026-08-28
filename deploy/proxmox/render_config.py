@@ -24,6 +24,19 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _canonical_path(path: Path) -> Path:
+    return path.expanduser().resolve(strict=False)
+
+
+def _paths_identify_same_target(source: Path, output: Path) -> bool:
+    try:
+        if source.exists() and output.exists() and source.samefile(output):
+            return True
+    except OSError:
+        pass
+    return _canonical_path(source) == _canonical_path(output)
+
+
 def _load_source(path: Path) -> TriBridConfig:
     payload = json.loads(path.read_text(encoding="utf-8"))
     return TriBridConfig.model_validate(payload)
@@ -76,6 +89,8 @@ def _write_output(path: Path, config: TriBridConfig) -> None:
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     try:
+        if _paths_identify_same_target(args.source, args.output):
+            raise ValueError("source and output must identify different files")
         config = _load_source(args.source)
         rendered = _apply_production_defaults(config)
         _write_output(args.output, rendered)

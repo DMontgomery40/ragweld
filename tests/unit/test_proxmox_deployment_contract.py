@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import subprocess
 import sys
@@ -61,7 +62,17 @@ def _nested_get(payload: dict[str, object], path: tuple[str, ...]) -> object:
     return current
 
 
+def _nested_set(payload: dict[str, object], path: tuple[str, ...], value: object) -> None:
+    current = payload
+    for key in path[:-1]:
+        current = current[key]
+        assert isinstance(current, dict)
+    current[path[-1]] = value
+
+
 def test_proxmox_renderer_writes_validated_production_defaults_atomically(tmp_path: Path) -> None:
+    source_payload = _read_config(SOURCE_CONFIG)
+    source_config = TriBridConfig.model_validate(source_payload)
     output = tmp_path / "tribrid_config.production.json"
 
     result = _run_renderer(source=SOURCE_CONFIG, output=output)
@@ -69,13 +80,16 @@ def test_proxmox_renderer_writes_validated_production_defaults_atomically(tmp_pa
     assert result.returncode == 0, result.stdout + result.stderr
     payload = _read_config(output)
     validated = TriBridConfig.model_validate(payload)
+    expected_payload = copy.deepcopy(source_config.model_dump(mode="json"))
+    for path, expected in PRODUCTION_DEFAULTS.items():
+        _nested_set(expected_payload, path, expected)
+    expected = TriBridConfig.model_validate(expected_payload)
     assert output.read_text(encoding="utf-8") == json.dumps(
-        validated.model_dump(mode="json"),
+        expected.model_dump(mode="json"),
         indent=2,
         sort_keys=True,
     ) + "\n"
-    for path, expected in PRODUCTION_DEFAULTS.items():
-        assert _nested_get(payload, path) == expected
+    assert validated.model_dump(mode="json") == expected.model_dump(mode="json")
     assert output.stat().st_mode & 0o777 == 0o600
     assert sorted(path.name for path in tmp_path.iterdir()) == [output.name]
 
@@ -90,6 +104,36 @@ def test_proxmox_renderer_preserves_source_bytes(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert source.read_bytes() == before
+
+
+def test_proxmox_renderer_rejects_same_source_and_output_file(tmp_path: Path) -> None:
+    source = tmp_path / "source.json"
+    source.write_bytes(SOURCE_CONFIG.read_bytes())
+    before = source.read_bytes()
+
+    result = _run_renderer(source=source, output=source)
+
+    assert result.returncode != 0
+    assert "must identify different files" in result.stderr
+    assert source.read_bytes() == before
+    assert sorted(path.name for path in tmp_path.iterdir()) == [source.name]
+
+
+def test_proxmox_renderer_rejects_symlink_output_to_source(tmp_path: Path) -> None:
+    source = tmp_path / "source.json"
+    source.write_bytes(SOURCE_CONFIG.read_bytes())
+    output = tmp_path / "rendered.json"
+    output.symlink_to(source)
+    before = source.read_bytes()
+
+    result = _run_renderer(source=source, output=output)
+
+    assert result.returncode != 0
+    assert "must identify different files" in result.stderr
+    assert source.read_bytes() == before
+    assert output.is_symlink()
+    assert output.resolve() == source.resolve()
+    assert sorted(path.name for path in tmp_path.iterdir()) == [output.name, source.name]
 
 
 def test_proxmox_renderer_rejects_invalid_source_without_creating_output(tmp_path: Path) -> None:
@@ -119,4 +163,21 @@ def test_proxmox_renderer_keeps_existing_output_on_validation_failure(tmp_path: 
 
     assert result.returncode != 0
     assert output.read_text(encoding="utf-8") == before
+    assert sorted(path.name for path in tmp_path.iterdir()) == [output.name, source.name]
+
+
+def test_proxmox_renderer_removes_temp_file_when_replace_fails(tmp_path: Path) -> None:
+    source = tmp_path / "source.json"
+    source.write_bytes(SOURCE_CONFIG.read_bytes())
+    output = tmp_path / "rendered"
+    output.mkdir()
+    marker = output / "marker.txt"
+    marker.write_text("keep", encoding="utf-8")
+
+    result = _run_renderer(source=source, output=output)
+
+    assert result.returncode != 0
+    assert output.is_dir()
+    assert marker.read_text(encoding="utf-8") == "keep"
+    assert list(tmp_path.glob(f".{output.name}.*.tmp")) == []
     assert sorted(path.name for path in tmp_path.iterdir()) == [output.name, source.name]
