@@ -37,6 +37,7 @@ Indexing turns a folder into a set of **retrieval primitives**:
 - **Dense embeddings** (vector search) in a per-corpus Qdrant generation
 - **Sparse index** (IDF-modified BM25 via fastembed `Qdrant/bm25`) in the same generation
 - **Graph context** (optional) stored in Neo4j
+- **Code graph** (optional, `graph_indexing.build_code_graph`) — module/class/function entities with `contains`/`inherits`/`imports`/`calls` edges in Neo4j
 
 ```mermaid
 flowchart LR
@@ -48,6 +49,43 @@ flowchart LR
   S --> Q
   C --> G["Neo4j (optional)"]
 ```
+
+### Optional: AST code graph (structural code context)
+
+For code corpora, ragweld can additionally build an **AST code graph** while indexing. It is off by default (`graph_indexing.build_code_graph=false`); enable it per corpus and re-index.
+
+What lands in Neo4j:
+
+- one **module** entity per Python, TypeScript, or JavaScript source file
+- **class** and **function/method** entities with qualname, line range, and first-line signature
+- `contains`, `inherits`, `imports`, and `calls` relationships between them
+- every entity linked to the chunk that defines it, so graph retrieval can expand a hit to its callers, callees, base classes, and importing modules instead of only neighbouring chunks
+
+*Concept diagram (this mechanism only — the full fused pipeline is on the [generated retrieval-pipeline page](../reference/architecture/retrieval-pipeline.md)):*
+
+```mermaid
+flowchart LR
+  SRC["Source file\n(Python / TypeScript / JavaScript)"] --> TS["tree-sitter AST pass\n(server/indexing/code_graph.py)"]
+  TS --> MOD["module entity"]
+  TS --> CLS["class entity"]
+  TS --> FN["function / method entity"]
+  MOD -->|"imports"| IMPT["imported module"]
+  CLS -->|"inherits"| BASE["base class"]
+  FN -->|"calls"| CALLEE["callee"]
+  MOD --> UPS["GraphRAG upsert"]
+  CLS --> UPS
+  FN --> UPS
+  IMPT --> UPS
+  BASE --> UPS
+  CALLEE --> UPS
+  UPS --> N4J["Neo4j"]
+```
+
+!!! note "Conservative resolution"
+    Imports and calls only produce edges when the target is defined inside the corpus or the import explicitly resolves to a corpus file. Everything else is counted as unresolved rather than guessed, keeping the graph high-signal.
+
+!!! warning "Enable per corpus, then re-index"
+    The code graph is built during indexing, so toggling `build_code_graph` has no effect until the corpus is re-indexed. It only pays for code corpora — leave it off for prose-only corpora.
 
 ## Before you index: estimate size/time (optional)
 

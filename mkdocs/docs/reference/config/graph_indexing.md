@@ -26,7 +26,7 @@
 [Config API & workflow](../../configuration.md){ .md-button }
 [Glossary](../../glossary.md){ .md-button }
 
-**Total parameters**: 27
+**Total parameters**: 28
 
 ??? info "Group index"
     - `(root)`
@@ -39,6 +39,7 @@
 | `graph_indexing.ast_contains_weight` | — | `float` | `1.0` | ≥ 0.0, ≤ 1.0 | Edge weight for AST containment relationships (module->class/function, class->method). |
 | `graph_indexing.ast_imports_weight` | — | `float` | `1.0` | ≥ 0.0, ≤ 1.0 | Edge weight for AST import relationships (module->imported_module). |
 | `graph_indexing.ast_inherits_weight` | — | `float` | `1.0` | ≥ 0.0, ≤ 1.0 | Edge weight for AST inheritance relationships (class->base). |
+| `graph_indexing.build_code_graph` | — | `bool` | `false` | — | Build an AST code graph during indexing: module, class and function entities with contains/inherits/imports/calls relationships (tree-sitter; Python, TypeScript, JavaScript), each linked to the chunk that defines it |
 | `graph_indexing.build_lexical_graph` | — | `bool` | `true` | — | Build lexical graph (Document/Chunk nodes + NEXT_CHUNK relationships) |
 | `graph_indexing.chunk_embedding_property` | — | `str` | `"embedding"` | — | Chunk node property that stores the embedding vector |
 | `graph_indexing.chunk_vector_index_name` | — | `str` | `"tribrid_chunk_embeddings"` | — | Neo4j vector index name for Chunk embeddings (mode='chunk') |

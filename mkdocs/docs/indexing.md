@@ -122,10 +122,48 @@ async function reindex(path: string) {
 |-------|---------|---------|
 | `graph_indexing.enabled` | true | Enable graph building during indexing |
 | `graph_indexing.build_lexical_graph` | true | Add Chunk/NEXT_CHUNK structure |
+| `graph_indexing.build_code_graph` | false | AST code graph: module/class/function entities with contains/inherits/imports/calls edges (Python, TypeScript, JavaScript) |
 | `graph_indexing.store_chunk_embeddings` | true | Store chunk vectors for Neo4j vector search |
 | `graph_indexing.semantic_kg_enabled` | false | Extract concept relations (heuristic or LLM) |
+
+### AST code graph (`build_code_graph`)
+
+When `graph_indexing.build_code_graph=true`, indexing additionally runs a tree-sitter AST pass per source file (`server/indexing/code_graph.py`) for **Python, TypeScript, and JavaScript**:
+
+- one **module** entity per file, plus **class** and **function**/**method** entities carrying qualname, line range, and first-line signature
+- `contains`, `inherits`, `imports`, and `calls` relationships, weighted by the `graph_indexing.ast_*_weight` fields
+- each entity anchored to the chunk that defines it through the same lexical chunk relationship, so `graph_search.mode=chunk` retrieval can expand a hit to its callers, callees, base classes, and importing modules
+
+Cross-file targets (an imported module, a base class, or a callee defined elsewhere) are emitted as minimal nodes with deterministic ids and unified by the GraphRAG `MERGE` upsert, so index order across files does not matter. Resolution is conservative: a name that cannot be tied to a definition inside the corpus, or an import that does not resolve to a corpus file, produces no edge and is counted as unresolved rather than guessed.
+
+!!! warning "Re-index after enabling"
+    The code graph is built during indexing. Toggling `build_code_graph` only affects new runs, so enable it per code corpus and re-index. It is off by default because it only pays for code corpora.
+
+The full fused path (where the graph leg feeds weighted RRF fusion alongside Qdrant dense and sparse) is documented on the generated [retrieval pipeline](reference/architecture/retrieval-pipeline.md) page; every `graph_indexing` knob is in the [`graph_indexing` config reference](reference/config/graph_indexing.md).
+
+=== "curl"
+
+    ```bash
+    curl -sS -X PATCH "http://127.0.0.1:58012/api/config/graph_indexing" \
+      -H 'Content-Type: application/json' \
+      -d '{"build_code_graph": true}' | jq .
+    ```
+
+=== "Python"
+
+    ```python
+    import httpx
+
+    httpx.patch(
+        "http://127.0.0.1:58012/api/config/graph_indexing",
+        json={"build_code_graph": True},
+    ).raise_for_status()  # (1)!
+    ```
+
+1. Sectional PATCH is validated by Pydantic; re-index the corpus to rebuild the graph
 
 ??? info "Failure Modes"
     - File decoding errors: logged and skipped.
     - Embedding timeouts: retried with backoff; chunk remains un-embedded if persistent.
     - Graph build failures: retrieval continues with vector/sparse; flagged in logs.
+    - Code graph: extraction is skipped entirely for unsupported languages (empty graph, not an error); only Python, TypeScript, and JavaScript are parsed.

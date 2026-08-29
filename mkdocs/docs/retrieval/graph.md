@@ -56,6 +56,13 @@
 | `graph_indexing.store_chunk_embeddings` | true | Store chunk vectors on nodes |
 | `graph_indexing.chunk_vector_index_name` | `tribrid_chunk_embeddings` | Vector index name |
 
+### Code graph artifacts
+
+The AST code graph written by `graph_indexing.build_code_graph` lands in the same Neo4j lane as the lexical graph and the semantic KG. In `chunk` mode, entity expansion can follow the chunk links into `calls`, `inherits`, and `imports` edges, so a seed chunk hit can reach its callers, base classes, and importing modules. See the [Indexing pipeline](../indexing.md) for build details and the [`graph_indexing` config reference](../reference/config/graph_indexing.md) for edge weights and timeouts.
+
+!!! tip "If you're not sure"
+    Leave `build_code_graph` off for prose-heavy corpora and turn it on for code corpora where structural questions ("who calls this?", "what inherits from this?") matter. It is built during indexing, so plan a re-index after enabling.
+
 ```mermaid
 flowchart LR
     Seed["Seed Chunks"] --> Walk["Traversal (max_hops)"]
