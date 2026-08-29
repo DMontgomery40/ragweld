@@ -395,11 +395,11 @@ flowchart LR
     n_graph --> n_graph_2
     n_graph_3["GET /api/graph/{corpus_id}/entities\n-> list[Entity]"]
     n_graph --> n_graph_3
-    n_graph_4["GET /api/graph/{corpus_id}/entity/{entity_id}\n-> Entity"]
+    n_graph_4["GET /api/graph/{corpus_id}/entity/{entity_id:path}\n-> Entity"]
     n_graph --> n_graph_4
-    n_graph_5["GET /api/graph/{corpus_id}/entity/{entity_id}/neighbors\n-> GraphNeighborsResponse"]
+    n_graph_5["GET /api/graph/{corpus_id}/entity/{entity_id:path}/neighbors\n-> GraphNeighborsResponse"]
     n_graph --> n_graph_5
-    n_graph_6["GET /api/graph/{corpus_id}/entity/{entity_id}/relationships\n-> list[Relationship]"]
+    n_graph_6["GET /api/graph/{corpus_id}/entity/{entity_id:path}/relationships\n-> list[Relationship]"]
     n_graph --> n_graph_6
     n_graph_7["POST /api/graph/{corpus_id}/query"]
     n_graph --> n_graph_7
@@ -415,9 +415,9 @@ flowchart LR
 | `GET` | `/api/graph/{corpus_id}/community/{community_id}/members` | `get_community_members` | `list[Entity]` |
 | `GET` | `/api/graph/{corpus_id}/community/{community_id}/subgraph` | `get_community_subgraph` | `GraphNeighborsResponse` |
 | `GET` | `/api/graph/{corpus_id}/entities` | `list_entities` | `list[Entity]` |
-| `GET` | `/api/graph/{corpus_id}/entity/{entity_id}` | `get_entity` | `Entity` |
-| `GET` | `/api/graph/{corpus_id}/entity/{entity_id}/neighbors` | `get_entity_neighbors` | `GraphNeighborsResponse` |
-| `GET` | `/api/graph/{corpus_id}/entity/{entity_id}/relationships` | `get_entity_relationships` | `list[Relationship]` |
+| `GET` | `/api/graph/{corpus_id}/entity/{entity_id:path}` | `get_entity` | `Entity` |
+| `GET` | `/api/graph/{corpus_id}/entity/{entity_id:path}/neighbors` | `get_entity_neighbors` | `GraphNeighborsResponse` |
+| `GET` | `/api/graph/{corpus_id}/entity/{entity_id:path}/relationships` | `get_entity_relationships` | `list[Relationship]` |
 | `POST` | `/api/graph/{corpus_id}/query` | `graph_query` | `-` |
 | `GET` | `/api/graph/{corpus_id}/stats` | `get_graph_stats` | `GraphStats` |
 | `GET` | `/api/graph/{corpus_id}/subgraph` | `get_repo_subgraph` | `GraphNeighborsResponse` |

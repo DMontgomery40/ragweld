@@ -63,6 +63,8 @@ The AST code graph written by `graph_indexing.build_code_graph` lands in the sam
 
 Cross-file edges are held back during the per-file pass and written in one relationship-only upsert after the run's last file (`server/api/index.py`), so both endpoints always exist in Neo4j under their real labels when the edge lands — a call to an imported class resolves to the `class` node, never to a guessed label. Entity ids are corpus-relative (`file_path` for modules, `file_path::qualname` for symbols), with uniqueness scoped by corpus.
 
+The entity inspection endpoints handle these ids directly: `/graph/{corpus_id}/entity/{entity_id}` matches `{entity_id}` as a full path segment, so ids containing `/` (for example `server/services/traces.py::TraceStore.add_event`) can be fetched without encoding the slashes. See [Graph API](../api_graph.md).
+
 !!! tip "If you're not sure"
     Leave `build_code_graph` off for prose-heavy corpora and turn it on for code corpora where structural questions ("who calls this?", "what inherits from this?") matter. It is built during indexing, so plan a re-index after enabling.
 

@@ -72,6 +72,9 @@
 !!! tip "Citations you can open"
     `ChunkMatch` now carries typed `provenance` (extraction method; cited pages and normalized regions for Docling PDFs), and `ChatResponse` carries `web_grounding` with validated web citations. See [Source document viewer](manual/source_viewer.md) and [Web search in Chat](manual/web_search.md).
 
+!!! note "Graph entity ids may contain slashes"
+    Code-graph entity ids are corpus-relative paths (`server/services/traces.py::TraceStore.add_event`). The `/api/graph/{corpus_id}/entity/{entity_id}` routes match ids containing `/`, so pass them as-is without encoding the slashes. See [Graph API](api_graph.md).
+
 ```mermaid
 flowchart TB
     CLI["Client"] --> API["FastAPI"]

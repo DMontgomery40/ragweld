@@ -43,6 +43,9 @@
 | `/graph/{corpus_id}/entity/{entity_id}/neighbors` | GET | 1-hop neighborhood |
 | `/graph/{corpus_id}/communities` | GET | List communities |
 
+!!! note "Entity ids may contain slashes"
+    Code-graph entity ids are corpus-relative paths such as `server/services/traces.py::TraceStore.add_event` (a module id is its `file_path`, a symbol id is `file_path::qualname`). The entity detail routes match `{entity_id}` as a full path segment (`{entity_id:path}` in `server/api/graph.py`), so ids containing `/` are accepted as-is — no extra encoding of the id is needed. Plain ids like `apollo_11` keep working unchanged.
+
 ```mermaid
 flowchart LR
     Center["Entity"] --> Calls["calls"]
@@ -50,6 +53,26 @@ flowchart LR
     Center --> Inherits["inherits"]
     Center --> Contains["contains"]
     Center --> Refs["references"]
+```
+
+## Entity ids with slashes (code graph)
+
+=== "Python"
+```python
+import httpx
+base = "http://127.0.0.1:58012/api"
+entity_id = "server/services/traces.py::TraceStore.add_event"
+ent = httpx.get(f"{base}/graph/ragweld_code/entity/{entity_id}").json()
+rels = httpx.get(f"{base}/graph/ragweld_code/entity/{entity_id}/relationships").json()
+print(ent["name"], len(rels))
+```
+
+=== "curl"
+```bash
+BASE=http://127.0.0.1:58012/api
+ENTITY_ID="server/services/traces.py::TraceStore.add_event"
+curl -sS "$BASE/graph/ragweld_code/entity/$ENTITY_ID" | jq '.name'
+curl -sS "$BASE/graph/ragweld_code/entity/$ENTITY_ID/neighbors" | jq '.relationships | length'
 ```
 
 === "Python"
