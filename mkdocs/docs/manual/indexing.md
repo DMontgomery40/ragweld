@@ -129,6 +129,62 @@ curl -sS "http://127.0.0.1:58012/api/index/demo/stats" | jq .
 
 In the UI, this typically maps to **RAG → Indexing** and **Dashboard → Storage**.
 
+
+### Runs started outside the tab are mirrored, not lost
+
+The **RAG → Indexing** tab used to only show progress for runs *it* started. That is no longer the case: the tab polls the corpus status endpoint every few seconds, so a run begun anywhere — a `POST /api/index` call from a script, another operator's browser, or a scheduled automation — appears in this tab exactly like a local one:
+
+- the progress bar and current file update live
+- the run's event log streams into the terminal pane (replayed from the start, then appended as new events arrive)
+- **Start** is disabled and **Stop** is available, so you can still cancel a run you didn't begin
+- the status panel adds a note: *started outside this tab (API, another operator, or a schedule) — progress mirrored from the server*
+
+If a run you started in this tab is in flight, its own event stream owns the UI and the polling stays quiet — there is no double-reporting.
+
+*Concept diagram (the run-adoption mechanism only — the full fused retrieval pipeline is on the [generated retrieval-pipeline page](../reference/architecture/retrieval-pipeline.md)):*
+
+```mermaid
+flowchart LR
+  subgraph s_sources["Run origins"]
+    UI["Indexing tab\nStart button"]
+    API["POST /api/index\n(scripts, CI, schedules)"]
+    OTHER["Another operator's browser"]
+  end
+  subgraph s_server["Server"]
+    IDX["Indexer\nruns latest"]
+    LATEST["GET /api/index/{corpus_id}/runs/latest"]
+    EVENTS["GET /api/index/{corpus_id}/runs/{run_id}/events"]
+    STATUS["GET /api/index/{corpus_id}/status"]
+  end
+  subgraph s_tab["Indexing tab (polling loop, every 3s)"]
+    POLL["Poll corpus status"]
+    ADOPT{"Run in flight\nand not started here?"}
+    MIRROR["Mirror progress,\ncurrent file, events"]
+    STOP["Stop button"]
+    DONE["On completion:\nrefresh stats + replay"]
+  end
+  UI --> IDX
+  API --> IDX
+  OTHER --> IDX
+  IDX --> STATUS
+  IDX --> LATEST
+  LATEST --> EVENTS
+  POLL --> STATUS
+  STATUS --> ADOPT
+  ADOPT -->|"yes"| MIRROR
+  MIRROR --> EVENTS
+  MIRROR --> STOP
+  ADOPT -->|"no (local stream owns UI)"| DONE
+  ADOPT -->|"run ended"| DONE
+```
+
+??? tip "Watch an API-triggered index from the UI"
+    1. Kick off indexing from a terminal: `curl -sS -X POST "http://127.0.0.1:58012/api/index" ...`
+    2. Open **RAG → Indexing** with the same corpus selected. Within a few seconds you'll see the progress bar moving, the current file, and the "started outside this tab" note.
+    3. The terminal pane replays the run's events from the beginning, so you don't need to have been watching when it started.
+
+    If you'd rather check programmatically, the run summary and events are plain GETs: `/api/index/{corpus_id}/runs/latest` and `/api/index/{corpus_id}/runs/{run_id}/events?limit=500`.
+
 ## Reindexing safely
 
 Common reasons to reindex:

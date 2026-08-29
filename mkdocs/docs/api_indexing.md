@@ -40,12 +40,19 @@
 | `/index` | POST | Start indexing |
 | `/index/status` | GET | Current state |
 | `/index/stats` | GET | Storage stats |
+| `/index/{corpus_id}/runs/latest` | GET | Latest run summary for the corpus (run id, status, progress) |
+| `/index/{corpus_id}/runs/{run_id}/events` | GET | Event log for a run (`?limit=500`), usable for replay or live tailing |
+
+!!! note "Runs are observable regardless of who started them"
+    Every indexing run is recorded against the corpus and can be polled by any client — the UI, a CI job that started the run via `POST /api/index`, or a scheduled automation. The **RAG → Indexing** tab polls `/api/index/{corpus_id}/status` and, when it finds a run it did not start itself, mirrors its progress bar, current file, event log, and Stop button, marking the run "started outside this tab". This means an indexing job kicked off by an API call or a schedule is never invisible in the workbench.
 
 ```mermaid
 flowchart LR
     Start["POST /index"] --> Worker["Indexer"]
     Worker --> Status["GET /index/status"]
     Worker --> Stats["GET /index/stats"]
+    Worker --> Latest["GET /index/{corpus_id}/runs/latest"]
+    Latest --> Events["GET /index/{corpus_id}/runs/{run_id}/events"]
 ```
 
 === "Python"
