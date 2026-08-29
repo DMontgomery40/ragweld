@@ -201,19 +201,25 @@ def _read_with_docling(path: Path, *, converter: Any | None = None) -> Extracted
     Returns None when the document is unparseable or serializes to nothing. The returned text
     is the whole-document markdown serialization, unmodified, so chunk char offsets index it
     exactly.
+
+    Only Docling's own conversion is guarded: a malformed/unsupported input is expected to fail
+    there, and that failure degrades to ``None`` (unparseable), never raises. Everything past
+    that point — building ragweld's own markdown serializer, serializing, the source map, the
+    figure counts — is ragweld's own code; a bug there must raise so a regression is visible
+    instead of silently degrading to "unparseable".
     """
+    from docling_core.types.doc import PictureItem
+    from docling_core.types.doc.document import DescriptionAnnotation, PictureMeta
+
+    from server.indexing.figure_serializer import make_markdown_serializer
+
     try:
-        from docling_core.types.doc import PictureItem
-        from docling_core.types.doc.document import DescriptionAnnotation, PictureMeta
-
-        from server.indexing.figure_serializer import make_markdown_serializer
-
         result = (converter or _docling_converter()).convert(str(path))
         doc = result.document
-        serializer = make_markdown_serializer(doc)
-        full = str(serializer.serialize().text or "")
     except Exception:
         return None
+    serializer = make_markdown_serializer(doc)
+    full = str(serializer.serialize().text or "")
     if not full.strip():
         return None
     spans, unlocated = _build_source_map(doc, serializer, full)

@@ -7,7 +7,12 @@ import json
 import pytest
 from docling.document_converter import DocumentConverter
 from docling_core.types.doc import PictureItem
-from docling_core.types.doc.document import DescriptionMetaField, PictureMeta
+from docling_core.types.doc.document import (
+    DescriptionMetaField,
+    PictureClassificationMetaField,
+    PictureClassificationPrediction,
+    PictureMeta,
+)
 
 from server.indexing.chunker import Chunker
 from server.indexing.figure_serializer import make_markdown_serializer
@@ -32,7 +37,12 @@ def described_doc():
     baseline_full = baseline_serializer.serialize().text
     _, baseline_unlocated = _build_source_map(doc, baseline_serializer, baseline_full)
 
-    pic.meta = PictureMeta(description=DescriptionMetaField(text=REPLY, created_by="test"))
+    pic.meta = PictureMeta(
+        description=DescriptionMetaField(text=REPLY, created_by="test"),
+        classification=PictureClassificationMetaField(
+            predictions=[PictureClassificationPrediction(class_name="drawing", confidence=0.9)]
+        ),
+    )
     serializer = make_markdown_serializer(doc)
     full = serializer.serialize().text
     spans, unlocated = _build_source_map(doc, serializer, full)
@@ -56,6 +66,7 @@ def test_source_map_attaches_the_figure_to_the_pictures_span(described_doc) -> N
 def test_stamp_provenance_marks_the_figure_chunk(described_doc) -> None:
     doc, pic, full, spans, _, _ = described_doc
     figure_span = next(s for s in spans if s.figure is not None)
+    assert figure_span.figure_class == "drawing"
     cfg = TriBridConfig()
     chunks = Chunker(cfg.chunking, cfg.tokenization).chunk_text(
         "apollo11_figure_pages.pdf", full, base_char_offset=0, base_line=1, starting_ordinal=0
@@ -65,9 +76,33 @@ def test_stamp_provenance_marks_the_figure_chunk(described_doc) -> None:
     assert figure_chunks, "the chunk holding the figure block must be a figure chunk"
     chunk = figure_chunks[0]
     assert chunk.metadata["figure"]["labels"] == ["PROBE", "FOOTPAD"]
+    assert chunk.metadata["figure_class"] == "drawing"
     assert chunk.provenance is not None and figure_span.region in chunk.provenance.regions
     text_chunks = [c for c in chunks if c.metadata.get("chunk_kind") != "figure"]
     assert all("figure" not in c.metadata for c in text_chunks)
+
+
+def test_figure_chunk_with_no_resolved_class_gets_no_figure_class_key() -> None:
+    """``figure_class`` is only set when the picture serializer actually resolved a class name;
+    a described-but-unclassified figure must not get a stray ``figure_class`` key backed by
+    nothing.
+    """
+    region = PageRegion(page=1, left=0.1, top=0.1, right=0.9, bottom=0.5)
+    full = "Figure: A short drawing."
+    spans = (
+        SourceSpan(
+            char_start=0,
+            char_end=len(full),
+            region=region,
+            figure=FigureAnnotation(summary="A short drawing."),
+            figure_class=None,
+        ),
+    )
+    chunk = Chunk(chunk_id="f:1-1:0", content=full, file_path="f", start_line=1, end_line=1, metadata={"char_start": 0, "char_end": len(full)})
+    stamp_provenance([chunk], extraction="docling", spans=spans)
+    assert chunk.metadata.get("chunk_kind") == "figure"
+    assert chunk.metadata.get("figure") is not None
+    assert "figure_class" not in chunk.metadata
 
 
 def test_a_chunk_that_only_brushes_a_figure_stays_a_text_chunk() -> None:
