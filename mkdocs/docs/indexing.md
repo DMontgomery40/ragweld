@@ -191,6 +191,8 @@ For document corpora, indexing can additionally **describe figures** — charts,
 - The structured description becomes a chunk anchored to the figure's page and normalized bounding box, so citations box the figure in the [source document viewer](manual/source_viewer.md)
 - Coverage and cost controls: `min_area_fraction`, `skip_classes`, `max_figures_per_file`, `max_completion_tokens`, `concurrency`, `timeout_s`
 
+The description is a structured `FigureAnnotation` (`server/models/index.py`): a vision-judged `kind` (diagram, chart, schematic, photo, table, drawing, other), a dense prose `summary` — the text that gets embedded — and transcribed `labels` (callouts, axis labels, legend entries, part numbers), `components`, `connections` (`A -> B`), `values` (numbers with units exactly as printed) and `references` (sheet/figure/table/section cross-references), persisted in `Chunk.metadata["figure"]` and rendered into the chunk as prose-only markdown, so callouts and part numbers are searchable verbatim without JSON entering the embedded text. The prompt templates and the reply parser live in `server/indexing/figure_prompts.py` (profile chosen via `indexing.figures.prompt_profile`); parsing is deliberately forgiving — fenced replies are unwrapped, unknown kinds fall back to `other`, and a non-JSON reply becomes the plain summary, so a malformed vision response degrades one chunk instead of failing the run.
+
 *Concept diagram (figure enrichment only — the full fused pipeline is on the [generated retrieval-pipeline page](reference/architecture/retrieval-pipeline.md)):*
 
 ```mermaid

@@ -121,6 +121,18 @@ flowchart LR
   CHUNK --> PG["Postgres chunk row\nwith provenance"]
 ```
 
+### What the vision model returns
+
+The vision reply is parsed into a structured `FigureAnnotation` (`server/models/index.py`): a vision-judged `kind` (diagram, chart, schematic, photo, table, drawing, other), a dense prose `summary` — which is the text that gets embedded — and transcribed lists of `labels` (callouts, axis labels, legend entries, part numbers), `components`, `connections` (`A -> B` relations), `values` (numbers with units exactly as printed), and `references` (sheet/figure/table/section cross-references). The annotation is persisted in `Chunk.metadata["figure"]`, so part numbers and callouts stay searchable verbatim even when they never appeared in the chunk's prose.
+
+Two details worth knowing:
+
+- **Only prose gets embedded.** The indexer renders the annotation as prose-only markdown (summary plus labelled lists); the JSON schema itself never enters the embedded text.
+- **Malformed replies degrade, never fail the run.** The parser in `server/indexing/figure_prompts.py` unwraps code-fenced replies, falls back to `kind: other` for unrecognized kinds, and turns a fully non-JSON reply into the plain-text summary — a weird description can make one chunk worse; it cannot fail indexing.
+
+!!! note "Profiles are protocol, not configuration"
+    The two prompt templates (`technical_figure`, `schematic`) live in `server/indexing/figure_prompts.py` as code — they are the reply-schema contract between ragweld and the vision alias, not per-corpus config. You choose the profile with `indexing.figures.prompt_profile`; the `schematic` profile additionally asks the model to put drawing number, sheet and revision into `references`, connector/pin/signal designators into `labels`, and every drawn connection into `connections` as `A -> B` with units exactly as printed.
+
 Knobs that matter:
 
 | Knob | Default | What it does |

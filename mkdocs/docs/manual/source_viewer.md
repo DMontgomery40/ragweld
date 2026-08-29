@@ -157,5 +157,5 @@ httpx.patch(
 - Page rendering: `server/services/pdf_render.py` — pypdfium2 serialized under Docling's `pypdfium2_lock`
 - Path safety, hashing, ETags: `server/services/corpus_files.py`
 - Provenance stamping at index time: `server/indexing/provenance.py` (maps chunk `char_start`/`char_end` onto Docling source spans)
-- Boundary models: `server/models/index.py` (`ChunkProvenance`, `PageRegion`, `DocumentView` and the typed error details), regenerated into `web/src/types/generated.ts`
+- Boundary models: `server/models/index.py` (`ChunkProvenance`, `PageRegion`, `DocumentView` and the typed error details; plus `FigureAnnotation`, the structured figure description persisted in `Chunk.metadata["figure"]` when `indexing.figures` is enabled), regenerated into `web/src/types/generated.ts`
 - Persistence: a `documents` table (sha256, size, kind, captured markdown for rich kinds) plus a `provenance` JSONB column on `chunks`; both are written under the staging corpus id during a run and promoted with the chunks.
