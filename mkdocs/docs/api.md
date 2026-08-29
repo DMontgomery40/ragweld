@@ -51,6 +51,9 @@
 | Index | `/api/index/{corpus_id}/stats` | GET | Per-corpus storage breakdown |
 | Index | `/api/index/estimate` | POST | Best-effort indexing estimate |
 | Index | `/api/index/vocab-preview` | GET | BM25 vocabulary sample |
+| Documents | `/api/corpora/{corpus_id}/documents/view` | GET | Typed document view (text/pdf/rich) with provenance state |
+| Documents | `/api/corpora/{corpus_id}/documents/page` | GET | Server-rendered PDF page PNG (`page`/`thumb`, ETag/304) |
+| Documents | `/api/corpora/{corpus_id}/documents/raw` | GET | Original file bytes (inline PDF, otherwise attachment + sandbox) |
 | Search | `/api/search` | POST | Tri-brid retrieval + fusion (+reranker) |
 | Answer | `/api/answer` | POST | Retrieval + LLM answer generation |
 | Answer | `/api/answer/stream` | POST | Stream answer generation |
@@ -65,6 +68,9 @@
 | Metrics | `/api/metrics` | GET | Prometheus exposition |
 | Docker | `/api/docker/*` | GET/POST | Infra status, logs, restart |
 | MCP | `/api/mcp/status` | GET | MCP inbound transport status |
+
+!!! tip "Citations you can open"
+    `ChunkMatch` now carries typed `provenance` (extraction method; cited pages and normalized regions for Docling PDFs), and `ChatResponse` carries `web_grounding` with validated web citations. See [Source document viewer](manual/source_viewer.md) and [Web search in Chat](manual/web_search.md).
 
 ```mermaid
 flowchart TB

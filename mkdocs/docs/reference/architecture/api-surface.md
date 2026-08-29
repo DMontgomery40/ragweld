@@ -5,7 +5,7 @@
     mount prefixes in `server/main.py` on every docs-autopilot run. The wire schemas are the registered
     Pydantic models; see the configuration reference for their fields.
 
-164 routes across 23 routers, all served by the FastAPI app in `server/main.py`.
+167 routes across 24 routers, all served by the FastAPI app in `server/main.py`.
 
 ```mermaid
 flowchart LR
@@ -26,6 +26,8 @@ flowchart LR
     app --> n_dataset
     n_docker["docker\n7 routes: GET, POST"]
     app --> n_docker
+    n_documents["documents\n3 routes: GET"]
+    app --> n_documents
     n_eval["eval\n13 routes: DELETE, GET, POST"]
     app --> n_eval
     n_feedback["feedback\n1 routes: POST"]
@@ -298,6 +300,25 @@ flowchart LR
 | `GET` | `/api/docker/status` | `get_docker_status` | `DockerStatus` |
 | `GET` | `/api/loki/status` | `loki_status` | `LokiStatus` |
 | `GET` | `/api/stream/loki/tail` | `loki_tail` | `-` |
+
+### `documents` (3 routes)
+
+```mermaid
+flowchart LR
+    n_documents["documents\nserver/api/documents.py"]
+    n_documents_0["GET /api/corpora/{corpus_id}/documents/page"]
+    n_documents --> n_documents_0
+    n_documents_1["GET /api/corpora/{corpus_id}/documents/raw"]
+    n_documents --> n_documents_1
+    n_documents_2["GET /api/corpora/{corpus_id}/documents/view\n-> DocumentView"]
+    n_documents --> n_documents_2
+```
+
+| Method | Path | Handler | Response model |
+|---|---|---|---|
+| `GET` | `/api/corpora/{corpus_id}/documents/page` | `render_document_page` | `-` |
+| `GET` | `/api/corpora/{corpus_id}/documents/raw` | `raw_document` | `-` |
+| `GET` | `/api/corpora/{corpus_id}/documents/view` | `view_document` | `DocumentView` |
 
 ### `eval` (13 routes)
 

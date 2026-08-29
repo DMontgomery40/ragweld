@@ -38,6 +38,10 @@ Indexing turns a folder into a set of **retrieval primitives**:
 - **Sparse index** (IDF-modified BM25 via fastembed `Qdrant/bm25`) in the same generation
 - **Graph context** (optional) stored in Neo4j
 - **Code graph** (optional, `graph_indexing.build_code_graph`) — module/class/function entities with `contains`/`inherits`/`imports`/`calls` edges in Neo4j
+- **Chunk provenance** — every chunk carries typed provenance (extraction method; for Docling PDFs, cited pages plus normalized layout regions) that powers the [source document viewer](source_viewer.md)
+
+!!! note "Corpora indexed before provenance capture"
+    Chunks from older runs report `provenance` as not captured, and rich documents (docx/pptx/xlsx/html) show a "not captured" state in the [source document viewer](source_viewer.md) until you re-index.
 
 ```mermaid
 flowchart LR

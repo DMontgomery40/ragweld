@@ -26,7 +26,7 @@
 [Config API & workflow](../../configuration.md){ .md-button }
 [Glossary](../../glossary.md){ .md-button }
 
-**Total parameters**: 64
+**Total parameters**: 69
 
 ??? info "Group index"
     - `(root)`
@@ -37,6 +37,7 @@
     - `recall`
     - `recall_gate`
     - `vllm`
+    - `web`
 
 ## `(root)`
 
@@ -141,3 +142,13 @@
 | `chat.vllm.base_url` | — | `str` | `"http://127.0.0.1:58080/v1"` | — | — |
 | `chat.vllm.default_model` | — | `str` | `"mlx-community/Qwen3.8-27B-4bit"` | — | — |
 | `chat.vllm.enabled` | — | `bool` | `true` | — | — |
+
+## `web`
+
+| JSON key | Env key(s) | Type | Default | Constraints | Summary |
+|---------|------------|------|---------|-------------|---------|
+| `chat.web.enabled` | — | `bool` | `true` | — | Allow opt-in web search in Chat. |
+| `chat.web.engine` | — | `Literal["auto", "native", "exa"]` | `"auto"` | allowed="auto", "native", "exa" | — |
+| `chat.web.max_characters` | — | `int` | `12000` | ≥ 1000, ≤ 50000 | — |
+| `chat.web.max_results` | — | `int` | `5` | ≥ 1, ≤ 20 | — |
+| `chat.web.max_total_results` | — | `int` | `5` | ≥ 1, ≤ 20 | — |

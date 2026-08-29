@@ -54,7 +54,7 @@ flowchart LR
     root --> n_training
     n_ui["ui\n45 fields"]
     root --> n_ui
-    n_chat["chat\n20 fields"]
+    n_chat["chat\n21 fields"]
     root --> n_chat
     n_hydration["hydration\n2 fields"]
     root --> n_hydration
@@ -68,6 +68,8 @@ flowchart LR
     root --> n_synthetic
     n_docker["docker\n7 fields"]
     root --> n_docker
+    n_document_viewer["document_viewer\n3 fields"]
+    root --> n_document_viewer
 ```
 
 | Section | Fields | Purpose | Reference |
@@ -95,10 +97,11 @@ flowchart LR
 | `tracing` | 28 | Observability and tracing configuration. | [tracing](../config/tracing.md) |
 | `training` | 46 | Reranker training configuration. | [training](../config/training.md) |
 | `ui` | 45 | User interface configuration. | [ui](../config/ui.md) |
-| `chat` | 20 | Top-level chat configuration. Lives at TriBridConfig.chat. | [chat](../config/chat.md) |
+| `chat` | 21 | Top-level chat configuration. Lives at TriBridConfig.chat. | [chat](../config/chat.md) |
 | `hydration` | 2 | Context hydration configuration. | [hydration](../config/hydration.md) |
 | `evaluation` | 14 | Evaluation dataset configuration. | [evaluation](../config/evaluation.md) |
 | `system_prompts` | 11 | System prompts for LLM interactions - affects RAG pipeline behavior. | [system_prompts](../config/system_prompts.md) |
 | `mcp` | 10 | Inbound MCP (Model Context Protocol) server configuration. | [mcp](../config/mcp.md) |
 | `synthetic` | 3 | Top-level synthetic data pipeline configuration. | [synthetic](../config/synthetic.md) |
 | `docker` | 7 | Docker infrastructure configuration. | [docker](../config/docker.md) |
+| `document_viewer` | 3 | Source document evidence viewer: how cited files are rendered back to the user. | [document_viewer](../config/document_viewer.md) |

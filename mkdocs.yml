@@ -120,6 +120,8 @@ nav:
       - Native Postgres (macOS): manual/native_postgres.md
       - Indexing a corpus: manual/indexing.md
       - Searching & answering: manual/search.md
+      - Source document viewer: manual/source_viewer.md
+      - Web search in Chat: manual/web_search.md
       - UI tour: manual/ui.md
       - Troubleshooting: manual/troubleshooting.md
   - Concepts:
@@ -136,6 +138,7 @@ nav:
       - Deployment: deployment.md
       - Operations & metrics: operations.md
       - Docker services UI: operations/docker_ui.md
+      - Production scope & links: operations/production_scope.md
       - Tracing: operations/tracing.md
       - Startup & lifecycle: operations/lifecycle.md
       - Startup cancellation & unwind: operations/cancellation.md

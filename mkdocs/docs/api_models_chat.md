@@ -37,8 +37,8 @@
 
 | Model | Key Fields |
 |-------|------------|
-| `ChatRequest` | `message`, `corpus_id`, `sources`, `top_k`, `include_vector/sparse/graph`, `stream` |
-| `ChatResponse` | `message`, `sources`, `tokens_used`, `debug`, `conversation_id` |
+| `ChatRequest` | `message`, `corpus_id`, `sources`, `top_k`, `include_vector/sparse/graph`, `stream`, `web_enabled` |
+| `ChatResponse` | `message`, `sources`, `tokens_used`, `debug`, `conversation_id`, `web_grounding` |
 | `ChatDebugInfo` | `fusion_method`, `rrf_k`, per-leg weights, confidence thresholds, counts |
 
 ```mermaid

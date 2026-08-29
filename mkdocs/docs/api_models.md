@@ -38,7 +38,7 @@
 | Model | Key Fields |
 |-------|------------|
 | `Chunk` | `chunk_id`, `content`, `file_path`, `start_line`, `end_line`, `language`, `token_count` |
-| `ChunkMatch` | `chunk_id`, `score`, `source`, `metadata` |
+| `ChunkMatch` | `chunk_id`, `score`, `source`, `metadata`, `provenance` |
 | `SearchRequest` | `corpus_id`, `query`, `top_k`, `include_vector/sparse/graph` |
 | `SearchResponse` | `matches`, `fusion_method`, `reranker_mode`, `latency_ms` |
 | `AnswerRequest` | `corpus_id`, `query`, `top_k`, `stream` |

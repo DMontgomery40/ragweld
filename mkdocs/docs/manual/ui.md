@@ -79,6 +79,13 @@ The graph view is where you validate entity extraction quality and relationship 
 
 This panel controls when memory is indexed and when recall is injected per message.
 
+### Citations open the actual source
+
+Every citation under a chat answer is clickable. PDF citations render as a page-thumbnail card with the cited region boxed; text citations open the file scrolled to the cited lines. Either way the document opens in the right rail's **Source** mode, so you can verify evidence without leaving the chat.
+
+- Source viewer guide: [Source document viewer](source_viewer.md)
+- Web-search citations: [Web search in Chat](web_search.md)
+
 ## Main tabs (what they’re for)
 
 The UI is organized into top-level tabs. Here’s the practical meaning of each:

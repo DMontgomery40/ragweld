@@ -37,6 +37,7 @@
 | `chunk_summaries` | [`chunk_summaries.md`](chunk_summaries.md) |
 | `chunking` | [`chunking.md`](chunking.md) |
 | `docker` | [`docker.md`](docker.md) |
+| `document_viewer` | [`document_viewer.md`](document_viewer.md) |
 | `embedding` | [`embedding.md`](embedding.md) |
 | `enrichment` | [`enrichment.md`](enrichment.md) |
 | `evaluation` | [`evaluation.md`](evaluation.md) |

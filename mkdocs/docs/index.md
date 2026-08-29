@@ -77,6 +77,8 @@
 | Eval + Drilldown | Run comparisons and per-query diagnostics for regressions | ✅ Active |
 | Tracing + Grafana | Local traces plus embedded observability dashboards | ✅ Active |
 | Routing + Model Catalog | Local/cloud model routing with catalog refresh and custom models | ✅ Active |
+| Source Document Viewer | Clicked citations open the cited file — PDF pages with boxed regions, cited lines, or captured Docling markdown | ✅ Active |
+| Web Search (Chat) | Opt-in OpenRouter web-search tool with validated citations and grounding metadata | ✅ Active |
 
 ## Product Screenshots
 

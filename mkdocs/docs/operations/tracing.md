@@ -103,6 +103,9 @@ ragweld’s local trace store prioritizes correctness during retries and simplic
 - [ ] You understand that “latest” is per `repo_id` and per `run_id`
 - [ ] You are okay with in-memory only storage (export externally if you need durability)
 
+!!! note "Deep links follow the current deployment"
+    Grafana/Tempo and Langfuse deep links stored in traces are re-pointed to the current `ui.grafana_base_url` and `tracing.langfuse_public_base_url` when traces are read, so old traces still land on the live dashboards. See [Production scope & links](production_scope.md).
+
 ## Switching to external tracing
 
 When you need persistent history, team collaboration, or advanced analytics, switch to external routing mode.
