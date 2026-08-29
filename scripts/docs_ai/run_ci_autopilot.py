@@ -372,7 +372,12 @@ def _run_ai_patch(worktree: Path, base_ref: str) -> tuple[bool, str]:
     # Raw model replies and the repair-round patch ride along as run artifacts
     # (`output/docs-autopilot/**` is uploaded), so a bad patch can be diagnosed
     # from what the model actually said rather than inferred from its remains.
-    for name in ("mkdocs-docs-llm-raw.txt", "mkdocs-docs-llm-repair.patch", "mkdocs-docs-llm-repair-raw.txt"):
+    for name in (
+        "mkdocs-docs-llm-raw.txt",
+        "mkdocs-docs-llm-repair.patch",
+        "mkdocs-docs-llm-repair-raw.txt",
+        "mkdocs-docs-llm-page-repair-raw.txt",
+    ):
         _copy_if_exists(worktree / name, ARTIFACT_DIR / name)
     if result.returncode != 0:
         return False, _error_detail(result)

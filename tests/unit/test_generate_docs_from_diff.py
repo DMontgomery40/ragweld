@@ -438,6 +438,81 @@ def test_repair_docs_links_resolves_unique_basenames_unwraps_the_rest_and_prunes
     assert (again.fixed, again.unwrapped, again.nav_pruned, again.changed_files) == ([], [], [], [])
 
 
+def test_parse_page_blocks_keeps_fences_and_multiple_pages() -> None:
+    module = _load_module()
+    reply = (
+        "Here are the pages.\n"
+        "### FILE: mkdocs/docs/manual/ui.md\n"
+        "# UI tour\n\n```mermaid\nflowchart LR\n  A --> B\n```\n\nText after the fence.\n"
+        "### END FILE\n"
+        "### FILE: `mkdocs/docs/api.md`\n"
+        "# API\n"
+        "### END FILE\n"
+        "Done."
+    )
+    pages = module.parse_page_blocks(reply)
+    assert list(pages) == ["mkdocs/docs/manual/ui.md", "mkdocs/docs/api.md"]
+    assert pages["mkdocs/docs/manual/ui.md"] == "# UI tour\n\n```mermaid\nflowchart LR\n  A --> B\n```\n\nText after the fence.\n"
+    assert pages["mkdocs/docs/api.md"] == "# API\n"
+    assert module.parse_page_blocks("no blocks here") == {}
+
+
+def test_apply_page_replacements_writes_allowed_pages_and_refuses_the_rest(tmp_path: Path) -> None:
+    """Whole-page repair obeys the same delete limits and path rules as a patch."""
+    module = _load_module()
+    repo = _init_repo(tmp_path)
+    module.ROOT = repo
+    big = "# Old Title\n" + "".join(f"line {i}\n" for i in range(400))
+    (repo / "mkdocs" / "docs" / "index.md").write_text(big, encoding="utf-8")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "big page")
+
+    pages = {
+        "mkdocs/docs/api.md": "# API Reference\n\nNew paragraph.\n",
+        "mkdocs/docs/index.md": "# New Title\n",  # destroys 400 lines: refused in incremental mode
+        "mkdocs/docs/guide.md": "# Guide\n",  # not in the rejected set
+        "server/main.py": "print(1)\n",  # outside docs
+    }
+    outcome = module.apply_page_replacements(
+        pages, allowed={"mkdocs/docs/api.md", "mkdocs/docs/index.md", "server/main.py"}, allow_large_deletes=False
+    )
+
+    assert outcome.written == ["mkdocs/docs/api.md"]
+    assert set(outcome.refused) == {"mkdocs/docs/index.md", "mkdocs/docs/guide.md", "server/main.py"}
+    assert "destructive" in outcome.refused["mkdocs/docs/index.md"] or "removes" in outcome.refused["mkdocs/docs/index.md"]
+    assert outcome.refused["mkdocs/docs/guide.md"] == "not one of the rejected pages"
+    assert outcome.refused["server/main.py"] == "outside mkdocs/docs"
+    assert (repo / "mkdocs" / "docs" / "api.md").read_text(encoding="utf-8") == "# API Reference\n\nNew paragraph.\n"
+    assert (repo / "mkdocs" / "docs" / "index.md").read_text(encoding="utf-8") == big
+    assert not (repo / "server" / "main.py").exists()
+    assert _git(repo, "diff", "--cached", "--name-only").stdout.split() == ["mkdocs/docs/api.md"]
+
+    # Bootstrap mode may rewrite wholesale, and an unchanged page is reported, not rewritten.
+    again = module.apply_page_replacements(
+        {"mkdocs/docs/index.md": "# New Title\n", "mkdocs/docs/api.md": "# API Reference\n\nNew paragraph.\n"},
+        allowed={"mkdocs/docs/index.md", "mkdocs/docs/api.md"},
+        allow_large_deletes=True,
+    )
+    assert again.written == ["mkdocs/docs/index.md"]
+    assert again.refused == {"mkdocs/docs/api.md": "identical to the current page"}
+
+
+def test_build_page_repair_prompt_quotes_pages_and_intended_edits(tmp_path: Path) -> None:
+    module = _load_module()
+    repo = _init_repo(tmp_path)
+    module.ROOT = repo
+    _, bad, _ = _mixed_quality_patch()
+    prompt = module.build_page_repair_prompt(
+        rejected={"mkdocs/docs/api.md": "error: patch failed: mkdocs/docs/api.md:1", "mkdocs/docs/new.md": "error: patch failed"},
+        rejected_patch_text=bad,
+    )
+    assert "### FILE: <path>" in prompt and "### END FILE" in prompt
+    assert "port 58012" in prompt
+    assert "# API Reference\n" in prompt
+    assert "mkdocs/docs/new.md" in prompt and "does not exist yet" in prompt
+    assert "index.md" not in prompt
+
+
 def test_response_output_text_reads_a_completed_response() -> None:
     module = _load_module()
     assert module.response_output_text(_COMPLETED_RESPONSE) == "diff --git a/x b/x"

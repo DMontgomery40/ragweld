@@ -19,6 +19,7 @@ Important:
 from __future__ import annotations
 
 import argparse
+import difflib
 from dataclasses import dataclass
 import os
 import re
@@ -39,6 +40,7 @@ PATCH_FILE = ROOT / "mkdocs-docs-llm.patch"
 RAW_REPLY_FILE = ROOT / "mkdocs-docs-llm-raw.txt"
 REPAIR_PATCH_FILE = ROOT / "mkdocs-docs-llm-repair.patch"
 REPAIR_RAW_REPLY_FILE = ROOT / "mkdocs-docs-llm-repair-raw.txt"
+PAGE_REPAIR_RAW_REPLY_FILE = ROOT / "mkdocs-docs-llm-page-repair-raw.txt"
 PLAN_FILE = ROOT / "mkdocs-docs-plan.md"
 
 # Git's well-known empty tree object. Use as a "base ref" to treat the entire
@@ -816,22 +818,18 @@ def response_output_text(data: object) -> str:
     raise RuntimeError("Model returned no output text.")
 
 
+PAGE_REPAIR_SYSTEM_PROMPT = (
+    "You are repairing documentation pages for ragweld whose unified-diff hunks git could not apply.\n"
+    "For EACH page listed in the request, return its COMPLETE new content - the whole page, not a diff.\n"
+    "Start every page with a line `### FILE: <path>` and end it with a line `### END FILE`.\n"
+    "Keep everything on the page that the request did not ask you to change; apply only the intended edits.\n"
+    "Markdown code fences inside the page are fine. Output nothing outside the FILE blocks.\n"
+)
+
+PAGE_BLOCK_RE = re.compile(r"^### FILE: (?P<path>[^\n]+)\n(?P<body>.*?)^### END FILE[ \t]*$", re.MULTILINE | re.DOTALL)
+
+
 def call_llm_unified_diff(prompt: str) -> str:
-    import requests
-
-    _maybe_load_dotenv()
-
-    api_key = (os.getenv("OPENROUTER_API_KEY") or "").strip().strip('"').strip("'")
-    if not api_key:
-        raise RuntimeError(
-            "OPENROUTER_API_KEY not set. In CI add it with: "
-            "gh secret set OPENROUTER_API_KEY --repo <owner>/<repo>"
-        )
-
-    model = os.getenv("DOCS_AUTOPILOT_MODEL", DEFAULT_MODEL)
-    url = (os.getenv("DOCS_AUTOPILOT_API_BASE", DEFAULT_API_BASE).rstrip("/") + "/responses")
-    max_output_tokens = int(os.getenv("DOCS_AUTOPILOT_MAX_OUTPUT_TOKENS", str(DEFAULT_MAX_OUTPUT_TOKENS)))
-
     base_prompt = _read_text(PROMPT_BASE_PATH).strip()
     system_prompt = (
         (base_prompt + "\n\n") if base_prompt else ""
@@ -853,6 +851,29 @@ def call_llm_unified_diff(prompt: str) -> str:
         "Finish every hunk you start; never stop mid-patch.\n"
         "The result must pass `mkdocs build --strict`.\n"
     )
+    return call_llm(prompt, system_prompt=system_prompt)
+
+
+def call_llm_pages(prompt: str) -> str:
+    base_prompt = _read_text(PROMPT_BASE_PATH).strip()
+    return call_llm(prompt, system_prompt=((base_prompt + "\n\n") if base_prompt else "") + PAGE_REPAIR_SYSTEM_PROMPT)
+
+
+def call_llm(prompt: str, *, system_prompt: str) -> str:
+    import requests
+
+    _maybe_load_dotenv()
+
+    api_key = (os.getenv("OPENROUTER_API_KEY") or "").strip().strip('"').strip("'")
+    if not api_key:
+        raise RuntimeError(
+            "OPENROUTER_API_KEY not set. In CI add it with: "
+            "gh secret set OPENROUTER_API_KEY --repo <owner>/<repo>"
+        )
+
+    model = os.getenv("DOCS_AUTOPILOT_MODEL", DEFAULT_MODEL)
+    url = (os.getenv("DOCS_AUTOPILOT_API_BASE", DEFAULT_API_BASE).rstrip("/") + "/responses")
+    max_output_tokens = int(os.getenv("DOCS_AUTOPILOT_MAX_OUTPUT_TOKENS", str(DEFAULT_MAX_OUTPUT_TOKENS)))
 
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     payload = {
@@ -1282,6 +1303,94 @@ def repair_docs_links(root: Path) -> LinkRepairReport:
     return report
 
 
+def build_page_repair_prompt(*, rejected: dict[str, str], rejected_patch_text: str) -> str:
+    """Ask for whole replacement pages for the files git still rejects after the diff repair round."""
+    lines: list[str] = [
+        "# Docs Autopilot Page Repair",
+        "",
+        "`git apply` rejected your diffs for the pages below even after a repair attempt, so return each page",
+        "in full instead. For every page: the complete new content, applying the edits your rejected hunks",
+        "intended, and keeping every other part of the page exactly as quoted. Use `### FILE: <path>` /",
+        "`### END FILE` markers. Do not return any page that is not listed here.",
+        "",
+        "## Why each was rejected",
+        *[f"- {path}: {err.splitlines()[0] if err else 'rejected'}" for path, err in rejected.items()],
+        "",
+        "## Your rejected hunks (the edits you intended)",
+        "```diff",
+        (rejected_patch_text or "").rstrip(),
+        "```",
+        "",
+        "## Current page text (verbatim)",
+    ]
+    for path in rejected:
+        current = _read_text(ROOT / path)
+        if current:
+            lines += [f"### {path}", "```markdown", current, "```", ""]
+        else:
+            lines += [f"### {path}", "(does not exist yet - return the complete new page)", ""]
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def parse_page_blocks(text: str) -> dict[str, str]:
+    """`### FILE: path` ... `### END FILE` blocks -> {path: content}. Fences inside a page are content."""
+    pages: dict[str, str] = {}
+    for m in PAGE_BLOCK_RE.finditer(text or ""):
+        path = m.group("path").strip().strip("`").replace("\\", "/")
+        body = m.group("body")
+        if body and not body.endswith("\n"):
+            body += "\n"
+        pages[path] = body
+    return pages
+
+
+@dataclass(frozen=True)
+class PageRepairResult:
+    written: list[str]
+    refused: dict[str, str]
+
+
+def apply_page_replacements(pages: dict[str, str], *, allowed: set[str], allow_large_deletes: bool) -> PageRepairResult:
+    """Write whole-page replacements for rejected files, under the same safety rules as a patch.
+
+    The replacement is diffed against the page on disk so the delete limits that
+    guard incremental runs apply to it exactly as they would to a hunk.
+    """
+    written: list[str] = []
+    refused: dict[str, str] = {}
+    for path, content in pages.items():
+        if path not in allowed:
+            refused[path] = "not one of the rejected pages"
+            continue
+        if not _is_allowed_patch_path(path):
+            refused[path] = "outside mkdocs/docs"
+            continue
+        target = ROOT / path
+        current = _read_text(target)
+        synthetic = "".join(
+            difflib.unified_diff(
+                current.splitlines(keepends=True),
+                content.splitlines(keepends=True),
+                fromfile=f"a/{path}",
+                tofile=f"b/{path}",
+            )
+        )
+        if not synthetic.strip():
+            refused[path] = "identical to the current page"
+            continue
+        synthetic = f"diff --git a/{path} b/{path}\n" + synthetic
+        errors = _validate_patch_safety(synthetic, allow_large_deletes=allow_large_deletes)
+        if errors:
+            refused[path] = "; ".join(errors)
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+        written.append(path)
+    if written:
+        run("git add -- " + " ".join(shlex.quote(p) for p in written))
+    return PageRepairResult(written=written, refused=refused)
+
+
 def build_repair_prompt(*, rejected: dict[str, str], rejected_patch_text: str) -> str:
     """Ask the model to re-emit only the files git rejected, against the real page text."""
     lines: list[str] = [
@@ -1400,6 +1509,25 @@ def main() -> None:
                 applied=result.applied + again.applied,
                 rejected=still_rejected,
                 rejected_patch_text=again.rejected_patch_text or result.rejected_patch_text,
+            )
+
+        if result.rejected and os.getenv("DOCS_AUTOPILOT_PAGE_REPAIR", "1") == "1":
+            print(f"Page repair: asking the model for whole replacement pages for {len(result.rejected)} file(s).")
+            page_reply = call_llm_pages(
+                build_page_repair_prompt(rejected=result.rejected, rejected_patch_text=result.rejected_patch_text)
+            )
+            PAGE_REPAIR_RAW_REPLY_FILE.write_text(page_reply, encoding="utf-8")
+            pages = parse_page_blocks(page_reply)
+            outcome = apply_page_replacements(
+                pages, allowed=set(result.rejected), allow_large_deletes=is_bootstrap_base(args.base)
+            )
+            for path, why in outcome.refused.items():
+                print(f"Page repair refused {path}: {why}")
+            still = {p: e for p, e in result.rejected.items() if p not in outcome.written}
+            for path in outcome.written:
+                print(f"Page repair wrote {path}")
+            result = PerFileApplyResult(
+                applied=result.applied + outcome.written, rejected=still, rejected_patch_text=result.rejected_patch_text
             )
 
         for path, err in result.rejected.items():
