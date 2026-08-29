@@ -205,6 +205,10 @@
          <lastmod>2026-08-29</lastmod>
     </url>
     <url>
+         <loc>https://dmontgomery40.github.io/ragweld/latest/operations/docker_ui/</loc>
+         <lastmod>2026-08-29</lastmod>
+    </url>
+    <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/operations/lifecycle/</loc>
          <lastmod>2026-08-29</lastmod>
     </url>
@@ -226,6 +230,26 @@
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/operations/webhooks/</loc>
+         <lastmod>2026-08-29</lastmod>
+    </url>
+    <url>
+         <loc>https://dmontgomery40.github.io/ragweld/latest/reference/architecture/</loc>
+         <lastmod>2026-08-29</lastmod>
+    </url>
+    <url>
+         <loc>https://dmontgomery40.github.io/ragweld/latest/reference/architecture/api-surface/</loc>
+         <lastmod>2026-08-29</lastmod>
+    </url>
+    <url>
+         <loc>https://dmontgomery40.github.io/ragweld/latest/reference/architecture/config-model/</loc>
+         <lastmod>2026-08-29</lastmod>
+    </url>
+    <url>
+         <loc>https://dmontgomery40.github.io/ragweld/latest/reference/architecture/retrieval-pipeline/</loc>
+         <lastmod>2026-08-29</lastmod>
+    </url>
+    <url>
+         <loc>https://dmontgomery40.github.io/ragweld/latest/reference/architecture/runtime-topology/</loc>
          <lastmod>2026-08-29</lastmod>
     </url>
     <url>
