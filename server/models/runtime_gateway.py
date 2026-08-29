@@ -12,7 +12,6 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-
 _LITELLM_ALIAS_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
@@ -110,7 +109,7 @@ class GenerationConfig(BaseModel):
     gen_max_tokens: int = Field(
         default=512,
         ge=100,
-        le=8192,
+        le=16000,
         description="Max tokens for generation",
     )
 

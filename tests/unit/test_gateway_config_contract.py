@@ -44,6 +44,12 @@ def test_generation_config_contains_only_gateway_aliases_and_generic_controls() 
     assert GenerationConfig().enrich_model == "ragweld-local"
 
 
+def test_long_form_generation_budget_accepts_production_ceiling_and_rejects_above() -> None:
+    assert GenerationConfig(gen_max_tokens=16000).gen_max_tokens == 16000
+    with pytest.raises(ValidationError, match="less than or equal to 16000"):
+        GenerationConfig(gen_max_tokens=16001)
+
+
 def test_chat_config_contains_only_litellm_and_vllm_generation_deployments() -> None:
     fields = set(ChatConfig.model_fields)
 
