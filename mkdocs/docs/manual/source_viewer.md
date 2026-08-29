@@ -131,6 +131,11 @@ httpx.patch(
     - Confirm the corpus still has chunks for the file: index it again, or check `GET /api/index/{corpus_id}/status`.
     - Corpora indexed before provenance capture still open, but show the "not captured" notice until you re-index.
 
+??? question "The viewer shows 'Signed out' instead of the document"
+    - The auth proxy in front of the API refused the request (HTTP 401 or 403) — most often because your sign-in session ended, for example after a service restart.
+    - Nothing is wrong with the document: reload the page to sign in again, then click the citation again.
+    - The error card says this directly ("Your sign-in session has ended, so the document could not be fetched") with a *Reload the page to sign in again* hint, instead of a generic `Could not load document (HTTP 401)` — so you don't go hunting for an indexing problem that doesn't exist.
+
 ??? question "PDF highlights look offset"
     - The file likely changed since indexing (check the **changed since indexing** badge). Re-index to rebuild the provenance map.
     - A handful of Docling layout items can fail to locate in the serialized markdown; those are counted as unlocated rather than guessed, so a region may be missing while the page highlight still works.

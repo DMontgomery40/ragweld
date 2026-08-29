@@ -75,6 +75,37 @@ flowchart LR
     D --> F["Save path: reconciled\nbefore persisting"]
 ```
 
+## Renderer output safety (`deploy/proxmox/render_config.py`)
+
+The Proxmox production render writes the validated config to disk atomically, and the write path is deliberately defensive. If you run the renderer from cron, systemd units, or a different user than whoever owns the deployed config, these rules are what protect you:
+
+Regular file required
+:   If the output path already exists, it must be a regular file. Symlinks — including a symlink pointing at an unrelated file elsewhere on disk — are refused with `output must be a regular file when it already exists` before anything is written, so a render can never silently overwrite a file it was not pointed at.
+
+Ownership preserved
+:   When the renderer replaces an existing output, the new file inherits the old file's `uid` and `gid`, and is always written with mode `0600` before it is swapped in via `os.replace`. A config rendered as root keeps the service account's ownership of the deployed file.
+
+Original kept on failure
+:   If restoring ownership fails (for example, a non-root renderer replacing a file it does not own), the render fails, the original file is left byte-for-byte intact, and the temporary file is cleaned up. A failed render never leaves you with a half-owned or mode-flipped production config.
+
+```mermaid
+flowchart LR
+    A["Rendered config JSON"] --> B{"Output exists?"}
+    B -->|"no"| E["Write temp file\nfchmod 0600"]
+    B -->|"yes"| C{"Regular file?"}
+    C -->|"no (symlink or special)"| D["Refuse:\noutput must be a regular file"]
+    C -->|"yes"| F["Write temp file\nfchown original uid:gid\nfchmod 0600"]
+    E --> G["os.replace\natomic swap"]
+    F --> G
+    F -.->|"fchown fails"| H["Keep original\nbyte-for-byte\nclean up temp"]
+    G --> I["Deployed config\n0600, original owner"]
+```
+
+!!! tip "If you're not sure"
+    Run the renderer as the same user that owns the deployed config, or expect to re-run it with sufficient privileges. If you see `output must be a regular file`, check for symlinks at the output path (`ls -la`) rather than forcing the write — the renderer refuses them on purpose.
+
+Unit coverage for these behaviors lives in `tests/unit/test_proxmox_deployment_contract.py` (ownership preservation, ownership-failure rollback, and symlink rejection).
+
 ## External link origin refresh
 
 Traces persist across deployments, but the dashboards they deep-link to move. `TraceStore` keeps a mapping from link kind to the current deployment origin and rewrites matching links whenever traces are read:
