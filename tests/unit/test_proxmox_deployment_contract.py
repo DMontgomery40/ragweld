@@ -829,7 +829,7 @@ def test_proxmox_compose_uses_only_allowlisted_secret_mounts_and_origins() -> No
     assert langfuse_env["AUTH_CUSTOM_CLIENT_SECRET"] == "contract-only"
     assert langfuse_env["AUTH_CUSTOM_FETCH_USERINFO"] == "true"
     assert langfuse_env["AUTH_CUSTOM_ALLOW_ACCOUNT_LINKING"] == "true"
-    assert langfuse_env["AUTH_CUSTOM_ISSUER"] == "https://auth.ragweld.com"
+    assert langfuse_env["AUTH_CUSTOM_ISSUER"] == "https://ragweld-auth.dtmont.com"
     assert langfuse_env["AUTH_CUSTOM_NAME"] == "Ragweld"
     assert langfuse_env["AUTH_CUSTOM_SCOPE"] == "openid email profile groups"
     assert langfuse_env["AUTH_DISABLE_SIGNUP"] == "true"
