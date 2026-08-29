@@ -87,6 +87,6 @@ flowchart TB
 
 ## What you’ll use most
 
-- **UI**: `http://127.0.0.1:5173/web/dashboard` (default dev URL)
-- **API base**: `http://127.0.0.1:8012/api` (default dev URL)
+- **UI**: `http://127.0.0.1:55173/web/dashboard` (default dev URL)
+- **API base**: `http://127.0.0.1:58012/api` (default dev URL)
 - **Source of truth**: `server/models/tribrid_config_model.py` (Pydantic config + API shapes)

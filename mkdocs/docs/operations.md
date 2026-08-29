@@ -18,7 +18,7 @@
 
     ---
 
-    Inspect and restart containers via Docker endpoints.
+    Inspect and restart the ragweld Compose services via project-scoped Docker endpoints.
 
 </div>
 
@@ -30,7 +30,7 @@
     Gate traffic on `/api/ready`. It verifies DB connectivity before admitting load.
 
 !!! note "Container Logs"
-    Use `/docker/{container}/logs` for ad-hoc log pulls, or rely on Loki for aggregation.
+    Use `/api/docker/services/{service}/logs` for ad-hoc log pulls (ragweld services only), or rely on Loki for aggregation.
 
 !!! warning "Restarts"
     Prefer coordinated restarts via the API (or compose) to avoid dropping in-flight requests.
@@ -39,17 +39,20 @@
 
 | Endpoint | Description |
 |----------|-------------|
-| `/api/docker/status` | Container status |
-| `/api/docker/containers` | List TriBrid-managed containers |
-| `/api/docker/containers/all` | List all containers |
-| `/api/docker/{container}/restart` | Restart container |
-| `/api/docker/{container}/logs` | Tail logs |
+| `/api/docker/status` | Docker daemon status + managed service count |
+| `/api/docker/services` | Allowlisted ragweld Compose services |
+| `/api/docker/services/{service}/{action}` | Start/stop/restart one managed service |
+| `/api/docker/services/{service}/logs` | Tail logs for one managed service |
+| `/api/observability/status` | Observability mode, component readiness, incidents |
+
+The Docker surface is project-scoped: it only ever exposes the allowlisted ragweld Compose services, never host-wide arbitrary container control.
 
 ```mermaid
 flowchart LR
-    Scrape["Prometheus"] --> API_METRICS["/metrics"]
-    API_METRICS --> APP["TriBridRAG"]
+    Scrape["Prometheus"] --> API_METRICS["/api/metrics"]
+    API_METRICS --> APP["ragweld API"]
     APP --> PG["Postgres"]
+    APP --> QD["Qdrant\n(dense + sparse)"]
     APP --> NEO["Neo4j"]
     Scrape --> PExp["postgres-exporter"]
 ```
@@ -76,4 +79,4 @@ await fetch('/api/docker/status').then(r => r.json())
 - [ ] Define SLOs for p95 latency per endpoint
 
 ??? note "Grafana"
-    Default dashboard UID `tribrid-overview` is embedded in the UI. Customize datasource/dashboards via mounted provisioning files.
+    Default dashboard UID `ragweld-oncall-overview` is embedded in the UI. Customize datasource/dashboards via mounted provisioning files.

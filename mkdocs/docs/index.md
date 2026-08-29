@@ -24,7 +24,7 @@
 
     ---
 
-    Chunk storage, embeddings, pgvector indexing, and FTS in one database.
+    Chunk rows, summaries, and caches in Postgres; dense and sparse vectors in per-corpus Qdrant generations.
 
 -   :material-graph:{ .lg .middle } **Knowledge Graph**
 
@@ -67,8 +67,8 @@
 
 | Feature | Description | Status |
 |---------|-------------|--------|
-| Vector Search | Dense similarity via pgvector in PostgreSQL | ✅ Active |
-| Sparse Search | PostgreSQL FTS/BM25 for exact terms, identifiers | ✅ Active |
+| Vector Search | Dense similarity via Qdrant dense generations | ✅ Active |
+| Sparse Search | IDF-modified BM25 (fastembed `Qdrant/bm25`) for exact terms, identifiers | ✅ Active |
 | Graph Search | Neo4j traversal to follow entities/relations | ✅ Active |
 | Fusion | Weighted/reciprocal-rank fusion of sources | ✅ Active |
 | Reranker | Optional cloud/learning reranking | ✅ Active |
@@ -122,8 +122,8 @@ These screenshots are taken from recent production UI surfaces and map to the sa
 
 ```mermaid
 flowchart LR
-    Q["Query"] --> V["Vector Search (pgvector)"]
-    Q --> S["Sparse Search (PostgreSQL FTS)"]
+    Q["Query"] --> V["Vector Search (Qdrant dense)"]
+    Q --> S["Sparse Search (Qdrant BM25)"]
     Q --> G["Graph Search (Neo4j)"]
     V --> F["Fusion Layer"]
     S --> F
@@ -149,7 +149,7 @@ Use ++ctrl+c++ to stop local `uvicorn` or Docker tail sessions.
 ```python
 import httpx, subprocess
 
-BASE = "http://127.0.0.1:8012/api"
+BASE = "http://127.0.0.1:58012/api"
 
 # 1) Generate TS types from Pydantic (required for UI) (1)!
 subprocess.check_call(["uv", "run", "scripts/generate_types.py"])  # (1) Types derive from Pydantic
@@ -185,7 +185,7 @@ for m in res.get("matches", []):
 
 === "curl"
 ```bash
-BASE=http://127.0.0.1:8012/api
+BASE=http://127.0.0.1:58012/api
 
 # Start indexing (1)!
 curl -sS -X POST "$BASE/index" \
@@ -219,7 +219,7 @@ curl -sS -X POST "$BASE/search" \
 import type { IndexRequest, SearchRequest, SearchResponse } from "./web/src/types/generated";
 
 async function indexAndSearch() {
-  const base = "http://127.0.0.1:8012/api";
+  const base = "http://127.0.0.1:58012/api";
 
   const indexReq: IndexRequest = {
     corpus_id: "tribrid", // (2)! repo_id alias also accepted server-side
@@ -261,8 +261,8 @@ flowchart TB
     end
 
     U --> A["FastAPI"]
-    A --> V["VectorRetriever\n(Postgres+pgvector)"]
-    A --> S["SparseRetriever\n(Postgres FTS)"]
+    A --> V["VectorRetriever\n(Qdrant dense)"]
+    A --> S["SparseRetriever\n(Qdrant sparse BM25)"]
     A --> G["GraphRetriever\n(Neo4j)"]
     V --> F["Fusion"]
     S --> F
@@ -273,11 +273,12 @@ flowchart TB
 
     subgraph Storage
       P["PostgreSQL"]
+      QD["Qdrant"]
       N["Neo4j"]
     end
 
-    V <--> P
-    S <--> P
+    V <--> QD
+    S <--> QD
     G <--> N
 ```
 

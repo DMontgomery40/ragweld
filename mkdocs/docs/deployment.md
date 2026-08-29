@@ -27,7 +27,7 @@
 [API](api.md){ .md-button }
 
 !!! tip "Persistent Volumes"
-    Keep DB data outside the repo. Default bind-mount path is `../tribrid-rag-db/`. Override with `TRIBRID_DB_DIR`.
+    Data lives in named Docker volumes (`postgres_data`, `qdrant_data`, `neo4j_data`, ...) owned by the `ragweld` Compose project. Back up the volumes rather than bind mounts.
 
 !!! note "Environment Template"
     Copy the provided environment configuration to `.env`, fill in DB credentials and API keys, and export it into your shell for local runs.
@@ -39,12 +39,16 @@
 
 | Service | Port | Purpose |
 |---------|------|---------|
-| API (uvicorn) | 8000 | REST endpoints |
-| PostgreSQL | 5432 | Chunk + vector + FTS storage |
+| API (uvicorn, host) | 58012 | REST endpoints under `/api` |
+| PostgreSQL | 5432 | Chunk rows, summaries, caches |
+| Qdrant | 56333 | Dense + sparse chunk vectors |
 | Neo4j Bolt | 7687 | Graph driver |
 | Neo4j Browser | 7474 | Admin UI |
-| Prometheus | 9090 | Metrics |
-| Grafana | 3001 | Dashboards |
+| LiteLLM | 54000 | Generation gateway |
+| MLflow | 55500 | Training run tracking |
+| Prometheus | 59090 | Metrics (remote-writes to Mimir) |
+| Grafana | 3301 | Dashboards |
+| Loki | 53100 | Log aggregation |
 
 ```mermaid
 flowchart LR
@@ -76,7 +80,7 @@ os.system("uvicorn server.main:app --reload --port 8000")  # (2) Dev server
 === "curl"
 ```bash
 # After containers are up:
-curl -sS http://127.0.0.1:8012/api/ready | jq .  # readiness check (3)!
+curl -sS http://127.0.0.1:58012/api/ready | jq .  # readiness check (3)!
 ```
 
 === "TypeScript"

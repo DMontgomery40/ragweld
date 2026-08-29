@@ -12,7 +12,7 @@
 
     ---
 
-    Chunks, embeddings, and sparse search live in PostgreSQL (pgvector + FTS).
+    Chunk rows live in Postgres; dense and sparse vectors live in a per-corpus Qdrant generation.
 
 -   :material-graph:{ .lg .middle } **Optional graph context**
 
@@ -33,9 +33,9 @@
 
 Indexing turns a folder into a set of **retrieval primitives**:
 
-- **Chunks** (text/code spans) with file paths and line ranges
-- **Embeddings** (vector search) stored in Postgres/pgvector
-- **Sparse index** (Postgres FTS/BM25-style scoring)
+- **Chunks** (text/code spans) with file paths and line ranges — rows in Postgres
+- **Dense embeddings** (vector search) in a per-corpus Qdrant generation
+- **Sparse index** (IDF-modified BM25 via fastembed `Qdrant/bm25`) in the same generation
 - **Graph context** (optional) stored in Neo4j
 
 ```mermaid
@@ -44,8 +44,8 @@ flowchart LR
   L --> C["Chunk"]
   C --> E["Embed"]
   C --> S["Sparse index"]
-  E --> P["Postgres (pgvector)"]
-  S --> P
+  E --> Q["Qdrant generation"]
+  S --> Q
   C --> G["Neo4j (optional)"]
 ```
 
@@ -54,7 +54,7 @@ flowchart LR
 Use the estimate endpoint to catch “oops, this repo is huge” early:
 
 ```bash
-curl -sS -X POST "http://127.0.0.1:8012/api/index/estimate" \
+curl -sS -X POST "http://127.0.0.1:58012/api/index/estimate" \
   -H "Content-Type: application/json" \
   -d '{
     "corpus_id": "demo",
@@ -69,7 +69,7 @@ curl -sS -X POST "http://127.0.0.1:8012/api/index/estimate" \
 ## Start indexing
 
 ```bash
-curl -sS -X POST "http://127.0.0.1:8012/api/index" \
+curl -sS -X POST "http://127.0.0.1:58012/api/index" \
   -H "Content-Type: application/json" \
   -d '{
     "corpus_id": "demo",
@@ -81,8 +81,8 @@ curl -sS -X POST "http://127.0.0.1:8012/api/index" \
 ## Monitor progress
 
 ```bash
-curl -sS "http://127.0.0.1:8012/api/index/demo/status" | jq .
-curl -sS "http://127.0.0.1:8012/api/index/demo/stats" | jq .
+curl -sS "http://127.0.0.1:58012/api/index/demo/status" | jq .
+curl -sS "http://127.0.0.1:58012/api/index/demo/stats" | jq .
 ```
 
 In the UI, this typically maps to **RAG → Indexing** and **Dashboard → Storage**.

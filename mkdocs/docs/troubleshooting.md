@@ -55,13 +55,13 @@ flowchart TB
 === "Python"
 ```python
 import httpx
-print(httpx.get("http://127.0.0.1:8012/api/ready").json())  # readiness
+print(httpx.get("http://127.0.0.1:58012/api/ready").json())  # readiness
 ```
 
 === "curl"
 ```bash
-curl -sS http://127.0.0.1:8012/api/ready | jq .
-curl -sS http://127.0.0.1:8012/api/docker/status | jq .
+curl -sS http://127.0.0.1:58012/api/ready | jq .
+curl -sS http://127.0.0.1:58012/api/docker/status | jq .
 ```
 
 === "TypeScript"
