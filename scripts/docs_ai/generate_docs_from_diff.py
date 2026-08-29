@@ -1170,6 +1170,118 @@ def apply_patch_per_file(patch_path: Path) -> PerFileApplyResult:
     return PerFileApplyResult(applied=applied, rejected=rejected, rejected_patch_text="".join(rejected_chunks))
 
 
+_MD_LINK_RE = re.compile(r"(?<!!)\[([^\]]*)\]\(([^)\s]+)(\s+\"[^\"]*\")?\)")
+_NAV_ITEM_RE = re.compile(r"^(\s*)- [^:]+: ([^\s].*?\.md)\s*$")
+_NAV_SECTION_RE = re.compile(r"^(\s*)- [^:]+:\s*$")
+
+
+@dataclass
+class LinkRepairReport:
+    fixed: list[tuple[str, str, str]]
+    unwrapped: list[tuple[str, str]]
+    nav_pruned: list[str]
+    changed_files: list[str]
+
+
+def _is_relative_doc_link(target: str) -> bool:
+    t = (target or "").strip()
+    if not t or t.startswith(("#", "/", "mailto:", "tel:", "data:")) or "://" in t:
+        return False
+    return True
+
+
+def _prune_nav(mkdocs_yml: Path, docs_dir: Path) -> list[str]:
+    """Drop nav entries whose page does not exist, and sections left empty by that.
+
+    mkdocs.yml carries `!!python/name:` tags, so this is a line pass over the
+    `nav:` block rather than a YAML round-trip.
+    """
+    lines = mkdocs_yml.read_text(encoding="utf-8").splitlines(keepends=True)
+    start = next((i for i, ln in enumerate(lines) if re.match(r"^nav:\s*$", ln)), None)
+    if start is None:
+        return []
+    end = next((i for i in range(start + 1, len(lines)) if re.match(r"^[A-Za-z_]", lines[i])), len(lines))
+    nav = lines[start + 1 : end]
+    pruned: list[str] = []
+    kept: list[str] = []
+    for ln in nav:
+        m = _NAV_ITEM_RE.match(ln)
+        if m and not (docs_dir / m.group(2).strip()).exists():
+            pruned.append(m.group(2).strip())
+            continue
+        kept.append(ln)
+    # A section header is empty when the next non-blank line is not indented deeper.
+    result: list[str] = []
+    for i, ln in enumerate(kept):
+        m = _NAV_SECTION_RE.match(ln)
+        if m:
+            indent = len(m.group(1))
+            nxt = next((k for k in kept[i + 1 :] if k.strip()), None)
+            if nxt is None or (len(nxt) - len(nxt.lstrip(" "))) <= indent:
+                pruned.append(ln.strip())
+                continue
+        result.append(ln)
+    if pruned:
+        mkdocs_yml.write_text("".join(lines[: start + 1] + result + lines[end:]), encoding="utf-8")
+    return pruned
+
+
+def repair_docs_links(root: Path) -> LinkRepairReport:
+    """Make relative links resolve before `mkdocs build --strict` sees them.
+
+    Run 33262983828 landed 15 pages and lost all of them to one link:
+    `manual/onboarding.md` pointed at `eval.md` when the page is
+    `guides/eval.md`. A dangling `.md` link whose basename exists exactly once
+    is rewritten to that page; anything else is unwrapped to plain text with a
+    warning; nav entries with no page are pruned. Assets and external URLs are
+    left for mkdocs to judge.
+    """
+    docs_dir = root / "mkdocs" / "docs"
+    report = LinkRepairReport(fixed=[], unwrapped=[], nav_pruned=[], changed_files=[])
+    if not docs_dir.exists():
+        return report
+    pages = sorted(docs_dir.rglob("*.md"))
+    by_name: dict[str, list[Path]] = {}
+    for page in pages:
+        by_name.setdefault(page.name, []).append(page)
+
+    for page in pages:
+        text = page.read_text(encoding="utf-8")
+        rel_page = page.relative_to(root).as_posix()
+
+        def _sub(m: re.Match[str], page: Path = page, rel_page: str = rel_page) -> str:
+            label, target, title = m.group(1), m.group(2), m.group(3) or ""
+            if not _is_relative_doc_link(target):
+                return m.group(0)
+            path_part, _, anchor = target.partition("#")
+            if not path_part.lower().endswith(".md"):
+                return m.group(0)
+            if (page.parent / path_part).resolve().exists():
+                return m.group(0)
+            matches = by_name.get(Path(path_part).name, [])
+            if len(matches) == 1:
+                new_target = os.path.relpath(matches[0], page.parent).replace(os.sep, "/")
+                if anchor:
+                    new_target += f"#{anchor}"
+                report.fixed.append((rel_page, target, new_target))
+                return f"[{label}]({new_target}{title})"
+            report.unwrapped.append((rel_page, target))
+            return label
+
+        new_text = _MD_LINK_RE.sub(_sub, text)
+        if new_text != text:
+            page.write_text(new_text, encoding="utf-8")
+            report.changed_files.append(rel_page)
+
+    mkdocs_yml = root / "mkdocs.yml"
+    if mkdocs_yml.exists():
+        pruned = _prune_nav(mkdocs_yml, docs_dir)
+        if pruned:
+            report.nav_pruned.extend(pruned)
+            report.changed_files.append("mkdocs.yml")
+    return report
+
+
 def build_repair_prompt(*, rejected: dict[str, str], rejected_patch_text: str) -> str:
     """Ask the model to re-emit only the files git rejected, against the real page text."""
     lines: list[str] = [
@@ -1294,6 +1406,21 @@ def main() -> None:
             first = err.splitlines()[0] if err else "git apply rejected it"
             print(f"::warning::docs-autopilot: dropped {path}: {first}")
         print(f"AUTOPILOT_APPLY_SUMMARY: applied={len(result.applied)} rejected={len(result.rejected)}")
+
+        if result.applied:
+            links = repair_docs_links(ROOT)
+            for page, old, new in links.fixed:
+                print(f"Link repaired in {page}: {old} -> {new}")
+            for page, old in links.unwrapped:
+                print(f"::warning::docs-autopilot: unresolvable link {old} in {page} unwrapped to plain text")
+            for entry in links.nav_pruned:
+                print(f"::warning::docs-autopilot: nav entry pruned (no such page): {entry}")
+            if links.changed_files:
+                run("git add -- " + " ".join(shlex.quote(p) for p in links.changed_files))
+            print(
+                f"AUTOPILOT_LINK_REPAIR: fixed={len(links.fixed)} unwrapped={len(links.unwrapped)} "
+                f"nav_pruned={len(links.nav_pruned)}"
+            )
         if not result.applied:
             _gh_error("Docs autopilot: no file of the LLM patch could be applied (corrupt or incompatible).")
             for path, err in result.rejected.items():

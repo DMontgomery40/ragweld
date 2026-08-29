@@ -372,6 +372,72 @@ def test_build_repair_prompt_quotes_error_rejected_hunks_and_current_pages(tmp_p
     assert "index.md" not in prompt  # only the rejected pages are re-quoted
 
 
+def _docs_tree_with_bad_links(tmp_path: Path) -> Path:
+    root = tmp_path / "site"
+    docs = root / "mkdocs" / "docs"
+    (docs / "manual").mkdir(parents=True)
+    (docs / "guides").mkdir()
+    (docs / "assets").mkdir()
+    (docs / "guides" / "eval.md").write_text("# Eval\n", encoding="utf-8")
+    (docs / "manual" / "quickstart.md").write_text("# Quickstart\n", encoding="utf-8")
+    (docs / "manual" / "onboarding.md").write_text(
+        "# Onboarding\n"
+        "[Eval guide](eval.md){ .md-button }\n"
+        "[Eval section](eval.md#metrics)\n"
+        "[Missing](nowhere.md) and [Quickstart](quickstart.md)\n"
+        "![shot](../assets/shot.png) [GitHub](https://example.com/x.md) [top](#top) [abs](/api/x.md)\n",
+        encoding="utf-8",
+    )
+    (root / "mkdocs.yml").write_text(
+        "site_name: Test\n"
+        "nav:\n"
+        "  - Home: index.md\n"
+        "  - Guides:\n"
+        "      - Evaluation: guides/eval.md\n"
+        "      - Ghost: guides/ghost.md\n"
+        "  - Empty section:\n"
+        "      - Nope: nope.md\n"
+        "  - Manual:\n"
+        "      - Onboarding: manual/onboarding.md\n"
+        "plugins:\n"
+        "  - search\n",
+        encoding="utf-8",
+    )
+    (docs / "index.md").write_text("# Home\n", encoding="utf-8")
+    return root
+
+
+def test_repair_docs_links_resolves_unique_basenames_unwraps_the_rest_and_prunes_nav(tmp_path: Path) -> None:
+    module = _load_module()
+    root = _docs_tree_with_bad_links(tmp_path)
+
+    report = module.repair_docs_links(root)
+
+    page = (root / "mkdocs" / "docs" / "manual" / "onboarding.md").read_text(encoding="utf-8")
+    assert "[Eval guide](../guides/eval.md){ .md-button }" in page
+    assert "[Eval section](../guides/eval.md#metrics)" in page
+    assert "Missing and [Quickstart](quickstart.md)" in page
+    assert "![shot](../assets/shot.png) [GitHub](https://example.com/x.md) [top](#top) [abs](/api/x.md)" in page
+    assert report.fixed == [
+        ("mkdocs/docs/manual/onboarding.md", "eval.md", "../guides/eval.md"),
+        ("mkdocs/docs/manual/onboarding.md", "eval.md#metrics", "../guides/eval.md#metrics"),
+    ]
+    assert report.unwrapped == [("mkdocs/docs/manual/onboarding.md", "nowhere.md")]
+
+    nav = (root / "mkdocs.yml").read_text(encoding="utf-8")
+    assert "guides/ghost.md" not in nav
+    assert "Empty section" not in nav and "nope.md" not in nav
+    assert "      - Evaluation: guides/eval.md" in nav
+    assert "      - Onboarding: manual/onboarding.md" in nav
+    assert nav.endswith("plugins:\n  - search\n")
+    assert set(report.nav_pruned) == {"guides/ghost.md", "nope.md", "- Empty section:"}
+    assert report.changed_files == ["mkdocs/docs/manual/onboarding.md", "mkdocs.yml"]
+
+    # Idempotent: a second pass finds nothing to do and touches nothing.
+    again = module.repair_docs_links(root)
+    assert (again.fixed, again.unwrapped, again.nav_pruned, again.changed_files) == ([], [], [], [])
+
+
 def test_response_output_text_reads_a_completed_response() -> None:
     module = _load_module()
     assert module.response_output_text(_COMPLETED_RESPONSE) == "diff --git a/x b/x"

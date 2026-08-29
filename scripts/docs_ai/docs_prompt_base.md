@@ -97,13 +97,38 @@ Use Material buttons (adjust relative paths correctly for nested pages):
 - Definition lists for “what does this setting mean?”
 - Task lists for checklists and step-by-step flows
 
+## Diagrams (mandatory depth and truth)
+
+Placeholder diagrams are forbidden. A box that says "Query -> Vector Top-K / Sparse Top-K / Graph Top-K
+-> Fusion -> Results" is not documentation of a retrieval pipeline that has Qdrant dense and sparse
+generations, a Neo4j lexical graph leg, weighted RRF with per-leg weights, scoring boosts, dedup/MMR,
+a gateway reranker, a confidence gate, hydration and a semantic cache.
+
+- The pages under `reference/architecture/**` are **generated from the code on every run** (runtime
+  topology, API surface, retrieval pipeline, configuration model). They are the authoritative diagrams.
+  Link to them from `architecture.md`, `retrieval/overview.md`, `indexing.md`, `operations.md`,
+  `observability.md` and `api.md`; do not redraw those systems by hand and do not edit those pages.
+- Every diagram you draw yourself must be derived from the code, config and diffs quoted in this plan:
+  real module paths (`server/retrieval/fusion.py`), real endpoints (`POST /api/chat/stream`), real
+  service names (`ragweld-tempo-1`), real config keys (`fusion.rrf_k`). No invented components.
+- Density floor for a system or flow diagram: at least 12 nodes and 15 edges, organised into `subgraph`
+  blocks per subsystem, with the data stores and external services shown explicitly. Sequence diagrams
+  must name the endpoint and every service hop (gateway, store, tracer). A concept diagram may be
+  smaller only when it explains one mechanism in isolation, and must say so in its caption.
+- Current stack, by name, whenever the diagram touches that area: vLLM + LiteLLM (generation), Flyte
+  (orchestration), Haystack + Docling + Qdrant (ingest and dense/sparse retrieval), Neo4j (graph),
+  Unsloth (training), MLflow + Ragas + Promptfoo (eval), Langfuse (LLM observability), OpenTelemetry +
+  Grafana Alloy + Tempo + Loki + Mimir + Pyroscope + Faro (telemetry fabric).
+- Never draw removed components as current: `pgvector`, Postgres FTS as a retrieval leg, `CrossEncoder`,
+  profiles, cards. Postgres holds chunk rows and generation manifests; retrieval legs read Qdrant and Neo4j.
+
 ## Mermaid v11 (avoid syntax errors)
 
 - No HTML in Mermaid.
 - Prefer simple node IDs (A, B, C…) and put human text in labels.
 - Quote labels containing spaces/punctuation/newlines:
-  - Good: `A["Vector Search\\n(pgvector)"]`
-  - Bad: `A[Vector Search (pgvector)]`
+  - Good: `A["Dense leg\\n(Qdrant dense generation)"]`
+  - Bad: `A[Dense leg (Qdrant)]`
 
 ## Linking rules (mkdocs build --strict must pass)
 
@@ -140,6 +165,9 @@ Use Material buttons (adjust relative paths correctly for nested pages):
   - `data/glossary.json` (long-form tooltip guidance, keyed by env-style names)
 - Do not propose manual edits to those pages. If a parameter description is wrong/missing, fix it in Pydantic and/or the glossary, then re-run:
   - `uv run python scripts/generate_config_reference_docs.py --clean`
+- Pages under `mkdocs/docs/reference/architecture/**` are likewise generated, by
+  `uv run python scripts/docs_ai/generate_architecture_diagrams.py --clean`, from the compose files,
+  `server/main.py` + `server/api/*.py` and the configuration model. Link them; never edit them.
 
 ## Runtime truthfulness guardrail
 

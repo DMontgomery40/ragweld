@@ -414,10 +414,50 @@ def _run_config_reference_generation(worktree: Path) -> tuple[bool, str]:
     return True, "Configuration reference regenerated."
 
 
+def _run_architecture_diagram_generation(worktree: Path) -> tuple[bool, str]:
+    """Regenerate the architecture pages from the code; a missing module fails the run on purpose."""
+    result = _run(
+        (
+            _project_python(),
+            str(_worktree_script(worktree, "scripts/docs_ai/generate_architecture_diagrams.py")),
+            "--clean",
+        ),
+        cwd=worktree,
+        check=False,
+    )
+    if result.returncode != 0:
+        return False, _error_detail(result)
+    _run(("git", "add", "--", "mkdocs/docs/reference/architecture"), cwd=worktree)
+    return True, "Architecture diagrams regenerated."
+
+
+_STRICT_LINE_RE = re.compile(r"^(?:WARNING|ERROR)\s+-\s+.*|^Aborted with .*", re.MULTILINE)
+
+
+def _strict_build_detail(result: CommandResult) -> str:
+    """The mkdocs warnings that failed a strict build, not the plugin's INFO chatter.
+
+    Run 33262983828 was reported as failing on
+    `INFO - [git-revision-date-localized-plugin] ... has no git logs` while the
+    actual cause, one dangling link, sat a few lines further down.
+    """
+    found: list[str] = []
+    for stream in (result.stderr, result.stdout):
+        for m in _STRICT_LINE_RE.finditer(stream or ""):
+            line = m.group(0).strip()
+            if line not in found:
+                found.append(line)
+    warnings = [ln for ln in found if not ln.startswith("Aborted")]
+    aborted = [ln for ln in found if ln.startswith("Aborted")]
+    if warnings:
+        return " | ".join(warnings[:4] + aborted[:1])
+    return _error_detail(result)
+
+
 def _run_build(worktree: Path) -> tuple[bool, str]:
     result = _run((_mkdocs_bin(), "build", "--strict"), cwd=worktree, check=False)
     if result.returncode != 0:
-        return False, _error_detail(result)
+        return False, _strict_build_detail(result)
     return True, "mkdocs build --strict passed."
 
 
@@ -511,6 +551,21 @@ def main(argv: list[str] | None = None) -> int:
         summary_lines.append(f"- Config reference: {config_message}")
         if not config_ok:
             _annotation("error", f"Config reference generation failed: {config_message}")
+            _capture_worktree_state(worktree)
+            summary_lines.extend(
+                [
+                    "- Result: branch unchanged; run marked failed so the next run re-covers this range.",
+                    f"- Debug artifacts: `{ARTIFACT_DIR.relative_to(ROOT)}`",
+                ]
+            )
+            _write_summary(summary_lines)
+            _write_github_output(pushed=False)
+            return 1
+
+        diagrams_ok, diagrams_message = _run_architecture_diagram_generation(worktree)
+        summary_lines.append(f"- Architecture diagrams: {diagrams_message}")
+        if not diagrams_ok:
+            _annotation("error", f"Architecture diagram generation failed: {diagrams_message}")
             _capture_worktree_state(worktree)
             summary_lines.extend(
                 [

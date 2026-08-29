@@ -114,6 +114,31 @@ def _init_fake_repo(tmp_path: Path) -> tuple[Path, Path, Path]:
         executable=True,
     )
     _write_file(
+        repo / "scripts" / "docs_ai" / "generate_architecture_diagrams.py",
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "from __future__ import annotations",
+                "",
+                "import os",
+                "from pathlib import Path",
+                "import sys",
+                "",
+                "ROOT = Path(__file__).resolve().parents[2]",
+                "mode = os.getenv('FAKE_ARCH_MODE', 'success')",
+                "if mode == 'fail':",
+                "    print('retrieval pipeline page names modules that no longer exist: server/retrieval/fusion.py', file=sys.stderr)",
+                "    raise SystemExit(1)",
+                "out = ROOT / 'mkdocs' / 'docs' / 'reference' / 'architecture'",
+                "out.mkdir(parents=True, exist_ok=True)",
+                "(out / 'index.md').write_text('# Architecture\\n', encoding='utf-8')",
+                "raise SystemExit(0)",
+                "",
+            ]
+        ),
+        executable=True,
+    )
+    _write_file(
         fake_bin / "mkdocs",
         "\n".join(
             [
@@ -193,6 +218,7 @@ def test_ai_patch_failure_still_allows_config_docs_and_keeps_root_clean(tmp_path
         assert _git(repo, "status", "--short").stdout.strip() == ""
         assert not (repo / "mkdocs" / "docs" / "reference" / "config" / "index.md").exists()
         assert _remote_file(remote, "mkdocs/docs/reference/config/index.md") == "# Config\n"
+        assert _remote_file(remote, "mkdocs/docs/reference/architecture/index.md") == "# Architecture\n"
         assert "mkdocs/docs/generated.md" not in _git(repo, "ls-tree", "-r", "HEAD", "--name-only").stdout
         assert module.PATCH_FILE.exists()
     finally:
@@ -281,6 +307,7 @@ def test_successful_run_pushes_docs_commit_and_reports_push_output(tmp_path: Pat
         assert after != before
         assert _remote_file(remote, "mkdocs/docs/generated.md") == "# Generated\n"
         assert _remote_file(remote, "mkdocs/docs/reference/config/index.md") == "# Config\n"
+        assert _remote_file(remote, "mkdocs/docs/reference/architecture/index.md") == "# Architecture\n"
         subject = subprocess.run(
             ["git", "--git-dir", str(remote), "log", "-1", "--format=%s", "refs/heads/main"],
             text=True,
@@ -305,8 +332,9 @@ def test_no_generated_changes_reports_pushed_false_and_leaves_remote_untouched(t
     # Commit the deterministic config reference up front so a run with an empty
     # LLM patch produces no staged delta at all.
     _write_file(repo / "mkdocs" / "docs" / "reference" / "config" / "index.md", "# Config\n")
+    _write_file(repo / "mkdocs" / "docs" / "reference" / "architecture" / "index.md", "# Architecture\n")
     _git(repo, "add", ".")
-    _git(repo, "commit", "-m", "config reference already current")
+    _git(repo, "commit", "-m", "generated references already current")
     _git(repo, "push", "origin", "main")
     before = _remote_head(remote)
     github_output = tmp_path / "github_output.txt"
@@ -655,3 +683,56 @@ def test_apply_summary_reports_landed_and_dropped_files() -> None:
     )
     assert module._apply_summary("AUTOPILOT_APPLY_SUMMARY: applied=16 rejected=0\n") == "LLM patch applied: 16 file(s)."
     assert module._apply_summary("no summary line here\n") == ""
+
+
+def test_strict_build_detail_reports_the_warning_not_plugin_info() -> None:
+    module = _load_module()
+    result = module.CommandResult(
+        args=("mkdocs", "build", "--strict"),
+        cwd=Path("."),
+        returncode=1,
+        stdout="",
+        stderr=(
+            "INFO    -  Cleaning site directory\n"
+            "INFO    -  [git-revision-date-localized-plugin] '/tmp/x/mkdocs/docs/operations/grafana.md' has no git logs, using current timestamp\n"
+            "WARNING -  Doc file 'manual/onboarding.md' contains a link 'eval.md', but the target 'manual/eval.md' is not found among documentation files.\n"
+            "\nAborted with 1 warnings in strict mode!\n"
+        ),
+    )
+    detail = module._strict_build_detail(result)
+    assert detail.startswith("WARNING -  Doc file 'manual/onboarding.md' contains a link 'eval.md'")
+    assert detail.endswith("Aborted with 1 warnings in strict mode!")
+    assert "git-revision" not in detail
+
+    plain = module.CommandResult(args=("mkdocs",), cwd=Path("."), returncode=1, stdout="", stderr="error: boom\n")
+    assert module._strict_build_detail(plain) == "error: boom"
+
+
+def test_architecture_diagram_failure_discards_the_run(tmp_path: Path) -> None:
+    """A vanished retrieval module must fail the run loudly, not publish stale diagrams."""
+    module = _load_module()
+    repo, remote, fake_bin = _init_fake_repo(tmp_path)
+    _configure_module(module, repo)
+    before = _remote_head(remote)
+
+    previous_env = os.environ.copy()
+    try:
+        os.environ["OPENROUTER_API_KEY"] = "test-key"
+        os.environ["FAKE_DOCS_AI_MODE"] = "success"
+        os.environ["FAKE_CONFIG_MODE"] = "success"
+        os.environ["FAKE_ARCH_MODE"] = "fail"
+        os.environ["FAKE_MKDOCS_MODE"] = "success"
+        os.environ["DOCS_AUTOPILOT_MKDOCS_BIN"] = str(fake_bin / "mkdocs")
+        os.environ.pop("GITHUB_HEAD_REF", None)
+        os.environ.pop("GITHUB_REF", None)
+        os.environ.pop("GITHUB_REF_NAME", None)
+
+        rc = module.main(["--base", "origin/main"])
+
+        assert rc == 1
+        assert _remote_head(remote) == before
+        assert _git(repo, "status", "--short").stdout.strip() == ""
+        assert module.STATUS_FILE.exists()
+    finally:
+        os.environ.clear()
+        os.environ.update(previous_env)
