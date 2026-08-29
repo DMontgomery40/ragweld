@@ -639,3 +639,19 @@ def test_publish_state_reports_whether_latest_docs_commit_is_deployed(tmp_path: 
     finally:
         os.environ.clear()
         os.environ.update(previous_env)
+
+
+def test_apply_summary_reports_landed_and_dropped_files() -> None:
+    module = _load_module()
+    stdout = (
+        "LLM patch saved: mkdocs-docs-llm.patch\n"
+        "Repair round 1: git apply rejected 5 file(s); asking the model to re-emit them against the current page text.\n"
+        "::warning::docs-autopilot: dropped mkdocs/docs/api.md: error: patch failed: mkdocs/docs/api.md:62\n"
+        "AUTOPILOT_APPLY_SUMMARY: applied=15 rejected=1\n"
+        "Patch applied to index: 15 file(s); dropped 1.\n"
+    )
+    assert module._apply_summary(stdout) == (
+        "LLM patch applied: 15 file(s); 1 file(s) dropped after the repair round (see ::warning:: lines)."
+    )
+    assert module._apply_summary("AUTOPILOT_APPLY_SUMMARY: applied=16 rejected=0\n") == "LLM patch applied: 16 file(s)."
+    assert module._apply_summary("no summary line here\n") == ""

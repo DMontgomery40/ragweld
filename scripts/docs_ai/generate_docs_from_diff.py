@@ -23,6 +23,7 @@ from dataclasses import dataclass
 import os
 import re
 import shlex
+import tempfile
 import subprocess
 from pathlib import Path
 from typing import Iterable, List, Optional, Tuple
@@ -32,6 +33,12 @@ ROOT = Path(__file__).resolve().parents[2]
 PROMPT_BASE_PATH = ROOT / "scripts" / "docs_ai" / "docs_prompt_base.md"
 
 PATCH_FILE = ROOT / "mkdocs-docs-llm.patch"
+# Raw model replies and the repair-round patch are kept as artifacts: the
+# 2026-08-29 truncation bug had to be inferred because only the extracted
+# patch survived the run.
+RAW_REPLY_FILE = ROOT / "mkdocs-docs-llm-raw.txt"
+REPAIR_PATCH_FILE = ROOT / "mkdocs-docs-llm-repair.patch"
+REPAIR_RAW_REPLY_FILE = ROOT / "mkdocs-docs-llm-repair-raw.txt"
 PLAN_FILE = ROOT / "mkdocs-docs-plan.md"
 
 # Git's well-known empty tree object. Use as a "base ref" to treat the entire
@@ -1093,6 +1100,106 @@ def apply_patch(patch_path: Path) -> tuple[bool, str]:
         return False, err
 
 
+@dataclass(frozen=True)
+class PerFileApplyResult:
+    applied: list[str]
+    rejected: dict[str, str]
+    # The rejected files' hunks, verbatim, so a repair round can show the model
+    # exactly what it sent.
+    rejected_patch_text: str
+
+
+def _split_patch_by_file(patch_text: str) -> list[tuple[str, str]]:
+    """Split a git unified diff into (path, chunk) pairs, one per `diff --git`."""
+    chunks: list[tuple[str, str]] = []
+    cur_path: str | None = None
+    cur_lines: list[str] = []
+    for line in (patch_text or "").splitlines(keepends=True):
+        if line.startswith("diff --git "):
+            if cur_path is not None:
+                chunks.append((cur_path, "".join(cur_lines)))
+            parts = line.split()
+            a_path = parts[2].removeprefix("a/").strip() if len(parts) > 2 else ""
+            b_path = parts[3].removeprefix("b/").strip() if len(parts) > 3 else ""
+            cur_path = b_path if b_path and b_path != "/dev/null" else a_path
+            cur_lines = [line]
+        elif cur_path is not None:
+            cur_lines.append(line)
+    if cur_path is not None:
+        chunks.append((cur_path, "".join(cur_lines)))
+    return chunks
+
+
+def _git_apply_error(message: str) -> str:
+    """Keep only git's `error:` lines; the command echo is noise in a warning."""
+    lines = [ln.strip() for ln in (message or "").splitlines() if ln.strip().startswith("error:")]
+    return "\n".join(lines) or (message or "").strip() or "git apply rejected the hunk"
+
+
+def apply_patch_per_file(patch_path: Path) -> PerFileApplyResult:
+    """Apply a model patch one file at a time.
+
+    `git apply` is all-or-nothing: on 2026-08-29 five hunks whose context the
+    model had "pre-edited" threw away eleven clean pages and left the documented
+    frontier pinned at March. Each file is its own `git apply --index` here, so
+    clean pages land and the rejected ones are reported (and offered a repair
+    round) instead of sinking the run.
+    """
+    patch_text = _read_text(patch_path)
+    if (patch_text or "").lstrip().startswith("*** Begin Patch"):
+        ops = _parse_cursor_style_patch(patch_text)
+        paths = sorted({op.path for op in ops})
+        ok, err = apply_patch(patch_path)
+        if ok:
+            return PerFileApplyResult(applied=paths, rejected={}, rejected_patch_text="")
+        return PerFileApplyResult(applied=[], rejected={p: err for p in paths}, rejected_patch_text=patch_text)
+
+    applied: list[str] = []
+    rejected: dict[str, str] = {}
+    rejected_chunks: list[str] = []
+    with tempfile.TemporaryDirectory(prefix="docs-autopilot-apply-") as td:
+        for i, (path, chunk) in enumerate(_split_patch_by_file(patch_text)):
+            tmp = Path(td) / f"chunk-{i:03d}.diff"
+            tmp.write_text(chunk if chunk.endswith("\n") else chunk + "\n", encoding="utf-8")
+            try:
+                run(f"git apply --recount --index {shlex.quote(str(tmp))}")
+                applied.append(path)
+            except RuntimeError as e:
+                rejected[path] = _git_apply_error(str(e))
+                rejected_chunks.append(chunk)
+    return PerFileApplyResult(applied=applied, rejected=rejected, rejected_patch_text="".join(rejected_chunks))
+
+
+def build_repair_prompt(*, rejected: dict[str, str], rejected_patch_text: str) -> str:
+    """Ask the model to re-emit only the files git rejected, against the real page text."""
+    lines: list[str] = [
+        "# Docs Autopilot Repair (rejected hunks)",
+        "",
+        "`git apply` rejected the hunks below: at least one context line in each does not match the",
+        "page on disk (typically a context line that already contains the edit you intended to make).",
+        "Re-emit a corrected git unified diff for ONLY the files listed here. Copy every context line",
+        "verbatim from the current page text quoted below; express each change as -/+ line pairs.",
+        "Output only the patch.",
+        "",
+        "## git apply errors",
+        *[f"- {path}: {err.splitlines()[0] if err else 'rejected'}" for path, err in rejected.items()],
+        "",
+        "## Rejected hunks (what you sent)",
+        "```diff",
+        (rejected_patch_text or "").rstrip(),
+        "```",
+        "",
+        "## Current page text (verbatim - copy context lines from here)",
+    ]
+    for path in rejected:
+        current = _read_text(ROOT / path)
+        if current:
+            lines += [f"### {path}", "```markdown", current, "```", ""]
+        else:
+            lines += [f"### {path}", "(does not exist yet - emit it as a new-file diff against /dev/null)", ""]
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(prog="docs-autopilot", description="Diff-driven MkDocs autopilot for ragweld")
     ap.add_argument("--base", default="origin/main", help="Git ref to diff against (base..HEAD)")
@@ -1124,6 +1231,7 @@ def main() -> None:
 
     # LLM mode -> patch
     llm_text = call_llm_unified_diff(plan)
+    RAW_REPLY_FILE.write_text(llm_text, encoding="utf-8")
     patch_text = _extract_unified_diff(llm_text)
     if not patch_text.strip():
         print("LLM returned an empty patch. Assuming no docs update is needed.")
@@ -1147,12 +1255,52 @@ def main() -> None:
     print(f"LLM patch saved: {PATCH_FILE.relative_to(ROOT)}")
 
     if args.apply:
-        ok, err = apply_patch(PATCH_FILE)
-        if not ok:
-            _gh_error("Docs autopilot: LLM patch could not be applied (corrupt or incompatible).")
-            _gh_error(f"Details: {err}")
+        result = apply_patch_per_file(PATCH_FILE)
+        repair_rounds = int(os.getenv("DOCS_AUTOPILOT_REPAIR_ROUNDS", "1"))
+        for attempt in range(1, repair_rounds + 1):
+            if not result.rejected:
+                break
+            print(
+                f"Repair round {attempt}: git apply rejected {len(result.rejected)} file(s); "
+                "asking the model to re-emit them against the current page text."
+            )
+            repair_reply = call_llm_unified_diff(
+                build_repair_prompt(rejected=result.rejected, rejected_patch_text=result.rejected_patch_text)
+            )
+            REPAIR_RAW_REPLY_FILE.write_text(repair_reply, encoding="utf-8")
+            repair_patch = _extract_unified_diff(repair_reply)
+            if not repair_patch.strip():
+                print("Repair round returned an empty patch.")
+                break
+            repair_errors = _validate_patch_paths(repair_patch) + _validate_patch_safety(
+                repair_patch, allow_large_deletes=is_bootstrap_base(args.base)
+            )
+            if repair_errors:
+                print("Repair patch refused:\n" + "\n".join(f"- {e}" for e in repair_errors))
+                break
+            REPAIR_PATCH_FILE.write_text(repair_patch, encoding="utf-8")
+            again = apply_patch_per_file(REPAIR_PATCH_FILE)
+            # Files the model did not re-emit stay rejected with their original
+            # error; files it re-emitted but git still refuses carry the new one.
+            still_rejected = {p: e for p, e in result.rejected.items() if p not in again.applied}
+            still_rejected.update(again.rejected)
+            result = PerFileApplyResult(
+                applied=result.applied + again.applied,
+                rejected=still_rejected,
+                rejected_patch_text=again.rejected_patch_text or result.rejected_patch_text,
+            )
+
+        for path, err in result.rejected.items():
+            first = err.splitlines()[0] if err else "git apply rejected it"
+            print(f"::warning::docs-autopilot: dropped {path}: {first}")
+        print(f"AUTOPILOT_APPLY_SUMMARY: applied={len(result.applied)} rejected={len(result.rejected)}")
+        if not result.applied:
+            _gh_error("Docs autopilot: no file of the LLM patch could be applied (corrupt or incompatible).")
+            for path, err in result.rejected.items():
+                _gh_error(f"{path}: {err}")
             raise SystemExit(1)
-        print("Patch applied to index.")
+        dropped = f"; dropped {len(result.rejected)}" if result.rejected else ""
+        print(f"Patch applied to index: {len(result.applied)} file(s){dropped}.")
 
 
 if __name__ == "__main__":

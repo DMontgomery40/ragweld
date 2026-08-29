@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -368,13 +369,33 @@ def _run_ai_patch(worktree: Path, base_ref: str) -> tuple[bool, str]:
         check=False,
     )
     _copy_if_exists(worktree / PATCH_FILE.name, PATCH_FILE)
+    # Raw model replies and the repair-round patch ride along as run artifacts
+    # (`output/docs-autopilot/**` is uploaded), so a bad patch can be diagnosed
+    # from what the model actually said rather than inferred from its remains.
+    for name in ("mkdocs-docs-llm-raw.txt", "mkdocs-docs-llm-repair.patch", "mkdocs-docs-llm-repair-raw.txt"):
+        _copy_if_exists(worktree / name, ARTIFACT_DIR / name)
     if result.returncode != 0:
         return False, _error_detail(result)
 
     patch_text = (worktree / PATCH_FILE.name).read_text(encoding="utf-8") if (worktree / PATCH_FILE.name).exists() else ""
     if not patch_text.strip():
         return True, "LLM returned an empty patch."
-    return True, "LLM patch applied successfully."
+    return True, _apply_summary(result.stdout) or "LLM patch applied successfully."
+
+
+_APPLY_SUMMARY_RE = re.compile(r"^AUTOPILOT_APPLY_SUMMARY: applied=(\d+) rejected=(\d+)\s*$", re.MULTILINE)
+
+
+def _apply_summary(stdout: str) -> str:
+    """Turn the generator's per-file apply line into the run summary sentence."""
+    m = _APPLY_SUMMARY_RE.search(stdout or "")
+    if not m:
+        return ""
+    applied, rejected = int(m.group(1)), int(m.group(2))
+    text = f"LLM patch applied: {applied} file(s)"
+    if rejected:
+        text += f"; {rejected} file(s) dropped after the repair round (see ::warning:: lines)"
+    return text + "."
 
 
 def _run_config_reference_generation(worktree: Path) -> tuple[bool, str]:

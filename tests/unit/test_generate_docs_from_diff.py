@@ -282,6 +282,96 @@ _TRUNCATED_RESPONSE = {
 }
 
 
+def _mixed_quality_patch() -> tuple[str, str, str]:
+    """One clean edit, one hunk whose context the model edited, one new file.
+
+    The middle hunk is the 2026-08-29 failure shape: the model wrote the text
+    it *wanted* (`port 58012`) as a context line instead of a -/+ pair, so
+    `git apply` cannot find it. All-or-nothing apply threw the other two away.
+    """
+    good = (
+        "diff --git a/mkdocs/docs/index.md b/mkdocs/docs/index.md\n"
+        "--- a/mkdocs/docs/index.md\n"
+        "+++ b/mkdocs/docs/index.md\n"
+        "@@ -1 +1 @@\n"
+        "-# Old Title\n"
+        "+# Updated Title\n"
+    )
+    bad = (
+        "diff --git a/mkdocs/docs/api.md b/mkdocs/docs/api.md\n"
+        "--- a/mkdocs/docs/api.md\n"
+        "+++ b/mkdocs/docs/api.md\n"
+        "@@ -1 +1,2 @@\n"
+        " # API Reference (port 58012)\n"
+        "+Endpoints are listed below.\n"
+    )
+    new = (
+        "diff --git a/mkdocs/docs/guide.md b/mkdocs/docs/guide.md\n"
+        "new file mode 100644\n"
+        "--- /dev/null\n"
+        "+++ b/mkdocs/docs/guide.md\n"
+        "@@ -0,0 +1,2 @@\n"
+        "+# Guide\n"
+        "+Body.\n"
+    )
+    return good, bad, new
+
+
+def test_apply_patch_per_file_lands_clean_files_and_reports_the_rest(tmp_path: Path) -> None:
+    module = _load_module()
+    repo = _init_repo(tmp_path)
+    good, bad, new = _mixed_quality_patch()
+    patch_path = tmp_path / "mixed.diff"
+    patch_path.write_text(good + bad + new, encoding="utf-8")
+
+    module.ROOT = repo
+    result = module.apply_patch_per_file(patch_path)
+
+    assert result.applied == ["mkdocs/docs/index.md", "mkdocs/docs/guide.md"]
+    assert list(result.rejected) == ["mkdocs/docs/api.md"]
+    assert "mkdocs/docs/api.md" in result.rejected["mkdocs/docs/api.md"]
+    assert (repo / "mkdocs" / "docs" / "index.md").read_text(encoding="utf-8") == "# Updated Title\n"
+    assert (repo / "mkdocs" / "docs" / "guide.md").read_text(encoding="utf-8") == "# Guide\nBody.\n"
+    assert (repo / "mkdocs" / "docs" / "api.md").read_text(encoding="utf-8") == "# API Reference\n"
+    staged = _git(repo, "diff", "--cached", "--name-only").stdout.split()
+    assert staged == ["mkdocs/docs/guide.md", "mkdocs/docs/index.md"]
+    # The rejected hunk survives verbatim so a repair round can quote it back.
+    assert result.rejected_patch_text.strip() == bad.strip()
+
+
+def test_apply_patch_per_file_with_nothing_applicable_leaves_the_worktree_clean(tmp_path: Path) -> None:
+    module = _load_module()
+    repo = _init_repo(tmp_path)
+    _, bad, _ = _mixed_quality_patch()
+    patch_path = tmp_path / "all-bad.diff"
+    patch_path.write_text(bad, encoding="utf-8")
+
+    module.ROOT = repo
+    result = module.apply_patch_per_file(patch_path)
+
+    assert result.applied == []
+    assert list(result.rejected) == ["mkdocs/docs/api.md"]
+    assert _git(repo, "status", "--porcelain").stdout.strip() == ""
+
+
+def test_build_repair_prompt_quotes_error_rejected_hunks_and_current_pages(tmp_path: Path) -> None:
+    module = _load_module()
+    repo = _init_repo(tmp_path)
+    _, bad, _ = _mixed_quality_patch()
+    module.ROOT = repo
+
+    prompt = module.build_repair_prompt(
+        rejected={"mkdocs/docs/api.md": "error: patch failed: mkdocs/docs/api.md:1"},
+        rejected_patch_text=bad,
+    )
+
+    assert "error: patch failed: mkdocs/docs/api.md:1" in prompt
+    assert "port 58012" in prompt  # the rejected hunk, so the model sees what it got wrong
+    assert "# API Reference\n" in prompt  # the page as it actually is on disk
+    assert "mkdocs/docs/api.md" in prompt
+    assert "index.md" not in prompt  # only the rejected pages are re-quoted
+
+
 def test_response_output_text_reads_a_completed_response() -> None:
     module = _load_module()
     assert module.response_output_text(_COMPLETED_RESPONSE) == "diff --git a/x b/x"
