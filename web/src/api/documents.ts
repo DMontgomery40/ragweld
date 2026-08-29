@@ -42,7 +42,7 @@ export function documentRawUrl(corpusId: string, path: string): string {
 /** Local view model for a failed document fetch (typed 409/413/503 details or plain HTTP errors). */
 export type DocumentViewError = {
   status: number;
-  code: 'document_not_captured' | 'document_too_large' | 'dependency_unavailable' | 'http';
+  code: 'document_not_captured' | 'document_too_large' | 'dependency_unavailable' | 'unauthenticated' | 'http';
   message: string;
   operatorHint: string | null;
 };
@@ -52,6 +52,16 @@ type TypedDetail = DocumentNotCapturedDetail | DocumentTooLargeDetail | Record<s
 export function toDocumentViewError(err: unknown): DocumentViewError {
   if (axios.isAxiosError(err)) {
     const status = Number(err.response?.status ?? 0);
+    if (status === 401 || status === 403) {
+      // The auth proxy in front of the API refused the request: the sign-in session ended
+      // (for example after a service restart). Nothing about the document is wrong.
+      return {
+        status,
+        code: 'unauthenticated',
+        message: 'Your sign-in session has ended, so the document could not be fetched.',
+        operatorHint: 'Reload the page to sign in again, then reopen the citation.',
+      };
+    }
     const data = err.response?.data as { detail?: TypedDetail | string } | undefined;
     const detail = data?.detail;
     if (detail && typeof detail === 'object') {
