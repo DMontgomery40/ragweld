@@ -371,6 +371,64 @@ def test_extract_unified_diff_round_trips_through_apply(tmp_path: Path) -> None:
     assert (repo / "mkdocs" / "docs" / "index.md").read_text(encoding="utf-8") == "# Updated Title\n"
 
 
+def test_extract_unified_diff_keeps_code_fences_inside_the_patch(tmp_path: Path) -> None:
+    """A fence inside the docs content must not end the patch early.
+
+    Every ragweld page carries mermaid diagrams, so a real patch always
+    contains `+```mermaid` lines. The fence regex ended the model's wrapper
+    at the first inner fence and silently dropped everything after it: the
+    hunk header promised the full page, `git apply --recount` renumbered the
+    stump, and a half-written page landed while the pages the nav still
+    pointed at were never created (2026-08-29 run: 105 promised, 35 landed).
+    """
+    module = _load_module()
+    body = (
+        "diff --git a/mkdocs/docs/guide.md b/mkdocs/docs/guide.md\n"
+        "new file mode 100644\n"
+        "--- /dev/null\n"
+        "+++ b/mkdocs/docs/guide.md\n"
+        "@@ -0,0 +1,12 @@\n"
+        "+# Guide\n"
+        "+\n"
+        "+```mermaid\n"
+        "+flowchart LR\n"
+        "+  A --> B\n"
+        "+```\n"
+        "+\n"
+        "+```python\n"
+        "+print(\"still inside the patch\")\n"
+        "+```\n"
+        "+\n"
+        "+Last line after both fences.\n"
+        "diff --git a/mkdocs/docs/index.md b/mkdocs/docs/index.md\n"
+        "--- a/mkdocs/docs/index.md\n"
+        "+++ b/mkdocs/docs/index.md\n"
+        "@@ -1 +1 @@\n"
+        "-# Old Title\n"
+        "+# Updated Title\n"
+    )
+    for wrapper in (
+        f"Here is the patch:\n```diff\n{body}```\nLet me know!",
+        f"```patch\n{body}```",
+        f"```\n{body}```",
+        f"Sure! Here you go.\n\n{body}",
+        body,
+    ):
+        out = module._extract_unified_diff(wrapper)
+        assert out == body, f"patch was altered for wrapper {wrapper[:20]!r}:\n{out}"
+
+    repo = _init_repo(tmp_path)
+    patch_path = tmp_path / "fenced-with-inner-fences.diff"
+    patch_path.write_text(module._extract_unified_diff(f"```diff\n{body}```\n"), encoding="utf-8")
+    module.ROOT = repo
+    ok, err = module.apply_patch(patch_path)
+    assert ok is True, err
+    guide = (repo / "mkdocs" / "docs" / "guide.md").read_text(encoding="utf-8")
+    assert guide.rstrip().endswith("Last line after both fences.")
+    assert guide.count("```") == 4
+    assert (repo / "mkdocs" / "docs" / "index.md").read_text(encoding="utf-8") == "# Updated Title\n"
+
+
 def _diff_block(path: str, removed: int, added: int) -> str:
     lines = [f"diff --git a/{path} b/{path}", f"--- a/{path}", f"+++ b/{path}", "@@ -1,1 +1,1 @@"]
     lines += [f"-old line {i}" for i in range(removed)]

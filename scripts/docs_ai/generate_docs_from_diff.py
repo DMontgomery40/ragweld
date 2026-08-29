@@ -728,7 +728,10 @@ def _validate_patch_safety(patch_text: str, *, allow_large_deletes: bool) -> Lis
 
 
 PATCH_START_RE = re.compile(r"^(?:diff --git |\*\*\* Begin Patch)", re.MULTILINE)
-FENCE_RE = re.compile(r"```[^\n]*\n(.*?)```", re.DOTALL)
+# The closing fence must start a line: inside a diff every content line is
+# prefixed (+/-/space), so a fence the model quoted inside a docs page
+# (`+```mermaid`) never sits at column 0 and cannot end the wrapper early.
+FENCE_RE = re.compile(r"```[^\n]*\n(.*?)^```", re.DOTALL | re.MULTILINE)
 
 
 def _extract_unified_diff(text: str) -> str:
