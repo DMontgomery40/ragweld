@@ -294,6 +294,7 @@ export function RetrievalSubtab() {
     reload,
     clearError,
   } = useConfig();
+  const productionModelRoutingLocked = String(config?.ui?.runtime_mode || '').trim().toLowerCase() === 'production';
 
 
   useEffect(() => {
@@ -444,14 +445,24 @@ export function RetrievalSubtab() {
             </select>
           </div>
 
-          <div className="input-group">
-            <label>Generation Alias</label>
+          <div className="input-group" data-testid="retrieval-generation-alias">
+            <label>{productionModelRoutingLocked ? 'Non-chat generation alias' : 'Generation Alias'}</label>
             <ChatModelPicker
               value={genModel}
               onChange={setGenModel}
               models={generationModels}
               valueMode="id"
+              disabled={productionModelRoutingLocked}
+              ariaDescribedBy={productionModelRoutingLocked ? 'retrieval-generation-alias-lock-note' : undefined}
             />
+            {productionModelRoutingLocked ? (
+              <div
+                id="retrieval-generation-alias-lock-note"
+                style={{ color: 'var(--fg-muted)', fontSize: 11, marginTop: 5, lineHeight: 1.4 }}
+              >
+                Chat uses its own model picker. This non-chat answer pipeline is locked by the production deployment.
+              </div>
+            ) : null}
           </div>
 
           <div className="input-group">
@@ -1209,15 +1220,25 @@ export function RetrievalSubtab() {
               </div>
 
               <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 16 }}>
-                <div className="input-group">
-                  <label>Generation Alias</label>
+                <div className="input-group" data-testid="retrieval-generation-answer-alias">
+                  <label>{productionModelRoutingLocked ? 'Non-chat generation alias' : 'Generation Alias'}</label>
                   <ChatModelPicker
                     value={genModel}
                     onChange={setGenModel}
                     models={generationModels}
                     valueMode="id"
                     allowEmpty
+                    disabled={productionModelRoutingLocked}
+                    ariaDescribedBy={productionModelRoutingLocked ? 'retrieval-generation-answer-alias-lock-note' : undefined}
                   />
+                  {productionModelRoutingLocked ? (
+                    <div
+                      id="retrieval-generation-answer-alias-lock-note"
+                      style={{ color: 'var(--fg-muted)', fontSize: 11, marginTop: 5, lineHeight: 1.4 }}
+                    >
+                      Chat uses its own model picker. This non-chat answer pipeline is locked by the production deployment.
+                    </div>
+                  ) : null}
                   <PromptLink promptKey="main_rag_chat">Edit Chat Prompt</PromptLink>
                 </div>
               </div>

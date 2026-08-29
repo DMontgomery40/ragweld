@@ -7,13 +7,23 @@ type ModelPickerProps = {
   models: ChatModelInfo[];
   valueMode?: 'override' | 'id';
   allowEmpty?: boolean;
+  disabled?: boolean;
+  ariaDescribedBy?: string;
 };
 
 function toOptionValue(model: ChatModelInfo, valueMode: 'override' | 'id'): string {
   return String(valueMode === 'id' ? model.id : model.override || model.id || '');
 }
 
-export function ModelPicker({ value, onChange, models, valueMode = 'override', allowEmpty = false }: ModelPickerProps) {
+export function ModelPicker({
+  value,
+  onChange,
+  models,
+  valueMode = 'override',
+  allowEmpty = false,
+  disabled = false,
+  ariaDescribedBy,
+}: ModelPickerProps) {
   const gatewayModels = models.filter((model) => model.source === 'litellm');
   const hasModels = gatewayModels.length > 0;
   const currentValueAvailable = !value
@@ -26,7 +36,8 @@ export function ModelPicker({ value, onChange, models, valueMode = 'override', a
       data-testid="model-picker"
       value={hasModels ? value : ''}
       onChange={(e) => onChange(e.target.value)}
-      disabled={!hasModels}
+      disabled={disabled || !hasModels}
+      aria-describedby={ariaDescribedBy}
       aria-invalid={!currentValueAvailable}
       style={{
         width: '100%',
