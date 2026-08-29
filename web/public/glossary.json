@@ -10100,6 +10100,19 @@
       "badges": []
     },
     {
+      "term": "Build Code Graph",
+      "key": "BUILD_CODE_GRAPH",
+      "definition": "Builds an AST-derived code graph in Neo4j while a corpus is indexed: one module entity per source file, class and function/method entities for Python, TypeScript and JavaScript, and contains, inherits, imports and calls relationships between them, each entity linked to the chunk that defines it. The graph retrieval leg can then expand a hit to its callers, callees, base classes and importing modules instead of only neighbouring chunks, which is what lets chat reason about the codebase structurally. Imports and calls are resolved conservatively: only definitions inside the corpus or explicit imports that resolve to corpus files produce edges; anything else is reported as unresolved. Off by default because it only pays for code corpora; enable it per corpus and re-index.",
+      "category": "graph",
+      "related": [
+        "GRAPH_SEARCH_ENABLED",
+        "GRAPH_SEARCH_MODE",
+        "NEO4J_URI"
+      ],
+      "links": [],
+      "badges": []
+    },
+    {
       "term": "Semantic Synonyms Expansion",
       "key": "USE_SEMANTIC_SYNONYMS",
       "definition": "Enables semantic synonym expansion before retrieval so user queries can match equivalent terminology, abbreviations, and team-specific phrasing beyond exact token overlap. This typically improves recall on natural-language prompts and cross-team vocabulary mismatches, especially when users ask with informal wording while documents use canonical terms. The tradeoff is expansion noise: broad or poorly curated synonym sets can pull in marginally related chunks and lower precision. Enable this with a controlled synonym dictionary, monitor zero-hit reduction and false-positive rates, and pair with reranking so expanded candidates are rescored instead of accepted blindly.",

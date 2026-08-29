@@ -4749,6 +4749,14 @@ class GraphIndexingConfig(BaseModel):
         default=True,
         description="Build lexical graph (Document/Chunk nodes + NEXT_CHUNK relationships)",
     )
+    build_code_graph: bool = Field(
+        default=False,
+        description=(
+            "Build an AST code graph during indexing: module, class and function entities with "
+            "contains/inherits/imports/calls relationships (tree-sitter; Python, TypeScript, JavaScript), "
+            "each linked to the chunk that defines it"
+        ),
+    )
 
     store_chunk_embeddings: bool = Field(
         default=True,

@@ -958,6 +958,8 @@ export interface GraphIndexingConfig {
   enabled?: boolean; // default: True
   /** Build lexical graph (Document/Chunk nodes + NEXT_CHUNK relationships) */
   build_lexical_graph?: boolean; // default: True
+  /** Build an AST code graph during indexing: module, class and function entities with contains/inherits/imports/calls relationships (tree-sitter; Python, TypeScript, JavaScript), each linked to the chunk that defines it */
+  build_code_graph?: boolean; // default: False
   /** Store chunk embeddings on Chunk nodes for Neo4j vector search (requires dense embeddings) */
   store_chunk_embeddings?: boolean; // default: True
   /** Build an official Neo4j GraphRAG semantic graph with typed entities and relationships linked to chunks during indexing */

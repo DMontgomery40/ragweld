@@ -31,6 +31,7 @@ from server.chat.provider_router import ProviderRoute, select_provider_route
 from server.db.neo4j import Neo4jClient
 from server.db.postgres import PostgresClient
 from server.indexing.chunker import Chunker
+from server.indexing.code_graph import CODE_GRAPH_LANGUAGES, extract_code_graph
 from server.indexing.embedder import Embedder, configure_postgres_embedding_cache_backend
 from server.indexing.generations import (
     DeletionIncompleteError,
@@ -124,6 +125,43 @@ _UNKNOWN_COMMITS: dict[str, str] = {}  # runs whose promotion outcome awaits man
 _STATUS_RUN_ID: dict[str, str] = {}  # the run each process-local terminal status describes
 _CANCELLED_AFTER_COMMIT: dict[str, str] = {}  # runs whose cancellation landed after their commit
 _QUEUE_RUN_CONTEXT: dict[int, tuple[str, str]] = {}
+
+async def _write_code_graph(
+    neo4j: Neo4jClient,
+    *,
+    cfg: TriBridConfig,
+    repo_id: str,
+    run_id: str,
+    repo_path: str,
+    chunks: list[Chunk],
+) -> None:
+    """AST entities for one source file, written through the same GraphRAG upsert as the lexical graph."""
+    if not chunks:
+        return
+    file_path = str(chunks[0].file_path or "")
+    language = str(chunks[0].language or "")
+    if language not in CODE_GRAPH_LANGUAGES:
+        return
+    source_path = Path(repo_path).expanduser() / file_path
+    try:
+        source = source_path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return
+    result = extract_code_graph(
+        repo_id=repo_id,
+        run_id=run_id,
+        file_path=file_path,
+        source=source,
+        language=language,
+        chunks=chunks,
+        cfg=cfg,
+        root=Path(repo_path).expanduser(),
+    )
+    if not result.graph.nodes:
+        return
+    with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_upsert_code_graph").time():
+        await neo4j.upsert_graphrag_graph(repo_id, result.graph, lexical_graph_config=result.lexical_graph_config)
+
 
 # Index estimate heuristics (intentionally rough).
 _EST_BYTES_PER_TOKEN = 4.0  # common rule-of-thumb for English-ish text
@@ -1674,6 +1712,10 @@ async def _run_index_body(
                         graph,
                         lexical_graph_config=lexical_graph_config,
                     )
+            if neo4j is not None and cfg.graph_indexing.build_code_graph:
+                await _write_code_graph(
+                    neo4j, cfg=cfg, repo_id=write_repo_id, run_id=run_id, repo_path=repo_path, chunks=chunks
+                )
             return chunks
 
         assert embedder is not None
@@ -1713,6 +1755,10 @@ async def _run_index_body(
                     graph,
                     lexical_graph_config=lexical_graph_config,
                 )
+        if neo4j is not None and cfg.graph_indexing.build_code_graph:
+            await _write_code_graph(
+                neo4j, cfg=cfg, repo_id=write_repo_id, run_id=run_id, repo_path=repo_path, chunks=embedded
+            )
         return embedded
 
     async def _upsert_chunk_batches(
