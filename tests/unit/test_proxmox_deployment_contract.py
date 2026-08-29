@@ -616,19 +616,39 @@ def test_proxmox_renderer_preserves_existing_output_ownership(
     output.write_text("{}\n", encoding="utf-8")
     original = output.stat()
     chown_calls: list[tuple[int, int]] = []
-    real_chown = os.chown
+    real_fchown = os.fchown
 
-    def record_chown(path: str | bytes | os.PathLike[str] | os.PathLike[bytes], uid: int, gid: int) -> None:
+    def record_fchown(fd: int, uid: int, gid: int) -> None:
         chown_calls.append((uid, gid))
-        real_chown(path, uid, gid)
+        real_fchown(fd, uid, gid)
 
-    monkeypatch.setattr(render_config.os, "chown", record_chown)
+    monkeypatch.setattr(render_config.os, "fchown", record_fchown)
     render_config._write_output(output, TriBridConfig())
 
     assert chown_calls == [(original.st_uid, original.st_gid)]
     assert output.stat().st_uid == original.st_uid
     assert output.stat().st_gid == original.st_gid
     assert output.stat().st_mode & 0o777 == 0o600
+
+
+def test_proxmox_renderer_keeps_existing_output_when_ownership_restore_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = tmp_path / "tribrid_config.production.json"
+    original = b'{"sentinel": true}\n'
+    output.write_bytes(original)
+
+    def fail_fchown(fd: int, uid: int, gid: int) -> None:
+        raise PermissionError("simulated ownership restore failure")
+
+    monkeypatch.setattr(render_config.os, "fchown", fail_fchown)
+
+    with pytest.raises(PermissionError, match="ownership restore failure"):
+        render_config._write_output(output, TriBridConfig())
+
+    assert output.read_bytes() == original
+    assert sorted(path.name for path in tmp_path.iterdir()) == [output.name]
 
 
 def test_proxmox_production_policy_never_routes_defaults_or_smoke_to_gpt_5_4() -> None:
@@ -708,6 +728,22 @@ def test_proxmox_renderer_rejects_symlink_output_to_source(tmp_path: Path) -> No
     assert output.is_symlink()
     assert output.resolve() == source.resolve()
     assert sorted(path.name for path in tmp_path.iterdir()) == [output.name, source.name]
+
+
+def test_proxmox_renderer_rejects_symlink_output_to_unrelated_file(tmp_path: Path) -> None:
+    target = tmp_path / "unrelated.json"
+    original = b'{"sentinel": true}\n'
+    target.write_bytes(original)
+    output = tmp_path / "rendered.json"
+    output.symlink_to(target)
+
+    result = _run_renderer(source=SOURCE_CONFIG, output=output)
+
+    assert result.returncode != 0
+    assert "output must be a regular file" in result.stderr
+    assert target.read_bytes() == original
+    assert output.is_symlink()
+    assert output.resolve() == target.resolve()
 
 
 def test_proxmox_renderer_rejects_invalid_source_without_creating_output(tmp_path: Path) -> None:

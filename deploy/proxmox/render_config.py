@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import stat
 import sys
 import tempfile
 from pathlib import Path
@@ -83,7 +84,12 @@ def _apply_production_defaults(config: TriBridConfig) -> TriBridConfig:
 
 def _write_output(path: Path, config: TriBridConfig) -> None:
     rendered = json.dumps(config.model_dump(mode="json"), indent=2, sort_keys=True) + "\n"
-    existing_stat = path.stat() if path.exists() else None
+    try:
+        existing_stat = path.lstat()
+    except FileNotFoundError:
+        existing_stat = None
+    if existing_stat is not None and not stat.S_ISREG(existing_stat.st_mode):
+        raise ValueError("output must be a regular file when it already exists")
     temp_path: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -94,11 +100,11 @@ def _write_output(path: Path, config: TriBridConfig) -> None:
             suffix=".tmp",
             delete=False,
         ) as handle:
-            handle.write(rendered)
             temp_path = Path(handle.name)
-        if existing_stat is not None:
-            os.chown(temp_path, existing_stat.st_uid, existing_stat.st_gid)
-        os.chmod(temp_path, 0o600)
+            handle.write(rendered)
+            if existing_stat is not None:
+                os.fchown(handle.fileno(), existing_stat.st_uid, existing_stat.st_gid)
+            os.fchmod(handle.fileno(), 0o600)
         os.replace(temp_path, path)
     except Exception:
         if temp_path is not None and temp_path.exists():
