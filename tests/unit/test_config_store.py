@@ -82,7 +82,8 @@ def _production_global_config() -> TriBridConfig:
     cfg.generation.gen_model = "openai.gpt-5.6-terra"
     cfg.generation.enrich_model = "openai.gpt-5.6-terra"
     cfg.chat.max_tokens = 16000
-    cfg.chat.litellm.default_model = "openai.gpt-5.6-terra"
+    cfg.chat.litellm.default_model = "z-ai.glm-5.3-flash"
+    cfg.ui.chat_default_model = "z-ai.glm-5.3-flash"
     cfg.chat.web.max_results = 8
     cfg.chat.web.max_total_results = 10
     cfg.chat.web.max_characters = 24000
@@ -103,7 +104,8 @@ def _legacy_scoped_config() -> TriBridConfig:
     cfg.generation.gen_model = "z-ai.glm-5.3-flash"
     cfg.generation.enrich_model = "z-ai.glm-5.3-flash"
     cfg.chat.max_tokens = 4096
-    cfg.chat.litellm.default_model = "z-ai.glm-5.3-flash"
+    cfg.chat.litellm.default_model = "openai.gpt-5.6-terra"
+    cfg.ui.chat_default_model = "openai.gpt-5.6-terra"
     cfg.chat.web.enabled = False
     cfg.chat.web.max_results = 1
     cfg.synthetic.generator.max_tokens = 4096
@@ -133,7 +135,8 @@ async def test_production_scope_reconciles_deployment_contract_and_persists_migr
     assert scoped.generation.gen_model == "openai.gpt-5.6-terra"
     assert scoped.generation.enrich_model == "openai.gpt-5.6-terra"
     assert scoped.chat.max_tokens == 16000
-    assert scoped.chat.litellm.default_model == "openai.gpt-5.6-terra"
+    assert scoped.chat.litellm.default_model == "z-ai.glm-5.3-flash"
+    assert scoped.ui.chat_default_model == "z-ai.glm-5.3-flash"
     assert scoped.chat.web == global_cfg.chat.web
     assert scoped.synthetic.generator.max_tokens == 16000
     assert scoped.ui.grafana_base_url == "https://ragweld-grafana.dtmont.com"
@@ -150,7 +153,7 @@ async def test_production_scope_reconciles_deployment_contract_and_persists_migr
     repo_id, persisted = postgres.upserts[0]
     assert repo_id == "nasa-apollo-11"
     assert persisted["ui"]["grafana_base_url"] == "https://ragweld-grafana.dtmont.com"  # type: ignore[index]
-    assert persisted["chat"]["litellm"]["default_model"] == "openai.gpt-5.6-terra"  # type: ignore[index]
+    assert persisted["chat"]["litellm"]["default_model"] == "z-ai.glm-5.3-flash"  # type: ignore[index]
     assert persisted["chat"]["web"]["max_characters"] == 24000  # type: ignore[index]
 
 
@@ -167,7 +170,7 @@ async def test_production_scope_save_cannot_reintroduce_deployment_drift() -> No
 
     assert saved.ui.grafana_base_url == "https://ragweld-grafana.dtmont.com"
     assert saved.tracing.faro_base_url == "https://ragweld.dtmont.com/faro/collect"
-    assert saved.chat.litellm.default_model == "openai.gpt-5.6-terra"
+    assert saved.chat.litellm.default_model == "z-ai.glm-5.3-flash"
     assert saved.chat.web == global_cfg.chat.web
     assert saved.chat.max_tokens == 16000
     assert saved.chat.temperature == 1.7
@@ -185,7 +188,7 @@ async def test_production_scope_reconciles_schema_defaulted_missing_keys() -> No
     scoped = await store.get(repo_id="legacy-minimal")
 
     assert scoped.ui.grafana_base_url == "https://ragweld-grafana.dtmont.com"
-    assert scoped.chat.litellm.default_model == "openai.gpt-5.6-terra"
+    assert scoped.chat.litellm.default_model == "z-ai.glm-5.3-flash"
     assert scoped.tracing.trace_store_path == "data/traces/workbench.json"
 
 
@@ -202,7 +205,7 @@ async def test_nonproduction_scope_preserves_corpus_overrides() -> None:
     scoped = await store.get(repo_id="development-corpus")
 
     assert scoped.ui.grafana_base_url == "https://grafana.ragweld.com"
-    assert scoped.chat.litellm.default_model == "z-ai.glm-5.3-flash"
+    assert scoped.chat.litellm.default_model == "openai.gpt-5.6-terra"
     assert scoped.chat.web.enabled is False
     assert scoped.chat.max_tokens == 4096
     assert postgres.upserts == []

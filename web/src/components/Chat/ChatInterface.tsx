@@ -1159,10 +1159,7 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
 
   useEffect(() => {
     if (!config) return;
-    if (!chatModels.length) {
-      if (modelOverride) setModelOverride('');
-      return;
-    }
+    if (!chatModels.length) return;
 
     const optionValues = chatModels.map((model) => String(model.override || model.id || '').trim());
     if (modelOverride && optionValues.includes(modelOverride)) return;

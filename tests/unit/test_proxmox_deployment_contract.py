@@ -104,14 +104,14 @@ PRODUCTION_DEFAULTS = {
     ("generation", "gen_max_tokens"): 16000,
     ("synthetic", "generator", "max_tokens"): 16000,
     ("chat", "max_tokens"): 16000,
-    ("chat", "litellm", "default_model"): "openai.gpt-5.6-terra",
+    ("chat", "litellm", "default_model"): "z-ai.glm-5.3-flash",
     ("chat", "multimodal", "vision_model_override"): "openai.gpt-5.6-terra",
     ("chat", "vllm", "enabled"): False,
     ("embedding", "embedding_backend"): "provider",
     ("embedding", "embedding_type"): "huggingface",
     ("embedding", "embedding_model"): "BAAI/bge-small-en-v1.5",
     ("embedding", "embedding_dim"): 384,
-    ("ui", "chat_default_model"): "openai.gpt-5.6-terra",
+    ("ui", "chat_default_model"): "z-ai.glm-5.3-flash",
     ("ui", "runtime_mode"): "production",
     ("ui", "open_browser"): False,
     ("ui", "grafana_base_url"): "https://ragweld-grafana.dtmont.com",
@@ -627,7 +627,7 @@ def test_proxmox_production_policy_never_routes_defaults_or_smoke_to_gpt_5_4() -
 
     assert "gpt-5.4" not in renderer_source
     assert "gpt-5.4" not in rollout_source
-    assert model_defaults == {"openai.gpt-5.6-terra"}
+    assert model_defaults == {"openai.gpt-5.6-terra", "z-ai.glm-5.3-flash"}
 
 
 def test_proxmox_rollout_copies_collection_scoped_qdrant_snapshots() -> None:
