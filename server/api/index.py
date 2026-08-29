@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, TypeVar
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from neo4j_graphrag.experimental.components.types import Neo4jGraph, Neo4jRelationship
 from starlette.responses import StreamingResponse
 
 from server.api.dependency_errors import (
@@ -55,6 +56,7 @@ from server.indexing.generations import (
 )
 from server.indexing.loader import FileLoader
 from server.indexing.official_graphrag import (
+    _lexical_graph_config,
     extract_semantic_kg_with_graphrag,
     write_lexical_graph_with_graphrag,
 )
@@ -142,19 +144,23 @@ async def _write_code_graph(
     run_id: str,
     repo_path: str,
     chunks: list[Chunk],
-) -> None:
-    """AST entities for one source file, written through the same GraphRAG upsert as the lexical graph."""
+) -> list[Neo4jRelationship]:
+    """AST entities for one source file, written through the same GraphRAG upsert as the lexical graph.
+
+    Returns the file's cross-file relationships; the caller writes them once
+    after every file of the run is in Neo4j, so both endpoints can MATCH.
+    """
     if not chunks:
-        return
+        return []
     file_path = str(chunks[0].file_path or "")
     language = str(chunks[0].language or "")
     if language not in CODE_GRAPH_LANGUAGES:
-        return
+        return []
     source_path = Path(repo_path).expanduser() / file_path
     try:
         source = source_path.read_text(encoding="utf-8", errors="ignore")
     except OSError:
-        return
+        return []
     result = extract_code_graph(
         repo_id=repo_id,
         run_id=run_id,
@@ -166,9 +172,10 @@ async def _write_code_graph(
         root=Path(repo_path).expanduser(),
     )
     if not result.graph.nodes:
-        return
+        return []
     with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_upsert_code_graph").time():
         await neo4j.upsert_graphrag_graph(repo_id, result.graph, lexical_graph_config=result.lexical_graph_config)
+    return result.deferred_relationships
 
 
 # Index estimate heuristics (intentionally rough).
@@ -1657,6 +1664,9 @@ async def _run_index_body(
     total_chunks = 0
     total_tokens = 0
     file_breakdown: dict[str, int] = defaultdict(int)
+    # Cross-file code-graph edges, written once after the file loop so both
+    # endpoints exist whichever file was indexed first.
+    code_graph_deferred: list[Neo4jRelationship] = []
 
     prev_status = _STATUS.get(repo_id)
     started_at = (
@@ -1755,8 +1765,10 @@ async def _run_index_body(
                         lexical_graph_config=lexical_graph_config,
                     )
             if neo4j is not None and cfg.graph_indexing.build_code_graph:
-                await _write_code_graph(
-                    neo4j, cfg=cfg, repo_id=write_repo_id, run_id=run_id, repo_path=repo_path, chunks=chunks
+                code_graph_deferred.extend(
+                    await _write_code_graph(
+                        neo4j, cfg=cfg, repo_id=write_repo_id, run_id=run_id, repo_path=repo_path, chunks=chunks
+                    )
                 )
             return chunks
 
@@ -1798,8 +1810,10 @@ async def _run_index_body(
                     lexical_graph_config=lexical_graph_config,
                 )
         if neo4j is not None and cfg.graph_indexing.build_code_graph:
-            await _write_code_graph(
-                neo4j, cfg=cfg, repo_id=write_repo_id, run_id=run_id, repo_path=repo_path, chunks=embedded
+            code_graph_deferred.extend(
+                await _write_code_graph(
+                    neo4j, cfg=cfg, repo_id=write_repo_id, run_id=run_id, repo_path=repo_path, chunks=embedded
+                )
             )
         return embedded
 
@@ -2145,6 +2159,14 @@ async def _run_index_body(
                 semantic_pending_chunks.clear()
 
     await _flush_pending_cross_file_chunks(force=True)
+
+    if neo4j is not None and code_graph_deferred:
+        with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_upsert_code_graph_edges").time():
+            await neo4j.upsert_graphrag_graph(
+                write_repo_id,
+                Neo4jGraph(nodes=[], relationships=code_graph_deferred),
+                lexical_graph_config=_lexical_graph_config(),
+            )
 
     if neo4j is not None and cfg.graph_indexing.semantic_kg_enabled:
         # A semantic-KG build without communities is an incomplete graph; fail the
