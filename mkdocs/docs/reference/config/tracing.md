@@ -26,7 +26,7 @@
 [Config API & workflow](../../configuration.md){ .md-button }
 [Glossary](../../glossary.md){ .md-button }
 
-**Total parameters**: 27
+**Total parameters**: 28
 
 ??? info "Group index"
     - `(root)`
@@ -59,6 +59,7 @@
 | `tracing.tempo_base_url` | `TEMPO_BASE_URL` | `str` | `""` | — | Tempo or Grafana explore base URL used for trace deep links |
 | `tracing.trace_retention` | `TRACE_RETENTION` | `int` | `50` | ≥ 10, ≤ 500 | Number of traces to retain |
 | `tracing.trace_sampling_rate` | `TRACE_SAMPLING_RATE` | `float` | `1.0` | ≥ 0.0, ≤ 1.0 | Trace sampling rate (0.0-1.0) |
+| `tracing.trace_store_path` | `TRACE_STORE_PATH` | `str` | `""` | — | Persistent workbench trace-store JSON path; empty keeps the store in memory only |
 | `tracing.tracing_enabled` | `TRACING_ENABLED` | `bool` | `true` | — | Enable distributed tracing |
 | `tracing.tracing_mode` | `TRACING_MODE` | `str` | `"local"` | pattern=^(local\|otel\|otel_langfuse\|off)$ | Observability mode |
 | `tracing.tribrid_log_path` | `TRIBRID_LOG_PATH` | `str` | `"data/logs/queries.jsonl"` | — | Query log file path |

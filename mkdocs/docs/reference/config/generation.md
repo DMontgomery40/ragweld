@@ -37,7 +37,7 @@
 |---------|------------|------|---------|-------------|---------|
 | `generation.enrich_disabled` | `ENRICH_DISABLED` | `bool` | `false` | — | Disable code enrichment |
 | `generation.enrich_model` | `ENRICH_MODEL` | `str` | `"ragweld-local"` | — | LiteLLM alias for code enrichment |
-| `generation.gen_max_tokens` | `GEN_MAX_TOKENS` | `int` | `512` | ≥ 100, ≤ 8192 | Max tokens for generation |
+| `generation.gen_max_tokens` | `GEN_MAX_TOKENS` | `int` | `512` | ≥ 100, ≤ 16000 | Max tokens for generation |
 | `generation.gen_model` | `GEN_MODEL` | `str` | `"ragweld-local"` | — | Primary LiteLLM model alias |
 | `generation.gen_model_cli` | `GEN_MODEL_CLI` | `str` | `""` | — | Optional LiteLLM alias for CLI requests |
 | `generation.gen_model_http` | `GEN_MODEL_HTTP` | `str` | `""` | — | HTTP transport generation model override |
