@@ -91,7 +91,7 @@ async def list_entities(
         return await scope.neo4j.list_entities(scope.graph_repo_id, entity_type, limit, query=q)
 
 
-@router.get("/graph/{corpus_id}/entity/{entity_id}", response_model=Entity)
+@router.get("/graph/{corpus_id}/entity/{entity_id:path}", response_model=Entity)
 async def get_entity(corpus_id: str, entity_id: str) -> Entity:
     async with _graph_client(corpus_id, boundary="Graph entity API") as scope:
         neo4j = scope.neo4j
@@ -104,7 +104,7 @@ async def get_entity(corpus_id: str, entity_id: str) -> Entity:
 
 
 @router.get(
-    "/graph/{corpus_id}/entity/{entity_id}/relationships", response_model=list[Relationship]
+    "/graph/{corpus_id}/entity/{entity_id:path}/relationships", response_model=list[Relationship]
 )
 async def get_entity_relationships(corpus_id: str, entity_id: str) -> list[Relationship]:
     async with _graph_client(corpus_id, boundary="Graph relationships API") as scope:
@@ -115,7 +115,7 @@ async def get_entity_relationships(corpus_id: str, entity_id: str) -> list[Relat
 
 
 @router.get(
-    "/graph/{corpus_id}/entity/{entity_id}/neighbors", response_model=GraphNeighborsResponse
+    "/graph/{corpus_id}/entity/{entity_id:path}/neighbors", response_model=GraphNeighborsResponse
 )
 async def get_entity_neighbors(
     corpus_id: str, entity_id: str, max_hops: int = 2, limit: int = 200
