@@ -134,7 +134,26 @@ When `graph_indexing.build_code_graph=true`, indexing additionally runs a tree-s
 - `contains`, `inherits`, `imports`, and `calls` relationships, weighted by the `graph_indexing.ast_*_weight` fields
 - each entity anchored to the chunk that defines it through the same lexical chunk relationship, so `graph_search.mode=chunk` retrieval can expand a hit to its callers, callees, base classes, and importing modules
 
-Cross-file targets (an imported module, a base class, or a callee defined elsewhere) are emitted as minimal nodes with deterministic ids and unified by the GraphRAG `MERGE` upsert, so index order across files does not matter. Resolution is conservative: a name that cannot be tied to a definition inside the corpus, or an import that does not resolve to a corpus file, produces no edge and is counted as unresolved rather than guessed.
+Entity ids are corpus-relative: a module is its `file_path` and a symbol is `file_path::qualname`; uniqueness in Neo4j is scoped by the corpus id, so a staging id never leaks into an entity id. Relationships whose target is defined in another file are **deferred**: the per-file pass writes only that file's entities and intra-file edges, and the cross-file edges (`imports`, plus cross-file `inherits` and `calls`) are written once after every file of the run is in Neo4j, through a relationship-only upsert that `MATCH`es both endpoints. No placeholder node is ever created for a target — a call to an imported class is a call to the existing `class` node, not to a guessed `function` node (the earlier shape collided with the Neo4j uniqueness constraint on entity ids and failed the run). Resolution is conservative: a name that cannot be tied to a definition inside the corpus, or an import that does not resolve to a corpus file, produces no edge and is counted as unresolved rather than guessed.
+
+*Concept diagram (the deferred cross-file write only — the full fused pipeline is on the [generated retrieval-pipeline page](reference/architecture/retrieval-pipeline.md)):*
+
+```mermaid
+flowchart LR
+  F1["File pass 1"] --> U1["GraphRAG upsert\n(entities + intra-file edges)"]
+  F2["File pass 2"] --> U2["GraphRAG upsert\n(entities + intra-file edges)"]
+  U1 --> N["Neo4j"]
+  U2 --> N
+  F1 --> D["Deferred cross-file edges\n(imports / inherits / calls)"]
+  F2 --> D
+  D --> UF["Relationship-only upsert\nMATCH both endpoints\nafter the last file of the run"]
+  UF --> N
+```
+
+??? note "Why deferred edges instead of placeholder nodes"
+    Placeholder nodes forced a guessed label for cross-file targets — for example, calling an imported class created a `function` node. When the defining file later wrote the real `class` entity with the same id, the two labels violated the Neo4j uniqueness constraint on entity ids and failed the index run. Deferring the edge until every file has been upserted means both endpoints always exist under their real labels, and index order across files no longer matters.
+
+For engineers: the deferred write runs under the `neo4j_upsert_code_graph_edges` Prometheus stage label in `server/api/index.py`, immediately after the file loop and before semantic-KG community detection.
 
 !!! warning "Re-index after enabling"
     The code graph is built during indexing. Toggling `build_code_graph` only affects new runs, so enable it per code corpus and re-index. It is off by default because it only pays for code corpora.

@@ -1,3 +1,4 @@
+```markdown
 # Graph Retrieval and Storage
 
 <div class="grid chunk_summaries" markdown>
@@ -59,6 +60,8 @@
 ### Code graph artifacts
 
 The AST code graph written by `graph_indexing.build_code_graph` lands in the same Neo4j lane as the lexical graph and the semantic KG. In `chunk` mode, entity expansion can follow the chunk links into `calls`, `inherits`, and `imports` edges, so a seed chunk hit can reach its callers, base classes, and importing modules. See the [Indexing pipeline](../indexing.md) for build details and the [`graph_indexing` config reference](../reference/config/graph_indexing.md) for edge weights and timeouts.
+
+Cross-file edges are held back during the per-file pass and written in one relationship-only upsert after the run's last file (`server/api/index.py`), so both endpoints always exist in Neo4j under their real labels when the edge lands — a call to an imported class resolves to the `class` node, never to a guessed label. Entity ids are corpus-relative (`file_path` for modules, `file_path::qualname` for symbols), with uniqueness scoped by corpus.
 
 !!! tip "If you're not sure"
     Leave `build_code_graph` off for prose-heavy corpora and turn it on for code corpora where structural questions ("who calls this?", "what inherits from this?") matter. It is built during indexing, so plan a re-index after enabling.

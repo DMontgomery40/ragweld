@@ -39,6 +39,7 @@ Indexing turns a folder into a set of **retrieval primitives**:
 - **Graph context** (optional) stored in Neo4j
 - **Code graph** (optional, `graph_indexing.build_code_graph`) — module/class/function entities with `contains`/`inherits`/`imports`/`calls` edges in Neo4j
 - **Chunk provenance** — every chunk carries typed provenance (extraction method; for Docling PDFs, cited pages plus normalized layout regions) that powers the [source document viewer](source_viewer.md)
+- Cross-file code-graph edges (`imports`, and `inherits`/`calls` that resolve to another file) are held back and written once after every file of the run is in Neo4j, so both endpoints exist under their real labels in either index order — no placeholder node is ever created for a target, and a call to an imported class resolves to the class node
 
 !!! note "Corpora indexed before provenance capture"
     Chunks from older runs report `provenance` as not captured, and rich documents (docx/pptx/xlsx/html) show a "not captured" state in the [source document viewer](source_viewer.md) until you re-index.
@@ -73,16 +74,15 @@ flowchart LR
   TS --> MOD["module entity"]
   TS --> CLS["class entity"]
   TS --> FN["function / method entity"]
-  MOD -->|"imports"| IMPT["imported module"]
-  CLS -->|"inherits"| BASE["base class"]
-  FN -->|"calls"| CALLEE["callee"]
-  MOD --> UPS["GraphRAG upsert"]
+  MOD --> UPS["GraphRAG upsert\nper-file entities + intra-file edges"]
   CLS --> UPS
   FN --> UPS
-  IMPT --> UPS
-  BASE --> UPS
-  CALLEE --> UPS
+  MOD -->|"imports (cross-file)"| DEF["Deferred cross-file edges"]
+  CLS -->|"inherits (cross-file)"| DEF
+  FN -->|"calls (cross-file)"| DEF
   UPS --> N4J["Neo4j"]
+  DEF --> UPS2["Relationship-only upsert\nafter the last file of the run"]
+  UPS2 --> N4J
 ```
 
 !!! note "Conservative resolution"
