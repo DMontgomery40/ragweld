@@ -71,6 +71,7 @@ flowchart TB
 | graph_storage | `neo4j_*`, `neo4j_database_mode` | Graph connectivity and isolation |
 | chat.recall_gate | `enabled`, `default_intensity`, `skip_*`, `*top_k`, `*recency_weight` | Smart memory gating |
 | chat.web | `enabled`, `engine`, `max_results`, `max_total_results`, `max_characters` | Server-owned web-search policy for Chat |
+| indexing | `figures.*` | Vision-described figures inside Docling-converted PDFs (off by default; the run refuses to start if the vision alias is not vision-capable) |
 | document_viewer | `page_render_scale`, `thumbnail_render_scale`, `max_text_bytes` | Source document evidence viewer limits |
 
 ### Fusion Configuration

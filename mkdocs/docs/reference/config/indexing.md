@@ -26,10 +26,11 @@
 [Config API & workflow](../../configuration.md){ .md-button }
 [Glossary](../../glossary.md){ .md-button }
 
-**Total parameters**: 18
+**Total parameters**: 30
 
 ??? info "Group index"
     - `(root)`
+    - `figures`
 
 ## `(root)`
 
@@ -231,3 +232,20 @@
     - [PostgreSQL Full Text Search](https://www.postgresql.org/docs/current/textsearch.html)
     - [Elasticsearch Reciprocal Rank Fusion (RRF)](https://www.elastic.co/guide/en/elasticsearch/reference/current/rrf.html)
     - [Search in PostgreSQL: Full Text Search (ParadeDB)](https://www.paradedb.com/learn/search-in-postgresql/full-text-search)
+
+## `figures`
+
+| JSON key | Env key(s) | Type | Default | Constraints | Summary |
+|---------|------------|------|---------|-------------|---------|
+| `indexing.figures.classify` | — | `bool` | `true` | — | Run Docling's local figure classifier (chart, diagram, logo, photo) before describing |
+| `indexing.figures.concurrency` | — | `int` | `4` | ≥ 1, ≤ 16 | Parallel vision calls while converting one document |
+| `indexing.figures.describe` | — | `bool` | `true` | — | Send each figure to the vision alias for a structured description |
+| `indexing.figures.enabled` | — | `bool` | `false` | — | Describe and classify figures inside Docling-converted PDFs so they become retrievable chunks |
+| `indexing.figures.images_scale` | — | `float` | `2.0` | ≥ 1.0, ≤ 4.0 | Docling raster scale for figure crops (2.0 is about 144 DPI) |
+| `indexing.figures.max_completion_tokens` | — | `int` | `600` | ≥ 64, ≤ 4000 | Output token budget per figure description |
+| `indexing.figures.max_figures_per_file` | — | `int` | `200` | ≥ 0 | Cap on described figures per document; the rest keep caption-only text |
+| `indexing.figures.min_area_fraction` | — | `float` | `0.02` | ≥ 0.0, ≤ 1.0 | Skip figures smaller than this fraction of the page area (icons, logos) |
+| `indexing.figures.prompt_profile` | — | `Literal["technical_figure", "schematic"]` | `"technical_figure"` | allowed="technical_figure", "schematic" | Prompt template for figure descriptions: technical figures or engineering schematics |
+| `indexing.figures.skip_classes` | — | `list[str]` | `["logo", "signature", "icon"]` | — | Classifier classes that are never sent for description |
+| `indexing.figures.timeout_s` | — | `int` | `90` | ≥ 5, ≤ 600 | Per-figure vision call timeout in seconds |
+| `indexing.figures.vision_model` | — | `str` | `"z-ai.glm-5.3-flash"` | — | Gateway alias used to describe figures; must be vision-capable in the model catalog |

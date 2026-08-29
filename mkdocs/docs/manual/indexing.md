@@ -1,3 +1,5 @@
+
+```markdown
 # Indexing a corpus
 
 <div class="grid chunk_summaries" markdown>
@@ -39,6 +41,7 @@ Indexing turns a folder into a set of **retrieval primitives**:
 - **Graph context** (optional) stored in Neo4j
 - **Code graph** (optional, `graph_indexing.build_code_graph`) — module/class/function entities with `contains`/`inherits`/`imports`/`calls` edges in Neo4j
 - **Chunk provenance** — every chunk carries typed provenance (extraction method; for Docling PDFs, cited pages plus normalized layout regions) that powers the [source document viewer](source_viewer.md)
+- **Figure descriptions** (optional, `indexing.figures.enabled`) — charts and drawings inside Docling-converted PDFs are described by a vision model and become retrievable chunks anchored to their page and bounding box
 - Cross-file code-graph edges (`imports`, and `inherits`/`calls` that resolve to another file) are held back and written once after every file of the run is in Neo4j, so both endpoints exist under their real labels in either index order — no placeholder node is ever created for a target, and a call to an imported class resolves to the class node
 
 !!! note "Corpora indexed before provenance capture"
@@ -90,6 +93,74 @@ flowchart LR
 
 !!! warning "Enable per corpus, then re-index"
     The code graph is built during indexing, so toggling `build_code_graph` has no effect until the corpus is re-indexed. It only pays for code corpora — leave it off for prose-only corpora.
+
+### Optional: Figure descriptions for PDFs (Docling picture enrichment)
+
+For document corpora, ragweld can additionally **describe figures** — charts, diagrams, photos and engineering drawings inside Docling-converted PDFs — so they become retrievable chunks. It is off by default (`indexing.figures.enabled=false`) because every described figure is a vision-model call through the LiteLLM gateway.
+
+What happens when it is on:
+
+- Docling detects picture regions on each page and (with `indexing.figures.classify`) records the figure kind — chart, diagram, logo, photo
+- Logos, signatures, icons (`indexing.figures.skip_classes`) and figures below `indexing.figures.min_area_fraction` are skipped and keep caption-only text
+- Everything else is cropped at `indexing.figures.images_scale` and sent to the vision alias (`indexing.figures.vision_model`) for a structured description
+- The description becomes a **retrievable chunk anchored to the figure's page and normalized bounding box**, so a citation boxes the figure in the [source document viewer](source_viewer.md)
+
+*Concept diagram (figure enrichment only — the full fused pipeline is on the [generated retrieval-pipeline page](../reference/architecture/retrieval-pipeline.md)):*
+
+```mermaid
+flowchart LR
+  PDF["Docling-converted PDF page"] --> DET["Picture region detection"]
+  DET --> CLS{"Classify\n(indexing.figures.classify)"}
+  CLS -->|"logo / signature / icon"| SKIP["Skip:\ncaption-only text"]
+  CLS -->|"chart / diagram / photo"| AREA{"Area filter\n(indexing.figures.min_area_fraction)"}
+  AREA -->|"too small"| SKIP
+  AREA -->|"passes"| CROP["Figure crop\n(indexing.figures.images_scale)"]
+  CROP --> VIS["Vision alias\n(indexing.figures.vision_model)"]
+  VIS --> CHUNK["Figure-description chunk\n(page + bounding box)"]
+  CHUNK --> QD["Qdrant dense + sparse generation"]
+  CHUNK --> PG["Postgres chunk row\nwith provenance"]
+```
+
+Knobs that matter:
+
+| Knob | Default | What it does |
+|------|---------|--------------|
+| `indexing.figures.enabled` | `false` | Turn figure description on per corpus |
+| `indexing.figures.describe` | `true` | Send each figure to the vision alias (off = captions and classification only) |
+| `indexing.figures.vision_model` | `z-ai.glm-5.3-flash` | Gateway alias for descriptions; must be vision-capable in the model catalog |
+| `indexing.figures.prompt_profile` | `technical_figure` | `technical_figure` for reports; `schematic` adds drawing number, sheet, revision and connector conventions |
+| `indexing.figures.images_scale` | `2.0` | Raster scale for figure crops (≈144 DPI at 2.0) |
+| `indexing.figures.min_area_fraction` | `0.02` | Skip icons and decorative marks |
+| `indexing.figures.max_figures_per_file` | `200` | Cap per document; the rest keep caption-only text |
+
+Enable it per corpus:
+
+=== "curl"
+
+    ```bash
+    curl -sS -X PATCH "http://127.0.0.1:58012/api/config/indexing" \
+      -H 'Content-Type: application/json' \
+      -d '{"figures": {"enabled": true, "prompt_profile": "schematic"}}' | jq .
+    ```
+
+=== "Python"
+
+    ```python
+    import httpx
+
+    httpx.patch(
+        "http://127.0.0.1:58012/api/config/indexing",
+        json={"figures": {"enabled": True, "prompt_profile": "schematic"}},
+    ).raise_for_status()  # (1)!
+    ```
+
+1. Sectional PATCH is validated by Pydantic; re-index the corpus to describe figures
+
+!!! warning "Vision costs are per figure"
+    A dense scanned PDF can hold hundreds of figures. Run `/api/index/estimate` first — the estimate includes the figure cost before you commit. Keep `max_figures_per_file` and `min_area_fraction` tight on large corpora, and point hard scanned schematics at a stronger vision alias per corpus.
+
+!!! tip "If you're not sure"
+    Leave it off for text-heavy corpora. Turn it on for report/drawing corpora where "which chart shows X?" is a real question, start with the defaults, and check the run summary's skipped-figure counts before widening the filters.
 
 ## Before you index: estimate size/time (optional)
 
@@ -235,4 +306,10 @@ Here’s the short list of “most likely to matter” knobs:
 ??? info "I’m missing chunks / the index looks empty"
     - Verify the `repo_path` exists *inside* the environment that’s indexing (host vs container path mismatch is the classic failure).
     - Confirm you’re querying the correct `corpus_id` (corpora are isolated).
+
+??? info "Figure descriptions never appear"
+    - Confirm `indexing.figures.enabled` is `true` for this corpus and the corpus was **re-indexed after enabling** — figures are captured during indexing, not retroactively.
+    - Check the run summary: figures below `min_area_fraction`, in `skip_classes`, or beyond `max_figures_per_file` are counted as skipped and keep caption-only text.
+    - The run refuses to start if the vision alias (`indexing.figures.vision_model`) is not flagged vision-capable in the model catalog — check the run error.
+    - Use `/api/index/estimate` before re-indexing large PDF corpora; figure descriptions are priced per figure.
 

@@ -72,6 +72,7 @@ flowchart LR
 | embedding | `embedding_model` | text-embedding-3-large | Model id |
 | embedding | `embedding_dim` | 3072 | Must match model outputs |
 | indexing | `bm25_tokenizer` | stemmer | Tokenizer for FTS |
+| indexing | `figures.*` | off | Describe charts/drawings in Docling-converted PDFs via a vision alias (`indexing.figures`) |
 
 ## Start Indexing via API (Annotated)
 
@@ -180,6 +181,30 @@ The full fused path (where the graph leg feeds weighted RRF fusion alongside Qdr
     ```
 
 1. Sectional PATCH is validated by Pydantic; re-index the corpus to rebuild the graph
+
+### Figure descriptions (`indexing.figures`)
+
+For document corpora, indexing can additionally **describe figures** — charts, diagrams and engineering drawings inside Docling-converted PDFs — so they become retrievable chunks. It is off by default (`indexing.figures.enabled=false`) because each described figure is a vision-model call through the LiteLLM gateway.
+
+- Docling detects picture regions per page, optionally classifies them (`chart`, `diagram`, `logo`, `photo`), and sends each qualifying figure to the configured vision alias (`indexing.figures.vision_model`, default `z-ai.glm-5.3-flash`)
+- The alias must be flagged vision-capable in the model catalog; the run refuses to start otherwise
+- The structured description becomes a chunk anchored to the figure's page and normalized bounding box, so citations box the figure in the [source document viewer](manual/source_viewer.md)
+- Coverage and cost controls: `min_area_fraction`, `skip_classes`, `max_figures_per_file`, `max_completion_tokens`, `concurrency`, `timeout_s`
+
+*Concept diagram (figure enrichment only — the full fused pipeline is on the [generated retrieval-pipeline page](reference/architecture/retrieval-pipeline.md)):*
+
+```mermaid
+flowchart LR
+  PDF["Docling-converted PDF page"] --> DET["Picture region detection"]
+  DET --> CLS["Classify + filters\n(skip_classes, min_area_fraction)"]
+  CLS -->|"skipped"| CAP["Caption-only text"]
+  CLS -->|"passes"| VIS["Vision alias\n(indexing.figures.vision_model)"]
+  VIS --> CHUNK["Figure-description chunk\n(page + bounding box)"]
+  CHUNK --> QD["Qdrant dense + sparse generation"]
+  CHUNK --> PG["Postgres chunk row\nwith provenance"]
+```
+
+For the operator walkthrough (cost estimation, per-corpus tuning, troubleshooting), see [Indexing a corpus](manual/indexing.md); every knob is in the [`indexing` config reference](reference/config/indexing.md).
 
 ??? info "Failure Modes"
     - File decoding errors: logged and skipped.
