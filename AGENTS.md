@@ -1,5 +1,7 @@
 It's all over there → LXC100 (`ragweld`, `192.168.68.225`) on Proxmox node pve1 (`192.168.68.171`); treat this Mac checkout as source only and never assume localhost is the live Ragweld runtime.
 
+Read `CLAUDE.md` fully before doing anything else: it holds the non-negotiable rules (execution location, SSH/browser authorization, architecture invariants, docs ownership, verification gates). This file is only the runtime pointer plus tool notes.
+
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
