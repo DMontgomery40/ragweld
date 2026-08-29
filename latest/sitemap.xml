@@ -189,11 +189,19 @@
          <lastmod>2026-08-29</lastmod>
     </url>
     <url>
+         <loc>https://dmontgomery40.github.io/ragweld/latest/manual/source_viewer/</loc>
+         <lastmod>2026-08-29</lastmod>
+    </url>
+    <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/manual/troubleshooting/</loc>
          <lastmod>2026-08-29</lastmod>
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/manual/ui/</loc>
+         <lastmod>2026-08-29</lastmod>
+    </url>
+    <url>
+         <loc>https://dmontgomery40.github.io/ragweld/latest/manual/web_search/</loc>
          <lastmod>2026-08-29</lastmod>
     </url>
     <url>
@@ -222,6 +230,10 @@
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/operations/postgres/</loc>
+         <lastmod>2026-08-29</lastmod>
+    </url>
+    <url>
+         <loc>https://dmontgomery40.github.io/ragweld/latest/operations/production_scope/</loc>
          <lastmod>2026-08-29</lastmod>
     </url>
     <url>
@@ -270,6 +282,10 @@
     </url>
     <url>
          <loc>https://dmontgomery40.github.io/ragweld/latest/reference/config/docker/</loc>
+         <lastmod>2026-08-29</lastmod>
+    </url>
+    <url>
+         <loc>https://dmontgomery40.github.io/ragweld/latest/reference/config/document_viewer/</loc>
          <lastmod>2026-08-29</lastmod>
     </url>
     <url>
