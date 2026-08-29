@@ -14,6 +14,12 @@
 
     It is only allowed to modify `mkdocs/docs/**` and `mkdocs.yml`.
 
+-   :material-file-restore:{ .lg .middle } **Repair rounds**
+
+    ---
+
+    Rejected hunks get a diff repair round, then a whole-page replacement round, before anything is dropped.
+
 -   :material-rocket-launch:{ .lg .middle } **Auto-deployed**
 
     ---
@@ -71,6 +77,22 @@ python scripts/docs_ai/generate_docs_from_diff.py --base origin/main --llm opena
 uv run python scripts/generate_config_reference_docs.py --clean
 mkdocs build --strict
 ```
+
+## Repair rounds (what happens when a patch doesn't apply)
+
+`git apply` sometimes rejects a hunk because a page changed after the diff was computed. Before the
+generator drops a file, it tries two recovery rounds:
+
+1. **Diff repair round** — the model re-emits only the rejected files, against their real current text.
+2. **Page repair round** (default on) — for files still rejected, the model returns each page's
+   **complete new content** between `### FILE: <path>` and `### END FILE` markers. Whole-page
+   replacements pass the same safety checks as hunks: only already-rejected files may be written,
+   only paths under `mkdocs/docs/`, and delete limits still apply (bootstrap runs with `--base EMPTY`
+   may rewrite wholesale).
+
+Anything still failing after both rounds is dropped with a `::warning::docs-autopilot:` line, and the
+raw replies (`mkdocs-docs-llm-repair-raw.txt`, `mkdocs-docs-llm-page-repair-raw.txt`) are kept so you
+can see what the model actually said. Set `DOCS_AUTOPILOT_PAGE_REPAIR=0` to skip the page repair round.
 
 ## Bootstrap / catch-up (one time)
 

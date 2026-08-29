@@ -32,6 +32,12 @@
 
     On failure, the raw patch is uploaded as `mkdocs-docs-llm-patch` for easy manual apply and triage.
 
+-   :material-file-restore:{ .lg .middle } **Two repair rounds**
+
+    ---
+
+    Rejected files get a diff repair round and a whole-page replacement round before they are dropped from the patch.
+
 -   :material-account-wrench:{ .lg .middle } **Human‑in‑the‑loop**
 
     ---
@@ -50,6 +56,7 @@
 
     - The "Generate docs patch (apply)" step has `id: docs_patch` and `continue-on-error: true`.
     - The failure summary step is gated by `if: steps.docs_patch.outcome == 'failure'` instead of a job-wide `failure()`.
+    - Inside the apply step, the generator runs two recovery rounds before dropping a file: a diff repair round (re-emit rejected files) and a whole-page repair round (complete replacement pages; `DOCS_AUTOPILOT_PAGE_REPAIR=1` by default).
     - After a patch failure, the workflow still:
         - Regenerates the config reference docs (Pydantic + glossary)
         - Builds the site with MkDocs in strict mode
@@ -57,11 +64,17 @@
 
 ## CI flow at a glance
 
+*Mechanism diagram (the apply-and-repair ladder inside the “Generate docs patch (apply)” step; the job steps around it are described below):*
+
 ```mermaid
 flowchart TB
   A["Push/Dispatch"] --> B["Generate docs patch\\n(apply)"]
-  B -->|success| D["Generate config reference docs"]
-  B -->|failure| C["Summarize failure\\nand upload patch"]
+  B -->|"all hunks applied"| D["Generate config reference docs"]
+  B -->|"git apply rejects files"| R1["Diff repair round\\nre-emit rejected files"]
+  R1 -->|"applied"| D
+  R1 -->|"still rejected"| R2["Page repair round\\nwhole replacement pages"]
+  R2 -->|"pages written"| D
+  R2 -->|"still rejected"| C["Write marker + warn\\nand upload patch"]
   C --> D
   D --> E["Build docs\\n(MkDocs --strict)"]
 ```
@@ -72,6 +85,7 @@ flowchart TB
 ## Triage when the patch fails (human fix loop)
 
 - [ ] Download the `mkdocs-docs-llm-patch` artifact from the failed run
+- [ ] Read `mkdocs-docs-llm-page-repair-raw.txt` (copied into run artifacts when present) to see the whole-page replacements proposed for files the diff rounds kept rejecting
 - [ ] Apply locally from repo root:
 
     ```bash
@@ -176,6 +190,8 @@ const cfg = await res.json();
   - It can propose changes, but they are overwritten by the generator step. To make config docs “stick”, update Pydantic and the glossary, then regenerate.
 - Why strict builds?
   - To catch broken links, malformed tabs/admonitions, and Mermaid errors before publishing.
+- What does the page repair round do?
+  - When `git apply` still rejects a file after the diff repair round, the model is asked for that page’s complete new content (between `### FILE: <path>` / `### END FILE` markers) instead of another hunk. Whole-page replacements are re-validated against the same safety rules as hunks (rejected files only, docs-only paths, delete limits), and the raw reply is kept as `mkdocs-docs-llm-page-repair-raw.txt`.
 
 ## Related reading
 

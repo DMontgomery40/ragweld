@@ -26,6 +26,12 @@
 
     Use `--soft-fail-apply-errors` in `generate_docs_from_diff.py` to mirror CI behavior on your machine.
 
+-   :material-file-restore:{ .lg .middle } **Page repair before drop**
+
+    ---
+
+    Files git still rejects after the diff repair round get one whole-page replacement attempt before they are dropped from the patch.
+
 </div>
 
 [Docs Autopilot](docs-autopilot.md){ .md-button .md-button--primary }
@@ -50,6 +56,35 @@ Rationale:
 
 - Docs edits often race with concurrent human commits. Hard-failing CI on a non-applicable patch wastes time.
 - We want visibility without blocking: the docs still build later in the job so you get a trustworthy mkdocs signal.
+
+## Page repair round (whole pages before drop)
+
+Since the soft-fail change, the generator gained one more recovery pass for stubborn files. When
+`git apply` rejects hunks for a file even after the diff repair round, the generator (by default)
+asks the model for the **complete new content of each still-rejected page** instead of another diff.
+
+How the round works:
+
+- The request lists why each file was rejected, quotes the intended (rejected) hunks, and quotes each
+  page's current text verbatim.
+- The reply must use `### FILE: <path>` / `### END FILE` markers; markdown fences inside a page are
+  just content.
+- Whole-page replacements are validated with the same rules as a patch before being written:
+  - only files already rejected may be written (anything else is refused),
+  - only paths under `mkdocs/docs/`,
+  - the replacement is diffed against the page on disk and re-checked against the delete limits, so
+    an incremental run cannot use "whole page" mode to destroy hundreds of lines (bootstrap runs,
+    `--base EMPTY`, may rewrite wholesale).
+- Pages that pass the checks are written and staged; pages that fail are reported as refused with a
+  reason (`not one of the rejected pages`, `outside mkdocs/docs`, a delete-limit error, or
+  `identical to the current page`).
+
+The raw model reply is written to `mkdocs-docs-llm-page-repair-raw.txt` whenever the round runs, and
+`scripts/docs_ai/run_ci_autopilot.py` copies it into the run artifacts alongside the other raw
+replies.
+
+!!! tip "Turning the round off"
+    Set `DOCS_AUTOPILOT_PAGE_REPAIR=0` to skip the whole-page recovery pass. Default is `1` (enabled).
 
 ## Updated GitHub Actions workflow snippets
 
@@ -107,6 +142,8 @@ python scripts/docs_ai/generate_docs_from_diff.py \
 
 1. Mirrors CI: if the patch can’t be applied, the script writes `mkdocs-docs-llm.apply-failed.txt`, prints `::warning::` logs, and exits successfully.
 
+The page repair round also runs here by default (`DOCS_AUTOPILOT_PAGE_REPAIR=1`), so a locally reproducible failure looks exactly like CI.
+
 ??? tip "Working with an existing patch file"
     If you already have a patch (from artifacts or a previous run), apply it directly:
 
@@ -125,10 +162,15 @@ mkdocs-docs-llm.apply-failed.txt
 ::warning::docs-autopilot
 : Log prefix used by the generator for GitHub Actions warnings. Helpful for quickly grepping pipeline issues.
 
+mkdocs-docs-llm-page-repair-raw.txt
+: Raw model reply from the whole-page repair round. Present only when that round ran (some files were still rejected after the diff repair round). Safe to delete; also copied into run artifacts.
+
 !!! tip "Where warnings come from"
     The generator now uses a `_gh_warning()` helper to emit GitHub Actions warnings. You’ll see these in the job logs even when the job continues.
 
 ## CI flow (at a glance)
+
+*Mechanism diagram (the apply-and-repair ladder inside the apply step; the surrounding CI steps are shown in the workflow snippets above):*
 
 ```mermaid
 flowchart LR
@@ -137,7 +179,13 @@ flowchart LR
   C --> D["git apply"]
   D --> E{"Apply ok?"}
   E -- "yes" --> F["Build docs\\nmkdocs build --strict"]
-  E -- "no" --> G["Write marker\\nmkdocs-docs-llm.apply-failed.txt"]
+  E -- "no" --> R1["Diff repair round\\nre-emit rejected files"]
+  R1 --> E2{"All applied?"}
+  E2 -- "yes" --> F
+  E2 -- "no" --> R2["Page repair round\\nwhole replacement pages"]
+  R2 --> E3{"Pages written?"}
+  E3 -- "all" --> F
+  E3 -- "some refused" --> G["Write marker\\nmkdocs-docs-llm.apply-failed.txt"]
   G --> H["Warn in CI\\n::warning::docs-autopilot"]
   H --> F
 ```
@@ -146,6 +194,7 @@ flowchart LR
 
 - [ ] Open GitHub Actions logs and search for `::warning::docs-autopilot`.
 - [ ] Download artifacts: `mkdocs-docs-llm.patch` and `mkdocs-docs-llm.apply-failed.txt`.
+- [ ] Read `mkdocs-docs-llm-page-repair-raw.txt` (when present) to see the whole-page replacements proposed for files the diff rounds kept rejecting.
 - [ ] Inspect the marker file to understand the apply error.
 - [ ] Try applying the patch locally on a clean branch.
 - [ ] If conflicts are due to recent doc edits, manually port the safe hunks and re-run CI.
