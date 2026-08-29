@@ -114,15 +114,16 @@ PRODUCTION_DEFAULTS = {
     ("ui", "chat_default_model"): "openai.gpt-5.6-terra",
     ("ui", "runtime_mode"): "production",
     ("ui", "open_browser"): False,
-    ("ui", "grafana_base_url"): "https://grafana.ragweld.com",
+    ("ui", "grafana_base_url"): "https://ragweld-grafana.dtmont.com",
     ("tracing", "langfuse_base_url"): "http://127.0.0.1:53000",
-    ("tracing", "langfuse_public_base_url"): "https://langfuse.ragweld.com",
-    ("tracing", "faro_base_url"): "https://me.ragweld.com/faro/collect",
+    ("tracing", "langfuse_public_base_url"): "https://ragweld-langfuse.dtmont.com",
+    ("tracing", "faro_base_url"): "https://ragweld.dtmont.com/faro/collect",
+    ("tracing", "trace_store_path"): "data/traces/workbench.json",
     ("training", "ragweld_agent_flyte_admin_base_url"): "http://127.0.0.1:30080",
-    ("training", "ragweld_agent_flyte_console_base_url"): "https://flyte.ragweld.com",
+    ("training", "ragweld_agent_flyte_console_base_url"): "https://ragweld-flyte.dtmont.com",
     ("training", "ragweld_agent_flyte_callback_base_url"): "http://172.17.0.1:58012",
     ("training", "ragweld_agent_mlflow_tracking_url"): "http://127.0.0.1:55500",
-    ("training", "ragweld_agent_mlflow_console_base_url"): "https://mlflow.ragweld.com",
+    ("training", "ragweld_agent_mlflow_console_base_url"): "https://ragweld-mlflow.dtmont.com",
     ("evaluation", "ragas_judge_model"): "openai.gpt-5.6-terra",
     ("evaluation", "promptfoo_grader_model"): "openai.gpt-5.6-terra",
 }
@@ -229,9 +230,13 @@ def _assert_caddy_contract(source: str) -> None:
         "http://me.ragweld.com:58000",
         "http://ragweld.dtmont.com:58000",
         "http://grafana.ragweld.com:58000",
+        "http://ragweld-grafana.dtmont.com:58000",
         "http://langfuse.ragweld.com:58000",
+        "http://ragweld-langfuse.dtmont.com:58000",
         "http://mlflow.ragweld.com:58000",
+        "http://ragweld-mlflow.dtmont.com:58000",
         "http://flyte.ragweld.com:58000",
+        "http://ragweld-flyte.dtmont.com:58000",
     }
     site_headers = {header for header in blocks if header.startswith("http://")}
     assert site_headers == expected_sites
@@ -301,9 +306,13 @@ def _assert_caddy_contract(source: str) -> None:
     assert block_targets(temporary_app_block) == {"127.0.0.1:58012", "127.0.0.1:52347"}
 
     assert block_targets(blocks["http://grafana.ragweld.com:58000"]) == {"127.0.0.1:3301"}
+    assert block_targets(blocks["http://ragweld-grafana.dtmont.com:58000"]) == {"127.0.0.1:3301"}
     assert block_targets(blocks["http://langfuse.ragweld.com:58000"]) == {"127.0.0.1:53000"}
+    assert block_targets(blocks["http://ragweld-langfuse.dtmont.com:58000"]) == {"127.0.0.1:53000"}
     assert block_targets(blocks["http://mlflow.ragweld.com:58000"]) == {"127.0.0.1:55500"}
+    assert block_targets(blocks["http://ragweld-mlflow.dtmont.com:58000"]) == {"127.0.0.1:55500"}
     assert block_targets(blocks["http://flyte.ragweld.com:58000"]) == {"127.0.0.1:30080"}
+    assert block_targets(blocks["http://ragweld-flyte.dtmont.com:58000"]) == {"127.0.0.1:30080"}
 
 
 def _compose_service_blocks(source: str) -> dict[str, str]:
@@ -735,8 +744,9 @@ def test_proxmox_compose_is_pinned_loopback_only_and_secret_file_backed() -> Non
         }
     ]
     assert services["grafana"]["environment"]["GF_SECURITY_ADMIN_PASSWORD"] == "contract-only"
-    assert services["grafana"]["environment"]["GF_SERVER_ROOT_URL"] == "https://grafana.ragweld.com"
-    assert services["langfuse"]["environment"]["NEXTAUTH_URL"] == "https://langfuse.ragweld.com"
+    assert services["grafana"]["environment"]["GF_SERVER_ROOT_URL"] == "https://ragweld-grafana.dtmont.com"
+    assert services["langfuse"]["environment"]["NEXTAUTH_URL"] == "https://ragweld-langfuse.dtmont.com"
+    assert services["langfuse"]["environment"]["AUTH_CUSTOM_ISSUER"] == "https://ragweld-auth.dtmont.com"
     assert services["langfuse"]["environment"]["AUTH_CUSTOM_CLIENT_SECRET"] == "contract-only"
     assert all(
         service["labels"]["io.ragweld.managed"] == "true"
@@ -812,7 +822,7 @@ def test_proxmox_compose_uses_only_allowlisted_secret_mounts_and_origins() -> No
     assert langfuse_env["AUTH_CUSTOM_SCOPE"] == "openid email profile groups"
     assert langfuse_env["AUTH_DISABLE_SIGNUP"] == "true"
     assert langfuse_env["AUTH_DISABLE_USERNAME_PASSWORD"] == "true"
-    assert langfuse_env["NEXTAUTH_URL"] == "https://langfuse.ragweld.com"
+    assert langfuse_env["NEXTAUTH_URL"] == "https://ragweld-langfuse.dtmont.com"
     for inherited_key in (
         "DATABASE_URL",
         "NEXTAUTH_SECRET",
@@ -824,7 +834,7 @@ def test_proxmox_compose_uses_only_allowlisted_secret_mounts_and_origins() -> No
 
     worker_env = services["langfuse-worker"].get("environment") or {}
     assert worker_env == {}
-    assert services["alloy"]["environment"]["ALLOY_FARO_CORS_ORIGIN"] == "https://me.ragweld.com"
+    assert services["alloy"]["environment"]["ALLOY_FARO_CORS_ORIGIN"] == "https://ragweld.dtmont.com"
     overlay_source = PROXMOX_COMPOSE.read_text(encoding="utf-8")
     service_blocks = _compose_service_blocks(overlay_source)
     for service_name in ("langfuse", "langfuse-worker"):
@@ -901,6 +911,10 @@ def test_proxmox_authelia_configuration_is_owner_only_and_deny_by_default() -> N
                 "langfuse.ragweld.com",
                 "mlflow.ragweld.com",
                 "flyte.ragweld.com",
+                "ragweld-grafana.dtmont.com",
+                "ragweld-langfuse.dtmont.com",
+                "ragweld-mlflow.dtmont.com",
+                "ragweld-flyte.dtmont.com",
             ],
             "policy": "one_factor",
             "subject": ["group:owners"],
@@ -934,6 +948,7 @@ def test_proxmox_authelia_configuration_is_owner_only_and_deny_by_default() -> N
             "authorization_policy": "one_factor",
             "redirect_uris": [
                 "https://langfuse.ragweld.com/api/auth/callback/custom",
+                "https://ragweld-langfuse.dtmont.com/api/auth/callback/custom",
             ],
             "scopes": ["openid", "profile", "email", "groups"],
             "response_types": ["code"],

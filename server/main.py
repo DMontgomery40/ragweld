@@ -214,6 +214,9 @@ async def _catalog_refresh_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    from server.services.traces import get_trace_store
+
+    await get_trace_store().initialize(_global_cfg)
     try:
         await asyncio.to_thread(_warm_catalog_views)
     except (OSError, ValueError) as error:

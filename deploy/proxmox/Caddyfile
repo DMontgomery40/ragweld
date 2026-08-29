@@ -71,7 +71,17 @@ http://grafana.ragweld.com:58000 {
     reverse_proxy 127.0.0.1:3301
 }
 
+http://ragweld-grafana.dtmont.com:58000 {
+    import require_owner
+    reverse_proxy 127.0.0.1:3301
+}
+
 http://langfuse.ragweld.com:58000 {
+    import require_owner
+    reverse_proxy 127.0.0.1:53000
+}
+
+http://ragweld-langfuse.dtmont.com:58000 {
     import require_owner
     reverse_proxy 127.0.0.1:53000
 }
@@ -81,7 +91,17 @@ http://mlflow.ragweld.com:58000 {
     reverse_proxy 127.0.0.1:55500
 }
 
+http://ragweld-mlflow.dtmont.com:58000 {
+    import require_owner
+    reverse_proxy 127.0.0.1:55500
+}
+
 http://flyte.ragweld.com:58000 {
+    import require_owner
+    reverse_proxy 127.0.0.1:30080
+}
+
+http://ragweld-flyte.dtmont.com:58000 {
     import require_owner
     reverse_proxy 127.0.0.1:30080
 }

@@ -2,21 +2,21 @@ services:
   grafana:
     environment:
       GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD}"
-      GF_SERVER_ROOT_URL: "https://grafana.ragweld.com"
+      GF_SERVER_ROOT_URL: "https://ragweld-grafana.dtmont.com"
 
   alloy:
     environment:
-      ALLOY_FARO_CORS_ORIGIN: "https://me.ragweld.com"
+      ALLOY_FARO_CORS_ORIGIN: "https://ragweld.dtmont.com"
 
   langfuse:
     env_file: !override
       - path: /etc/ragweld/langfuse.env
         required: false
     environment:
-      NEXTAUTH_URL: "https://langfuse.ragweld.com"
+      NEXTAUTH_URL: "https://ragweld-langfuse.dtmont.com"
       AUTH_CUSTOM_CLIENT_ID: "langfuse"
       AUTH_CUSTOM_CLIENT_SECRET: "${LANGFUSE_OIDC_CLIENT_SECRET:?set LANGFUSE_OIDC_CLIENT_SECRET}"
-      AUTH_CUSTOM_ISSUER: "https://auth.ragweld.com"
+      AUTH_CUSTOM_ISSUER: "https://ragweld-auth.dtmont.com"
       AUTH_CUSTOM_NAME: "Ragweld"
       AUTH_CUSTOM_SCOPE: "openid email profile groups"
       AUTH_CUSTOM_FETCH_USERINFO: "true"

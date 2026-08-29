@@ -13,12 +13,28 @@ Design goals:
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
+import os
 import random
+import tempfile
 import time
 from collections import deque
+from pathlib import Path
 from typing import Any
 
-from server.models.tribrid_config_model import Trace, TraceCostSummary, TraceEvent, TraceExternalLink, TraceRouteSummary, TracesLatestResponse, TriBridConfig
+from server.models.tribrid_config_model import (
+    Trace,
+    TraceCostSummary,
+    TraceEvent,
+    TraceExternalLink,
+    TraceRouteSummary,
+    TracesLatestResponse,
+    TriBridConfig,
+)
+
+logger = logging.getLogger(__name__)
+_TRACE_STORE_VERSION = 1
 
 
 def _now_ms() -> int:
@@ -63,6 +79,92 @@ class TraceStore:
         self._traces: dict[str, Trace] = {}
         self._order: deque[str] = deque()
         self._order_by_repo: dict[str, deque[str]] = {}
+        self._persist_path: Path | None = None
+        self._initialized = False
+
+    @staticmethod
+    def _configured_path(config: TriBridConfig) -> Path | None:
+        raw = str(getattr(config.tracing, "trace_store_path", "") or "").strip()
+        return Path(raw).expanduser().resolve(strict=False) if raw else None
+
+    def _reset_locked(self) -> None:
+        self._traces.clear()
+        self._order.clear()
+        self._order_by_repo.clear()
+
+    async def initialize(self, config: TriBridConfig) -> None:
+        """Load persisted traces once and rebuild every retention index."""
+        path = self._configured_path(config)
+        async with self._lock:
+            # Persistence ownership is process-global. Corpus-scoped configs may
+            # predate this field and therefore carry an empty default; they must
+            # never reset or disable the path established during API startup.
+            if self._initialized:
+                return
+            self._initialized = True
+            self._persist_path = path
+            if path is None:
+                return
+
+            self._reset_locked()
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                if not isinstance(payload, dict):
+                    raise ValueError("trace-store root must be an object")
+                if payload.get("version") != _TRACE_STORE_VERSION:
+                    raise ValueError("unsupported trace-store version")
+                rows = payload.get("traces")
+                if not isinstance(rows, list):
+                    raise ValueError("trace-store traces must be a list")
+                for row in rows:
+                    trace = Trace.model_validate(row)
+                    self._drop_run_id_indexes_locked(trace.run_id)
+                    self._traces[trace.run_id] = trace
+                    self._order.append(trace.run_id)
+                    self._order_by_repo.setdefault(trace.repo_id, deque()).append(trace.run_id)
+                for repo_id in list(self._order_by_repo):
+                    await self._enforce_retention_locked(repo_id=repo_id, config=config)
+            except FileNotFoundError:
+                return
+            except (OSError, TypeError, ValueError) as exc:
+                self._reset_locked()
+                logger.warning("persistent trace store ignored at %s: %s", path, exc)
+
+    def _persist_locked(self) -> None:
+        path = self._persist_path
+        if path is None:
+            return
+        temp_path: Path | None = None
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "version": _TRACE_STORE_VERSION,
+                "traces": [
+                    self._traces[run_id].model_dump(mode="json")
+                    for run_id in self._order
+                    if run_id in self._traces
+                ],
+            }
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=path.parent,
+                prefix=f".{path.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as handle:
+                json.dump(payload, handle, ensure_ascii=False, separators=(",", ":"))
+                handle.write("\n")
+                os.fchmod(handle.fileno(), 0o600)
+                temp_path = Path(handle.name)
+            os.replace(temp_path, path)
+        except OSError as exc:
+            if temp_path is not None:
+                try:
+                    temp_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            logger.error("persistent trace store write failed at %s: %s", path, exc)
 
     def _drop_run_id_indexes_locked(self, run_id: str) -> None:
         """Remove all index references to run_id before replacing its trace entry."""
@@ -91,6 +193,8 @@ class TraceStore:
             return False
         if not _passes_sample_rate(config):
             return False
+
+        await self.initialize(config)
 
         async with self._lock:
             # If a caller reuses run_id (for retries/restarts), purge stale index
@@ -159,6 +263,7 @@ class TraceStore:
             if trace is None:
                 return
             trace.ended_at_ms = int(ended_at_ms or _now_ms())
+            self._persist_locked()
 
     async def get_trace(self, run_id: str) -> Trace | None:
         async with self._lock:

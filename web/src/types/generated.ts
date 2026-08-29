@@ -2590,6 +2590,8 @@ export interface TracingConfig {
   tracing_mode?: string; // default: "local"
   /** Number of traces to retain */
   trace_retention?: number; // default: 50
+  /** Persistent workbench trace-store JSON path; empty keeps the store in memory only */
+  trace_store_path?: string; // default: ""
   /** Query log file path */
   tribrid_log_path?: string; // default: "data/logs/queries.jsonl"
   /** Alert severities to notify */

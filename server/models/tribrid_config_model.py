@@ -5232,6 +5232,11 @@ class TracingConfig(BaseModel):
         description="Number of traces to retain"
     )
 
+    trace_store_path: str = Field(
+        default="",
+        description="Persistent workbench trace-store JSON path; empty keeps the store in memory only",
+    )
+
     tribrid_log_path: str = Field(
         default="data/logs/queries.jsonl",
         description="Query log file path"
@@ -6766,6 +6771,7 @@ class TriBridConfig(BaseModel):
             'LOG_LEVEL': self.tracing.log_level,
             'TRACING_MODE': self.tracing.tracing_mode,
             'TRACE_RETENTION': self.tracing.trace_retention,
+            'TRACE_STORE_PATH': self.tracing.trace_store_path,
             'TRIBRID_LOG_PATH': self.tracing.tribrid_log_path,
             'ALERT_NOTIFY_SEVERITIES': self.tracing.alert_notify_severities,
             'OTEL_EXPORT_ENABLED': self.tracing.otel_export_enabled,
@@ -7154,6 +7160,7 @@ class TriBridConfig(BaseModel):
                 log_level=data.get('LOG_LEVEL', 'INFO'),
                 tracing_mode=data.get('TRACING_MODE', 'local'),
                 trace_retention=data.get('TRACE_RETENTION', 50),
+                trace_store_path=data.get('TRACE_STORE_PATH', ''),
                 tribrid_log_path=data.get('TRIBRID_LOG_PATH', 'data/logs/queries.jsonl'),
                 alert_notify_severities=data.get('ALERT_NOTIFY_SEVERITIES', 'critical,warning'),
                 otel_export_enabled=data.get('OTEL_EXPORT_ENABLED', True),

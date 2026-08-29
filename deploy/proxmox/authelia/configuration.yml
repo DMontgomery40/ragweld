@@ -44,6 +44,10 @@ access_control:
         - langfuse.ragweld.com
         - mlflow.ragweld.com
         - flyte.ragweld.com
+        - ragweld-grafana.dtmont.com
+        - ragweld-langfuse.dtmont.com
+        - ragweld-mlflow.dtmont.com
+        - ragweld-flyte.dtmont.com
       policy: one_factor
       subject:
         - group:owners
@@ -63,6 +67,7 @@ identity_providers:
         authorization_policy: one_factor
         redirect_uris:
           - https://langfuse.ragweld.com/api/auth/callback/custom
+          - https://ragweld-langfuse.dtmont.com/api/auth/callback/custom
         scopes:
           - openid
           - profile
