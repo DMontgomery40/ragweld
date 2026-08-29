@@ -195,6 +195,8 @@ The description is a structured `FigureAnnotation` (`server/models/index.py`): a
 
 Rendering is its own step: `RagweldPictureSerializer` (`server/indexing/figure_serializer.py`) serializes each picture as prose at the picture's position and blocks Docling's meta-serialization block, so the raw vision JSON can never leak into the markdown even though Docling carries the reply on `item.meta`. A picture the classifier caught but the vision alias skipped — `min_area_fraction`, `skip_classes`, or a per-figure timeout — still renders a `Figure (chart)`-style header plus its image placeholder, so the class name stays searchable text; and a figure whose caption and summary are both blank keeps its structured lists (`Labels`, `Components`, `Connections`, `Values`, `References`) instead of collapsing away. The prose block appears exactly once per picture even when Docling keeps both the newer `item.meta` shape and its legacy annotations.
 
+Stamping closes the loop: `stamp_provenance` (`server/indexing/provenance.py`) maps chunk char ranges back to source spans and, when a described figure's span covers at least half a chunk's range, marks that chunk as a **figure chunk** — `chunk.metadata["chunk_kind"] = "figure"` plus the parsed `FigureAnnotation` under `chunk.metadata["figure"]` and `chunk.metadata["figure_class"]` when the classifier resolved one. A chunk that merely brushes a figure keeps the page region in its provenance but stays a text chunk, and `figure_class` is only written when a class was actually resolved, so no metadata key is backed by nothing. The extracted document reports `figures_described` and `figures_skipped` counts across both the `item.meta` and legacy `item.annotations` shapes, and only Docling's own conversion is guarded: conversion failures degrade to "unparseable" as before, while a bug in ragweld's serializer, source map, or figure counting raises so regressions stay visible.
+
 *Concept diagram (figure enrichment only — the full fused pipeline is on the [generated retrieval-pipeline page](reference/architecture/retrieval-pipeline.md)):*
 
 ```mermaid
@@ -204,7 +206,8 @@ flowchart LR
   CLS -->|"skipped"| CAP["Caption-only text"]
   CLS -->|"passes"| VIS["Vision alias\n(indexing.figures.vision_model)"]
   VIS --> CHUNK["Figure-description chunk\n(page + bounding box)"]
-  CHUNK --> QD["Qdrant dense + sparse generation"]
+  VIS --> CHUNK2["Figure chunk\n(chunk_kind=figure,\nfigure + figure_class metadata)"]
+  CHUNK2 --> QD["Qdrant dense + sparse generation"]
   CHUNK --> PG["Postgres chunk row\nwith provenance"]
 ```
 

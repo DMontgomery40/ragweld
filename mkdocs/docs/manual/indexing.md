@@ -41,7 +41,7 @@ Indexing turns a folder into a set of **retrieval primitives**:
 - **Graph context** (optional) stored in Neo4j
 - **Code graph** (optional, `graph_indexing.build_code_graph`) — module/class/function entities with `contains`/`inherits`/`imports`/`calls` edges in Neo4j
 - **Chunk provenance** — every chunk carries typed provenance (extraction method; for Docling PDFs, cited pages plus normalized layout regions) that powers the [source document viewer](source_viewer.md)
-- **Figure descriptions** (optional, `indexing.figures.enabled`) — charts and drawings inside Docling-converted PDFs are described by a vision model and become retrievable chunks anchored to their page and bounding box
+- **Figure descriptions** (optional, `indexing.figures.enabled`) — charts and drawings inside Docling-converted PDFs are described by a vision model and become retrievable chunks anchored to their page and bounding box; the chunk holding a described figure is stamped `chunk_kind: "figure"` so retrieval can prefer or filter figure evidence by metadata
 - Cross-file code-graph edges (`imports`, and `inherits`/`calls` that resolve to another file) are held back and written once after every file of the run is in Neo4j, so both endpoints exist under their real labels in either index order — no placeholder node is ever created for a target, and a call to an imported class resolves to the class node
 
 !!! note "Corpora indexed before provenance capture"
@@ -130,6 +130,16 @@ Three details worth knowing:
 - **Only prose gets embedded.** The indexer renders the annotation as prose-only markdown (summary plus labelled lists); the JSON schema itself never enters the embedded text.
 - **Malformed replies degrade, never fail the run.** The parser in `server/indexing/figure_prompts.py` unwraps code-fenced replies, falls back to `kind: other` for unrecognized kinds, and turns a fully non-JSON reply into the plain-text summary — a weird description can make one chunk worse; it cannot fail indexing.
 - **Nothing quietly disappears.** A figure whose caption and summary are both blank keeps its structured lists (`Labels`, `Components`, `Connections`, `Values`, `References`) in the chunk text; a picture the classifier caught but the vision alias skipped still renders a `Figure (chart)`-style header plus the image placeholder; and the prose block appears exactly once even when Docling carries the reply on both the newer `item.meta` shape and its legacy annotations. Rendering itself lives in `server/indexing/figure_serializer.py`, which blocks Docling's meta-serialization block so the raw vision JSON can never reach the markdown.
+
+### Described figures become figure chunks
+
+A chunk whose text is majority covered by a described figure's source span is stamped as a **figure chunk** during provenance stamping (`server/indexing/provenance.py`): its chunk metadata carries `chunk_kind: "figure"`, the parsed `FigureAnnotation` JSON under `figure`, and `figure_class` when Docling's picture classifier resolved a class name. Three boundaries keep this honest:
+
+- **The annotation must dominate the chunk.** If the figure span covers at least half the chunk's character range, the chunk is a figure chunk. A chunk that merely brushes a figure at its edge keeps the figure's page region in its [provenance](source_viewer.md) but stays a text chunk, so ordinary prose next to a figure is never mislabeled.
+- **`figure_class` is only written when classification resolved.** A described-but-unclassified figure gets `chunk_kind` and `figure` but no `figure_class` key — no metadata backed by nothing.
+- **Only the marked chunk carries the annotation.** Text chunks next to a figure get no `figure` key, so retrieval-side filtering on `chunk_kind` can't accidentally pick up prose.
+
+For retrieval, this means figure evidence can be preferred or excluded by chunk metadata without text sniffing, and extraction reports `figures_described` and `figures_skipped` counts (counted across both the live `item.meta` shape and Docling's deprecated `item.annotations` shape) in the run summary.
 
 !!! note "Profiles are protocol, not configuration"
     The two prompt templates (`technical_figure`, `schematic`) live in `server/indexing/figure_prompts.py` as code — they are the reply-schema contract between ragweld and the vision alias, not per-corpus config. You choose the profile with `indexing.figures.prompt_profile`; the `schematic` profile additionally asks the model to put drawing number, sheet and revision into `references`, connector/pin/signal designators into `labels`, and every drawn connection into `connections` as `A -> B` with units exactly as printed.

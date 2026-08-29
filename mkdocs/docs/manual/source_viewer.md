@@ -48,7 +48,7 @@ The server inspects how the file was indexed and returns a typed view:
 The viewer header always shows the corpus, the corpus-relative path, the content kind, and an **Open original ↗** link to the raw file.
 
 !!! note "Figure-description chunks"
-    When `indexing.figures` is enabled, described figures inside Docling-converted PDFs become their own chunks, anchored to the figure's page and normalized bounding box. Clicking such a citation renders the page with the figure region boxed — the same evidence behavior as any other PDF citation, but the highlighted region is the chart or drawing itself rather than a text span.
+    When `indexing.figures` is enabled, described figures inside Docling-converted PDFs become their own chunks, anchored to the figure's page and normalized bounding box. These chunks carry `chunk_kind: "figure"` in chunk metadata (with the parsed `FigureAnnotation` under `figure` and `figure_class` when the classifier resolved one), so retrieval can identify figure evidence by metadata rather than text sniffing. Clicking such a citation renders the page with the figure region boxed — the same evidence behavior as any other PDF citation, but the highlighted region is the chart or drawing itself rather than a text span.
 
 *Sequence diagram (this viewer only; retrieval itself is documented on the [generated retrieval-pipeline page](../reference/architecture/retrieval-pipeline.md)):*
 
