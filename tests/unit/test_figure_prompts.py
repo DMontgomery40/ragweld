@@ -84,3 +84,13 @@ def test_block_markdown_keeps_structured_content_with_blank_caption_and_summary(
     """
     fig = FigureAnnotation(labels=["J1", "J2"])
     assert figure_block_markdown("", None, fig) == "Figure\nLabels: J1, J2"
+
+
+def test_block_markdown_keeps_class_header_with_no_caption_and_no_figure() -> None:
+    """A classified-but-undescribed picture (``fig`` is ``None``) with no caption — Docling only
+    attaches a caption when adjacent text is recognised as one — must still surface the class
+    name rather than collapsing to "". With no structured content and no caption, only ``cls``
+    keeps the block alive.
+    """
+    assert figure_block_markdown("", "chart", None) == "Figure (chart)"
+    assert figure_block_markdown("", None, None) == "", "no caption, no cls, no figure is still empty"

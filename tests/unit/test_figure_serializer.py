@@ -42,16 +42,17 @@ def converted():
 
 @pytest.fixture(autouse=True)
 def _restore_picture_state(converted):
-    """Tests mutate ``annotations``/``meta`` on pictures from the module-scoped ``converted``
-    fixture; restore each picture to its pre-test state so tests don't leak state into each
-    other regardless of execution order.
+    """Tests mutate ``annotations``/``meta``/``captions`` on pictures from the module-scoped
+    ``converted`` fixture; restore each picture to its pre-test state so tests don't leak state
+    into each other regardless of execution order.
     """
     _, pictures = converted
-    snapshot = [(pic, list(pic.annotations), pic.meta) for pic in pictures]
+    snapshot = [(pic, list(pic.annotations), pic.meta, list(pic.captions)) for pic in pictures]
     yield
-    for pic, saved_annotations, saved_meta in snapshot:
+    for pic, saved_annotations, saved_meta, saved_captions in snapshot:
         pic.annotations = saved_annotations
         pic.meta = saved_meta
+        pic.captions = saved_captions
 
 
 def test_described_picture_serializes_as_prose_block(converted) -> None:
@@ -187,3 +188,31 @@ def test_classified_but_undescribed_picture_shows_class_header(converted) -> Non
     picture_serializer = serializer.picture_serializer
     assert picture_serializer.classes_by_ref[pic.self_ref] == "chart"
     assert pic.self_ref not in picture_serializer.figures_by_ref, "no description was parsed, so no FigureAnnotation"
+
+
+def test_classified_but_undescribed_and_uncaptioned_picture_shows_class_header(converted) -> None:
+    """Docling only attaches a caption when adjacent text is recognised as one — a common shape
+    where a classified-but-undescribed picture has neither a description nor a caption. Without
+    ``cls`` alone keeping ``figure_block_markdown`` alive, this collapses to just the image
+    placeholder and the classification vanishes again.
+    """
+    doc, pictures = converted
+    pic = pictures[0]
+    pic.annotations = []
+    pic.captions = []
+    pic.meta = PictureMeta(
+        classification=PictureClassificationMetaField(
+            predictions=[PictureClassificationPrediction(class_name="chart", confidence=0.9)]
+        )
+    )
+
+    serializer = make_markdown_serializer(doc)
+    full = serializer.serialize().text
+    part = serializer.serialize(item=pic).text
+
+    assert part.startswith("Figure (chart)")
+    placeholder = MarkdownParams().image_placeholder
+    assert part.endswith(placeholder), "the image part must still follow the class header"
+    assert full.count(part) == 1
+    picture_serializer = serializer.picture_serializer
+    assert picture_serializer.classes_by_ref[pic.self_ref] == "chart"

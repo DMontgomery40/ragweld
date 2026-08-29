@@ -96,7 +96,7 @@ def figure_block_markdown(caption: str, cls: str | None, fig: FigureAnnotation |
     has_structured_content = fig is not None and (
         fig.summary or fig.labels or fig.components or fig.connections or fig.values or fig.references
     )
-    if not caption and not has_structured_content:
+    if not caption and cls is None and not has_structured_content:
         return ""
     parts: list[str] = [head.rstrip(": ").rstrip()]
     if fig is not None:
