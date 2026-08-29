@@ -4,7 +4,8 @@ Date: 2026-08-28
 
 Status: Linux runtime, capacity, logical backup, Docling responsiveness, Mac
 evacuation, and temporary public ingress complete; `ragweld.com` registrar
-activation and the signed-in curious-user browser drive remain pending
+activation and the final post-restart signed-in browser confirmation remain
+pending
 
 ## Scope
 
@@ -32,11 +33,16 @@ published to Git.
   published in `de6085d36d25194fa089c63bdd3befd15794509f`.
 - The first final execution evidence update was published in
   `f7ba79bd1ac844172141f46c917c173ad1b7305e`.
+- The ultimate post-restart archive evidence was published in
+  `44a42e2bdb4b4dce14d2cf87e96f495db1a1ef2f`.
+- Production chat budget and persistence fixes were published in
+  `3cedcfa5270a9fdf459bfe289429644c91882953` and
+  `c5989bfc5952f9fe99c67888ae24d59941804981`.
 - Before this evidence-only update, local `main`, `origin/main`, LXC100
-  `/opt/ragweld`, and `/etc/ragweld/deployment-commit` all matched `f7ba79bd`.
-- The Mac then had one branch (`main`), one worktree, no tracked or ignored
-  changes, no Ragweld Vite/backend/docs worker, and no `colima-ragweld` profile
-  or Docker context.
+  `/opt/ragweld`, and `/etc/ragweld/deployment-commit` all matched `c5989bfc`.
+- The Mac then had one branch (`main`), one worktree, only the two owned
+  evidence files modified, no ignored changes, no Ragweld Vite/backend/docs
+  worker, and no `colima-ragweld` profile or Docker context.
 
 ### Source verification and review
 
@@ -68,13 +74,20 @@ published to Git.
   pytest; the owning session and all three process groups were stopped again,
   their regenerated ignored state was archived on Linux, and no paid GLM rerun
   was accepted as new final evidence. Earlier paid reviews remain historical.
+- Chat-budget TDD proved the production renderer contract red at 512 and green
+  at 4096. The full Proxmox contract reached 31 pass / 17 skip; its sole
+  remaining live-host-only failure is expected because Compose reads the real
+  optional `/etc/ragweld/langfuse.env`, while the source contract assumes that
+  secret file is absent. The full config-reality file is 9/9 green, including
+  the 1024/4096/16384 preservation matrix; banned patterns, generated types,
+  and the 371-alias LiteLLM lockstep checks pass.
 
 ### Capacity and recovery
 
 - pve1 `pve/data` has the scoped `ragweld-thinpool` profile attached with
   `thin_pool_autoextend_threshold=80`, `thin_pool_autoextend_percent=1`, and
   `seg_monitor=monitored`.
-- Final audit measured `8.86%` data, `0.53%` metadata, and LXC100 root at
+- Final audit measured `9.50%` data, `0.55%` metadata, and LXC100 root at
   `56G/295G` (`20%`). The five-minute capacity timer is enabled/active, its
   latest service result is success, and all production state files are `ok`.
 - The non-destructive fake-delivery matrix proved warn, unchanged dedupe,
@@ -104,9 +117,15 @@ published to Git.
   200 at 1.9–2.5 ms and `/api/corpora` remained HTTP 200 at 2.2–6.5 ms.
 - The real corpus DELETE API returned `{"ok":true}`. The corpus now returns
   404, zero matching Qdrant collections remain, the exact temp PDF/directory
-  were removed, readiness is 200, and the registry again contains only
-  `nasa-apollo-11` and `epstein-files-public`. The empty per-corpus lineage lock
-  is retained intentionally by the lock design to prevent inode-swap races.
+  were removed, and readiness is 200. The user-managed registry contains only
+  `nasa-apollo-11` and `epstein-files-public`; `recall_default` is the separate
+  product-owned chat-memory corpus. Empty per-corpus lineage locks are retained
+  intentionally by the lock design to prevent inode-swap races.
+- Completed manifests from the three temporary Docling proof corpora were moved
+  out of active `data/index_runs` into root-private
+  `/srv/ragweld/acceptance-evidence/docling-run-manifests`; archive SHA-256 is
+  `428980379efd12481dbf791fd698af5ad852ff5b31370b685fed81e3f585312e`
+  and its sidecar passes in place.
 
 ### Mac data evacuation and cleanup
 
@@ -126,6 +145,9 @@ SHA verification; all sidecars now use the deployed basename and pass
 - ultimate post-restart delta (35 exact ignored paths, 53,483 archive entries,
   1,493,829,632 uncompressed bytes, 370,555,696 compressed bytes):
   `0b0688462f828a0a20175173828f600ee2ab19858bccbc0cfc3cc91f2d3e2ba5`
+- post-validation Python cache delta (one exact ignored path, two archive
+  entries, 12,288 uncompressed bytes, 5,677 compressed bytes):
+  `aec05f69e0db94d0dbfc8a5972f115afb608c39c06cc356edd68b9701a546f36`
 - detached synthetic review worktree bundle:
   `561c8bf5948c16b911c8478d28e3d75db16b6b7c5dc202350187eca21702355c`
   preserving unique commit `0abf6cf6d9075a8b13219db16704daef7d5340f6`
@@ -137,6 +159,35 @@ stopped before the late archive was created. When a resumed Claude session
 later restarted generator/reviewer/test groups, those were stopped too; the
 ultimate delta above was verified and extracted root-private on Linux before
 the exact ignored paths were removed from the Mac again.
+
+### Live chat fix-forward
+
+- A signed-in curious-user query, `tell me how big was the spaceship`, selected
+  `z-ai.glm-5.3-flash` against `nasa-apollo-11` and returned the real
+  `generation_unavailable` card. Correlation
+  `10c63eb3-d5d6-4a21-805a-3fbf8690d4c5` and trace
+  `77726bb7b09119194d8253aa889e2661` proved retrieval succeeded and the gateway
+  returned HTTP 200, but the effective scoped budget was still 512.
+- A sanitized direct gateway probe showed the model emitting standard
+  `delta.reasoning` until `finish_reason=length`; 122 of a 128-token probe were
+  reasoning tokens before partial answer content. The failure was not DNS,
+  authentication, retrieval, a missing alias, or a missing provider key.
+- `3cedcfa5` made the Proxmox production chat allowance 4096. The first retest
+  still failed because `server.services.config_store._upgrade_raw_config`
+  silently rewrote stored 4096 values to 512. `c5989bfc` removed only that stale
+  migration and added a 1024/4096/16384 preservation matrix. GitNexus marked the
+  loader CRITICAL by reachability (89 dependents / 79 flows), while staged
+  detection for the literal migration change reported three symbols, zero
+  affected processes, and low risk.
+- The Apollo scoped config was backed up root-private, patched to 4096 through
+  the real config API, and survived a full service/container restart at 4096.
+  The restart first failed closed because the one-off atomic updater created a
+  root-owned config; ownership was restored to required UID/GID 1000 and the
+  subsequent startup/readiness gates passed.
+- Exact live post-restart run `edf49d16-f8af-47a6-a0bc-e7882cac7554` used GLM
+  5.3 Flash and 13 grounded sources, returned a complete Apollo answer,
+  reported 2,923 tokens, `llm_used=true`, `llm_error=null`, and zero SSE error
+  events.
 
 ### Public ingress
 
@@ -152,9 +203,11 @@ the exact ignored paths were removed from the Mac again.
   real Authelia login page. No auth bypass or loop was observed.
 - Two accidental nested records created by the zone-scoped cloudflared CLI
   were immediately deleted before the correct `dtmont.com` records were added.
-- The signed-in curious-user walkthrough remains pending user credential entry;
-  passwords/OTPs are never handled by the agent. Companion `*.ragweld.com`
-  surfaces remain pending the Netlify registrar change.
+- The user completed sign-in once and exposed the chat failure above. The
+  fix-forward restart invalidated that browser session, so final visual
+  post-fix confirmation awaits user reauthentication; passwords/OTPs are never
+  handled by the agent. Companion `*.ragweld.com` surfaces remain pending the
+  Netlify registrar change.
 
 ## Historical source state before the final execution addendum
 

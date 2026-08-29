@@ -15,7 +15,7 @@ Status delta for the reviewed local source candidate after that timestamp:
   awaiting final rerun, commit, push, and pve1 deployment proof; they are not
   still-open implementation tasks on the live instance.
 
-## Execution result addendum — current through 2026-08-28 17:34 MDT
+## Execution result addendum — current through 2026-08-28 18:04 MDT
 
 This addendum supersedes the stale-state statements below. Preserve the body as
 the executed acceptance specification and historical command record. Exact
@@ -28,11 +28,13 @@ evidence is in
 - Published/deployed milestones are `0458f505` (capacity/Docling source),
   `3004aad9` (tracked handoff/agent material), `f60c440e` (temporary
   `dtmont.com` ingress), `de6085d3` (concurrent docs-autopilot hardening), and
-  `f7ba79bd` (first final execution evidence update).
-- Mac `main` and `origin/main` matched `f7ba79bd` before this evidence-only
-  update; the Mac had one branch, one worktree, no tracked or ignored state, no
-  Ragweld local services/workers, and no `colima-ragweld` profile/context.
-- LXC100 checkout and `/etc/ragweld/deployment-commit` matched `f7ba79bd`;
+  `f7ba79bd` / `44a42e2b` (execution evidence), `3cedcfa5` (production chat
+  output budget), and `c5989bfc` (scoped-config persistence fix).
+- Mac `main` and `origin/main` matched `c5989bfc` before this evidence-only
+  update; the only tracked state was these two owned evidence files. The Mac
+  had one branch, one worktree, no ignored state, no Ragweld local
+  services/workers, and no `colima-ragweld` profile/context.
+- LXC100 checkout and `/etc/ragweld/deployment-commit` matched `c5989bfc`;
   `ragweld.service`, API readiness, Caddy, Authelia, and cloudflared were green.
 - Exact source gate before teardown: `1241 passed, 98 skipped, 7 warnings`.
   The later docs-autopilot lane is `25 passed`; standard validators remain
@@ -53,14 +55,24 @@ evidence is in
   timer is enabled. The existing PBS VMID100 job is unchanged.
 - Real Docling run `20260828T230708_90174b3bb8` completed with eight chunks and
   3,131 tokens while health stayed 1.9–2.5 ms and corpus reads 2.2–6.5 ms. Its
-  temporary corpus was deleted through the real API; only the two approved
-  public corpora remain.
+  temporary corpus was deleted through the real API. Exactly two user-managed
+  public corpora remain; `recall_default` is the product-owned chat-memory
+  corpus, not a third public corpus.
+- The user's signed-in browser drive found a real GLM 5.3 Flash chat failure.
+  Raw gateway proof showed reasoning tokens exhausting the effective 512-token
+  corpus budget before any answer text. `3cedcfa5` renders 4096 for production,
+  and `c5989bfc` stops the scoped-config loader from silently migrating 4096
+  back to 512. After a full restart, the scoped value remained 4096 and exact
+  live run `edf49d16-f8af-47a6-a0bc-e7882cac7554` returned a complete grounded
+  answer with `llm_used=true`, zero error events, 2,923 tokens, and 13 sources.
 - All Mac state is under
   `/srv/ragweld/mac-archive/2026-08-28-from-mac`, including initial/delta
   archives, the stopped Colima profile, a late 1.5G regenerated-state delta,
   the ultimate post-restart delta (35 exact ignored paths, 53,483 archive
   entries, 1,493,829,632 uncompressed bytes, SHA-256
   `0b0688462f828a0a20175173828f600ee2ab19858bccbc0cfc3cc91f2d3e2ba5`), and a
+  final two-entry Python validation-cache delta (SHA-256
+  `aec05f69e0db94d0dbfc8a5972f115afb608c39c06cc356edd68b9701a546f36`), plus a
   verified Git bundle for unique detached review commit `0abf6cf6`. Every
   sidecar passes `sha256sum -c` in place.
 - Netlify support has the `ragweld.com` nameserver-change request. Until that
@@ -69,9 +81,9 @@ evidence is in
   to the correct Authelia host, and the login page renders in the in-app
   Browser.
 - Remaining external gates: Netlify must activate the original Cloudflare zone,
-  and the user must enter Authelia credentials so the signed-in curious-user
-  walkthrough and companion-UI acceptance can finish. Agents never handle the
-  password/OTP.
+  and the user must re-enter Authelia credentials after the fix-forward restart
+  so the final signed-in visual confirmation and companion-UI acceptance can
+  finish. Agents never handle the password/OTP.
 
 ---
 
