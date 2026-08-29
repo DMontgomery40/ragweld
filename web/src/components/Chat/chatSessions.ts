@@ -3,6 +3,7 @@ import type {
   ChatDebugInfo,
   ChunkMatch,
   ImageAttachment,
+  WebGroundingMetadata,
 } from '@/types/generated';
 import type {
   MessageStatus,
@@ -33,6 +34,7 @@ export type RagweldMessageCustom = {
   startedAtMs?: number;
   traceId?: string | null;
   correlationId?: string | null;
+  webGrounding?: WebGroundingMetadata;
 };
 
 export type ChatSession = {

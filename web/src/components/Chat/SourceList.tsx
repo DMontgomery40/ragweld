@@ -3,11 +3,12 @@ import { RegionOverlay } from '@/components/Documents/RegionOverlay';
 import { corpusIdOf, formatSourceLocation, hasPageRegions, regionsForPage } from '@/components/Documents/sourceLabels';
 import { useDockStore } from '@/stores/useDockStore';
 import { useRepoStore } from '@/stores/useRepoStore';
-import type { ChunkMatch } from '@/types/generated';
+import type { ChunkMatch, WebCitation } from '@/types/generated';
 
 type Props = {
   sources: ChunkMatch[];
   legacyCitations: string[];
+  webCitations: WebCitation[];
 };
 
 const rowButton: React.CSSProperties = {
@@ -29,7 +30,7 @@ const rowButton: React.CSSProperties = {
  * "paper" thumbnail card; everything else is a compact clickable file:line row. Both open the
  * source in the right rail at the cited location.
  */
-export function SourceList({ sources, legacyCitations }: Props) {
+export function SourceList({ sources, legacyCitations, webCitations }: Props) {
   const openDocument = useDockStore((s) => s.openDocument);
   const repos = useRepoStore((s) => s.repos);
   const corpusName = (id: string) => repos.find((r) => r.corpus_id === id)?.name || id;
@@ -123,6 +124,29 @@ export function SourceList({ sources, legacyCitations }: Props) {
         <div key={`${citation}-${index}`} style={{ color: 'var(--fg-muted)' }}>
           {citation}
         </div>
+      ))}
+      {webCitations.map((citation, index) => (
+        <a
+          key={`${citation.url}-${citation.start_index}-${citation.end_index}-${index}`}
+          href={citation.url}
+          target="_blank"
+          rel="noreferrer noopener"
+          data-testid="chat-web-citation-link"
+          style={{
+            color: 'var(--link)',
+            textDecoration: 'none',
+            border: '1px solid var(--line)',
+            borderRadius: 'var(--radius-md)',
+            padding: '7px 9px',
+            display: 'grid',
+            gap: '2px',
+          }}
+        >
+          <span style={{ fontWeight: 700 }}>{citation.title || citation.url}</span>
+          <span style={{ color: 'var(--fg-muted)', fontSize: '11px', wordBreak: 'break-all' }}>
+            {citation.url}
+          </span>
+        </a>
       ))}
     </div>
   );

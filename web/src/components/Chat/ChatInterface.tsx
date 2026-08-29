@@ -605,6 +605,8 @@ function AssistantThreadMessage(props: AssistantThreadMessageProps) {
   const isAssistantError = message.role === 'assistant' && messageStatus?.type === 'incomplete';
   const sources = Array.isArray(custom.sources) ? custom.sources : [];
   const legacyCitations = Array.isArray(custom.legacyCitations) ? custom.legacyCitations : [];
+  const webGrounding = custom.webGrounding;
+  const webCitations = Array.isArray(webGrounding?.citations) ? webGrounding.citations : [];
   const recallSignals = custom.debug?.recall_plan?.signals;
 
   return (
@@ -649,6 +651,19 @@ function AssistantThreadMessage(props: AssistantThreadMessageProps) {
           {providerName ? <span style={{ color: 'var(--fg-muted)' }}>{providerName}</span> : null}
           {message.role === 'assistant' && messageStatus?.type === 'running' ? (
             <span style={{ color: 'var(--accent)', fontWeight: 700 }}>Streaming</span>
+          ) : null}
+          {message.role === 'assistant' && webGrounding?.web_requested ? (
+            <span
+              data-testid="chat-web-grounding-badge"
+              style={{
+                color: webGrounding.web_grounded ? 'var(--ok)' : 'var(--fg-muted)',
+                fontWeight: 700,
+              }}
+            >
+              {webGrounding.web_grounded
+                ? `Web grounded · ${webCitations.length} citation${webCitations.length === 1 ? '' : 's'}`
+                : 'Web requested · no validated citations'}
+            </span>
           ) : null}
         </div>
 
@@ -738,8 +753,8 @@ function AssistantThreadMessage(props: AssistantThreadMessageProps) {
           </div>
         )}
 
-        {props.showCitations && (sources.length > 0 || legacyCitations.length > 0) && (
-          <SourceList sources={sources} legacyCitations={legacyCitations} />
+        {props.showCitations && (sources.length > 0 || legacyCitations.length > 0 || webCitations.length > 0) && (
+          <SourceList sources={sources} legacyCitations={legacyCitations} webCitations={webCitations} />
         )}
 
         <div
@@ -907,6 +922,7 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
   const [includeVector, setIncludeVector] = useState(true);
   const [includeSparse, setIncludeSparse] = useState(true);
   const [includeGraph, setIncludeGraph] = useState(false);
+  const [webEnabled, setWebEnabled] = useState(false);
   const [recallIntensity, setRecallIntensity] = useState<RecallIntensity | null>(null);
   const [chatModels, setChatModels] = useState<ChatModelInfo[]>([]);
   const [sending, setSending] = useState(false);
@@ -1401,6 +1417,7 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
           requestSources,
           signal: abortController.signal,
           streamPreferred: true,
+          webEnabled,
         });
 
         if (!isRequestTokenActive(requestToken)) return;
@@ -1417,6 +1434,7 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
           sources: result.sources,
           startedAtMs: result.startedAtMs,
           traceId: result.headers.traceId,
+          webGrounding: result.webGrounding,
         };
 
         const finalMessages = updateAssistantMessage(assistantId, (message) =>
@@ -1522,6 +1540,7 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
       saveChatHistory,
       showToast,
       updateAssistantMessage,
+      webEnabled,
     ],
   );
 
@@ -1747,6 +1766,8 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
             recallIntensity={recallIntensity}
             onRecallIntensityChange={setRecallIntensity}
             onCleanupUnindexed={handleCleanupUnindexed}
+            webEnabled={webEnabled}
+            onWebEnabledChange={setWebEnabled}
           />
 
           <div style={{ flex: '1 1 220px', minWidth: '180px', maxWidth: '360px' }}>

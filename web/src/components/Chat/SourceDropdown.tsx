@@ -14,6 +14,8 @@ type SourceDropdownProps = {
   onIncludeGraphChange: (v: boolean) => void;
   recallIntensity: RecallIntensity | null;
   onRecallIntensityChange: (v: RecallIntensity | null) => void;
+  webEnabled: boolean;
+  onWebEnabledChange: (v: boolean) => void;
   onCleanupUnindexed?: () => void | Promise<void>;
 };
 
@@ -52,7 +54,11 @@ export function SourceDropdown(props: SourceDropdownProps) {
   const unindexedCount = availableCorpora.filter((c) => !c.last_indexed).length;
 
   const selectedCount = corpusIds.length;
-  const summaryLabel = selectedCount === 0 ? 'None' : `${selectedCount} selected`;
+  const summaryParts = [
+    selectedCount > 0 ? `${selectedCount} selected` : null,
+    props.webEnabled ? 'Web' : null,
+  ].filter(Boolean);
+  const summaryLabel = summaryParts.length > 0 ? summaryParts.join(' + ') : 'None';
 
   useEffect(() => {
     if (!confirmCleanup) return;
@@ -118,7 +124,37 @@ export function SourceDropdown(props: SourceDropdownProps) {
         }}
       >
         <div style={{ fontSize: '12px', color: 'var(--fg-muted)', marginBottom: '8px' }}>
-          Retrieval legs
+          Live sources
+        </div>
+
+        <label
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            padding: '9px 10px',
+            marginBottom: '12px',
+            borderRadius: '9px',
+            border: props.webEnabled ? '1px solid var(--accent)' : '1px solid var(--line)',
+            background: props.webEnabled ? 'rgba(99, 179, 237, 0.08)' : 'transparent',
+          }}
+        >
+          <input
+            data-testid="source-web"
+            type="checkbox"
+            checked={props.webEnabled}
+            onChange={(event) => props.onWebEnabledChange(event.target.checked)}
+          />
+          <span style={{ flex: 1 }}>
+            <strong>Web</strong>
+            <span style={{ display: 'block', color: 'var(--fg-muted)', fontSize: '11px', marginTop: '2px' }}>
+              Search current public information when the model needs it
+            </span>
+          </span>
+        </label>
+
+        <div style={{ fontSize: '12px', color: 'var(--fg-muted)', marginBottom: '8px' }}>
+          Corpus retrieval legs
         </div>
 
         <div style={{ display: 'flex', gap: '14px', flexWrap: 'wrap', marginBottom: '14px' }}>

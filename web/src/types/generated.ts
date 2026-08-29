@@ -158,6 +158,7 @@ export interface BenchmarkRun {
 export interface ChatConfig {
   /** Default checked user-facing corpus IDs for new conversations. */
   default_corpus_ids?: string[]; // default: ["recall_default"]
+  web?: ChatWebConfig;
   system_prompt_base?: string; // default: "You are a helpful assistant."
   system_prompt_recall_suffix?: string; // default: " You have access to conversation history. Refer..."
   system_prompt_rag_suffix?: string; // default: " Answer questions using the provided database i..."
@@ -302,6 +303,16 @@ export interface ChatProviderInfo {
   model: string;
   /** LiteLLM OpenAI-compatible base URL */
   base_url?: string | null; // default: None
+}
+
+/** Server-owned OpenRouter web-search policy for ordinary chat. */
+export interface ChatWebConfig {
+  /** Allow opt-in web search in Chat. */
+  enabled?: boolean; // default: True
+  engine?: "auto" | "native" | "exa"; // default: "auto"
+  max_results?: number; // default: 5
+  max_total_results?: number; // default: 5
+  max_characters?: number; // default: 12000
 }
 
 /** Unified result shape for vector/sparse/graph retrieval. */
@@ -2697,6 +2708,12 @@ export interface TraceRouteSummary {
   llm_used?: boolean | null; // default: None
   /** Short reason generation failed or was unavailable. */
   llm_error?: string | null; // default: None
+  /** Whether the caller enabled web search. */
+  web_requested?: boolean; // default: False
+  /** Whether validated web citations support the response. */
+  web_grounded?: boolean; // default: False
+  /** Provider-reported web-search request count; unknown when omitted. */
+  web_search_requests?: number | null; // default: None
 }
 
 /** Observability and tracing configuration. */
@@ -2983,6 +3000,26 @@ export interface VectorSearchConfig {
   similarity_threshold?: number; // default: 0.0
 }
 
+/** One validated URL citation returned by the generation gateway. */
+export interface WebCitation {
+  /** Provider-supplied citation title. */
+  title?: string; // default: ""
+  /** Validated HTTP(S) citation URL. */
+  url: string;
+  /** Inclusive character offset in the final answer. */
+  start_index: number;
+  /** Exclusive character offset in the final answer. */
+  end_index: number;
+}
+
+/** Terminal web-grounding facts; never inferred from inline answer text. */
+export interface WebGroundingMetadata {
+  web_requested?: boolean; // default: False
+  web_grounded?: boolean; // default: False
+  web_search_requests?: number | null; // default: None
+  citations?: WebCitation[];
+}
+
 export interface AgentTrainControlPlaneStatusResponse {
   ok?: boolean;
   /** Resolved target lane for the Learning Agent Training Center surface. */
@@ -3232,6 +3269,8 @@ export interface ChatRequest {
   conversation_id?: string | null;
   /** Stream the response */
   stream?: boolean;
+  /** Allow the server-owned web-search tool for this message. */
+  web_enabled?: boolean;
   /** Optional images for vision. Max 10 by schema; server further limits by config.chat.multimodal.max_images_per_message. */
   images?: ImageAttachment[];
   /** Override chat model for this request (empty=default) */
@@ -3266,6 +3305,7 @@ export interface ChatResponse {
   sources: ChunkMatch[];
   /** Tokens consumed */
   tokens_used: number;
+  web_grounding?: WebGroundingMetadata;
 }
 
 /** A code chunk from the indexed repository. */

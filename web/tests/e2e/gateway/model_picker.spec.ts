@@ -127,4 +127,48 @@ test.describe('generation gateway catalog in the Chat picker', () => {
     await expect(page.getByTestId('chat-structured-error-card')).toHaveCount(0);
     await expect(latest).toContainText('LiteLLM');
   });
+
+  test('web search works as the only selected source and renders validated citations', async ({ page }) => {
+    await page.goto('chat?subtab=ui', { waitUntil: 'domcontentloaded' });
+    const picker = page.getByTestId('model-picker').first();
+    await expect(picker).toBeEnabled({ timeout: 60_000 });
+    await picker.selectOption(`litellm:${PAID_ALIAS}`);
+
+    const sources = page.getByTestId('source-dropdown');
+    await sources.locator('summary').click();
+    const recall = page.getByTestId('source-recall');
+    if (await recall.isChecked()) await recall.uncheck();
+    const corpusToggles = sources.locator('[data-testid^="source-corpus-"]');
+    for (let index = 0; index < await corpusToggles.count(); index += 1) {
+      const toggle = corpusToggles.nth(index);
+      if (await toggle.isChecked()) await toggle.uncheck();
+    }
+    const web = page.getByTestId('source-web');
+    await web.check();
+    await expect(web).toBeChecked();
+    await sources.locator('summary').click();
+
+    const question = 'What are the latest two posts on the OpenAI News page right now? Cite the web sources.';
+    await page.fill('#chat-input', question);
+    const chatRequest = page.waitForRequest(
+      (request) => request.method() === 'POST' && /\/api\/chat(\/stream)?(\?|$)/.test(request.url()),
+      { timeout: 60_000 }
+    );
+    await page.click('#chat-send');
+    const sent = JSON.parse((await chatRequest).postData() ?? '{}') as {
+      sources?: { corpus_ids?: string[] };
+      web_enabled?: boolean;
+    };
+    expect(sent.sources?.corpus_ids ?? []).toEqual([]);
+    expect(sent.web_enabled).toBe(true);
+
+    const latest = page.locator('[data-role="assistant"]').last();
+    await expect(latest.getByTestId('chat-web-grounding-badge')).toContainText('Web grounded', {
+      timeout: 4 * 60 * 1000,
+    });
+    const citation = latest.getByTestId('chat-web-citation-link').first();
+    await expect(citation).toBeVisible();
+    await expect(citation).toHaveAttribute('href', /^https:\/\//);
+    await expect(citation).toHaveAttribute('target', '_blank');
+  });
 });

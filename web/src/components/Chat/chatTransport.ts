@@ -9,6 +9,7 @@ import type {
   RecallIntensity,
   RequiredRetrievalLegFailureDetail,
   RetrievalContractMismatchDetail,
+  WebGroundingMetadata,
 } from '@/types/generated';
 import type { ThreadMessage, ThreadUserMessage } from '@assistant-ui/react';
 
@@ -31,6 +32,7 @@ export type RagweldChatResult = {
   sources: ChunkMatch[];
   startedAtMs?: number;
   text: string;
+  webGrounding: WebGroundingMetadata;
 };
 
 type RagweldStreamTerminal = {
@@ -41,6 +43,7 @@ type RagweldStreamTerminal = {
   runId?: string;
   sources: ChunkMatch[];
   startedAtMs?: number;
+  webGrounding: WebGroundingMetadata;
 };
 
 type SendRagweldChatArgs = {
@@ -56,6 +59,7 @@ type SendRagweldChatArgs = {
   requestSources: ActiveSources;
   signal: AbortSignal;
   streamPreferred: boolean;
+  webEnabled: boolean;
 };
 
 export class ChatRequestAbortedError extends Error {
@@ -190,6 +194,7 @@ function buildChatPayload(
     include_sparse: args.includeSparse,
     include_graph: args.includeGraph,
     recall_intensity: args.recallIntensityOverride,
+    web_enabled: args.webEnabled,
   };
 }
 
@@ -228,6 +233,12 @@ async function runRegularChat(args: SendRagweldChatArgs): Promise<RagweldChatRes
     sources: Array.isArray(data?.sources) ? (data.sources as ChunkMatch[]) : [],
     startedAtMs: typeof data?.started_at_ms === 'number' ? data.started_at_ms : undefined,
     text,
+    webGrounding: (data?.web_grounding || {
+      web_requested: args.webEnabled,
+      web_grounded: false,
+      web_search_requests: null,
+      citations: [],
+    }) as WebGroundingMetadata,
   };
 }
 
@@ -307,6 +318,12 @@ async function runStreamingChat(args: SendRagweldChatArgs): Promise<RagweldChatR
           runId: typeof parsed.run_id === 'string' ? parsed.run_id : undefined,
           sources: Array.isArray(parsed.sources) ? (parsed.sources as ChunkMatch[]) : [],
           startedAtMs: typeof parsed.started_at_ms === 'number' ? parsed.started_at_ms : undefined,
+          webGrounding: (parsed.web_grounding || {
+            web_requested: args.webEnabled,
+            web_grounded: false,
+            web_search_requests: null,
+            citations: [],
+          }) as WebGroundingMetadata,
         };
         return;
       }
@@ -367,6 +384,7 @@ async function runStreamingChat(args: SendRagweldChatArgs): Promise<RagweldChatR
     sources: finalEvent.sources,
     startedAtMs: finalEvent.startedAtMs,
     text: accumulatedText,
+    webGrounding: finalEvent.webGrounding,
   };
 }
 
