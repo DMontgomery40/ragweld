@@ -18,6 +18,7 @@ import pytest
 import yaml
 from cryptography.hazmat.primitives.kdf.argon2 import Argon2id
 
+from deploy.proxmox import render_config
 from server.models.tribrid_config_model import TriBridConfig
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -605,6 +606,29 @@ def test_proxmox_renderer_writes_validated_production_defaults_atomically(tmp_pa
     assert validated.model_dump(mode="json") == expected.model_dump(mode="json")
     assert output.stat().st_mode & 0o777 == 0o600
     assert sorted(path.name for path in tmp_path.iterdir()) == [output.name]
+
+
+def test_proxmox_renderer_preserves_existing_output_ownership(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = tmp_path / "tribrid_config.production.json"
+    output.write_text("{}\n", encoding="utf-8")
+    original = output.stat()
+    chown_calls: list[tuple[int, int]] = []
+    real_chown = os.chown
+
+    def record_chown(path: str | bytes | os.PathLike[str] | os.PathLike[bytes], uid: int, gid: int) -> None:
+        chown_calls.append((uid, gid))
+        real_chown(path, uid, gid)
+
+    monkeypatch.setattr(render_config.os, "chown", record_chown)
+    render_config._write_output(output, TriBridConfig())
+
+    assert chown_calls == [(original.st_uid, original.st_gid)]
+    assert output.stat().st_uid == original.st_uid
+    assert output.stat().st_gid == original.st_gid
+    assert output.stat().st_mode & 0o777 == 0o600
 
 
 def test_proxmox_production_policy_never_routes_defaults_or_smoke_to_gpt_5_4() -> None:

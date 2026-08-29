@@ -83,6 +83,7 @@ def _apply_production_defaults(config: TriBridConfig) -> TriBridConfig:
 
 def _write_output(path: Path, config: TriBridConfig) -> None:
     rendered = json.dumps(config.model_dump(mode="json"), indent=2, sort_keys=True) + "\n"
+    existing_stat = path.stat() if path.exists() else None
     temp_path: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -95,6 +96,8 @@ def _write_output(path: Path, config: TriBridConfig) -> None:
         ) as handle:
             handle.write(rendered)
             temp_path = Path(handle.name)
+        if existing_stat is not None:
+            os.chown(temp_path, existing_stat.st_uid, existing_stat.st_gid)
         os.chmod(temp_path, 0o600)
         os.replace(temp_path, path)
     except Exception:
