@@ -132,9 +132,14 @@ httpx.patch(
     - Corpora indexed before provenance capture still open, but show the "not captured" notice until you re-index.
 
 ??? question "The viewer shows 'Signed out' instead of the document"
-    - The auth proxy in front of the API refused the request (HTTP 401 or 403) — most often because your sign-in session ended, for example after a service restart.
+    - The auth proxy in front of the API has no valid session for you (HTTP 401) — most often because your sign-in session ended, for example after a service restart.
     - Nothing is wrong with the document: reload the page to sign in again, then click the citation again.
     - The error card says this directly ("Your sign-in session has ended, so the document could not be fetched") with a *Reload the page to sign in again* hint, instead of a generic `Could not load document (HTTP 401)` — so you don't go hunting for an indexing problem that doesn't exist.
+
+??? question "The viewer says 'Access denied' even though I'm signed in"
+    - HTTP 403 is handled separately from 401: you **are** authenticated, but the access policy on this deployment does not allow your account to read documents.
+    - Signing in again cannot fix this — the error card says so explicitly ("Access denied: your account is not allowed to read documents on this deployment") so you don't waste a reload cycle on it.
+    - The operator hint on the card points at the real fix: ask the operator to grant your user the required group in the auth policy. There is nothing to change in the corpus, the index, or the viewer itself.
 
 ??? question "PDF highlights look offset"
     - The file likely changed since indexing (check the **changed since indexing** badge). Re-index to rebuild the provenance map.
