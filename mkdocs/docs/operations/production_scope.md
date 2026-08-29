@@ -56,6 +56,14 @@ When the global config has `ui.runtime_mode=production`:
 !!! warning "Don't hand-edit these paths per corpus in production"
     The values are reconciled away on the next read. Change them in the **global** config (or the deployment environment) instead. Corpus-specific tuning that is *not* on the list — retrieval, fusion, chunking, recall gates — remains fully corpus-scoped.
 
+!!! note "Concrete production aliases"
+    The Proxmox production render (`deploy/proxmox/render_config.py`) sets `chat.litellm.default_model` and `ui.chat_default_model` to `z-ai.glm-5.3-flash`, while keeping `chat.multimodal.vision_model_override` on `openai.gpt-5.6-terra`. Two things follow from this split:
+
+    - The **chat default** is a fast, lightweight gateway alias — it is what every conversation starts on unless a per-message override is picked.
+    - The **vision override** stays pinned to a multimodal-capable alias, because image-capable requests route through `chat.multimodal.vision_model_override` rather than the chat default.
+
+    Both are deployment-owned values on the production-scoped list above: a stale per-corpus snapshot carrying an older alias is reconciled to the current global value on the next read, and a client PUT cannot reintroduce the drift (see the save-path behavior below).
+
 *Mechanism diagram (reconciliation only; the wider config store behavior is covered in the [config store guide](../dev/config_store.md)):*
 
 ```mermaid

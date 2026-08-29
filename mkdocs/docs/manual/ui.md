@@ -86,6 +86,18 @@ Every citation under a chat answer is clickable. PDF citations render as a page-
 - Source viewer guide: [Source document viewer](source_viewer.md)
 - Web-search citations: [Web search in Chat](web_search.md)
 
+### Chat model choice survives reloads
+
+Your selected chat model is saved per conversation. On page load, the model picker keeps that saved override while `/api/chat/models` is still loading — it is no longer reset just because the model catalog has not arrived yet. Once the catalog responds, the picker confirms the saved model is present and keeps it selected.
+
+Why this matters: if you pin a specific LiteLLM gateway alias for your conversations (for example, a production chat model that differs from the vision override), a refresh no longer silently drops you back to the default before the catalog finishes loading. The picker simply stays on your saved choice until the server confirms the option list.
+
+!!! tip "If the picker stays disabled"
+    The picker enables once `/api/chat/models` responds. If it never does, check:
+
+    - `GET /api/chat/health` (default dev base `http://127.0.0.1:58012/api`) for provider readiness
+    - The LiteLLM gateway service on port `54000` (see the [runtime topology](../reference/architecture/runtime-topology.md) for the full service map)
+
 ## Main tabs (what they’re for)
 
 The UI is organized into top-level tabs. Here’s the practical meaning of each:
