@@ -92,3 +92,13 @@ def build_aurora_report_pdf() -> bytes:
 
 ACCEPTANCE_DOCS_DIR = Path(__file__).resolve().parent / "acceptance_corpus_docs"
 AURORA_REPORT_PDF = ACCEPTANCE_DOCS_DIR / "aurora-mission-report.pdf"
+
+# Two consecutive scanned pages of the Apollo 11 Mission Report (NASA, public domain) on which
+# Docling's layout model detects at least one figure. Used by the figure-chunk tests.
+APOLLO_FIGURE_FIXTURE = ACCEPTANCE_DOCS_DIR / "apollo11_figure_pages.pdf"
+
+
+def apollo_figure_pages() -> Path:
+    if not APOLLO_FIGURE_FIXTURE.exists():
+        raise FileNotFoundError(f"missing fixture {APOLLO_FIGURE_FIXTURE}")
+    return APOLLO_FIGURE_FIXTURE
