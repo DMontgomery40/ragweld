@@ -52,6 +52,25 @@ class ChunkProvenance(BaseModel):
         return self
 
 
+FigureKind = Literal["diagram", "chart", "schematic", "photo", "table", "drawing", "other"]
+
+
+class FigureAnnotation(BaseModel):
+    """Structured description of one figure, produced by the vision alias at index time.
+
+    Persisted in ``Chunk.metadata["figure"]`` so callouts and part numbers are searchable
+    verbatim and a later schematic graph can consume ``components``/``connections``.
+    """
+
+    kind: FigureKind = Field(default="other", description="Figure kind as judged by the vision model")
+    summary: str = Field(default="", description="Dense prose description; this is what gets embedded")
+    labels: list[str] = Field(default_factory=list, description="Legible callouts, axis labels, legend entries, part numbers")
+    components: list[str] = Field(default_factory=list, description="Named parts or entities depicted")
+    connections: list[str] = Field(default_factory=list, description="'A -> B' relations stated or drawn")
+    values: list[str] = Field(default_factory=list, description="Numbers with units as printed")
+    references: list[str] = Field(default_factory=list, description="Sheet/figure/table/section cross-references printed on the figure")
+
+
 class Chunk(BaseModel):
     """A code chunk from the indexed repository."""
 
