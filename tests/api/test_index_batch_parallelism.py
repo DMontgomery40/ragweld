@@ -38,7 +38,7 @@ async def test_file_extraction_yields_the_api_event_loop(tmp_path: Path) -> None
     writer.join(timeout=2.0)
 
     assert responsive_after < 0.35
-    assert content == "event loop stayed responsive"
+    assert content is not None and content.text == "event loop stayed responsive"
     assert not writer.is_alive()
 
 
@@ -64,7 +64,7 @@ async def test_unsupported_suffix_fallback_file_read_yields_the_api_event_loop(
     writer.join(timeout=2.0)
 
     assert responsive_after < 0.35
-    assert content == "fallback stayed responsive"
+    assert content is not None and content.text == "fallback stayed responsive"
     assert not writer.is_alive()
 
 
@@ -89,7 +89,7 @@ async def test_unsupported_suffix_fallback_bypasses_the_docling_lock(tmp_path: P
     writer.join(timeout=2.0)
 
     assert responsive_after < 0.35
-    assert content == "docling lock ignored"
+    assert content is not None and content.text == "docling lock ignored"
     assert not writer.is_alive()
 
 
@@ -253,9 +253,14 @@ class _RecordingPostgres:
         self.chunk_batch_sizes: list[int] = []
         self.embedding_meta: dict[str, object] | None = None
         self.semantic_cache_cleared: list[str] = []
+        self.documents: list[tuple[str, str]] = []
 
     async def delete_chunks(self, _repo_id: str) -> int:
         return 0
+
+    async def upsert_document(self, repo_id: str, record) -> None:
+        # One provenance record per extracted file, written under the staging id.
+        self.documents.append((repo_id, record.file_path))
 
     async def upsert_chunks(self, _repo_id: str, chunks) -> int:
         assert all(ch.embedding is not None for ch in chunks)

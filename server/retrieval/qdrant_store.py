@@ -33,7 +33,7 @@ from typing import Any
 
 from server.db.postgres import PostgresClient
 from server.dependency_errors import DependencyUnavailableError
-from server.models.index import Chunk
+from server.models.index import Chunk, ChunkProvenance
 from server.models.retrieval import ChunkMatch
 from server.models.tribrid_config_model import TriBridConfig
 from server.retrieval.contracts import (
@@ -56,7 +56,6 @@ _PAYLOAD_META_KEYS = (
     "parent_doc_id",
     "char_start",
     "char_end",
-    "extraction",
     "kind",
 )
 
@@ -207,6 +206,8 @@ def _chunk_to_document(corpus_id: str, chunk: Chunk) -> Any:
     for key in _PAYLOAD_META_KEYS:
         if key in metadata and metadata[key] is not None:
             meta[key] = metadata[key]
+    if chunk.provenance is not None:
+        meta["provenance"] = chunk.provenance.model_dump(mode="json")
     return Document(
         id=str(chunk.chunk_id),
         content=str(chunk.content or ""),
@@ -219,10 +220,16 @@ def _point_to_match(point: Any, *, source: str, corpus_id: str) -> ChunkMatch:
     payload = dict(point.payload or {})
     meta = dict(payload.get("meta") or {})
     language = meta.get("language")
+    raw_provenance = meta.get("provenance")
+    # Generations written before provenance capture carry no key (and may still carry the
+    # retired ``extraction`` metadata key); they read back as provenance=None, never synthesized.
+    provenance = (
+        ChunkProvenance.model_validate(raw_provenance) if isinstance(raw_provenance, dict) else None
+    )
     metadata: dict[str, Any] = {
         k: v
         for k, v in meta.items()
-        if k not in {"file_path", "start_line", "end_line", "language"}
+        if k not in {"file_path", "start_line", "end_line", "language", "provenance", "extraction"}
     }
     metadata["corpus_id"] = corpus_id
     if source == "sparse":
@@ -237,6 +244,7 @@ def _point_to_match(point: Any, *, source: str, corpus_id: str) -> ChunkMatch:
         score=float(getattr(point, "score", 0.0) or 0.0),
         source=source,  # type: ignore[arg-type]
         metadata=metadata,
+        provenance=provenance,
     )
 
 

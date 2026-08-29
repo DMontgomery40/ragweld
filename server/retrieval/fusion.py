@@ -880,6 +880,7 @@ class TriBridFusion:
                                     start_line=ch.start_line,
                                     end_line=ch.end_line,
                                     language=ch.language,
+                                    provenance=ch.provenance,
                                     score=float(score_by_id.get(ch.chunk_id) or 0.0),
                                     source="graph",
                                     metadata={
@@ -934,6 +935,7 @@ class TriBridFusion:
                                     start_line=ch.start_line,
                                     end_line=ch.end_line,
                                     language=ch.language,
+                                    provenance=ch.provenance,
                                     score=float(score_by_id.get(ch.chunk_id) or 0.0),
                                     source="graph",
                                     metadata={
@@ -1630,6 +1632,7 @@ async def _expand_neighbors(
                     start_line=ch.start_line,
                     end_line=ch.end_line,
                     language=ch.language,
+                    provenance=ch.provenance,
                     score=0.0,
                     # Neighbors are attributed to the leg that found the seed chunk.
                     # Keep schemas stable by marking neighbor-ness only via metadata.

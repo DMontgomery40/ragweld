@@ -47,10 +47,16 @@ from server.models.tribrid_config_model import (
 from server.retrieval.mlx_qwen3 import mlx_is_available
 from server.services.config_store import CorpusNotFoundError
 from server.services.config_store import get_config as load_scoped_config
+from server.services.corpus_files import resolve_corpus_file
 from server.training.agent_artifact import (
     AgentArtifactError,
     agent_artifact_incompatibility,
     validate_agent_artifact_dir,
+)
+from server.training.artifact_store import (
+    ArtifactStoreError,
+    VersionedArtifactSwap,
+    resolve_active_artifact_dir,
 )
 from server.training.atomic_json import write_json_atomic
 from server.training.control_plane import (
@@ -81,11 +87,6 @@ from server.training.mlx_qwen3_agent_trainer import (
     train_mlx_qwen3_agent,
 )
 from server.training.mlx_qwen3_trainer import TrainingCancelledError
-from server.training.artifact_store import (
-    ArtifactStoreError,
-    VersionedArtifactSwap,
-    resolve_active_artifact_dir,
-)
 from server.training.promotion import (
     BaselineState,
     await_uncancellable,
@@ -812,30 +813,6 @@ async def _request_train_run_cancel(*, run_id: str, reason: str) -> bool:
         return True
 
 
-def _resolve_expected_path(*, corpus_root: Path, path_str: str) -> Path | None:
-    p = Path(str(path_str or "").strip())
-    if not str(p):
-        return None
-    try:
-        root = corpus_root.resolve()
-    except Exception:
-        root = corpus_root.absolute()
-
-    try:
-        if p.is_absolute():
-            resolved = p.resolve()
-        else:
-            resolved = (corpus_root / p).resolve()
-    except Exception:
-        return None
-
-    try:
-        resolved.relative_to(root)
-    except Exception:
-        return None
-    return resolved
-
-
 def _read_text(path: Path, *, max_chars: int) -> str:
     try:
         raw = path.read_text(encoding="utf-8", errors="ignore")
@@ -953,7 +930,7 @@ async def _load_training_messages(
 
         rag_chunks: list[ChunkMatch] = []
         for p in list(item.expected_paths or [])[:20]:
-            resolved = _resolve_expected_path(corpus_root=corpus_root, path_str=str(p))
+            resolved = resolve_corpus_file(corpus_root, str(p))
             if resolved is None:
                 continue
             txt = _read_text(resolved, max_chars=int(snippet_chars))

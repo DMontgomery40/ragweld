@@ -9,7 +9,7 @@ Postgres pgvector/FTS legs were removed when this lane was promoted.
 ## Ownership
 
 - **Postgres** (`server/db/postgres.py`): corpus registry and per-corpus config,
-  chunk rows (content, provenance, `metadata.extraction`), chunk summaries,
+  chunk rows (content, typed `provenance`: extraction method + page regions), chunk summaries,
   semantic/embedding caches, and the recorded index contracts
   (`corpora.embedding_*`, `corpora.sparse_contract`). Chunk rows carry no
   vectors.
@@ -25,8 +25,9 @@ Postgres pgvector/FTS legs were removed when this lane was promoted.
 - **Neo4j**: the graph leg (lexical graph, chunk vector index, optional
   semantic KG) is unchanged and remains the graph leg's own implementation.
 - **Docling** (`server/indexing/text_extractors.py`): PDF, DOCX, PPTX, XLSX and
-  HTML are converted to markdown by Docling during indexing; chunks record
-  `extraction = docling | direct`.
+  HTML are converted to markdown by Docling during indexing; every chunk carries a typed
+  `provenance` (`extraction = docling | direct`, plus `page_start/page_end` and normalized
+  per-item page `regions` for PDFs, built from Docling's per-item page/bbox data).
 
 ## Index run lifecycle (`server/api/index.py`)
 
@@ -167,3 +168,33 @@ On the first boot after the cutover the schema migration drops
 indexed" (no `last_indexed`, no contracts) because its vectors no longer
 exist anywhere. Re-run indexing per corpus; Recall recreates its generation on
 the next conversation write.
+
+## Source document viewer (`server/api/documents.py`)
+
+Citations open the actual cited document instead of a path. Provenance is captured at index
+time and served back by three corpus-scoped routes:
+
+- `chunks.provenance` (JSONB, typed `ChunkProvenance`): extraction method and, for Docling PDFs,
+  the pages and normalized top-left page regions the chunk text was taken from. It rides the
+  Qdrant payload and Postgres rows, so vector, sparse, graph-hydrated and neighbor-expanded hits
+  all carry it. Rows indexed before capture read back as `provenance = null`; nothing is
+  synthesized.
+- `documents` (one row per indexed file, written under the staging id and promoted with the
+  chunks): `kind` (`text | pdf | rich`), `extraction`, `sha256`, `byte_size`, and the Docling
+  markdown for rich kinds (docx/pptx/xlsx/html) only.
+- `GET /api/corpora/{corpus_id}/documents/view?path=` — `DocumentView`: the file text (decoded
+  exactly as the indexer decoded it), the PDF's live page sizes, or the captured markdown, plus a
+  provenance state: `captured` (with `stale` = the file changed on disk since indexing) or
+  `not_captured` (indexed before capture; re-index to enable page highlights). A rich document
+  without captured markdown is a typed 409 `document_not_captured`; a text file over
+  `document_viewer.max_text_bytes` is a typed 413.
+- `GET …/documents/page?path=&page=&variant=page|thumb` — one page rendered by pypdfium2 at
+  `document_viewer.page_render_scale` / `thumbnail_render_scale`, with a stat-based ETag (304 on
+  `If-None-Match`). Non-PDFs are 415.
+- `GET …/documents/raw?path=` — the original bytes; PDFs inline, everything else as an attachment
+  with `nosniff` and a sandboxing CSP so a corpus HTML file can never execute on the API origin.
+
+A file is viewable exactly when the corpus indexed it (a `chunks` row exists for that path); paths
+must be corpus-root-relative, and anything absolute, containing `..`, or resolving outside the
+root is a 404. The chat UI renders PDF citations with page regions as thumbnail cards and other
+citations as clickable `file:start-end` rows; both open the viewer in the right rail.

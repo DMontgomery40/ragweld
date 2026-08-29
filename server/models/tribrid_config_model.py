@@ -29,7 +29,7 @@ except ImportError:
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from server.models.index import IndexStats
+from server.models.index import ChunkProvenance, IndexStats
 from server.models.runtime_gateway import BenchmarkConfig as BenchmarkConfig
 from server.models.runtime_gateway import ChatModelInfo as ChatModelInfo
 from server.models.runtime_gateway import ChatModelsResponse as ChatModelsResponse
@@ -489,6 +489,20 @@ class CorpusStats(BaseModel):
     graph_stats: GraphStats | None = Field(default=None, description="Graph stats (if built)")
 
 
+
+def validate_corpus_id_component(value: str) -> str:
+    """A corpus id names one filesystem component under data/lineage, data/index_runs and
+    friends: dot segments and path separators would escape those directories."""
+    text = str(value).strip()
+    if not text:
+        raise ValueError("corpus_id must not be empty")
+    if text in {".", ".."} or "/" in text or "\\" in text or any(ch.isspace() for ch in text):
+        raise ValueError(
+            "corpus_id must be a single path-safe component (no '.', '..', separators or whitespace)"
+        )
+    return text
+
+
 class CorpusCreateRequest(BaseModel):
     """Request to create a new corpus."""
 
@@ -505,16 +519,12 @@ class CorpusCreateRequest(BaseModel):
     @field_validator("repo_id", mode="before")
     @classmethod
     def _validate_repo_id(cls, value: object) -> object:
-        """A corpus id names one filesystem component under data/lineage, data/index_runs
-        and friends: dot segments and path separators would escape those directories."""
         if value is None:
             return None
         text = str(value).strip()
         if not text:
             return None
-        if text in {".", ".."} or "/" in text or "\\" in text or any(ch.isspace() for ch in text):
-            raise ValueError("corpus_id must be a single path-safe component (no '.', '..', separators or whitespace)")
-        return text
+        return validate_corpus_id_component(text)
 
 
 class CorpusUpdateRequest(BaseModel):
@@ -759,6 +769,10 @@ class ChunkMatch(BaseModel):
         description="Which retrieval leg found this"
     )
     metadata: dict[str, Any] = Field(default_factory=dict, description="Additional match metadata")
+    provenance: ChunkProvenance | None = Field(
+        default=None,
+        description="Extraction and page provenance; None for chunks indexed before provenance capture",
+    )
 
 
 class SearchRequest(BaseModel):
@@ -6287,6 +6301,29 @@ Output JSON only: a JSON array of exactly N objects {"id": <the candidate id exa
     )
 
 
+class DocumentViewerConfig(BaseModel):
+    """Source document evidence viewer: how cited files are rendered back to the user."""
+
+    page_render_scale: float = Field(
+        default=2.0,
+        ge=1.0,
+        le=4.0,
+        description="PDF page raster scale for the viewer (1.0 = 72 dpi; 2.0 = 144 dpi)",
+    )
+    thumbnail_render_scale: float = Field(
+        default=0.5,
+        ge=0.25,
+        le=1.0,
+        description="PDF page raster scale for citation thumbnails in chat",
+    )
+    max_text_bytes: int = Field(
+        default=5_000_000,
+        ge=65_536,
+        le=50_000_000,
+        description="Largest text/code file the viewer will serve in full",
+    )
+
+
 class DockerConfig(BaseModel):
     """Docker infrastructure configuration."""
 
@@ -6572,6 +6609,7 @@ class TriBridConfig(BaseModel):
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     synthetic: SyntheticConfig = Field(default_factory=SyntheticConfig)
     docker: DockerConfig = Field(default_factory=DockerConfig)
+    document_viewer: DocumentViewerConfig = Field(default_factory=DocumentViewerConfig)
 
     model_config = ConfigDict(
         extra="allow",

@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 import asyncpg
 from pgvector.asyncpg import register_vector
 
-from server.models.index import Chunk, IndexStats
+from server.models.index import Chunk, ChunkProvenance, IndexedDocumentRecord, IndexStats
 from server.models.tribrid_config_model import (
     ChunkSummariesLastBuild,
     ChunkSummary,
@@ -96,6 +96,27 @@ def _sanitize_json_value(value: Any) -> Any:
 
 def _json_dumps_sanitized(value: Any) -> str:
     return json.dumps(_sanitize_json_value(value))
+
+
+def _row_to_chunk(row: Any) -> Chunk:
+    """Persistence-to-domain mapping for one ``chunks`` row (vectors never live here)."""
+    raw_prov = row.get("provenance")
+    provenance: ChunkProvenance | None = None
+    if raw_prov is not None:
+        provenance = ChunkProvenance.model_validate(_coerce_jsonb_dict(raw_prov))
+    return Chunk(
+        chunk_id=str(row["chunk_id"]),
+        content=str(row["content"]),
+        file_path=str(row["file_path"]),
+        start_line=int(row["start_line"]),
+        end_line=int(row["end_line"]),
+        language=str(row["language"]) if row["language"] is not None else None,
+        token_count=int(row["token_count"] or 0),
+        embedding=None,
+        summary=None,
+        metadata=_coerce_jsonb_dict(row.get("metadata")),
+        provenance=provenance,
+    )
 
 
 def _sanitize_chunk_for_storage(chunk: Chunk) -> Chunk:
@@ -463,6 +484,27 @@ class PostgresClient:
         await conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_chunks_repo_file ON chunks (repo_id, file_path);"
         )
+        # Typed chunk provenance (extraction method + page regions). NULL = indexed before capture.
+        await conn.execute("ALTER TABLE chunks ADD COLUMN IF NOT EXISTS provenance JSONB;")
+
+        # Per-file provenance record for the source document viewer. Rows are written under the
+        # staging corpus id and promoted with the chunks; ``markdown`` is stored for rich kinds
+        # (docx/pptx/xlsx/html) only, never for PDFs (those render from the original file).
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS documents (
+              repo_id TEXT NOT NULL REFERENCES corpora(repo_id) ON DELETE CASCADE,
+              file_path TEXT NOT NULL,
+              kind TEXT NOT NULL CHECK (kind IN ('text', 'pdf', 'rich')),
+              extraction TEXT NOT NULL CHECK (extraction IN ('docling', 'direct')),
+              sha256 TEXT NOT NULL,
+              byte_size BIGINT NOT NULL,
+              markdown TEXT,
+              indexed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+              PRIMARY KEY (repo_id, file_path)
+            );
+            """
+        )
         # Vector/FTS columns and their indexes moved to Qdrant; remove them from upgraded installs.
         await conn.execute("DROP INDEX IF EXISTS idx_chunks_tsv;")
         await conn.execute("DROP INDEX IF EXISTS idx_chunks_bm25;")
@@ -567,9 +609,10 @@ class PostgresClient:
     async def _upsert_chunk_rows(self, conn: Any, repo_id: str, chunks: list[Chunk]) -> None:
         stmt = """
         INSERT INTO chunks (
-          repo_id, chunk_id, file_path, start_line, end_line, language, content, token_count, metadata
+          repo_id, chunk_id, file_path, start_line, end_line, language, content, token_count,
+          metadata, provenance
         )
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb)
         ON CONFLICT (repo_id, chunk_id) DO UPDATE SET
           file_path = EXCLUDED.file_path,
           start_line = EXCLUDED.start_line,
@@ -577,7 +620,8 @@ class PostgresClient:
           language = EXCLUDED.language,
           content = EXCLUDED.content,
           token_count = EXCLUDED.token_count,
-          metadata = EXCLUDED.metadata;
+          metadata = EXCLUDED.metadata,
+          provenance = EXCLUDED.provenance;
         """
         await conn.executemany(
             stmt,
@@ -592,6 +636,7 @@ class PostgresClient:
                     ch.content,
                     int(ch.token_count or 0),
                     _json_dumps_sanitized(ch.metadata or {}),
+                    json.dumps(ch.provenance.model_dump(mode="json")) if ch.provenance else None,
                 )
                 for ch in chunks
             ],
@@ -722,7 +767,7 @@ class PostgresClient:
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                SELECT repo_id, chunk_id, content, file_path, start_line, end_line, language, token_count, metadata
+                SELECT repo_id, chunk_id, content, file_path, start_line, end_line, language, token_count, metadata, provenance
                 FROM chunks
                 WHERE repo_id = $1
                   AND chunk_id = $2
@@ -733,18 +778,7 @@ class PostgresClient:
             )
         if not row:
             return None
-        return Chunk(
-            chunk_id=str(row["chunk_id"]),
-            content=str(row["content"]),
-            file_path=str(row["file_path"]),
-            start_line=int(row["start_line"]),
-            end_line=int(row["end_line"]),
-            language=str(row["language"]) if row["language"] is not None else None,
-            token_count=int(row["token_count"] or 0),
-            embedding=None,
-            summary=None,
-            metadata=_coerce_jsonb_dict(row.get("metadata")),
-        )
+        return _row_to_chunk(row)
 
     async def get_chunks(self, repo_id: str, chunk_ids: list[str]) -> list[Chunk]:
         if not chunk_ids:
@@ -755,7 +789,7 @@ class PostgresClient:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT c.chunk_id, c.content, c.file_path, c.start_line, c.end_line, c.language, c.token_count, c.metadata
+                SELECT c.chunk_id, c.content, c.file_path, c.start_line, c.end_line, c.language, c.token_count, c.metadata, c.provenance
                 FROM unnest($2::text[]) WITH ORDINALITY AS u(chunk_id, ord)
                 JOIN chunks c
                   ON c.repo_id = $1
@@ -766,18 +800,7 @@ class PostgresClient:
                 chunk_ids,
             )
         return [
-            Chunk(
-                chunk_id=str(r["chunk_id"]),
-                content=str(r["content"]),
-                file_path=str(r["file_path"]),
-                start_line=int(r["start_line"]),
-                end_line=int(r["end_line"]),
-                language=str(r["language"]) if r["language"] is not None else None,
-                token_count=int(r["token_count"] or 0),
-                embedding=None,
-                summary=None,
-                metadata=_coerce_jsonb_dict(r.get("metadata")),
-            )
+            _row_to_chunk(r)
             for r in rows
         ]
 
@@ -797,7 +820,7 @@ class PostgresClient:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT chunk_id, content, file_path, start_line, end_line, language, token_count, metadata
+                SELECT chunk_id, content, file_path, start_line, end_line, language, token_count, metadata, provenance
                 FROM chunks
                 WHERE repo_id = $1
                   AND file_path = $2
@@ -810,18 +833,7 @@ class PostgresClient:
             )
 
         return [
-            Chunk(
-                chunk_id=str(r["chunk_id"]),
-                content=str(r["content"]),
-                file_path=str(r["file_path"]),
-                start_line=int(r["start_line"]),
-                end_line=int(r["end_line"]),
-                language=str(r["language"]) if r["language"] is not None else None,
-                token_count=int(r["token_count"] or 0),
-                embedding=None,
-                summary=None,
-                metadata=_coerce_jsonb_dict(r.get("metadata")),
-            )
+            _row_to_chunk(r)
             for r in rows
         ]
 
@@ -1543,45 +1555,6 @@ class PostgresClient:
                 _json_dumps_sanitized(sparse_contract) if sparse_contract else None,
             )
 
-    async def get_chunks_for_file_span(
-        self, repo_id: str, file_path: str, start_line: int, end_line: int, limit: int = 5
-    ) -> list[Chunk]:
-        await self._require_pool()
-        assert self._pool is not None
-
-        async with self._pool.acquire() as conn:
-            rows = await conn.fetch(
-                """
-                SELECT chunk_id, content, file_path, start_line, end_line, language, token_count, metadata
-                FROM chunks
-                WHERE repo_id = $1
-                  AND file_path = $2
-                  AND NOT (end_line < $3 OR start_line > $4)
-                ORDER BY start_line ASC
-                LIMIT $5;
-                """,
-                repo_id,
-                file_path,
-                int(start_line),
-                int(end_line),
-                int(limit),
-            )
-        return [
-            Chunk(
-                chunk_id=str(r["chunk_id"]),
-                content=str(r["content"]),
-                file_path=str(r["file_path"]),
-                start_line=int(r["start_line"]),
-                end_line=int(r["end_line"]),
-                language=str(r["language"]) if r["language"] is not None else None,
-                token_count=int(r["token_count"] or 0),
-                embedding=None,
-                summary=None,
-                metadata=_coerce_jsonb_dict(r.get("metadata")),
-            )
-            for r in rows
-        ]
-
     async def list_chunks_for_repo(self, repo_id: str, limit: int | None = None) -> list[Chunk]:
         await self._require_pool()
         assert self._pool is not None
@@ -1590,7 +1563,7 @@ class PostgresClient:
             if limit is None:
                 rows = await conn.fetch(
                     """
-                    SELECT chunk_id, content, file_path, start_line, end_line, language, token_count, metadata
+                    SELECT chunk_id, content, file_path, start_line, end_line, language, token_count, metadata, provenance
                     FROM chunks
                     WHERE repo_id = $1
                     ORDER BY file_path ASC, start_line ASC, chunk_id ASC;
@@ -1600,7 +1573,7 @@ class PostgresClient:
             else:
                 rows = await conn.fetch(
                     """
-                    SELECT chunk_id, content, file_path, start_line, end_line, language, token_count, metadata
+                    SELECT chunk_id, content, file_path, start_line, end_line, language, token_count, metadata, provenance
                     FROM chunks
                     WHERE repo_id = $1
                     ORDER BY file_path ASC, start_line ASC, chunk_id ASC
@@ -1611,20 +1584,91 @@ class PostgresClient:
                 )
 
         return [
-            Chunk(
-                chunk_id=str(r["chunk_id"]),
-                content=str(r["content"]),
-                file_path=str(r["file_path"]),
-                start_line=int(r["start_line"]),
-                end_line=int(r["end_line"]),
-                language=str(r["language"]) if r["language"] is not None else None,
-                token_count=int(r["token_count"] or 0),
-                embedding=None,
-                summary=None,
-                metadata=_coerce_jsonb_dict(r.get("metadata")),
-            )
+            _row_to_chunk(r)
             for r in rows
         ]
+
+    # ---------------------------------------------------------------------
+    # Document provenance records (source document viewer)
+    # ---------------------------------------------------------------------
+
+    async def upsert_document(self, repo_id: str, record: IndexedDocumentRecord) -> None:
+        """Write the per-file provenance record under ``repo_id`` (staging id during a run)."""
+        await self._require_pool()
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                await self._ensure_corpus_row(
+                    conn, repo_id, name=repo_id, root_path=".", preserve_identity=True
+                )
+                await conn.execute(
+                    """
+                    INSERT INTO documents (
+                      repo_id, file_path, kind, extraction, sha256, byte_size, markdown, indexed_at
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+                    ON CONFLICT (repo_id, file_path) DO UPDATE SET
+                      kind = EXCLUDED.kind,
+                      extraction = EXCLUDED.extraction,
+                      sha256 = EXCLUDED.sha256,
+                      byte_size = EXCLUDED.byte_size,
+                      markdown = EXCLUDED.markdown,
+                      indexed_at = now();
+                    """,
+                    repo_id,
+                    record.file_path,
+                    record.kind,
+                    record.extraction,
+                    record.sha256,
+                    int(record.byte_size),
+                    _sanitize_pg_text(record.markdown) if record.markdown is not None else None,
+                )
+
+    async def get_document(self, repo_id: str, file_path: str) -> IndexedDocumentRecord | None:
+        await self._require_pool()
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT file_path, kind, extraction, sha256, byte_size, markdown, indexed_at
+                FROM documents
+                WHERE repo_id = $1 AND file_path = $2;
+                """,
+                repo_id,
+                file_path,
+            )
+        if not row:
+            return None
+        return IndexedDocumentRecord(
+            file_path=str(row["file_path"]),
+            kind=row["kind"],
+            extraction=row["extraction"],
+            sha256=str(row["sha256"]),
+            byte_size=int(row["byte_size"]),
+            markdown=row["markdown"],
+            indexed_at=row["indexed_at"],
+        )
+
+    async def file_is_indexed(self, repo_id: str, file_path: str) -> bool:
+        """True when the corpus holds at least one chunk for the file (the viewer's authorization)."""
+        await self._require_pool()
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            found = await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM chunks WHERE repo_id = $1 AND file_path = $2);",
+                repo_id,
+                file_path,
+            )
+        return bool(found)
+
+    async def count_documents(self, repo_id: str) -> int:
+        await self._require_pool()
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            return int(
+                await conn.fetchval("SELECT count(*) FROM documents WHERE repo_id = $1;", repo_id)
+                or 0
+            )
 
     async def list_chunk_summaries(
         self, repo_id: str, limit: int | None = None
@@ -2407,6 +2451,7 @@ class PostgresClient:
                     "WITH d AS (DELETE FROM chunks WHERE repo_id = $1 RETURNING 1) SELECT count(*) FROM d;",
                     repo_id,
                 )
+                await conn.execute("DELETE FROM documents WHERE repo_id = $1;", repo_id)
                 await conn.execute("DELETE FROM chunk_summaries WHERE repo_id = $1;", repo_id)
                 await conn.execute(
                     "DELETE FROM chunk_summaries_last_build WHERE repo_id = $1;", repo_id
@@ -2501,7 +2546,9 @@ class PostgresClient:
         await self._require_pool()
         assert self._pool is not None
         async with self._pool.acquire() as conn:
-            result = await conn.execute("DELETE FROM chunks WHERE repo_id = $1;", repo_id)
+            async with conn.transaction():
+                await conn.execute("DELETE FROM documents WHERE repo_id = $1;", repo_id)
+                result = await conn.execute("DELETE FROM chunks WHERE repo_id = $1;", repo_id)
         return int(result.split()[-1])
 
     async def delete_corpus_with_data(self, repo_id: str) -> None:
@@ -2514,6 +2561,7 @@ class PostgresClient:
                     "DELETE FROM chunk_summaries_last_build WHERE repo_id = $1;", repo_id
                 )
                 await conn.execute("DELETE FROM chunk_summaries WHERE repo_id = $1;", repo_id)
+                await conn.execute("DELETE FROM documents WHERE repo_id = $1;", repo_id)
                 await conn.execute("DELETE FROM chunks WHERE repo_id = $1;", repo_id)
                 await conn.execute("DELETE FROM corpus_configs WHERE repo_id = $1;", repo_id)
                 await conn.execute("DELETE FROM corpora WHERE repo_id = $1;", repo_id)
@@ -2639,6 +2687,13 @@ class PostgresClient:
                 await conn.execute("DELETE FROM chunks WHERE repo_id = $1;", active_repo_id)
                 await conn.execute(
                     "UPDATE chunks SET repo_id = $1 WHERE repo_id = $2;",
+                    active_repo_id,
+                    staging_repo_id,
+                )
+
+                await conn.execute("DELETE FROM documents WHERE repo_id = $1;", active_repo_id)
+                await conn.execute(
+                    "UPDATE documents SET repo_id = $1 WHERE repo_id = $2;",
                     active_repo_id,
                     staging_repo_id,
                 )

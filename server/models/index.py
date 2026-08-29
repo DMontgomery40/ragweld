@@ -5,7 +5,51 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import AliasChoices, BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field, model_validator
+
+ExtractionMethod = Literal["docling", "direct"]
+DocumentKind = Literal["text", "pdf", "rich"]
+
+
+class PageRegion(BaseModel):
+    """One cited region on a page: top-left origin, normalized to the page size (0..1)."""
+
+    page: int = Field(ge=1, description="1-based page number")
+    left: float = Field(ge=0.0, le=1.0, description="Left edge as a fraction of page width")
+    top: float = Field(ge=0.0, le=1.0, description="Top edge as a fraction of page height")
+    right: float = Field(ge=0.0, le=1.0, description="Right edge as a fraction of page width")
+    bottom: float = Field(ge=0.0, le=1.0, description="Bottom edge as a fraction of page height")
+
+    @model_validator(mode="after")
+    def _ordered(self) -> PageRegion:
+        if self.left > self.right or self.top > self.bottom:
+            raise ValueError("PageRegion requires left <= right and top <= bottom")
+        return self
+
+
+class ChunkProvenance(BaseModel):
+    """Where a chunk came from in its source document: extraction method plus page regions.
+
+    Direct text/code extraction has line spans only (``regions`` empty, pages ``None``).
+    Docling extraction carries one region per contributing layout item.
+    """
+
+    extraction: ExtractionMethod = Field(description="How the source text was extracted")
+    page_start: int | None = Field(default=None, ge=1, description="First cited page (1-based)")
+    page_end: int | None = Field(default=None, ge=1, description="Last cited page (1-based)")
+    regions: list[PageRegion] = Field(
+        default_factory=list, description="Layout regions the chunk text was taken from"
+    )
+
+    @model_validator(mode="after")
+    def _consistent(self) -> ChunkProvenance:
+        if (self.page_start is None) != (self.page_end is None):
+            raise ValueError("page_start and page_end must both be set or both be None")
+        if self.page_start is not None and self.page_end is not None and self.page_start > self.page_end:
+            raise ValueError("page_start must be <= page_end")
+        if bool(self.regions) != (self.page_start is not None):
+            raise ValueError("regions must be non-empty exactly when page_start is set")
+        return self
 
 
 class Chunk(BaseModel):
@@ -21,6 +65,10 @@ class Chunk(BaseModel):
     embedding: list[float] | None = Field(default=None, description="Vector embedding")
     summary: str | None = Field(default=None, description="AI-generated chunk summary")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Arbitrary chunk metadata")
+    provenance: ChunkProvenance | None = Field(
+        default=None,
+        description="Extraction and page provenance; None only for rows indexed before provenance capture",
+    )
 
 
 class IndexRequest(BaseModel):
@@ -264,8 +312,138 @@ class IndexDeletionIncompleteResponse(BaseModel):
     detail: IndexDeletionIncompleteDetail
 
 
+# =============================================================================
+# SOURCE DOCUMENT VIEWER - document view + provenance record
+# =============================================================================
+
+
+class PageSize(BaseModel):
+    """PDF page size in points (72 per inch)."""
+
+    width: float = Field(gt=0.0, description="Page width in points")
+    height: float = Field(gt=0.0, description="Page height in points")
+
+
+class DocumentTextView(BaseModel):
+    """Plain text/code document content for the viewer."""
+
+    kind: Literal["text"] = "text"
+    text: str = Field(description="Full file text decoded exactly as the indexer decoded it")
+    line_count: int = Field(ge=0, description="Number of lines in text")
+
+
+class DocumentPdfView(BaseModel):
+    """PDF document: pages are rendered on demand through the page endpoint."""
+
+    kind: Literal["pdf"] = "pdf"
+    page_count: int = Field(ge=1, description="Number of pages")
+    page_sizes: list[PageSize] = Field(description="Page sizes in points, index 0 = page 1")
+
+
+class DocumentRichView(BaseModel):
+    """Rich document (docx/pptx/xlsx/html) shown as the Docling markdown the chunks were cut from."""
+
+    kind: Literal["rich"] = "rich"
+    markdown: str = Field(description="Docling markdown export captured at index time")
+
+
+class DocumentProvenanceCaptured(BaseModel):
+    """The file has a provenance record from indexing."""
+
+    state: Literal["captured"] = "captured"
+    extraction: ExtractionMethod = Field(description="How the file was extracted at index time")
+    sha256: str = Field(min_length=64, max_length=64, description="SHA-256 of the file at index time")
+    byte_size: int = Field(ge=0, description="File size at index time")
+    indexed_at: datetime = Field(description="When the provenance record was written")
+    stale: bool = Field(description="True when the file on disk no longer matches sha256")
+
+
+class DocumentProvenanceNotCaptured(BaseModel):
+    """The file was indexed before provenance capture existed; re-index to enable it."""
+
+    state: Literal["not_captured"] = "not_captured"
+    message: str = Field(description="Stable, non-sensitive summary")
+    operator_hint: str = Field(description="What the operator can do next")
+
+
+class DocumentView(BaseModel):
+    """Source document as served to the evidence viewer."""
+
+    corpus_id: str = Field(description="Corpus the file belongs to")
+    file_path: str = Field(description="Corpus-root-relative POSIX path")
+    byte_size: int = Field(ge=0, description="Current file size on disk")
+    content: DocumentTextView | DocumentPdfView | DocumentRichView = Field(discriminator="kind")
+    provenance: DocumentProvenanceCaptured | DocumentProvenanceNotCaptured = Field(
+        discriminator="state"
+    )
+
+
+class DocumentNotCapturedDetail(BaseModel):
+    """Public error detail (HTTP 409): a rich document has no captured markdown to show."""
+
+    code: Literal["document_not_captured"] = "document_not_captured"
+    corpus_id: str = Field(description="Corpus the file belongs to")
+    file_path: str = Field(description="Corpus-root-relative POSIX path")
+    message: str = Field(description="Stable, non-sensitive summary")
+    operator_hint: str = Field(description="What the operator can do next")
+
+
+class DocumentNotCapturedResponse(BaseModel):
+    """FastAPI response envelope for a not-captured rich document."""
+
+    detail: DocumentNotCapturedDetail
+
+
+class DocumentTooLargeDetail(BaseModel):
+    """Public error detail (HTTP 413): a text document exceeds the viewer size limit."""
+
+    code: Literal["document_too_large"] = "document_too_large"
+    corpus_id: str = Field(description="Corpus the file belongs to")
+    file_path: str = Field(description="Corpus-root-relative POSIX path")
+    byte_size: int = Field(ge=0, description="Current file size on disk")
+    max_text_bytes: int = Field(ge=0, description="Configured document_viewer.max_text_bytes")
+    message: str = Field(description="Stable, non-sensitive summary")
+    operator_hint: str = Field(description="What the operator can do next")
+
+
+class DocumentTooLargeResponse(BaseModel):
+    """FastAPI response envelope for an over-limit text document."""
+
+    detail: DocumentTooLargeDetail
+
+
+class IndexedDocumentRecord(BaseModel):
+    """Persistence boundary for the ``documents`` table (not a frontend wire type)."""
+
+    file_path: str = Field(description="Corpus-root-relative POSIX path")
+    kind: DocumentKind = Field(description="Viewer content kind")
+    extraction: ExtractionMethod = Field(description="How the file was extracted")
+    sha256: str = Field(min_length=64, max_length=64, description="SHA-256 of the file at index time")
+    byte_size: int = Field(ge=0, description="File size at index time")
+    markdown: str | None = Field(
+        default=None, description="Docling markdown export; stored for rich kinds only"
+    )
+    indexed_at: datetime | None = Field(default=None, description="Set by the database on write")
+
+
 __all__ = [
     "Chunk",
+    "ChunkProvenance",
+    "DocumentKind",
+    "DocumentNotCapturedDetail",
+    "DocumentNotCapturedResponse",
+    "DocumentPdfView",
+    "DocumentProvenanceCaptured",
+    "DocumentProvenanceNotCaptured",
+    "DocumentRichView",
+    "DocumentTextView",
+    "DocumentTooLargeDetail",
+    "DocumentTooLargeResponse",
+    "DocumentView",
+    "ExtractionMethod",
+    "IndexedDocumentRecord",
+    "PageRegion",
+    "PageSize",
     "IndexDeletionIncompleteDetail",
     "IndexDeletionIncompleteResponse",
     "IndexEstimate",

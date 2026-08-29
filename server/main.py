@@ -22,6 +22,7 @@ from server.api.cost import router as cost_router
 from server.api.cost import warm_cost_catalog
 from server.api.dataset import router as dataset_router
 from server.api.docker import router as docker_router
+from server.api.documents import router as documents_router
 from server.api.eval import router as eval_router
 from server.api.feedback import router as feedback_router
 from server.api.graph import router as graph_router
@@ -454,6 +455,7 @@ async def observability_middleware(
 app.include_router(health_router, prefix="/api")
 app.include_router(config_router, prefix="/api")
 app.include_router(repos_router, prefix="/api")
+app.include_router(documents_router, prefix="/api")
 app.include_router(index_router, prefix="/api")
 app.include_router(chunk_summaries_router, prefix="/api")
 app.include_router(keywords_router, prefix="/api")

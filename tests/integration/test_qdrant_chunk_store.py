@@ -14,7 +14,7 @@ import pytest
 from server.config import load_config
 from server.db.postgres import PostgresClient
 from server.indexing.generations import build_generation
-from server.models.index import Chunk
+from server.models.index import Chunk, ChunkProvenance
 from server.retrieval.qdrant_store import (
     QdrantChunkStore,
     QdrantCollectionMissingError,
@@ -35,7 +35,8 @@ def _chunk(chunk_id: str, content: str, *, embedding: list[float] | None, ordina
         language="markdown",
         token_count=len(content.split()),
         embedding=embedding,
-        metadata={"chunk_ordinal": ordinal, "extraction": "direct"},
+        metadata={"chunk_ordinal": ordinal},
+        provenance=ChunkProvenance(extraction="direct"),
     )
 
 
@@ -81,7 +82,8 @@ async def test_staged_generations_serve_both_legs_and_retire_after_the_manifest_
         assert dense[0].file_path == "docs/a.md"
         assert dense[0].metadata["corpus_id"] == corpus_id
         assert dense[0].metadata["chunk_ordinal"] == 0
-        assert dense[0].metadata["extraction"] == "direct"
+        assert "extraction" not in dense[0].metadata
+        assert dense[0].provenance is not None and dense[0].provenance.extraction == "direct"
 
         sparse = await store.sparse_search(corpus_id, "salinity calibration", 5, physical=first)
         assert sparse and sparse[0].chunk_id == "a"

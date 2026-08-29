@@ -100,6 +100,7 @@ _SECTION_DEFAULTS: dict[str, _SectionDefaults] = {
     "mcp": _SectionDefaults("global", "shell_ui", "shell", "advanced", "restart"),
     "synthetic": _SectionDefaults("corpus", "ragas", "eval", "advanced", "live"),
     "docker": _SectionDefaults("global", "shell_ui", "shell", "advanced", "restart"),
+    "document_viewer": _SectionDefaults("global", "shell_ui", "shell", "advanced", "live"),
 }
 
 _FIELD_OVERRIDES: dict[str, dict[str, Any]] = {

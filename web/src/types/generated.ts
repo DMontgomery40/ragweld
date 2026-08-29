@@ -324,6 +324,20 @@ export interface ChunkMatch {
   source: "vector" | "sparse" | "graph";
   /** Additional match metadata */
   metadata?: Record<string, unknown>;
+  /** Extraction and page provenance; None for chunks indexed before provenance capture */
+  provenance?: ChunkProvenance | null; // default: None
+}
+
+/** Where a chunk came from in its source document: extraction method plus page regions.  Direct text/code extraction has line spans only (``regions`` empty, pages ``None``). Docling extraction carries one region per contributing layout item. */
+export interface ChunkProvenance {
+  /** How the source text was extracted */
+  extraction: "docling" | "direct";
+  /** First cited page (1-based) */
+  page_start?: number | null; // default: None
+  /** Last cited page (1-based) */
+  page_end?: number | null; // default: None
+  /** Layout regions the chunk text was taken from */
+  regions?: PageRegion[];
 }
 
 /** Metadata about the most recent chunk_summaries build. */
@@ -620,6 +634,95 @@ export interface DockerContainer {
   compose_service: string;
   /** Whether exact Ragweld project and ownership labels authorize local control. */
   managed: boolean;
+}
+
+/** Public error detail (HTTP 409): a rich document has no captured markdown to show. */
+export interface DocumentNotCapturedDetail {
+  code?: "document_not_captured"; // default: "document_not_captured"
+  /** Corpus the file belongs to */
+  corpus_id: string;
+  /** Corpus-root-relative POSIX path */
+  file_path: string;
+  /** Stable, non-sensitive summary */
+  message: string;
+  /** What the operator can do next */
+  operator_hint: string;
+}
+
+/** PDF document: pages are rendered on demand through the page endpoint. */
+export interface DocumentPdfView {
+  kind?: "pdf"; // default: "pdf"
+  /** Number of pages */
+  page_count: number;
+  /** Page sizes in points, index 0 = page 1 */
+  page_sizes: PageSize[];
+}
+
+/** The file has a provenance record from indexing. */
+export interface DocumentProvenanceCaptured {
+  state?: "captured"; // default: "captured"
+  /** How the file was extracted at index time */
+  extraction: "docling" | "direct";
+  /** SHA-256 of the file at index time */
+  sha256: string;
+  /** File size at index time */
+  byte_size: number;
+  /** When the provenance record was written */
+  indexed_at: string;
+  /** True when the file on disk no longer matches sha256 */
+  stale: boolean;
+}
+
+/** The file was indexed before provenance capture existed; re-index to enable it. */
+export interface DocumentProvenanceNotCaptured {
+  state?: "not_captured"; // default: "not_captured"
+  /** Stable, non-sensitive summary */
+  message: string;
+  /** What the operator can do next */
+  operator_hint: string;
+}
+
+/** Rich document (docx/pptx/xlsx/html) shown as the Docling markdown the chunks were cut from. */
+export interface DocumentRichView {
+  kind?: "rich"; // default: "rich"
+  /** Docling markdown export captured at index time */
+  markdown: string;
+}
+
+/** Plain text/code document content for the viewer. */
+export interface DocumentTextView {
+  kind?: "text"; // default: "text"
+  /** Full file text decoded exactly as the indexer decoded it */
+  text: string;
+  /** Number of lines in text */
+  line_count: number;
+}
+
+/** Public error detail (HTTP 413): a text document exceeds the viewer size limit. */
+export interface DocumentTooLargeDetail {
+  code?: "document_too_large"; // default: "document_too_large"
+  /** Corpus the file belongs to */
+  corpus_id: string;
+  /** Corpus-root-relative POSIX path */
+  file_path: string;
+  /** Current file size on disk */
+  byte_size: number;
+  /** Configured document_viewer.max_text_bytes */
+  max_text_bytes: number;
+  /** Stable, non-sensitive summary */
+  message: string;
+  /** What the operator can do next */
+  operator_hint: string;
+}
+
+/** Source document evidence viewer: how cited files are rendered back to the user. */
+export interface DocumentViewerConfig {
+  /** PDF page raster scale for the viewer (1.0 = 72 dpi; 2.0 = 144 dpi) */
+  page_render_scale?: number; // default: 2.0
+  /** PDF page raster scale for citation thumbnails in chat */
+  thumbnail_render_scale?: number; // default: 0.5
+  /** Largest text/code file the viewer will serve in full */
+  max_text_bytes?: number; // default: 5000000
 }
 
 /** Embedding generation and caching configuration. */
@@ -1674,6 +1777,28 @@ export interface ObservabilityWorkbenchLink {
   subtab?: string | null; // default: None
   /** Operator-facing explanation for the destination. */
   description?: string | null; // default: None
+}
+
+/** One cited region on a page: top-left origin, normalized to the page size (0..1). */
+export interface PageRegion {
+  /** 1-based page number */
+  page: number;
+  /** Left edge as a fraction of page width */
+  left: number;
+  /** Top edge as a fraction of page height */
+  top: number;
+  /** Right edge as a fraction of page width */
+  right: number;
+  /** Bottom edge as a fraction of page height */
+  bottom: number;
+}
+
+/** PDF page size in points (72 per inch). */
+export interface PageSize {
+  /** Page width in points */
+  width: number;
+  /** Page height in points */
+  height: number;
 }
 
 /** Public error detail (HTTP 409) when a corpus's persisted index state does not validate. */
@@ -3165,6 +3290,8 @@ export interface Chunk {
   summary?: string | null;
   /** Arbitrary chunk metadata */
   metadata?: Record<string, unknown>;
+  /** Extraction and page provenance; None only for rows indexed before provenance capture */
+  provenance?: ChunkProvenance | null;
 }
 
 /** Request to build chunk_summaries for a repository. */
@@ -3380,6 +3507,28 @@ export interface DockerStatus {
   project_name?: "ragweld";
   /** Number of authorized Ragweld service containers. */
   containers_count?: number;
+}
+
+/** FastAPI response envelope for a not-captured rich document. */
+export interface DocumentNotCapturedResponse {
+  detail: DocumentNotCapturedDetail;
+}
+
+/** FastAPI response envelope for an over-limit text document. */
+export interface DocumentTooLargeResponse {
+  detail: DocumentTooLargeDetail;
+}
+
+/** Source document as served to the evidence viewer. */
+export interface DocumentView {
+  /** Corpus the file belongs to */
+  corpus_id: string;
+  /** Corpus-root-relative POSIX path */
+  file_path: string;
+  /** Current file size on disk */
+  byte_size: number;
+  content: DocumentTextView | DocumentPdfView | DocumentRichView;
+  provenance: DocumentProvenanceCaptured | DocumentProvenanceNotCaptured;
 }
 
 /** Request payload for /eval/analyze_comparison. */
@@ -4501,4 +4650,5 @@ export interface TriBridConfig {
   mcp?: MCPConfig;
   synthetic?: SyntheticConfig;
   docker?: DockerConfig;
+  document_viewer?: DocumentViewerConfig;
 }

@@ -253,7 +253,8 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         )
         stored_chunks = await pg.list_chunks_for_repo(corpus_id, limit=5)
         assert stored_chunks and all(
-            ch.metadata.get("extraction") == "direct" for ch in stored_chunks
+            ch.provenance is not None and ch.provenance.extraction == "direct"
+            for ch in stored_chunks
         )
         assert all(ch.embedding is None for ch in stored_chunks)
 

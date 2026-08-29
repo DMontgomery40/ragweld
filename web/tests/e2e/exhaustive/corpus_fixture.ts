@@ -109,10 +109,12 @@ export async function indexCorpus(request: APIRequestContext, corpusId: string, 
  */
 export async function provisionExhaustiveCorpus(
   request: APIRequestContext,
-  opts: { index?: boolean } = {}
+  opts: { index?: boolean; corpusPath?: string } = {}
 ): Promise<ExhaustiveCorpus> {
   const corpusId = uniqueCorpusId();
-  const corpusPath = acceptanceCorpusPath();
+  // Default: the Aurora acceptance fixture. A spec may point at its own materialized directory
+  // (e.g. the source-viewer spec adds the deterministic PDF/HTML fixtures to a temp copy).
+  const corpusPath = opts.corpusPath ?? acceptanceCorpusPath();
   // `/api/reranker/logs` only serves log paths under data/logs/ (or the OS temp dir).
   const runDir = path.posix.join('data', 'logs', 'exhaustive', corpusId);
   mkdirSync(path.resolve(process.cwd(), runDir), { recursive: true });

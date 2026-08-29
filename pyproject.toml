@@ -49,6 +49,8 @@ dependencies = [
     "qdrant-client>=1.17.0",
     "qdrant-haystack>=10.3.0",
     "docling>=2.81.0",
+    "pypdfium2>=5.6.0",
+    "pillow>=12.1",
     "neo4j-graphrag[openai]==1.14.1",
     "fastembed-haystack>=2.6.0",
     "ragas>=0.3.1",

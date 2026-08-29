@@ -3,6 +3,8 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { Sidepanel } from '@/components/Sidepanel';
 import { DockPickerModal } from '@/components/Dock/DockPickerModal';
 import { DockView } from '@/components/Dock/DockView';
+import { DocumentViewer } from '@/components/Documents/DocumentViewer';
+import { formatSourceLocation } from '@/components/Documents/sourceLabels';
 import { DOCK_DEFAULT_MODE_BY_PATH } from '@/config/dockCatalog';
 import { getRouteByPath } from '@/config/routes';
 import { useDockStore } from '@/stores';
@@ -24,6 +26,7 @@ export function DockPanel() {
 
   const mode = useDockStore((s) => s.mode);
   const docked = useDockStore((s) => s.docked);
+  const activeDocument = useDockStore((s) => s.activeDocument);
   const setMode = useDockStore((s) => s.setMode);
   const setDocked = useDockStore((s) => s.setDocked);
   const clearDocked = useDockStore((s) => s.clearDocked);
@@ -163,9 +166,14 @@ export function DockPanel() {
 
   const title = useMemo(() => {
     if (mode === 'settings') return 'Settings';
+    if (mode === 'document') {
+      if (!activeDocument) return 'Source';
+      const name = activeDocument.source.file_path.split('/').pop() || activeDocument.source.file_path;
+      return `Source: ${name} · ${formatSourceLocation(activeDocument.source)}`;
+    }
     if (!docked) return 'Dock';
     return `Dock: ${formatDockTitle(docked)}`;
-  }, [docked, mode]);
+  }, [activeDocument, docked, mode]);
 
   const SegmentedButton = ({
     active,
@@ -256,6 +264,12 @@ export function DockPanel() {
               onClick={() => setMode('dock')}
               testId="dock-mode-dock"
             />
+            <SegmentedButton
+              active={mode === 'document'}
+              label="Source"
+              onClick={() => setMode('document')}
+              testId="dock-mode-document"
+            />
           </div>
 
           <div
@@ -297,6 +311,32 @@ export function DockPanel() {
           <div style={{ height: '100%', overflow: 'auto', padding: '20px' }}>
             <Sidepanel />
           </div>
+        ) : mode === 'document' ? (
+          activeDocument ? (
+            <div style={{ height: '100%', overflow: 'hidden' }}>
+              <DocumentViewer key={`${activeDocument.corpusId}:${activeDocument.source.chunk_id}`} target={activeDocument} />
+            </div>
+          ) : (
+            <div
+              data-testid="dock-document-empty"
+              style={{
+                height: '100%',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '10px',
+                padding: '18px',
+                color: 'var(--fg-muted)',
+                textAlign: 'center',
+              }}
+            >
+              <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--fg)' }}>No source open</div>
+              <div style={{ fontSize: '12.5px', maxWidth: '320px' }}>
+                Click a citation under a chat answer to see the cited page or lines here.
+              </div>
+            </div>
+          )
         ) : docked ? (
           <div style={{ height: '100%', overflow: 'hidden' }}>
             <DockView target={docked} />

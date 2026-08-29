@@ -58,10 +58,17 @@ from server.indexing.official_graphrag import (
     extract_semantic_kg_with_graphrag,
     write_lexical_graph_with_graphrag,
 )
-from server.indexing.text_extractors import extract_text_for_path, extraction_method_for_path
+from server.indexing.provenance import stamp_provenance
+from server.indexing.text_extractors import (
+    ExtractedDocument,
+    document_kind_for_path,
+    extract_text_for_path,
+    extraction_method_for_path,
+)
 from server.models.index import (
     Chunk,
     IndexDeletionIncompleteResponse,
+    IndexedDocumentRecord,
     IndexEstimate,
     IndexFenceCorruptDetail,
     IndexRequest,
@@ -100,6 +107,7 @@ from server.observability.metrics import (
 from server.retrieval.qdrant_store import QdrantChunkStore
 from server.services.config_store import CorpusNotFoundError
 from server.services.config_store import get_config as load_scoped_config
+from server.services.corpus_files import sha256_file
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
@@ -1498,8 +1506,8 @@ def _extract_text_for_index_sync(
     parquet_max_cell_chars: int = 20_000,
     parquet_text_columns_only: bool = True,
     parquet_include_column_names: bool = True,
-) -> str | None:
-    content = extract_text_for_path(
+) -> ExtractedDocument | None:
+    extracted = extract_text_for_path(
         path,
         parquet_max_rows=parquet_max_rows,
         parquet_max_chars=parquet_max_chars,
@@ -1507,9 +1515,43 @@ def _extract_text_for_index_sync(
         parquet_text_columns_only=parquet_text_columns_only,
         parquet_include_column_names=parquet_include_column_names,
     )
-    if content is not None:
-        return content
-    return path.read_text(encoding="utf-8", errors="ignore")
+    if extracted is not None:
+        return extracted
+    return ExtractedDocument(
+        text=path.read_text(encoding="utf-8", errors="ignore"),
+        extraction="direct",
+        kind=document_kind_for_path(path),
+    )
+
+
+
+def _hash_and_size(path: Path) -> tuple[str, int]:
+    return sha256_file(path), int(path.stat().st_size)
+
+
+async def _record_document(
+    postgres: PostgresClient,
+    write_repo_id: str,
+    rel_path: str,
+    abs_path: Path,
+    extracted: ExtractedDocument | None,
+) -> None:
+    """Write the file's provenance record under the staging id (promoted with its chunks)."""
+    sha256, byte_size = await asyncio.to_thread(_hash_and_size, abs_path)
+    kind = extracted.kind if extracted is not None else document_kind_for_path(abs_path)
+    extraction = extracted.extraction if extracted is not None else "direct"
+    markdown = extracted.text if (extracted is not None and kind == "rich") else None
+    await postgres.upsert_document(
+        write_repo_id,
+        IndexedDocumentRecord(
+            file_path=rel_path,
+            kind=kind,
+            extraction=extraction,
+            sha256=sha256,
+            byte_size=byte_size,
+            markdown=markdown,
+        ),
+    )
 
 
 async def _run_docling_extraction_locked(
@@ -1561,7 +1603,7 @@ async def _extract_text_for_index(
     parquet_max_cell_chars: int = 20_000,
     parquet_text_columns_only: bool = True,
     parquet_include_column_names: bool = True,
-) -> str | None:
+) -> ExtractedDocument | None:
     if extraction_method_for_path(path) == "docling":
         return await _run_docling_extraction_locked(
             _extract_text_for_index_sync,
@@ -1878,6 +1920,7 @@ async def _run_index_body(
             ordinal = 0
             try:
                 INDEX_FILES_PROCESSED_TOTAL.inc()
+                await _record_document(postgres, write_repo_id, rel_path, abs_path, None)
                 with INDEX_STAGE_LATENCY_SECONDS.labels(stage="file_read_stream").time():
                     with abs_path.open("r", encoding="utf-8", errors="ignore") as f:
                         while True:
@@ -1899,6 +1942,7 @@ async def _run_index_body(
                             base_line += block.count("\n")
                             if not chunks:
                                 continue
+                            stamp_provenance(chunks, extraction="direct", spans=())
                             embedded_batches = await _upsert_chunk_batches(chunks)
                             if (
                                 semantic_budget > 0
@@ -1923,7 +1967,7 @@ async def _run_index_body(
         else:
             try:
                 with INDEX_STAGE_LATENCY_SECONDS.labels(stage="file_read").time():
-                    content = await _extract_text_for_index(
+                    extracted = await _extract_text_for_index(
                         abs_path,
                         parquet_max_rows=int(
                             getattr(cfg.indexing, "parquet_extract_max_rows", 5000) or 5000
@@ -1955,8 +1999,12 @@ async def _run_index_body(
                     drop_oldest=True,
                 )
                 continue
+            if extracted is None:
+                continue
+            content = extracted.text
             if "\x00" in content:
                 continue
+            await _record_document(postgres, write_repo_id, rel_path, abs_path, extracted)
 
             # Local-only "late chunking": embed the full doc segment once, then pool per chunk span.
             # This is experimental and only applies when explicitly enabled via config.
@@ -1989,6 +2037,7 @@ async def _run_index_body(
                 INDEX_FILES_PROCESSED_TOTAL.inc()
                 if not chunks:
                     continue
+                stamp_provenance(chunks, extraction=extracted.extraction, spans=extracted.spans)
                 embedded_batches = await _upsert_chunk_batches(chunks)
                 if (
                     semantic_budget > 0
@@ -2005,9 +2054,7 @@ async def _run_index_body(
             INDEX_FILES_PROCESSED_TOTAL.inc()
             if not chunks:
                 continue
-            extraction = extraction_method_for_path(abs_path)
-            for chunk in chunks:
-                chunk.metadata["extraction"] = extraction
+            stamp_provenance(chunks, extraction=extracted.extraction, spans=extracted.spans)
             if cross_file_chunk_batching:
                 pending_cross_file_chunks.extend(chunks)
                 await _flush_pending_cross_file_chunks(force=False)

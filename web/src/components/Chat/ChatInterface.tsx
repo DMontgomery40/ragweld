@@ -16,6 +16,7 @@ import { withCorpusScope } from '@/api/client';
 import { ChatHistorySidebar } from '@/components/Chat/ChatHistorySidebar';
 import { ModelPicker } from '@/components/Chat/ModelPicker';
 import { SourceDropdown } from '@/components/Chat/SourceDropdown';
+import { SourceList } from '@/components/Chat/SourceList';
 import { StatusBar } from '@/components/Chat/StatusBar';
 import {
   clampChatHistory,
@@ -99,14 +100,6 @@ function emitRunComplete(runId?: string, startedAtMs?: number, endedAtMs?: numbe
   } catch {
     // ignore event dispatch failures
   }
-}
-
-function citationLabel(source: ChunkMatch): string {
-  return `${source.file_path}:${source.start_line}-${source.end_line}`;
-}
-
-function citationToVscodeHref(source: ChunkMatch): string {
-  return `vscode://file/${source.file_path}:${source.start_line}`;
 }
 
 const AssistantMarkdown = memo(function AssistantMarkdown({ content }: { content: string }) {
@@ -746,40 +739,7 @@ function AssistantThreadMessage(props: AssistantThreadMessageProps) {
         )}
 
         {props.showCitations && (sources.length > 0 || legacyCitations.length > 0) && (
-          <div
-            style={{
-              marginTop: '12px',
-              paddingTop: '12px',
-              borderTop: '1px solid var(--line)',
-              fontSize: '11px',
-              display: 'grid',
-              gap: '6px',
-            }}
-          >
-            <strong>Sources</strong>
-            {sources.map((source, index) => (
-              <a
-                key={`${source.file_path}-${index}`}
-                href={citationToVscodeHref(source)}
-                title="Open in editor"
-                data-testid="chat-citation-link"
-                style={{
-                  color: 'var(--link)',
-                  textDecoration: 'none',
-                  borderBottom: '1px solid rgba(255,255,255,0.18)',
-                  paddingBottom: '4px',
-                }}
-              >
-                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px' }}>{citationLabel(source)}</div>
-                <div style={{ color: 'var(--fg-muted)', marginTop: '2px' }}>
-                  score {Number(source.score || 0).toFixed(3)}
-                </div>
-              </a>
-            ))}
-            {legacyCitations.map((citation, index) => (
-              <div key={`${citation}-${index}`} style={{ color: 'var(--fg-muted)' }}>{citation}</div>
-            ))}
-          </div>
+          <SourceList sources={sources} legacyCitations={legacyCitations} />
         )}
 
         <div

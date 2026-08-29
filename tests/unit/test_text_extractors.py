@@ -5,16 +5,26 @@ import sys
 import textwrap
 from pathlib import Path
 
-from server.indexing.text_extractors import extract_text_for_path, extraction_method_for_path
+from server.indexing.text_extractors import (
+    document_kind_for_path,
+    extract_text_for_path,
+    extraction_method_for_path,
+)
+from tests.fixtures.pdf_builder import (
+    AURORA_REPORT_PDF,
+    PAGE_TWO_SENTENCE,
+    build_aurora_report_pdf,
+)
 
 
 def test_extract_text_for_csv(tmp_path: Path) -> None:
     p = tmp_path / "data.csv"
     p.write_text("a,b,c\n1,2,3\n", encoding="utf-8")
-    out = extract_text_for_path(p)
-    assert out is not None
-    assert "a\tb\tc" in out
-    assert "1\t2\t3" in out
+    doc = extract_text_for_path(p)
+    assert doc is not None
+    assert doc.extraction == "direct" and doc.kind == "text" and doc.spans == ()
+    assert "a\tb\tc" in doc.text
+    assert "1\t2\t3" in doc.text
 
 
 def test_extract_text_for_xlsx(tmp_path: Path) -> None:
@@ -32,8 +42,10 @@ def test_extract_text_for_xlsx(tmp_path: Path) -> None:
     wb.close()
 
     assert extraction_method_for_path(p) == "docling"
-    out = extract_text_for_path(p)
-    assert out is not None
+    doc = extract_text_for_path(p)
+    assert doc is not None
+    out = doc.text
+    assert doc.extraction == "docling" and doc.kind == "rich"
     # Docling renders worksheets as markdown tables.
     assert "|" in out
     assert "name" in out and "value" in out
@@ -68,9 +80,49 @@ def test_extract_text_for_pdf(tmp_path: Path) -> None:
     p.write_bytes(_build_minimal_pdf("Hello PDF from ragweld"))
 
     assert extraction_method_for_path(p) == "docling"
-    out = extract_text_for_path(p)
-    assert out is not None
-    assert "hello pdf from ragweld" in out.lower()
+    doc = extract_text_for_path(p)
+    assert doc is not None
+    assert doc.kind == "pdf"
+    assert "hello pdf from ragweld" in doc.text.lower()
+
+
+def test_checked_in_aurora_pdf_matches_its_builder() -> None:
+    assert AURORA_REPORT_PDF.read_bytes() == build_aurora_report_pdf()
+
+
+def test_pdf_extraction_yields_page_spans_with_normalized_boxes() -> None:
+    doc = extract_text_for_path(AURORA_REPORT_PDF)
+    assert doc is not None
+    assert doc.extraction == "docling" and doc.kind == "pdf"
+    assert doc.unlocated_items == 0
+    assert doc.spans, "PDF extraction must carry a source map"
+    assert {span.region.page for span in doc.spans} == {1, 2}
+    previous_end = 0
+    for span in doc.spans:
+        region = span.region
+        assert 0.0 <= region.left < region.right <= 1.0
+        assert 0.0 <= region.top < region.bottom <= 1.0
+        assert span.char_start >= previous_end  # monotonic, non-overlapping
+        assert span.char_end > span.char_start
+        assert doc.text[span.char_start : span.char_end].strip()
+        previous_end = span.char_end
+    hit = doc.text.find(PAGE_TWO_SENTENCE)
+    assert hit >= 0
+    covering = [s for s in doc.spans if s.char_start <= hit < s.char_end]
+    assert covering and all(s.region.page == 2 for s in covering)
+    # page-1 text sits above page-2 text in the markdown, never the reverse
+    assert max(s.char_end for s in doc.spans if s.region.page == 1) <= min(
+        s.char_start for s in doc.spans if s.region.page == 2
+    )
+
+
+def test_document_kind_for_path() -> None:
+    assert document_kind_for_path(Path("a.pdf")) == "pdf"
+    assert document_kind_for_path(Path("a.PDF")) == "pdf"
+    assert document_kind_for_path(Path("a.docx")) == "rich"
+    assert document_kind_for_path(Path("a.html")) == "rich"
+    assert document_kind_for_path(Path("a.py")) == "text"
+    assert document_kind_for_path(Path("a.txt")) == "text"
 
 
 def test_extract_text_for_html_uses_docling_and_keeps_tables(tmp_path: Path) -> None:
@@ -83,8 +135,11 @@ def test_extract_text_for_html_uses_docling_and_keeps_tables(tmp_path: Path) -> 
         encoding="utf-8",
     )
     assert extraction_method_for_path(p) == "docling"
-    out = extract_text_for_path(p)
-    assert out is not None
+    doc = extract_text_for_path(p)
+    assert doc is not None
+    assert doc.kind == "rich" and doc.extraction == "docling"
+    assert doc.spans == ()  # HTML items carry no page provenance
+    out = doc.text
     assert "calibrated every 45 days" in out
     assert "|" in out  # table survived conversion to markdown
 
@@ -161,7 +216,9 @@ def test_extract_text_for_parquet_is_bounded(tmp_path: Path) -> None:
         parquet_include_column_names=True,
     )
     assert out is not None
-    assert "row 0" in out
-    assert "[text]" in out
-    assert "hello" in out
-    assert "world" not in out
+    text = out.text
+    assert out.extraction == "direct" and out.kind == "text"
+    assert "row 0" in text
+    assert "[text]" in text
+    assert "hello" in text
+    assert "world" not in text

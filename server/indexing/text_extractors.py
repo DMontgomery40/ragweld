@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import csv
 import threading
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
-ExtractionMethod = Literal["docling", "direct"]
+from server.models.index import DocumentKind, ExtractionMethod, PageRegion
 
 # Rich-document formats are converted through Docling; code and plain-text
 # formats keep the direct read path by design.
@@ -15,8 +16,43 @@ _DOCLING_CONVERTER: Any = None
 _DOCLING_CONVERTER_LOCK = threading.Lock()
 
 
+@dataclass(frozen=True)
+class SourceSpan:
+    """One Docling layout item located in the serialized markdown: [char_start, char_end)."""
+
+    char_start: int
+    char_end: int
+    region: PageRegion
+
+
+@dataclass(frozen=True)
+class ExtractedDocument:
+    """Extracted text plus the provenance needed to point a chunk back at its source."""
+
+    text: str
+    extraction: ExtractionMethod
+    kind: DocumentKind
+    spans: tuple[SourceSpan, ...] = ()
+    unlocated_items: int = 0
+
+
 def extraction_method_for_path(path: Path) -> ExtractionMethod:
     return "docling" if path.suffix.lower() in DOCLING_SUFFIXES else "direct"
+
+
+def document_kind_for_path(path: Path) -> DocumentKind:
+    ext = path.suffix.lower()
+    if ext == ".pdf":
+        return "pdf"
+    if ext in DOCLING_SUFFIXES:
+        return "rich"
+    return "text"
+
+
+def _direct(text: str | None) -> ExtractedDocument | None:
+    if text is None:
+        return None
+    return ExtractedDocument(text=text, extraction="direct", kind="text")
 
 
 def _docling_converter() -> Any:
@@ -39,8 +75,8 @@ def extract_text_for_path(
     parquet_max_cell_chars: int = 20_000,
     parquet_text_columns_only: bool = True,
     parquet_include_column_names: bool = True,
-) -> str | None:
-    """Return extracted text for a file, or None if unsupported/unreadable.
+) -> ExtractedDocument | None:
+    """Return the extracted document for a file, or None if unsupported/unreadable.
 
     - Text/code formats are read as UTF-8 (errors ignored)
     - CSV/TSV are normalized into tab-separated rows
@@ -49,19 +85,21 @@ def extract_text_for_path(
     """
     ext = path.suffix.lower()
     if ext in {".txt", ".md", ".rst", ".json", ".yaml", ".yml", ".toml", ".sql", ".py", ".js", ".jsx", ".ts", ".tsx"}:
-        return _read_text(path)
+        return _direct(_read_text(path))
     if ext in {".csv", ".tsv"}:
-        return _read_delimited(path, delimiter="," if ext == ".csv" else "\t")
+        return _direct(_read_delimited(path, delimiter="," if ext == ".csv" else "\t"))
     if ext in DOCLING_SUFFIXES:
         return _read_with_docling(path)
     if ext == ".parquet":
-        return _read_parquet(
-            path,
-            max_rows=int(parquet_max_rows),
-            max_chars=int(parquet_max_chars),
-            max_cell_chars=int(parquet_max_cell_chars),
-            text_columns_only=bool(parquet_text_columns_only),
-            include_column_names=bool(parquet_include_column_names),
+        return _direct(
+            _read_parquet(
+                path,
+                max_rows=int(parquet_max_rows),
+                max_chars=int(parquet_max_chars),
+                max_cell_chars=int(parquet_max_cell_chars),
+                text_columns_only=bool(parquet_text_columns_only),
+                include_column_names=bool(parquet_include_column_names),
+            )
         )
     return None
 
@@ -92,15 +130,83 @@ def _read_delimited(path: Path, *, delimiter: str) -> str | None:
     return "\n".join(out_lines)
 
 
-def _read_with_docling(path: Path) -> str | None:
-    """Convert a rich document to markdown via Docling; None when unparseable."""
+def _clamp01(value: float) -> float:
+    return 0.0 if value < 0.0 else 1.0 if value > 1.0 else float(value)
+
+
+def _build_source_map(doc: Any, serializer: Any, full: str) -> tuple[tuple[SourceSpan, ...], int]:
+    """Locate every Docling item's markdown inside the whole-document markdown.
+
+    The document serialization is the concatenation of the per-item serializations in
+    reading order, so a monotonic ``find`` cursor maps each item to one [start, end) span. Each
+    of the item's ``prov`` entries (page + bounding box, bottom-left origin in PDF points)
+    becomes a normalized top-left ``PageRegion`` over that span. Items that cannot be located
+    are counted, never raised: extraction must not fail because one layout item drifted.
+    """
+    from docling_core.types.doc import DocItem
+
+    spans: list[SourceSpan] = []
+    unlocated = 0
+    cursor = 0
+    for item, _level in doc.iterate_items():
+        if not isinstance(item, DocItem) or not getattr(item, "prov", None):
+            continue
+        part = serializer.serialize(item=item).text
+        if not part.strip():
+            continue
+        pos = full.find(part, cursor)
+        if pos < 0:
+            unlocated += 1
+            continue
+        end = pos + len(part)
+        cursor = end
+        for prov in item.prov:
+            page = doc.pages.get(prov.page_no)
+            size = getattr(page, "size", None)
+            if size is None or size.width <= 0 or size.height <= 0:
+                continue
+            box = prov.bbox.to_top_left_origin(size.height)
+            left, right = sorted((_clamp01(box.l / size.width), _clamp01(box.r / size.width)))
+            top, bottom = sorted((_clamp01(box.t / size.height), _clamp01(box.b / size.height)))
+            spans.append(
+                SourceSpan(
+                    char_start=pos,
+                    char_end=end,
+                    region=PageRegion(
+                        page=int(prov.page_no), left=left, top=top, right=right, bottom=bottom
+                    ),
+                )
+            )
+    spans.sort(key=lambda span: (span.char_start, span.char_end))
+    return tuple(spans), unlocated
+
+
+def _read_with_docling(path: Path) -> ExtractedDocument | None:
+    """Convert a rich document to markdown via Docling with a page/bbox source map.
+
+    Returns None when the document is unparseable or serializes to nothing. The returned text
+    is the whole-document markdown serialization, unmodified, so chunk char offsets index it
+    exactly.
+    """
     try:
+        from docling_core.transforms.serializer.markdown import MarkdownDocSerializer
+
         result = _docling_converter().convert(str(path))
-        text = result.document.export_to_markdown()
+        doc = result.document
+        serializer = MarkdownDocSerializer(doc=doc)
+        full = str(serializer.serialize().text or "")
     except Exception:
         return None
-    text = str(text or "")
-    return text if text.strip() else None
+    if not full.strip():
+        return None
+    spans, unlocated = _build_source_map(doc, serializer, full)
+    return ExtractedDocument(
+        text=full,
+        extraction="docling",
+        kind=document_kind_for_path(path),
+        spans=spans,
+        unlocated_items=unlocated,
+    )
 
 
 def _read_parquet(

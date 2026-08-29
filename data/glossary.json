@@ -12540,6 +12540,51 @@
       "definition": "INDEX_RUN_LEASE_SECONDS is the lease on the durable per-corpus index-run fence stored on the corpus row. A running index heartbeats the fence at a tenth of the lease; a second run on the same corpus is refused with a typed 409 while the fence is fresh. A fence whose last heartbeat is older than the lease is treated as a crashed worker: a new run may take it over, and stopping the corpus releases it. Set it longer than the longest pause a run can have without heartbeating.",
       "category": "retrieval",
       "related": []
+    },
+    {
+      "term": "Source Document Viewer",
+      "key": "SOURCE_DOCUMENT_VIEWER",
+      "definition": "The evidence panel that opens when you click a citation. It shows the actual cited file rather than a path: a PDF page rendered by the server with the chunk's layout regions boxed, a text or code file scrolled to the cited lines, or the Docling markdown for docx/pptx/xlsx/html with the cited span marked. The viewer only serves files the corpus has indexed and reports when the file on disk has changed since indexing.",
+      "category": "general",
+      "badges": [],
+      "links": [],
+      "related": []
+    },
+    {
+      "term": "Chunk Provenance",
+      "key": "CHUNK_PROVENANCE",
+      "definition": "Typed record on every chunk of how its text was extracted (direct read or Docling) and, for Docling PDFs, which pages and normalized layout regions the text came from. Captured at index time from Docling's per-item page and bounding-box data; corpora indexed before capture report the state as not captured until re-indexed.",
+      "category": "general",
+      "badges": [],
+      "links": [],
+      "related": []
+    },
+    {
+      "term": "Page Render Scale",
+      "key": "DOCUMENT_VIEWER_PAGE_RENDER_SCALE",
+      "definition": "Raster scale used when the server renders a PDF page for the viewer. 1.0 equals 72 dpi; 2.0 (default) gives 144 dpi, sharp on 1x monitors while keeping a letter page under a few hundred kilobytes. Higher values cost render time and bandwidth per page.",
+      "category": "general",
+      "badges": [],
+      "links": [],
+      "related": []
+    },
+    {
+      "term": "Thumbnail Render Scale",
+      "key": "DOCUMENT_VIEWER_THUMBNAIL_RENDER_SCALE",
+      "definition": "Raster scale for the small page thumbnails shown on PDF citation cards in chat. Kept low (default 0.5) because the thumbnail only needs to show where on the page the cited region sits.",
+      "category": "general",
+      "badges": [],
+      "links": [],
+      "related": []
+    },
+    {
+      "term": "Viewer Max Text Bytes",
+      "key": "DOCUMENT_VIEWER_MAX_TEXT_BYTES",
+      "definition": "Largest text or code file the source viewer will serve in full. Files above this size return a typed 413 with an operator hint instead of streaming megabytes into the browser.",
+      "category": "general",
+      "badges": [],
+      "links": [],
+      "related": []
     }
   ]
 }

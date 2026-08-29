@@ -182,6 +182,13 @@
         "server/api/index.py",
         "server/retrieval/fusion.py"
       ]
+    },
+    "document_viewer": {
+      "disposition": "runtime_effect",
+      "evidence": [
+        "server/api/documents.py",
+        "server/services/pdf_render.py"
+      ]
     }
   },
   "overrides": {},
