@@ -130,7 +130,9 @@ export function DocumentViewer({ target }: { target: DocumentTarget }) {
                   ? 'Document too large to display'
                   : state.error.code === 'dependency_unavailable'
                     ? 'Store unavailable'
-                    : `Could not load document (HTTP ${state.error.status || 'error'})`
+                    : state.error.code === 'unauthenticated'
+                      ? 'Signed out'
+                      : `Could not load document (HTTP ${state.error.status || 'error'})`
             }
             message={state.error.message}
             hint={state.error.operatorHint}

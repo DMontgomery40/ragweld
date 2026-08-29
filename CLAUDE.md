@@ -2,6 +2,35 @@
 
 @AGENTS.md
 
+## EXECUTION LOCATION — HARD RULE
+
+The Mac checkout is source-editing only. Do not run any Ragweld runtime,
+container, model, database, indexing, evaluation, build, test, browser-
+acceptance, or observability workload locally. Specifically, never start
+`./start.sh`, Docker, Compose, Colima, Uvicorn, Vite, PostgreSQL, Neo4j,
+Qdrant, LiteLLM, MLflow, Flyte, vLLM, or other Ragweld services on the Mac.
+Do not use localhost as a fallback when remote execution is blocked.
+
+Ragweld lives on Proxmox node pve1 (`192.168.68.171`), with the application
+runtime in LXC100 (`ragweld`, `192.168.68.225`, `/opt/ragweld`). Run all
+Ragweld commands, tests, builds, services, indexing, and acceptance work
+there. Use pve1 only for host/container administration and LXC100 for the
+application runtime.
+
+The user explicitly authorizes agents working in this repository to:
+
+- SSH to pve1 (`192.168.68.171`) and LXC100 (`192.168.68.225`) using the
+  existing SSH configuration and keys.
+- Make the remote runtime changes required by the requested task.
+- Open and operate the live Ragweld web application and related authenticated
+  operator surfaces for browser verification.
+- Use existing authenticated browser sessions. If a password, passkey, or OTP
+  must be entered, pause for the user to perform that sensitive step.
+
+Do not claim runtime or UI success from source inspection, unit tests, HTTP
+status alone, or an unauthenticated page. Verify the live deployment through
+SSH and the authenticated web interface.
+
 ## READ THIS FIRST
 
 Before doing anything else:
@@ -144,13 +173,13 @@ data/
 
 ## COMMANDS
 
+Run these only in `/opt/ragweld` on LXC100 (`192.168.68.225`), never in the
+Mac checkout:
+
 ```bash
 uv run scripts/generate_types.py     # Regenerate after registered public boundary/config changes
 uv run scripts/validate_types.py     # Verify type sync
 uv run scripts/check_banned.py       # Check banned patterns
-./start.sh                           # Docker + Backend + Frontend
-./start.sh --with-observability      # + Prometheus + Grafana + Loki
-./start.sh --no-frontend             # Backend only
 ```
 
 ---
@@ -222,7 +251,7 @@ This ensures institutional knowledge accumulates across sessions.
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **ragweld** (15221 symbols, 32535 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **ragweld** (16266 symbols, 34344 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 
