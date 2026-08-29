@@ -36,6 +36,26 @@ def test_parse_reply_wrapped_in_fences_and_unknown_kind() -> None:
     assert fig.kind == "other" and fig.summary == "x" and fig.labels == ["A"]
 
 
+def test_parse_reply_fenced_with_literal_closing_brace_in_strings() -> None:
+    reply = '```json\n{"kind": "chart", "summary": "shows A} B split", "labels": ["X}"]}\n```'
+    fig = parse_figure_reply(reply)
+    assert fig.kind == "chart"
+    assert fig.summary == "shows A} B split"
+    assert fig.labels == ["X}"]
+
+
+def test_parse_reply_fenced_with_literal_closing_brace_and_surrounding_prose() -> None:
+    reply = (
+        "Here is the figure description:\n"
+        '```json\n{"kind": "chart", "summary": "shows A} B split", "labels": ["X}"]}\n```\n'
+        "Let me know if you need anything else."
+    )
+    fig = parse_figure_reply(reply)
+    assert fig.kind == "chart"
+    assert fig.summary == "shows A} B split"
+    assert fig.labels == ["X}"]
+
+
 def test_non_json_reply_becomes_summary() -> None:
     fig = parse_figure_reply("A photograph of the lunar module ascent stage on the pad.")
     assert fig.summary == "A photograph of the lunar module ascent stage on the pad."

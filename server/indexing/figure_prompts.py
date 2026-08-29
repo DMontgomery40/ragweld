@@ -36,7 +36,7 @@ FIGURE_PROMPTS: dict[str, str] = {
     ),
 }
 
-_FENCE_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
+_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
 _VALID_KINDS: frozenset[str] = frozenset(get_args(FigureKind))
 
 
@@ -45,7 +45,18 @@ def _string_list(value: Any) -> list[str]:
         value = [value]
     if not isinstance(value, list):
         return []
-    return [str(v).strip() for v in value if str(v).strip()]
+    return [str(v).strip() for v in value if not isinstance(v, (dict, list)) and str(v).strip()]
+
+
+def _outermost_object(text: str) -> str:
+    """Slice ``text`` from its first ``{`` to its last ``}``, inclusive; "" if there is no pair.
+
+    Using the outermost brace pair (rather than a non-greedy regex) tolerates a literal
+    ``}`` inside a string value (e.g. a summary that quotes a bracket), which would
+    otherwise truncate the candidate before the object's real closing brace.
+    """
+    start, end = text.find("{"), text.rfind("}")
+    return text[start : end + 1] if start >= 0 and end > start else ""
 
 
 def parse_figure_reply(text: str) -> FigureAnnotation:
@@ -53,13 +64,11 @@ def parse_figure_reply(text: str) -> FigureAnnotation:
     raw = (text or "").strip()
     if not raw:
         return FigureAnnotation()
-    candidate = raw
+    fenced = raw
     m = _FENCE_RE.search(raw)
     if m:
-        candidate = m.group(1)
-    elif not raw.startswith("{"):
-        start, end = raw.find("{"), raw.rfind("}")
-        candidate = raw[start : end + 1] if start >= 0 and end > start else ""
+        fenced = m.group(1)
+    candidate = _outermost_object(fenced)
     data: Any = None
     if candidate:
         try:
