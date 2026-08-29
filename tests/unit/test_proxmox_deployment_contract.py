@@ -223,6 +223,7 @@ def _assert_caddy_contract(source: str) -> None:
     blocks = _caddy_named_blocks(source)
     assert "" in blocks
     assert "(require_owner)" in blocks
+    assert "(require_owner_except_faro)" in blocks
 
     expected_sites = {
         "http://auth.ragweld.com:58000",
@@ -251,12 +252,23 @@ def _assert_caddy_contract(source: str) -> None:
     assert "copy_headers Remote-User Remote-Groups Remote-Email Remote-Name" in require_owner
     assert "header_up X-Forwarded-Proto https" in require_owner
 
+    faro_auth = blocks["(require_owner_except_faro)"]
+    assert "not path /faro/collect" in faro_auth
+    assert "forward_auth @owner_required" in faro_auth
+    assert "uri /api/authz/forward-auth" in faro_auth
+
     auth_headers = {
         "http://auth.ragweld.com:58000",
         "http://ragweld-auth.dtmont.com:58000",
     }
-    for header in expected_sites - auth_headers:
+    app_headers = {
+        "http://me.ragweld.com:58000",
+        "http://ragweld.dtmont.com:58000",
+    }
+    for header in expected_sites - auth_headers - app_headers:
         assert "import require_owner" in blocks[header], header
+    for header in app_headers:
+        assert "import require_owner_except_faro" in blocks[header], header
 
     def block_targets(block: str) -> set[str]:
         return {

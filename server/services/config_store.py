@@ -67,6 +67,37 @@ _REMOVED_FLAT_KEYS: tuple[str, ...] = (
 )
 
 
+_PRODUCTION_SCOPED_GLOBAL_PATHS: tuple[str, ...] = (
+    "generation.gen_model",
+    "generation.enrich_model",
+    "generation.gen_max_tokens",
+    "chat.max_tokens",
+    "chat.litellm.default_model",
+    "chat.multimodal.vision_model_override",
+    "chat.vllm.enabled",
+    "synthetic.generator.max_tokens",
+    "embedding.embedding_backend",
+    "embedding.embedding_type",
+    "embedding.embedding_model",
+    "embedding.embedding_dim",
+    "ui.chat_default_model",
+    "ui.runtime_mode",
+    "ui.open_browser",
+    "ui.grafana_base_url",
+    "tracing.langfuse_base_url",
+    "tracing.langfuse_public_base_url",
+    "tracing.faro_base_url",
+    "tracing.trace_store_path",
+    "training.ragweld_agent_flyte_admin_base_url",
+    "training.ragweld_agent_flyte_console_base_url",
+    "training.ragweld_agent_flyte_callback_base_url",
+    "training.ragweld_agent_mlflow_tracking_url",
+    "training.ragweld_agent_mlflow_console_base_url",
+    "evaluation.ragas_judge_model",
+    "evaluation.promptfoo_grader_model",
+)
+
+
 def _remove_nested_key(payload: dict[str, Any], dotted_path: str) -> bool:
     parts = [p for p in str(dotted_path or "").split(".") if p]
     if not parts:
@@ -81,6 +112,44 @@ def _remove_nested_key(payload: dict[str, Any], dotted_path: str) -> bool:
         del cur[leaf]
         return True
     return False
+
+
+def _value_at_path(payload: dict[str, Any], dotted_path: str) -> Any:
+    current: Any = payload
+    for part in dotted_path.split("."):
+        current = current[part]
+    return current
+
+
+def _set_value_at_path(payload: dict[str, Any], dotted_path: str, value: Any) -> None:
+    parts = dotted_path.split(".")
+    current: Any = payload
+    for part in parts[:-1]:
+        current = current[part]
+    current[parts[-1]] = copy.deepcopy(value)
+
+
+def _reconcile_production_scope(
+    config: TriBridConfig,
+    global_config: TriBridConfig,
+) -> tuple[TriBridConfig, bool, list[str]]:
+    """Apply deployment-owned production values to a corpus-scoped config."""
+    if str(global_config.ui.runtime_mode or "").strip().lower() != "production":
+        return config, False, []
+
+    scoped_payload = config.model_dump(mode="json")
+    global_payload = global_config.model_dump(mode="json")
+    changed_paths: list[str] = []
+    for dotted_path in _PRODUCTION_SCOPED_GLOBAL_PATHS:
+        expected = _value_at_path(global_payload, dotted_path)
+        if _value_at_path(scoped_payload, dotted_path) == expected:
+            continue
+        _set_value_at_path(scoped_payload, dotted_path, expected)
+        changed_paths.append(dotted_path)
+
+    if not changed_paths:
+        return config, False, []
+    return TriBridConfig.model_validate(scoped_payload), True, changed_paths
 
 
 def _upgrade_raw_config(raw: dict[str, Any]) -> tuple[TriBridConfig, bool, list[str]]:
@@ -200,6 +269,9 @@ class ConfigStore:
                 cfg = base
             else:
                 cfg, changed, migrated = _upgrade_raw_config(raw)
+                cfg, reconciled, reconciled_paths = _reconcile_production_scope(cfg, base)
+                changed = changed or reconciled
+                migrated.extend(reconciled_paths)
                 if changed:
                     await self._postgres.upsert_corpus_config_json(repo_id, cfg.model_dump())
                     if migrated:
@@ -220,6 +292,8 @@ class ConfigStore:
             corpus = await self._postgres.get_corpus(repo_id)
             if corpus is None:
                 raise CorpusNotFoundError(f"Corpus not found: {repo_id}")
+            base = await self.get(repo_id=None)
+            config, _, _ = _reconcile_production_scope(config, base)
             await self._postgres.upsert_corpus_config_json(repo_id, config.model_dump())
             self._cache[repo_id] = config.model_copy(deep=True)
             return self._cache[repo_id].model_copy(deep=True)

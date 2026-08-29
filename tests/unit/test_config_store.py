@@ -57,6 +57,148 @@ class _ControlledPostgres:
         return None
 
 
+class _SnapshotPostgres:
+    def __init__(self, raw: dict[str, object]) -> None:
+        self.raw = raw
+        self.upserts: list[tuple[str, dict[str, object]]] = []
+
+    async def connect(self) -> None:
+        return None
+
+    async def get_corpus(self, repo_id: str) -> dict[str, object]:
+        return {"id": repo_id}
+
+    async def get_corpus_config_json(self, repo_id: str) -> dict[str, object]:
+        _ = repo_id
+        return self.raw
+
+    async def upsert_corpus_config_json(self, repo_id: str, payload: dict[str, object]) -> None:
+        self.upserts.append((repo_id, payload))
+
+
+def _production_global_config() -> TriBridConfig:
+    cfg = TriBridConfig()
+    cfg.ui.runtime_mode = "production"
+    cfg.generation.gen_model = "openai.gpt-5.6-terra"
+    cfg.generation.enrich_model = "openai.gpt-5.6-terra"
+    cfg.chat.max_tokens = 16000
+    cfg.chat.litellm.default_model = "openai.gpt-5.6-terra"
+    cfg.synthetic.generator.max_tokens = 16000
+    cfg.ui.grafana_base_url = "https://ragweld-grafana.dtmont.com"
+    cfg.tracing.langfuse_public_base_url = "https://ragweld-langfuse.dtmont.com"
+    cfg.tracing.faro_base_url = "https://ragweld.dtmont.com/faro/collect"
+    cfg.tracing.trace_store_path = "data/traces/workbench.json"
+    cfg.training.ragweld_agent_flyte_console_base_url = "https://ragweld-flyte.dtmont.com"
+    cfg.training.ragweld_agent_mlflow_console_base_url = "https://ragweld-mlflow.dtmont.com"
+    cfg.evaluation.ragas_judge_model = "openai.gpt-5.6-terra"
+    cfg.evaluation.promptfoo_grader_model = "openai.gpt-5.6-terra"
+    return cfg
+
+
+def _legacy_scoped_config() -> TriBridConfig:
+    cfg = TriBridConfig()
+    cfg.generation.gen_model = "z-ai.glm-5.3-flash"
+    cfg.generation.enrich_model = "z-ai.glm-5.3-flash"
+    cfg.chat.max_tokens = 4096
+    cfg.chat.litellm.default_model = "z-ai.glm-5.3-flash"
+    cfg.synthetic.generator.max_tokens = 4096
+    cfg.ui.grafana_base_url = "https://grafana.ragweld.com"
+    cfg.tracing.langfuse_public_base_url = "https://langfuse.ragweld.com"
+    cfg.tracing.faro_base_url = "https://me.ragweld.com/faro/collect"
+    cfg.tracing.trace_store_path = ""
+    cfg.training.ragweld_agent_flyte_console_base_url = "https://flyte.ragweld.com"
+    cfg.training.ragweld_agent_mlflow_console_base_url = "https://mlflow.ragweld.com"
+    cfg.evaluation.ragas_judge_model = "z-ai.glm-5.3-flash"
+    cfg.evaluation.promptfoo_grader_model = "z-ai.glm-5.3-flash"
+    cfg.chat.temperature = 1.7
+    return cfg
+
+
+@pytest.mark.asyncio
+async def test_production_scope_reconciles_deployment_contract_and_persists_migration() -> None:
+    global_cfg = _production_global_config()
+    legacy = _legacy_scoped_config()
+    postgres = _SnapshotPostgres(legacy.model_dump())
+    store = ConfigStore("postgresql://unused")
+    store._cache[None] = global_cfg
+    store._postgres = postgres  # type: ignore[assignment]
+
+    scoped = await store.get(repo_id="nasa-apollo-11")
+
+    assert scoped.generation.gen_model == "openai.gpt-5.6-terra"
+    assert scoped.generation.enrich_model == "openai.gpt-5.6-terra"
+    assert scoped.chat.max_tokens == 16000
+    assert scoped.chat.litellm.default_model == "openai.gpt-5.6-terra"
+    assert scoped.synthetic.generator.max_tokens == 16000
+    assert scoped.ui.grafana_base_url == "https://ragweld-grafana.dtmont.com"
+    assert scoped.tracing.langfuse_public_base_url == "https://ragweld-langfuse.dtmont.com"
+    assert scoped.tracing.faro_base_url == "https://ragweld.dtmont.com/faro/collect"
+    assert scoped.tracing.trace_store_path == "data/traces/workbench.json"
+    assert scoped.training.ragweld_agent_flyte_console_base_url == "https://ragweld-flyte.dtmont.com"
+    assert scoped.training.ragweld_agent_mlflow_console_base_url == "https://ragweld-mlflow.dtmont.com"
+    assert scoped.evaluation.ragas_judge_model == "openai.gpt-5.6-terra"
+    assert scoped.evaluation.promptfoo_grader_model == "openai.gpt-5.6-terra"
+    assert scoped.chat.temperature == 1.7
+
+    assert len(postgres.upserts) == 1
+    repo_id, persisted = postgres.upserts[0]
+    assert repo_id == "nasa-apollo-11"
+    assert persisted["ui"]["grafana_base_url"] == "https://ragweld-grafana.dtmont.com"  # type: ignore[index]
+    assert persisted["chat"]["litellm"]["default_model"] == "openai.gpt-5.6-terra"  # type: ignore[index]
+
+
+@pytest.mark.asyncio
+async def test_production_scope_save_cannot_reintroduce_deployment_drift() -> None:
+    global_cfg = _production_global_config()
+    legacy = _legacy_scoped_config()
+    postgres = _SnapshotPostgres(legacy.model_dump())
+    store = ConfigStore("postgresql://unused")
+    store._cache[None] = global_cfg
+    store._postgres = postgres  # type: ignore[assignment]
+
+    saved = await store.save(legacy, repo_id="nasa-apollo-11")
+
+    assert saved.ui.grafana_base_url == "https://ragweld-grafana.dtmont.com"
+    assert saved.tracing.faro_base_url == "https://ragweld.dtmont.com/faro/collect"
+    assert saved.chat.litellm.default_model == "openai.gpt-5.6-terra"
+    assert saved.chat.max_tokens == 16000
+    assert saved.chat.temperature == 1.7
+    assert postgres.upserts[-1][1]["ui"]["grafana_base_url"] == "https://ragweld-grafana.dtmont.com"  # type: ignore[index]
+
+
+@pytest.mark.asyncio
+async def test_production_scope_reconciles_schema_defaulted_missing_keys() -> None:
+    global_cfg = _production_global_config()
+    postgres = _SnapshotPostgres({})
+    store = ConfigStore("postgresql://unused")
+    store._cache[None] = global_cfg
+    store._postgres = postgres  # type: ignore[assignment]
+
+    scoped = await store.get(repo_id="legacy-minimal")
+
+    assert scoped.ui.grafana_base_url == "https://ragweld-grafana.dtmont.com"
+    assert scoped.chat.litellm.default_model == "openai.gpt-5.6-terra"
+    assert scoped.tracing.trace_store_path == "data/traces/workbench.json"
+
+
+@pytest.mark.asyncio
+async def test_nonproduction_scope_preserves_corpus_overrides() -> None:
+    global_cfg = _production_global_config()
+    global_cfg.ui.runtime_mode = "development"
+    legacy = _legacy_scoped_config()
+    postgres = _SnapshotPostgres(legacy.model_dump())
+    store = ConfigStore("postgresql://unused")
+    store._cache[None] = global_cfg
+    store._postgres = postgres  # type: ignore[assignment]
+
+    scoped = await store.get(repo_id="development-corpus")
+
+    assert scoped.ui.grafana_base_url == "https://grafana.ragweld.com"
+    assert scoped.chat.litellm.default_model == "z-ai.glm-5.3-flash"
+    assert scoped.chat.max_tokens == 4096
+    assert postgres.upserts == []
+
+
 @pytest.mark.asyncio
 async def test_get_does_not_overwrite_newer_concurrent_repo_save() -> None:
     started = asyncio.Event()

@@ -208,3 +208,83 @@ async def test_initialized_global_store_path_survives_scoped_config_without_path
     reloaded = TraceStore()
     await reloaded.initialize(global_cfg)
     assert (await reloaded.latest(repo="repo-a")).run_id == "scoped-run"
+
+
+@pytest.mark.asyncio
+async def test_persisted_external_links_follow_current_deployment_origins(tmp_path: Path) -> None:
+    path = tmp_path / "traces" / "workbench.json"
+    old_cfg = _persistent_trace_config(path)
+    old_cfg.ui.grafana_base_url = "https://grafana.ragweld.com"
+    old_cfg.tracing.langfuse_public_base_url = "https://langfuse.ragweld.com"
+    first = TraceStore()
+    assert await first.start(run_id="old-links", repo_id="repo-a", started_at_ms=1, config=old_cfg)
+    await first.annotate(
+        "old-links",
+        trace_id="trace-123",
+        external_links=[
+            TraceExternalLink(
+                label="Grafana dashboard",
+                kind="grafana",
+                url="https://grafana.ragweld.com/d/retrieval/retrieval?from=now-1h",
+            ),
+            TraceExternalLink(
+                label="Tempo trace",
+                kind="tempo",
+                url="https://grafana.ragweld.com/explore?trace=trace-123",
+            ),
+            TraceExternalLink(
+                label="Langfuse trace",
+                kind="langfuse",
+                url="https://langfuse.ragweld.com/project/ragweld/traces/trace-123",
+            ),
+            TraceExternalLink(
+                label="Custom",
+                kind="custom",
+                url="https://custom.example/run/old-links",
+            ),
+        ],
+    )
+    await first.end("old-links", ended_at_ms=2)
+
+    current_cfg = _persistent_trace_config(path)
+    current_cfg.ui.grafana_base_url = "https://ragweld-grafana.dtmont.com"
+    current_cfg.tracing.langfuse_public_base_url = "https://ragweld-langfuse.dtmont.com"
+    reloaded = TraceStore()
+    await reloaded.initialize(current_cfg)
+
+    latest = await reloaded.latest(run_id="old-links")
+    assert latest.trace is not None
+    assert [link.url for link in latest.trace.external_links] == [
+        "https://ragweld-grafana.dtmont.com/d/retrieval/retrieval?from=now-1h",
+        "https://ragweld-grafana.dtmont.com/explore?trace=trace-123",
+        "https://ragweld-langfuse.dtmont.com/project/ragweld/traces/trace-123",
+        "https://custom.example/run/old-links",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_initialized_trace_store_refreshes_link_origins_when_runtime_config_changes() -> None:
+    old_cfg = TriBridConfig()
+    old_cfg.tracing.tracing_mode = "otel_langfuse"
+    old_cfg.ui.grafana_base_url = "https://grafana.ragweld.com"
+    store = TraceStore()
+    await store.initialize(old_cfg)
+    assert await store.start(run_id="runtime-change", repo_id="repo-a", started_at_ms=1, config=old_cfg)
+    await store.annotate(
+        "runtime-change",
+        external_links=[
+            TraceExternalLink(
+                label="Grafana dashboard",
+                kind="grafana",
+                url="https://grafana.ragweld.com/d/runtime/runtime",
+            )
+        ],
+    )
+
+    current_cfg = old_cfg.model_copy(deep=True)
+    current_cfg.ui.grafana_base_url = "https://ragweld-grafana.dtmont.com"
+    await store.initialize(current_cfg)
+
+    latest = await store.latest(run_id="runtime-change")
+    assert latest.trace is not None
+    assert latest.trace.external_links[0].url == "https://ragweld-grafana.dtmont.com/d/runtime/runtime"

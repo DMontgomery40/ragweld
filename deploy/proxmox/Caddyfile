@@ -12,6 +12,17 @@
     }
 }
 
+(require_owner_except_faro) {
+    @owner_required {
+        not path /faro/collect
+    }
+    forward_auth @owner_required 127.0.0.1:59091 {
+        uri /api/authz/forward-auth
+        copy_headers Remote-User Remote-Groups Remote-Email Remote-Name
+        header_up X-Forwarded-Proto https
+    }
+}
+
 http://auth.ragweld.com:58000 {
     reverse_proxy 127.0.0.1:59091 {
         header_up X-Forwarded-Proto https
@@ -25,7 +36,7 @@ http://ragweld-auth.dtmont.com:58000 {
 }
 
 http://me.ragweld.com:58000 {
-    import require_owner
+    import require_owner_except_faro
     handle /api/* {
         reverse_proxy 127.0.0.1:58012
     }
@@ -46,7 +57,7 @@ http://me.ragweld.com:58000 {
 }
 
 http://ragweld.dtmont.com:58000 {
-    import require_owner
+    import require_owner_except_faro
     handle /api/* {
         reverse_proxy 127.0.0.1:58012
     }

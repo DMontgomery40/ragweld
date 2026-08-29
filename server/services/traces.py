@@ -19,6 +19,7 @@ import os
 import random
 import tempfile
 import time
+import urllib.parse
 from collections import deque
 from pathlib import Path
 from typing import Any
@@ -80,6 +81,7 @@ class TraceStore:
         self._order: deque[str] = deque()
         self._order_by_repo: dict[str, deque[str]] = {}
         self._persist_path: Path | None = None
+        self._external_link_bases: dict[str, str] = {}
         self._initialized = False
 
     @staticmethod
@@ -92,10 +94,42 @@ class TraceStore:
         self._order.clear()
         self._order_by_repo.clear()
 
+    def _refresh_external_link_origins(self, trace: Trace) -> Trace:
+        refreshed: list[TraceExternalLink] = []
+        changed = False
+        for link in trace.external_links:
+            base_url = self._external_link_bases.get(link.kind)
+            if not base_url:
+                refreshed.append(link)
+                continue
+            source = urllib.parse.urlsplit(link.url)
+            base = urllib.parse.urlsplit(base_url)
+            if not source.scheme or not source.netloc or not base.scheme or not base.netloc:
+                refreshed.append(link)
+                continue
+            url = urllib.parse.urlunsplit((base.scheme, base.netloc, source.path, source.query, source.fragment))
+            refreshed.append(link.model_copy(update={"url": url}))
+            changed = changed or url != link.url
+        return trace.model_copy(update={"external_links": refreshed}) if changed else trace
+
+    def _configure_external_link_bases(self, config: TriBridConfig) -> None:
+        grafana_base = str(config.ui.grafana_base_url or "").strip().rstrip("/")
+        langfuse_base = str(config.tracing.langfuse_public_base_url or "").strip().rstrip("/")
+        self._external_link_bases = {
+            kind: base
+            for kind, base in (
+                ("grafana", grafana_base),
+                ("tempo", grafana_base),
+                ("langfuse", langfuse_base),
+            )
+            if base
+        }
+
     async def initialize(self, config: TriBridConfig) -> None:
         """Load persisted traces once and rebuild every retention index."""
         path = self._configured_path(config)
         async with self._lock:
+            self._configure_external_link_bases(config)
             # Persistence ownership is process-global. Corpus-scoped configs may
             # predate this field and therefore carry an empty default; they must
             # never reset or disable the path established during API startup.
@@ -117,7 +151,7 @@ class TraceStore:
                 if not isinstance(rows, list):
                     raise ValueError("trace-store traces must be a list")
                 for row in rows:
-                    trace = Trace.model_validate(row)
+                    trace = self._refresh_external_link_origins(Trace.model_validate(row))
                     self._drop_run_id_indexes_locked(trace.run_id)
                     self._traces[trace.run_id] = trace
                     self._order.append(trace.run_id)
@@ -270,7 +304,7 @@ class TraceStore:
             trace = self._traces.get(run_id)
             if trace is None:
                 return None
-            return trace.model_copy(deep=True)
+            return self._refresh_external_link_origins(trace.model_copy(deep=True))
 
     async def latest(self, *, repo: str | None = None, run_id: str | None = None) -> TracesLatestResponse:
         """Return the latest trace (optionally for a repo or specific run_id)."""
@@ -288,7 +322,11 @@ class TraceStore:
                 return TracesLatestResponse(
                     repo=repo,
                     run_id=rid,
-                    trace=(trace.model_copy(deep=True) if trace is not None else None),
+                    trace=(
+                        self._refresh_external_link_origins(trace.model_copy(deep=True))
+                        if trace is not None
+                        else None
+                    ),
                 )
 
             if not self._order:
@@ -298,7 +336,9 @@ class TraceStore:
             return TracesLatestResponse(
                 repo=(tr.repo_id if tr else None),
                 run_id=rid,
-                trace=(tr.model_copy(deep=True) if tr is not None else None),
+                trace=(
+                    self._refresh_external_link_origins(tr.model_copy(deep=True)) if tr is not None else None
+                ),
             )
 
     async def _enforce_retention_locked(self, *, repo_id: str, config: TriBridConfig) -> None:
