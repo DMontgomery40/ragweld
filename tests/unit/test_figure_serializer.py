@@ -80,11 +80,18 @@ def test_described_picture_serializes_as_prose_block(converted) -> None:
 
 
 def test_undescribed_picture_serializes_exactly_as_docling_would(converted) -> None:
+    """Byte-identity with stock Docling holds only when there is neither a description nor a
+    classification anywhere on the item; make that premise explicit rather than assuming it.
+    """
     from docling_core.transforms.serializer.markdown import MarkdownDocSerializer
 
     doc, pictures = converted
     pic = pictures[-1]
-    pic.annotations = [a for a in pic.annotations if not isinstance(a, DescriptionAnnotation)]
+    pic.meta = None
+    pic.annotations = [a for a in pic.annotations if not isinstance(a, (DescriptionAnnotation, PictureClassificationData))]
+    assert pic.meta is None
+    assert not any(isinstance(a, PictureClassificationData) for a in pic.annotations)
+
     ours = make_markdown_serializer(doc).serialize(item=pic).text
     theirs = MarkdownDocSerializer(doc=doc).serialize(item=pic).text
     assert ours == theirs
@@ -150,3 +157,33 @@ def test_meta_and_annotations_both_set_render_prose_once(converted) -> None:
     assert part.startswith("Figure (chart):")
     assert full.count(part) == 1, "the prose block must appear exactly once even with both shapes set"
     assert '"summary"' not in full and REPLY not in full
+
+
+def test_classified_but_undescribed_picture_shows_class_header(converted) -> None:
+    """A classifier can run without a description (area threshold, class deny-list, or a
+    vision-alias timeout); the class name is searchable text and must not silently disappear
+    into the undescribed (byte-identical-to-Docling) branch.
+    """
+    doc, pictures = converted
+    pic = pictures[0]
+    pic.annotations = []
+    pic.meta = PictureMeta(
+        classification=PictureClassificationMetaField(
+            predictions=[PictureClassificationPrediction(class_name="chart", confidence=0.9)]
+        )
+    )
+
+    serializer = make_markdown_serializer(doc)
+    caption = serializer.serialize_captions(item=pic).text
+    full = serializer.serialize().text
+    part = serializer.serialize(item=pic).text
+
+    assert part.startswith("Figure (chart):")
+    assert caption in part
+    placeholder = MarkdownParams().image_placeholder
+    assert part.endswith(placeholder), "the image part must still follow the class header"
+    assert "{" not in part
+    assert full.count(part) == 1
+    picture_serializer = serializer.picture_serializer
+    assert picture_serializer.classes_by_ref[pic.self_ref] == "chart"
+    assert pic.self_ref not in picture_serializer.figures_by_ref, "no description was parsed, so no FigureAnnotation"

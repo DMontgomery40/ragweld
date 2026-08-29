@@ -22,8 +22,13 @@ block renders ``meta.description.text`` verbatim (the raw JSON reply) via
 ``classification`` meta names so that leak cannot happen no matter which item is being
 serialized, and this serializer is the sole place that turns the parsed reply into prose.
 
-When a picture has no description at all, this serializer defers to Docling's own
-``MarkdownPictureSerializer.serialize`` so the output is byte-identical to stock Docling.
+A picture can be classified without being described — the vision alias is skipped by an area
+threshold, a class deny-list, or a timeout, while the (cheaper, local) classifier still ran.
+The class name is searchable text and must not silently vanish, so a classified-but-undescribed
+picture still gets a header-only block (``figure_block_markdown(caption, cls, None)``) plus the
+image part. Byte-identity with stock Docling's ``MarkdownPictureSerializer.serialize`` holds
+only for a picture with neither a description nor a classification; that is the only case this
+serializer defers to ``super().serialize(...)``.
 """
 
 from __future__ import annotations
@@ -49,7 +54,9 @@ from server.models.index import FigureAnnotation
 
 
 class RagweldPictureSerializer(MarkdownPictureSerializer):
-    """Prose for described pictures; Docling's default output for everything else."""
+    """Prose for described and/or classified pictures; Docling's default output only when
+    neither a description nor a classification is present.
+    """
 
     def __init__(self) -> None:
         super().__init__()
@@ -73,11 +80,14 @@ class RagweldPictureSerializer(MarkdownPictureSerializer):
 
         if cls is not None:
             self.classes_by_ref[item.self_ref] = cls
-        if description_text is None:
+        if description_text is None and cls is None:
             return super().serialize(item=item, doc_serializer=doc_serializer, doc=doc, **kwargs)
 
-        fig = parse_figure_reply(description_text)
-        self.figures_by_ref[item.self_ref] = fig
+        fig: FigureAnnotation | None = None
+        if description_text is not None:
+            fig = parse_figure_reply(description_text)
+            self.figures_by_ref[item.self_ref] = fig
+
         caption = doc_serializer.serialize_captions(item=item, **kwargs).text
         params = MarkdownParams(**kwargs)
         block = figure_block_markdown(caption, cls, fig)
