@@ -228,6 +228,13 @@ export function IndexingSubtab() {
 
   // Index stats + status
   const [_indexStatus, setIndexStatus] = useState<IndexStatus | null>(null);
+  // A run adopted from the server because it was started outside this tab (API, another
+  // operator, a schedule). Progress, current file and events are mirrored by polling.
+  const [foreignRun, setForeignRun] = useState(false);
+  const foreignRunIdRef = useRef<string>('');
+  const foreignEventsSeenRef = useRef(0);
+  const localRunRef = useRef(false);
+  const isIndexingRef = useRef(false);
   const [latestRun, setLatestRun] = useState<IndexRunSummary | null>(null);
   const [latestRunEvents, setLatestRunEvents] = useState<IndexRunEvent[]>([]);
   const [indexStats, setIndexStats] = useState<IndexStats | null>(null);
@@ -507,7 +514,7 @@ export function IndexingSubtab() {
 
   const loadLatestRunReplay = useCallback(async () => {
     const rid = String(activeRepo || '').trim();
-    if (!rid || isIndexing) {
+    if (!rid || isIndexingRef.current) {
       return;
     }
     try {
@@ -556,13 +563,113 @@ export function IndexingSubtab() {
     } catch {
       // best effort only
     }
-  }, [activeRepo, api, isIndexing, resetTerminal]);
+  }, [activeRepo, api, resetTerminal]);
+
+  useEffect(() => {
+    isIndexingRef.current = isIndexing;
+  }, [isIndexing]);
 
   useEffect(() => {
     void refreshStatus();
     void loadStats();
     void loadLatestRunReplay();
   }, [refreshStatus, loadStats, loadLatestRunReplay]);
+
+  // Poll the corpus status so a run started anywhere (API, another operator, a schedule)
+  // shows up here exactly like one started from this tab: progress bar, current file,
+  // replayed + live events, Stop button, Start disabled. Without this the tab only knew
+  // about runs it had started itself.
+  useEffect(() => {
+    const rid = String(activeRepo || '').trim();
+    if (!rid) return;
+    let cancelled = false;
+    const appendEvents = (events: IndexRunEvent[]) => {
+      const fresh = events.slice(foreignEventsSeenRef.current);
+      for (const ev of fresh) {
+        const msg = String(ev.message || '').trim();
+        if (!msg) continue;
+        if (ev.type === 'error') terminalRef.current?.appendLine(`\x1b[31m${msg}\x1b[0m`);
+        else if (ev.type === 'warning') terminalRef.current?.appendLine(`\x1b[33m${msg}\x1b[0m`);
+        else if (ev.type === 'complete') terminalRef.current?.appendLine(`\x1b[32m${msg}\x1b[0m`);
+        else terminalRef.current?.appendLine(msg);
+      }
+      foreignEventsSeenRef.current = events.length;
+    };
+    const tick = async () => {
+      if (localRunRef.current) return; // this tab's own stream owns the UI
+      let data: IndexStatus | null = null;
+      try {
+        data = await fetchIndexStatus(rid, { quiet: true });
+      } catch {
+        return;
+      }
+      if (cancelled || activeRepoRef.current !== rid || !data) return;
+      setIndexStatus(data);
+      if (data.status === 'indexing') {
+        // A single-file corpus reports progress 1.0 while its file is still converting; never
+        // show 100% for a run that has not finished.
+        const pct = Math.min(99, Math.max(0, Math.round(Number(data.progress || 0) * 100)));
+        const file = String(data.current_file || '').trim();
+        setIsIndexing(true);
+        setForeignRun(true);
+        setProgress({ current: pct, total: 100, status: file ? `Indexing ${file}` : 'Indexing…' });
+        try {
+          const latestResp = await fetch(api(`index/${encodeURIComponent(rid)}/runs/latest`));
+          if (!latestResp.ok) return;
+          const latest: IndexRunSummary = await latestResp.json();
+          const runId = String(latest.run_id || '');
+          if (!runId) return;
+          if (runId !== foreignRunIdRef.current) {
+            foreignRunIdRef.current = runId;
+            foreignEventsSeenRef.current = 0;
+            setLatestRun(latest);
+            setTerminalVisible(true);
+            resetTerminal(`Indexing: ${rid} (run ${runId.slice(0, 12)}, started outside this tab)`);
+          }
+          const eventsResp = await fetch(
+            api(`index/${encodeURIComponent(rid)}/runs/${encodeURIComponent(runId)}/events?limit=500`)
+          );
+          if (!eventsResp.ok) return;
+          const events: IndexRunEvent[] = await eventsResp.json();
+          if (cancelled || !Array.isArray(events)) return;
+          appendEvents(events);
+          setLatestRunEvents(events);
+        } catch {
+          // best effort only
+        }
+      } else if (foreignRunIdRef.current) {
+        // The adopted run ended while we were watching it.
+        foreignRunIdRef.current = '';
+        foreignEventsSeenRef.current = 0;
+        setForeignRun(false);
+        setIsIndexing(false);
+        isIndexingRef.current = false;
+        setProgress(
+          data.status === 'complete'
+            ? { current: 100, total: 100, status: 'Complete' }
+            : data.status === 'error'
+              ? { current: 0, total: 100, status: `Error: ${String(data.error || '')}` }
+              : { current: 0, total: 100, status: 'Cancelled' }
+        );
+        void loadStats();
+        void loadLatestRunReplay();
+      }
+    };
+    void tick();
+    const timer = window.setInterval(() => {
+      void tick();
+    }, 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      if (foreignRunIdRef.current) {
+        foreignRunIdRef.current = '';
+        foreignEventsSeenRef.current = 0;
+        setForeignRun(false);
+        setIsIndexing(false);
+      }
+    };
+  }, [activeRepo, api, fetchIndexStatus, loadLatestRunReplay, loadStats, resetTerminal]);
 
   const handleStopIndex = useCallback(async () => {
     const rid = String(activeRepo || '').trim();
@@ -675,7 +782,9 @@ export function IndexingSubtab() {
         }
       }
 
+      localRunRef.current = true;
       setIsIndexing(true);
+      setForeignRun(false);
       setProgress({ current: 0, total: 100, status: 'Starting...' });
       setTerminalVisible(true);
       resetTerminal(`Indexing: ${rid}`);
@@ -695,6 +804,7 @@ export function IndexingSubtab() {
         onError: (err) => {
           terminalRef.current?.appendLine(`\x1b[31mERROR: ${err}\x1b[0m`);
           setProgress((prev) => ({ ...prev, status: `Error: ${err}` }));
+          localRunRef.current = false;
           setIsIndexing(false);
           void loadLatestRunReplay();
         },
@@ -702,6 +812,7 @@ export function IndexingSubtab() {
           terminalRef.current?.updateProgress(100, 'Complete');
           terminalRef.current?.appendLine(`\x1b[32m✓ Indexing complete!\x1b[0m`);
           setProgress({ current: 100, total: 100, status: 'Complete' });
+          localRunRef.current = false;
           setIsIndexing(false);
           void loadStats();
           void refreshStatus();
@@ -710,6 +821,7 @@ export function IndexingSubtab() {
         onCancelled: () => {
           terminalRef.current?.appendLine(`\x1b[33m⚠ Indexing cancelled\x1b[0m`);
           setProgress((prev) => ({ ...prev, status: 'Cancelled' }));
+          localRunRef.current = false;
           setIsIndexing(false);
           void loadStats();
           void refreshStatus();
@@ -721,6 +833,7 @@ export function IndexingSubtab() {
       const msg = e instanceof Error ? e.message : 'Indexing failed';
       setErrorBanner(msg);
       terminalRef.current?.appendLine(`\x1b[31mFailed: ${msg}\x1b[0m`);
+      localRunRef.current = false;
       setIsIndexing(false);
     }
   }, [
@@ -844,7 +957,9 @@ export function IndexingSubtab() {
           data-testid="index-run-status-panel"
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: '12px', color: 'var(--fg-muted)' }}>Last run status</span>
+            <span style={{ fontSize: '12px', color: 'var(--fg-muted)' }}>
+              {isIndexing ? 'Current run' : 'Last run status'}
+            </span>
             <span
               style={{
                 fontSize: '11px',
@@ -857,7 +972,9 @@ export function IndexingSubtab() {
                     ? 'var(--error)'
                     : (_indexStatus?.status || latestRun?.status) === 'complete'
                       ? 'var(--ok)'
-                      : 'var(--fg)',
+                      : (_indexStatus?.status || latestRun?.status) === 'indexing'
+                        ? 'var(--link)'
+                        : 'var(--fg)',
               }}
               data-testid="index-run-status-pill"
             >
@@ -870,7 +987,15 @@ export function IndexingSubtab() {
             ) : null}
             {latestRunEvents.length > 0 ? (
               <span style={{ fontSize: '11px', color: 'var(--fg-muted)' }}>
-                {latestRunEvents.length} replayed events
+                {latestRunEvents.length} {isIndexing ? 'events so far' : 'replayed events'}
+              </span>
+            ) : null}
+            {foreignRun ? (
+              <span
+                data-testid="index-run-foreign-note"
+                style={{ fontSize: '11.5px', color: 'var(--fg-muted)' }}
+              >
+                started outside this tab (API, another operator, or a schedule) — progress mirrored from the server
               </span>
             ) : null}
           </div>
