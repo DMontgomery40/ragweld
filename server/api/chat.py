@@ -45,6 +45,7 @@ from server.models.tribrid_config_model import (
     RecallStatusResponse,
     TracesLatestResponse,
     TriBridConfig,
+    WebGroundingMetadata,
 )
 from server.observability.runtime import (
     apply_default_links,
@@ -270,6 +271,7 @@ async def chat(request: ChatRequest, response: Response) -> ChatResponse:
                     "top_k_override": request.top_k,
                     "stream": False,
                     "images_count": len(list(request.images or [])),
+                    "web_requested": bool(request.web_enabled),
                 },
             )
 
@@ -288,6 +290,7 @@ async def chat(request: ChatRequest, response: Response) -> ChatResponse:
             llm_used = chat_result.llm_used
             llm_error = chat_result.llm_error
             tokens_used = chat_result.tokens_used
+            web_grounding = chat_result.web_grounding
             ended_at_ms = int(time.time() * 1000)
             debug = build_chat_debug_info(
                 config=config,
@@ -313,6 +316,9 @@ async def chat(request: ChatRequest, response: Response) -> ChatResponse:
                 final_results=len(sources),
                 llm_used=bool(llm_used),
                 llm_error=llm_error,
+                web_requested=web_grounding.web_requested,
+                web_grounded=web_grounding.web_grounded,
+                web_search_requests=web_grounding.web_search_requests,
             )
 
             if trace_enabled:
@@ -374,6 +380,7 @@ async def chat(request: ChatRequest, response: Response) -> ChatResponse:
                     data={
                         "sources_count": len(sources),
                         "tokens_used": tokens_used,
+                        "web_grounding": web_grounding.model_dump(mode="json"),
                     },
                 )
                 await trace_store.annotate(run_id, **current_trace_payload_fields())
@@ -436,6 +443,7 @@ async def chat(request: ChatRequest, response: Response) -> ChatResponse:
                 message=assistant_msg,
                 sources=sources,
                 tokens_used=tokens_used,
+                web_grounding=web_grounding,
             )
 
         except RetrievalContractMismatchError as e:
@@ -535,6 +543,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                 "top_k_override": request.top_k,
                 "stream": True,
                 "images_count": len(list(request.images or [])),
+                "web_requested": bool(request.web_enabled),
             },
         )
 
@@ -697,6 +706,17 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                     llm_error: str | None = None
                     if isinstance(llm_error_raw, str) and llm_error_raw.strip():
                         llm_error = llm_error_raw.strip()
+                    raw_web_grounding = payload.get("web_grounding")
+                    try:
+                        web_grounding = WebGroundingMetadata.model_validate(raw_web_grounding or {})
+                    except Exception as error:
+                        logger.warning(
+                            "Chat stream produced malformed web-grounding metadata: %s",
+                            type(error).__name__,
+                        )
+                        web_grounding = WebGroundingMetadata(
+                            web_requested=bool(request.web_enabled)
+                        )
                     debug = debug.model_copy(update={"llm_used": llm_used, "llm_error": llm_error})
                     update_route_summary(
                         corpus_ids=resolve_sources(request.sources),
@@ -709,6 +729,9 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                         final_results=len(src_objs),
                         llm_used=llm_used,
                         llm_error=llm_error,
+                        web_requested=web_grounding.web_requested,
+                        web_grounded=web_grounding.web_grounded,
+                        web_search_requests=web_grounding.web_search_requests,
                     )
                     payload["debug"] = debug.model_dump(mode="serialization", by_alias=True)
 
@@ -742,6 +765,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                             data={
                                 "sources_count": len(payload.get("sources") or []),
                                 "tokens_used": int(payload.get("tokens_used") or 0),
+                                "web_grounding": web_grounding.model_dump(mode="json"),
                             },
                         )
                         await trace_store.annotate(run_id, **current_trace_payload_fields())

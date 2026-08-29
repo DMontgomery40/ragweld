@@ -23,13 +23,16 @@ from server.chat.provider_router import select_provider_route
 from server.chat.retrieval_gate import classify_for_recall
 from server.chat.source_router import resolve_sources
 from server.db.postgres import PostgresClient
+from server.gateway_catalog import OPENROUTER_UPSTREAM_PREFIX, gateway_rows_snapshot
 from server.models.chat_config import ImageAttachment, RecallConfig, RecallIntensity, RecallPlan
 from server.models.retrieval import ChunkMatch
 from server.models.tribrid_config_model import (
     ChatProviderInfo,
     ChatRequest,
+    ChatWebConfig,
     GenerationUnavailableDetail,
     TriBridConfig,
+    WebGroundingMetadata,
 )
 from server.observability.costing import usage_total_tokens
 from server.retrieval.cache import CacheMode, SemanticCacheService
@@ -85,6 +88,22 @@ class ChatOnceResult:
     llm_used: bool
     llm_error: str | None
     tokens_used: int
+    web_grounding: WebGroundingMetadata
+
+
+def _web_config_for_route(
+    *, request: ChatRequest, config: TriBridConfig, route: Any
+) -> ChatWebConfig | None:
+    if not request.web_enabled:
+        return None
+    if not config.chat.web.enabled:
+        raise RuntimeError("Web search is disabled by the server chat configuration")
+    row = gateway_rows_snapshot().get(str(route.model))
+    if row is None or not str(row.upstream).startswith(OPENROUTER_UPSTREAM_PREFIX):
+        raise RuntimeError(
+            f"Web search requires an OpenRouter-backed gateway alias; {route.model!r} is unsupported"
+        )
+    return config.chat.web
 
 
 def fit_context_to_route(
@@ -435,7 +454,9 @@ async def chat_once(
     )
     cache_service = SemanticCacheService(config)
     cache_scope_key = SemanticCacheService.scope_key(corpus_ids or ["direct_chat"])
-    cache_allowed = not (bool(request.images) and config.semantic_cache.bypass_if_images)
+    cache_allowed = not request.web_enabled and not (
+        bool(request.images) and config.semantic_cache.bypass_if_images
+    )
     # Hashing up to five 20 MiB attachments is CPU work: do it off the loop, and only when the
     # cache can be consulted at all.
     images_fp = (
@@ -538,6 +559,7 @@ async def chat_once(
                 llm_used=True,
                 llm_error=None,
                 tokens_used=0,
+                web_grounding=WebGroundingMetadata(),
             )
 
     try:
@@ -551,19 +573,21 @@ async def chat_once(
             model=str(route.model),
             base_url=str(route.base_url) if getattr(route, "base_url", None) else None,
         )
+        web_config = _web_config_for_route(request=request, config=config, route=route)
 
         generation = _coerce_generation_result(
             await generate_chat_text(
                 route=route,
                 system_prompt=system_prompt,
-            user_message=request.message,
-            images=list(request.images or []),
-            image_detail=str(config.chat.multimodal.image_detail or "auto"),
-            temperature=temperature,
-            max_tokens=int(config.chat.max_tokens),
-            context_text=context_text,
-            context_chunks=sources,
-            timeout_s=float(getattr(config.ui, "chat_stream_timeout", 120) or 120),
+                user_message=request.message,
+                images=list(request.images or []),
+                image_detail=str(config.chat.multimodal.image_detail or "auto"),
+                temperature=temperature,
+                max_tokens=int(config.chat.max_tokens),
+                context_text=context_text,
+                context_chunks=sources,
+                timeout_s=float(getattr(config.ui, "chat_stream_timeout", 120) or 120),
+                web_config=web_config,
             )
         )
         text = generation.text
@@ -621,6 +645,10 @@ async def chat_once(
         llm_used=llm_used,
         llm_error=llm_error,
         tokens_used=usage_total_tokens(generation.usage),
+        web_grounding=(
+            generation.web_grounding
+            or WebGroundingMetadata(web_requested=bool(request.web_enabled))
+        ),
     )
 
 
@@ -767,12 +795,15 @@ async def chat_stream(
     accumulated = ""
     provider_response_id: str | None = None
     provider_usage: dict[str, Any] = {}
+    web_grounding = WebGroundingMetadata(web_requested=bool(request.web_enabled))
     temperature = (
         float(config.chat.temperature_no_retrieval) if not corpus_ids else float(config.chat.temperature)
     )
     cache_service = SemanticCacheService(config)
     cache_scope_key = SemanticCacheService.scope_key(corpus_ids or ["direct_chat"])
-    cache_allowed = not (bool(request.images) and config.semantic_cache.bypass_if_images)
+    cache_allowed = not request.web_enabled and not (
+        bool(request.images) and config.semantic_cache.bypass_if_images
+    )
     # Hashing up to five 20 MiB attachments is CPU work: do it off the loop, and only when the
     # cache can be consulted at all.
     images_fp = (
@@ -884,6 +915,7 @@ async def chat_stream(
                 "llm_used": True,
                 "llm_error": None,
                 "tokens_used": 0,
+                "web_grounding": WebGroundingMetadata().model_dump(mode="json"),
             }
             yield f"data: {json.dumps(done_payload)}\n\n"
             return
@@ -897,6 +929,10 @@ async def chat_stream(
         nonlocal provider_usage
         provider_usage = dict(value)
 
+    def _capture_web_grounding(value: WebGroundingMetadata) -> None:
+        nonlocal web_grounding
+        web_grounding = value
+
     try:
         route = resolved_route or select_provider_route(
             config=config,
@@ -908,6 +944,7 @@ async def chat_stream(
             model=str(route.model),
             base_url=str(route.base_url) if getattr(route, "base_url", None) else None,
         )
+        web_config = _web_config_for_route(request=request, config=config, route=route)
 
         async for delta in stream_chat_text(
             route=route,
@@ -922,6 +959,8 @@ async def chat_stream(
             timeout_s=float(getattr(config.ui, "chat_stream_timeout", 120) or 120),
             on_provider_response_id=_capture_provider_response_id,
             on_usage=_capture_usage,
+            on_web_grounding=_capture_web_grounding,
+            web_config=web_config,
         ):
             accumulated += delta
             yield f"data: {json.dumps({'type': 'text', 'content': delta})}\n\n"
@@ -976,6 +1015,7 @@ async def chat_stream(
             "llm_used": False,
             "llm_error": llm_error,
             "tokens_used": usage_total_tokens(provider_usage),
+            "web_grounding": web_grounding.model_dump(mode="json"),
         }
         yield f"data: {json.dumps(done_event_payload)}\n\n"
         return
@@ -1028,5 +1068,6 @@ async def chat_stream(
         "llm_used": bool(llm_used),
         "llm_error": llm_error,
         "tokens_used": usage_total_tokens(provider_usage),
+        "web_grounding": web_grounding.model_dump(mode="json"),
     }
     yield f"data: {json.dumps(done_event_payload)}\n\n"

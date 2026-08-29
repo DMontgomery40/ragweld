@@ -1091,6 +1091,23 @@ class ImageAttachment(BaseModel):
 class ChatRequest(BaseModel):
     """Chat request — composable data sources, not modes."""
 
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_client_web_policy_overrides(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        forbidden = sorted(
+            str(key)
+            for key in value
+            if str(key).startswith("web_") and str(key) != "web_enabled"
+        )
+        if forbidden:
+            raise ValueError(
+                "Web search policy is server-owned; unsupported request fields: "
+                + ", ".join(forbidden)
+            )
+        return value
+
     message: str = Field(description="User's message")
 
     repo_id: str = Field(
@@ -1118,6 +1135,10 @@ class ChatRequest(BaseModel):
 
     conversation_id: str | None = Field(default=None, description="Continue existing conversation")
     stream: bool = Field(default=False, description="Stream the response")
+    web_enabled: bool = Field(
+        default=False,
+        description="Allow the server-owned web-search tool for this message.",
+    )
     images: list[ImageAttachment] = Field(
         default_factory=list,
         max_length=10,
@@ -1304,6 +1325,13 @@ class TraceRouteSummary(BaseModel):
     final_results: int | None = Field(default=None, ge=0, description="Final results returned to the caller.")
     llm_used: bool | None = Field(default=None, description="Whether an LLM/provider response was used.")
     llm_error: str | None = Field(default=None, description="Short reason generation failed or was unavailable.")
+    web_requested: bool = Field(default=False, description="Whether the caller enabled web search.")
+    web_grounded: bool = Field(default=False, description="Whether validated web citations support the response.")
+    web_search_requests: int | None = Field(
+        default=None,
+        ge=0,
+        description="Provider-reported web-search request count; unknown when omitted.",
+    )
 
 
 class TraceEvent(BaseModel):
@@ -1681,6 +1709,24 @@ class ObservabilityStatusResponse(BaseModel):
     operator_hint: str | None = Field(default=None, description="High-signal next-step guidance for operators.")
 
 
+class WebCitation(BaseModel):
+    """One validated URL citation returned by the generation gateway."""
+
+    title: str = Field(default="", description="Provider-supplied citation title.")
+    url: str = Field(description="Validated HTTP(S) citation URL.")
+    start_index: int = Field(ge=0, description="Inclusive character offset in the final answer.")
+    end_index: int = Field(gt=0, description="Exclusive character offset in the final answer.")
+
+
+class WebGroundingMetadata(BaseModel):
+    """Terminal web-grounding facts; never inferred from inline answer text."""
+
+    web_requested: bool = Field(default=False)
+    web_grounded: bool = Field(default=False)
+    web_search_requests: int | None = Field(default=None, ge=0)
+    citations: list[WebCitation] = Field(default_factory=list)
+
+
 class ChatResponse(BaseModel):
     """Response from chat endpoint."""
     run_id: str = Field(description="Unique identifier for this chat run (trace/log correlation)")
@@ -1691,6 +1737,7 @@ class ChatResponse(BaseModel):
     message: Message = Field(description="Assistant's response message")
     sources: list[ChunkMatch] = Field(description="Sources used for response")
     tokens_used: int = Field(description="Tokens consumed")
+    web_grounding: WebGroundingMetadata = Field(default_factory=WebGroundingMetadata)
 
 
 class ModelCatalogEntry(BaseModel):
@@ -6459,6 +6506,18 @@ class ImageGenConfig(BaseModel):
     default_resolution: str = Field(default="1024x1024")
 
 
+class ChatWebConfig(BaseModel):
+    """Server-owned OpenRouter web-search policy for ordinary chat."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = Field(default=True, description="Allow opt-in web search in Chat.")
+    engine: Literal["auto", "native", "exa"] = Field(default="auto")
+    max_results: int = Field(default=5, ge=1, le=20)
+    max_total_results: int = Field(default=5, ge=1, le=20)
+    max_characters: int = Field(default=12000, ge=1000, le=50000)
+
+
 class ChatConfig(BaseModel):
     """Top-level chat configuration. Lives at TriBridConfig.chat.
 
@@ -6473,6 +6532,7 @@ class ChatConfig(BaseModel):
         default=["recall_default"],
         description="Default checked user-facing corpus IDs for new conversations.",
     )
+    web: ChatWebConfig = Field(default_factory=ChatWebConfig)
 
     # Legacy prompt composition (kept for backwards compatibility; prefer the 4 state prompts below).
     system_prompt_base: str = Field(default="You are a helpful assistant.")

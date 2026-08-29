@@ -8,6 +8,7 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from server.api.chat import set_config, set_fusion
+from server.gateway_catalog import warm_gateway_catalog
 from server.main import app
 from server.models.chat import Message
 from server.models.retrieval import ChunkMatch
@@ -84,6 +85,7 @@ async def chat_client(
 ) -> AsyncClient:
     """Create test client with mocked dependencies."""
     # Set up mocked dependencies
+    warm_gateway_catalog()
     set_config(test_config)
     set_fusion(mock_fusion)
 

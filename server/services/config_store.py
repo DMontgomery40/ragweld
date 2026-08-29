@@ -75,6 +75,7 @@ _PRODUCTION_SCOPED_GLOBAL_PATHS: tuple[str, ...] = (
     "chat.litellm.default_model",
     "chat.multimodal.vision_model_override",
     "chat.vllm.enabled",
+    "chat.web",
     "synthetic.generator.max_tokens",
     "embedding.embedding_backend",
     "embedding.embedding_type",
