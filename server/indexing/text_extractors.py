@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import json
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -72,9 +73,108 @@ def _docling_converter() -> Any:
     return _DOCLING_CONVERTER
 
 
+@dataclass(frozen=True)
+class FigureGateway:
+    """Resolved LiteLLM route for figure description (URL, key, alias)."""
+
+    base_url: str
+    api_key: str
+    model: str
+
+
+def build_figure_pipeline_options(figures: Any, gateway: FigureGateway | None) -> Any:
+    """Docling PDF pipeline options for figure classification/description from config.
+
+    ``describe`` requires a resolved gateway: asking for descriptions and silently
+    producing none would hide a misconfigured vision alias behind an index run that
+    looks successful, so the missing route raises instead.
+    """
+    from docling.datamodel.pipeline_options import PdfPipelineOptions, PictureDescriptionApiOptions
+
+    from server.indexing.figure_prompts import FIGURE_PROMPTS
+
+    opts = PdfPipelineOptions()
+    opts.generate_picture_images = True
+    opts.images_scale = float(figures.images_scale)
+    opts.do_picture_classification = bool(figures.classify)
+    describe = bool(figures.describe)
+    if describe and gateway is None:
+        raise ValueError(
+            "indexing.figures.describe is enabled but no vision gateway route was resolved; "
+            "figure description must fail closed, never be skipped silently"
+        )
+    opts.do_picture_description = describe
+    opts.enable_remote_services = describe
+    if describe:
+        assert gateway is not None
+        opts.picture_description_options = PictureDescriptionApiOptions(
+            url=f"{gateway.base_url.rstrip('/')}/chat/completions",
+            headers={"Authorization": f"Bearer {gateway.api_key}"},
+            params={
+                "model": gateway.model,
+                "max_completion_tokens": int(figures.max_completion_tokens),
+                "response_format": {"type": "json_object"},
+            },
+            prompt=FIGURE_PROMPTS[str(figures.prompt_profile)],
+            timeout=float(figures.timeout_s),
+            concurrency=int(figures.concurrency),
+            picture_area_threshold=float(figures.min_area_fraction),
+            classification_deny=list(figures.skip_classes),
+            # The pipeline raster scale governs the stored picture; this one governs the
+            # crop actually sent to the vision alias. Both follow the operator's setting.
+            scale=float(figures.images_scale),
+            provenance=f"ragweld:{gateway.model}",
+        )
+    return opts
+
+
+_FIGURE_CONVERTERS: dict[str, Any] = {}
+
+
+def docling_converter_for(figures: Any, gateway: FigureGateway | None) -> Any:
+    """The plain cached converter when figures are off; otherwise one converter per options signature.
+
+    The signature deliberately excludes the API key: it is a secret, and it is fixed for
+    the life of the process (resolved from the environment at route resolution).
+    """
+    if figures is None or not bool(getattr(figures, "enabled", False)):
+        return _docling_converter()
+    signature = json.dumps(
+        {
+            "figures": figures.model_dump(mode="json"),
+            "gateway": [gateway.base_url, gateway.model] if gateway is not None else None,
+        },
+        sort_keys=True,
+    )
+    with _DOCLING_CONVERTER_LOCK:
+        converter = _FIGURE_CONVERTERS.get(signature)
+        if converter is None:
+            from docling.datamodel.base_models import InputFormat
+            from docling.document_converter import (
+                DocumentConverter,
+                ImageFormatOption,
+                PdfFormatOption,
+            )
+
+            options = build_figure_pipeline_options(figures, gateway)
+            # Only these two formats carry a picture-enrichment pipeline. Every other
+            # Docling format keeps its default option, so DOCX/PPTX/XLSX/HTML extraction
+            # is unchanged by enabling figures.
+            converter = DocumentConverter(
+                format_options={
+                    InputFormat.PDF: PdfFormatOption(pipeline_options=options),
+                    InputFormat.IMAGE: ImageFormatOption(pipeline_options=options),
+                }
+            )
+            _FIGURE_CONVERTERS[signature] = converter
+    return converter
+
+
 def extract_text_for_path(
     path: Path,
     *,
+    figures: Any | None = None,
+    gateway: FigureGateway | None = None,
     parquet_max_rows: int = 5000,
     parquet_max_chars: int = 2_000_000,
     parquet_max_cell_chars: int = 20_000,
@@ -87,6 +187,10 @@ def extract_text_for_path(
     - CSV/TSV are normalized into tab-separated rows
     - PDF, DOCX, PPTX, XLSX, and HTML are converted to markdown by Docling
     - Parquet extraction uses pyarrow, bounded by config
+
+    ``figures``/``gateway`` select the Docling converter: an enrichment converter that
+    classifies and describes pictures when ``indexing.figures`` is enabled, otherwise the
+    plain shared converter.
     """
     ext = path.suffix.lower()
     if ext in {".txt", ".md", ".rst", ".json", ".yaml", ".yml", ".toml", ".sql", ".py", ".js", ".jsx", ".ts", ".tsx"}:
@@ -94,7 +198,7 @@ def extract_text_for_path(
     if ext in {".csv", ".tsv"}:
         return _direct(_read_delimited(path, delimiter="," if ext == ".csv" else "\t"))
     if ext in DOCLING_SUFFIXES:
-        return _read_with_docling(path)
+        return _read_with_docling(path, converter=docling_converter_for(figures, gateway))
     if ext == ".parquet":
         return _direct(
             _read_parquet(

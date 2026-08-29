@@ -63,6 +63,7 @@ from server.indexing.official_graphrag import (
 from server.indexing.provenance import stamp_provenance
 from server.indexing.text_extractors import (
     ExtractedDocument,
+    FigureGateway,
     document_kind_for_path,
     extract_text_for_path,
     extraction_method_for_path,
@@ -982,6 +983,44 @@ def _resolve_semantic_kg_route(cfg: TriBridConfig) -> ProviderRoute:
     return route
 
 
+def _figure_model_spec(alias: str) -> dict[str, Any] | None:
+    """The catalog row served under one gateway alias, or None when the alias is unknown."""
+    for m in _load_models_json():
+        if str(m.get("gateway_alias") or "").strip() == alias:
+            return m
+    return None
+
+
+def _resolve_figure_route(cfg: TriBridConfig) -> FigureGateway | None:
+    """Validated gateway route for figure description, or None when figures are off.
+
+    Fails closed: an alias that is not in the catalog, is not vision-capable, or cannot be
+    routed refuses the run rather than letting it convert every PDF without descriptions.
+    """
+    figures = cfg.indexing.figures
+    if not figures.enabled or not figures.describe:
+        return None
+    alias = str(figures.vision_model or "").strip()
+    spec = _figure_model_spec(alias)
+    if spec is None or not bool(spec.get("supports_vision")):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"indexing.figures.vision_model {alias!r} is not a vision-capable gateway alias "
+                "in the model catalog"
+            ),
+        )
+    try:
+        route = select_provider_route(config=cfg, model_override=alias)
+    except Exception as exc:  # fail closed with the alias in the message
+        raise HTTPException(
+            status_code=409, detail=f"figure vision alias {alias!r} is not routable: {exc}"
+        ) from exc
+    return FigureGateway(
+        base_url=str(route.base_url), api_key=str(route.api_key), model=str(route.model)
+    )
+
+
 def _detect_local_hardware_class() -> str:
     machine = str(platform.machine() or "").strip().lower()
     is_apple_silicon = sys.platform == "darwin" and machine in {"arm64", "aarch64"}
@@ -1508,6 +1547,8 @@ async def _run_index(
 def _extract_text_for_index_sync(
     path: Path,
     *,
+    figures: Any | None = None,
+    gateway: FigureGateway | None = None,
     parquet_max_rows: int = 5000,
     parquet_max_chars: int = 2_000_000,
     parquet_max_cell_chars: int = 20_000,
@@ -1516,6 +1557,8 @@ def _extract_text_for_index_sync(
 ) -> ExtractedDocument | None:
     extracted = extract_text_for_path(
         path,
+        figures=figures,
+        gateway=gateway,
         parquet_max_rows=parquet_max_rows,
         parquet_max_chars=parquet_max_chars,
         parquet_max_cell_chars=parquet_max_cell_chars,
@@ -1605,6 +1648,8 @@ async def _run_docling_extraction_locked(
 async def _extract_text_for_index(
     path: Path,
     *,
+    figures: Any | None = None,
+    gateway: FigureGateway | None = None,
     parquet_max_rows: int = 5000,
     parquet_max_chars: int = 2_000_000,
     parquet_max_cell_chars: int = 20_000,
@@ -1615,6 +1660,8 @@ async def _extract_text_for_index(
         return await _run_docling_extraction_locked(
             _extract_text_for_index_sync,
             path,
+            figures=figures,
+            gateway=gateway,
             parquet_max_rows=parquet_max_rows,
             parquet_max_chars=parquet_max_chars,
             parquet_max_cell_chars=parquet_max_cell_chars,
@@ -1624,6 +1671,8 @@ async def _extract_text_for_index(
     return await asyncio.to_thread(
         _extract_text_for_index_sync,
         path,
+        figures=figures,
+        gateway=gateway,
         parquet_max_rows=parquet_max_rows,
         parquet_max_chars=parquet_max_chars,
         parquet_max_cell_chars=parquet_max_cell_chars,
@@ -1716,6 +1765,12 @@ async def _run_index_body(
     semantic_entities_total = 0
     semantic_relations_total = 0
     semantic_empty_chunks = 0
+    # Resolved from this run's config snapshot, like the semantic-KG route below: the
+    # figures the pipeline is asked for and the alias that describes them must come from
+    # one decision. ``start_index`` already refused an unroutable alias before the fence.
+    figure_gateway = _resolve_figure_route(cfg)
+    figures_described_total = 0
+    figures_undescribed_total = 0
     contextual_mode = (
         str(getattr(cfg.embedding, "contextual_chunk_embeddings", "off") or "off").strip().lower()
     )
@@ -1983,6 +2038,8 @@ async def _run_index_body(
                 with INDEX_STAGE_LATENCY_SECONDS.labels(stage="file_read").time():
                     extracted = await _extract_text_for_index(
                         abs_path,
+                        figures=cfg.indexing.figures,
+                        gateway=figure_gateway,
                         parquet_max_rows=int(
                             getattr(cfg.indexing, "parquet_extract_max_rows", 5000) or 5000
                         ),
@@ -2015,6 +2072,10 @@ async def _run_index_body(
                 continue
             if extracted is None:
                 continue
+            # Counted per successfully extracted document: the vision calls were made
+            # (and billed) even if the document is skipped further down.
+            figures_described_total += extracted.figures_described
+            figures_undescribed_total += extracted.figures_skipped
             content = extracted.text
             if "\x00" in content:
                 continue
@@ -2216,6 +2277,23 @@ async def _run_index_body(
                     f"entities={semantic_entities_total} "
                     f"relations={semantic_relations_total} "
                     f"empty_chunks={semantic_empty_chunks}"
+                ),
+            },
+            drop_oldest=True,
+        )
+
+    # Reported independently of GraphRAG: figures can be enabled with semantic KG off.
+    # Docling exposes no per-picture failure reason, so an eligible picture that came back
+    # without a description is reported as undescribed rather than guessed to be a failure.
+    if event_queue is not None and cfg.indexing.figures.enabled:
+        _emit_event(
+            event_queue,
+            {
+                "type": "log",
+                "message": (
+                    "Figure summary: "
+                    f"figures_described={figures_described_total} "
+                    f"figures_undescribed={figures_undescribed_total}"
                 ),
             },
             drop_oldest=True,
@@ -3187,8 +3265,10 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
         409: {
             "model": IndexRunConflictResponse | PersistedStateCorruptResponse,
             "description": (
-                "An index run already holds this corpus (durable per-corpus run fence), or its "
-                "persisted index state is malformed (de-index to repair)."
+                "An index run already holds this corpus (durable per-corpus run fence), its "
+                "persisted index state is malformed (de-index to repair), or "
+                "indexing.figures.vision_model is not a routable vision-capable gateway alias "
+                "(that one carries a plain string detail, not one of the models above)."
             ),
         },
         503: {
@@ -3212,6 +3292,10 @@ async def start_index(request: IndexRequest) -> IndexStatus:
     # Durable per-corpus run fence (compare-and-set on the corpus row): a second
     # worker or process cannot build and retire against the same corpus.
     cfg = await load_scoped_config(repo_id=request.repo_id)
+    # Refuse an unroutable or non-vision figure alias here, before the fence and the lease
+    # are taken: a misconfigured alias must not cost a claimed corpus and a staged
+    # generation. The run body resolves the route again from its own config snapshot.
+    _resolve_figure_route(cfg)
     postgres = PostgresClient(cfg.indexing.postgres_url)
     claim: FenceClaim | None = None
     try:
