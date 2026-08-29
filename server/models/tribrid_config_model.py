@@ -4396,6 +4396,73 @@ class ChunkingConfig(BaseModel):
         return self
 
 
+ChunkFigurePromptProfile = Literal["technical_figure", "schematic"]
+
+
+class IndexingFiguresConfig(BaseModel):
+    """Figure/chart/drawing description during indexing (Docling picture enrichment via the gateway)."""
+
+    enabled: bool = Field(
+        default=False,
+        description="Describe and classify figures inside Docling-converted PDFs so they become retrievable chunks",
+    )
+    describe: bool = Field(
+        default=True,
+        description="Send each figure to the vision alias for a structured description",
+    )
+    classify: bool = Field(
+        default=True,
+        description="Run Docling's local figure classifier (chart, diagram, logo, photo) before describing",
+    )
+    vision_model: str = Field(
+        default="z-ai.glm-5.3-flash",
+        description="Gateway alias used to describe figures; must be vision-capable in the model catalog",
+    )
+    prompt_profile: ChunkFigurePromptProfile = Field(
+        default="technical_figure",
+        description="Prompt template for figure descriptions: technical figures or engineering schematics",
+    )
+    images_scale: float = Field(
+        default=2.0,
+        ge=1.0,
+        le=4.0,
+        description="Docling raster scale for figure crops (2.0 is about 144 DPI)",
+    )
+    min_area_fraction: float = Field(
+        default=0.02,
+        ge=0.0,
+        le=1.0,
+        description="Skip figures smaller than this fraction of the page area (icons, logos)",
+    )
+    skip_classes: list[str] = Field(
+        default_factory=lambda: ["logo", "signature", "icon"],
+        description="Classifier classes that are never sent for description",
+    )
+    max_figures_per_file: int = Field(
+        default=200,
+        ge=0,
+        description="Cap on described figures per document; the rest keep caption-only text",
+    )
+    max_completion_tokens: int = Field(
+        default=600,
+        ge=64,
+        le=4000,
+        description="Output token budget per figure description",
+    )
+    concurrency: int = Field(
+        default=4,
+        ge=1,
+        le=16,
+        description="Parallel vision calls while converting one document",
+    )
+    timeout_s: int = Field(
+        default=90,
+        ge=5,
+        le=600,
+        description="Per-figure vision call timeout in seconds",
+    )
+
+
 class IndexingConfig(BaseModel):
     """Indexing and vector storage configuration."""
 
@@ -4503,6 +4570,7 @@ class IndexingConfig(BaseModel):
         le=500_000,
         description="Optional local embedding throughput override for index-time estimates (tokens/sec).",
     )
+    figures: IndexingFiguresConfig = Field(default_factory=IndexingFiguresConfig)
 
 
 # =============================================================================

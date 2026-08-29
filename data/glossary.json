@@ -12585,6 +12585,139 @@
       "badges": [],
       "links": [],
       "related": []
+    },
+    {
+      "term": "Figures Enabled",
+      "key": "FIGURES_ENABLED",
+      "definition": "Turns on figure/chart/drawing description during indexing for this corpus. Docling detects picture regions on each page, optionally classifies them, and sends each one to the configured vision alias; the description becomes a retrievable chunk anchored to the figure's page and bounding box so citations can box it in the viewer. Off by default because it spends vision calls; the index estimate shows the cost before a run.",
+      "category": "indexing",
+      "related": [
+        "FIGURES_VISION_MODEL",
+        "FIGURES_PROMPT_PROFILE"
+      ],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Figures Describe",
+      "key": "FIGURES_DESCRIBE",
+      "definition": "Whether each detected figure is sent to the vision alias for a structured description (summary, labels, components, connections, values, references). Turn off to keep only captions and classification.",
+      "category": "indexing",
+      "related": [
+        "FIGURES_ENABLED"
+      ],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Figures Classify",
+      "key": "FIGURES_CLASSIFY",
+      "definition": "Runs Docling's local figure classifier before description so logos, signatures and icons can be skipped and the figure kind (chart, diagram, photo) is recorded on the chunk.",
+      "category": "indexing",
+      "related": [
+        "FIGURES_ENABLED"
+      ],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Figures Vision Model",
+      "key": "FIGURES_VISION_MODEL",
+      "definition": "Gateway alias that describes figures at index time. Must be a catalog alias flagged as vision-capable; the run refuses to start otherwise. Defaults to the cheap GLM 5.3 Flash alias; point hard scanned schematics at a stronger vision model per corpus.",
+      "category": "indexing",
+      "related": [
+        "FIGURES_ENABLED"
+      ],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Figures Prompt Profile",
+      "key": "FIGURES_PROMPT_PROFILE",
+      "definition": "Prompt template for figure descriptions. 'technical_figure' covers charts, diagrams and photos in reports; 'schematic' adds drawing number, sheet, revision, connector and unit conventions for engineering drawings.",
+      "category": "indexing",
+      "related": [
+        "FIGURES_ENABLED"
+      ],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Figures Image Scale",
+      "key": "FIGURES_IMAGES_SCALE",
+      "definition": "Raster scale Docling uses for figure crops sent to the vision model (1.0 = 72 DPI; 2.0 ≈ 144 DPI). Higher reads small callouts better at higher token cost.",
+      "category": "indexing",
+      "related": [
+        "FIGURES_ENABLED"
+      ],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Figures Min Area Fraction",
+      "key": "FIGURES_MIN_AREA_FRACTION",
+      "definition": "Figures smaller than this fraction of the page area are not described (icons, logos, decorative marks).",
+      "category": "indexing",
+      "related": [
+        "FIGURES_ENABLED"
+      ],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Figures Skip Classes",
+      "key": "FIGURES_SKIP_CLASSES",
+      "definition": "Classifier classes that are never described, e.g. logo, signature, icon.",
+      "category": "indexing",
+      "related": [
+        "FIGURES_ENABLED"
+      ],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Figures Max Per File",
+      "key": "FIGURES_MAX_FIGURES_PER_FILE",
+      "definition": "Hard cap on described figures per document; figures beyond the cap keep caption-only text and are counted as skipped in the run summary.",
+      "category": "indexing",
+      "related": [
+        "FIGURES_ENABLED"
+      ],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Figures Max Completion Tokens",
+      "key": "FIGURES_MAX_COMPLETION_TOKENS",
+      "definition": "Output token budget for one figure description.",
+      "category": "indexing",
+      "related": [
+        "FIGURES_ENABLED"
+      ],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Figures Concurrency",
+      "key": "FIGURES_CONCURRENCY",
+      "definition": "How many vision calls run in parallel while converting one document.",
+      "category": "indexing",
+      "related": [
+        "FIGURES_ENABLED"
+      ],
+      "links": [],
+      "badges": []
+    },
+    {
+      "term": "Figures Timeout",
+      "key": "FIGURES_TIMEOUT_S",
+      "definition": "Seconds to wait for one vision call before the figure falls back to caption-only text.",
+      "category": "indexing",
+      "related": [
+        "FIGURES_ENABLED"
+      ],
+      "links": [],
+      "badges": []
     }
   ]
 }

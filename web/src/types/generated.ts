@@ -1343,6 +1343,35 @@ export interface IndexingConfig {
   skip_dense?: boolean; // default: False
   /** Optional local embedding throughput override for index-time estimates (tokens/sec). */
   estimated_tokens_per_second_local?: number | null; // default: None
+  figures?: IndexingFiguresConfig;
+}
+
+/** Figure/chart/drawing description during indexing (Docling picture enrichment via the gateway). */
+export interface IndexingFiguresConfig {
+  /** Describe and classify figures inside Docling-converted PDFs so they become retrievable chunks */
+  enabled?: boolean; // default: False
+  /** Send each figure to the vision alias for a structured description */
+  describe?: boolean; // default: True
+  /** Run Docling's local figure classifier (chart, diagram, logo, photo) before describing */
+  classify?: boolean; // default: True
+  /** Gateway alias used to describe figures; must be vision-capable in the model catalog */
+  vision_model?: string; // default: "z-ai.glm-5.3-flash"
+  /** Prompt template for figure descriptions: technical figures or engineering schematics */
+  prompt_profile?: "technical_figure" | "schematic"; // default: "technical_figure"
+  /** Docling raster scale for figure crops (2.0 is about 144 DPI) */
+  images_scale?: number; // default: 2.0
+  /** Skip figures smaller than this fraction of the page area (icons, logos) */
+  min_area_fraction?: number; // default: 0.02
+  /** Classifier classes that are never sent for description */
+  skip_classes?: string[];
+  /** Cap on described figures per document; the rest keep caption-only text */
+  max_figures_per_file?: number; // default: 200
+  /** Output token budget per figure description */
+  max_completion_tokens?: number; // default: 600
+  /** Parallel vision calls while converting one document */
+  concurrency?: number; // default: 4
+  /** Per-figure vision call timeout in seconds */
+  timeout_s?: number; // default: 90
 }
 
 /** Runtime capability matrix for indexing backends. */
