@@ -93,7 +93,10 @@ def figure_block_markdown(caption: str, cls: str | None, fig: FigureAnnotation |
     """Prose-only markdown for one figure; the JSON never enters the embedded text."""
     caption = (caption or "").strip()
     head = f"Figure ({cls}): {caption}" if cls else f"Figure: {caption}"
-    if not caption and (fig is None or not fig.summary):
+    has_structured_content = fig is not None and (
+        fig.summary or fig.labels or fig.components or fig.connections or fig.values or fig.references
+    )
+    if not caption and not has_structured_content:
         return ""
     parts: list[str] = [head.rstrip(": ").rstrip()]
     if fig is not None:

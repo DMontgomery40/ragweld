@@ -74,3 +74,13 @@ def test_block_markdown_is_prose_only_and_omits_empty_parts() -> None:
     assert "Values:" not in block and "{" not in block
     assert figure_block_markdown("", None, None) == ""
     assert figure_block_markdown("Figure 2", None, None) == "Figure: Figure 2"
+
+
+def test_block_markdown_keeps_structured_content_with_blank_caption_and_summary() -> None:
+    """A blank caption and blank summary must not drop labels/components/etc.; only a wholly
+    empty figure (no caption, no summary, no lists) collapses to "". The header here has no
+    trailing colon: with no caption and no cls, head is "Figure: " and the existing
+    ``head.rstrip(": ").rstrip()`` normalization strips the dangling "` : `" down to "Figure".
+    """
+    fig = FigureAnnotation(labels=["J1", "J2"])
+    assert figure_block_markdown("", None, fig) == "Figure\nLabels: J1, J2"

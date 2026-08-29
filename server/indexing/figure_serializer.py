@@ -9,7 +9,20 @@ One serializer instance is used for both the whole-document serialization and th
 calls made by ``_build_source_map``; the per-item text is therefore findable verbatim in the
 whole text, which is what the source map relies on.
 
-When a picture has no ``DescriptionAnnotation``, this serializer defers to Docling's own
+Docling's live enrichment pipeline attaches the description and classification to
+``item.meta`` (``PictureMeta.description`` / ``.classification``), and only additionally
+appends the deprecated ``DescriptionAnnotation`` / ``PictureClassificationData`` to
+``item.annotations`` because ``_keep_deprecated_annotations`` defaults to True. This
+serializer reads ``item.meta`` first and falls back to ``item.annotations`` so it works
+against both the live enrichment shape and hand-built test fixtures that only set
+annotations. Whenever ``item.meta`` is set at all, ``DocSerializer.serialize`` prepends a
+``serialize_meta`` block ahead of the picture serializer's own output; left unconfigured that
+block renders ``meta.description.text`` verbatim (the raw JSON reply) via
+``MarkdownMetaSerializer``. ``make_markdown_serializer`` blocks the ``description`` and
+``classification`` meta names so that leak cannot happen no matter which item is being
+serialized, and this serializer is the sole place that turns the parsed reply into prose.
+
+When a picture has no description at all, this serializer defers to Docling's own
 ``MarkdownPictureSerializer.serialize`` so the output is byte-identical to stock Docling.
 """
 
@@ -28,6 +41,7 @@ from docling_core.types.doc.document import (
     DoclingDocument,
     PictureClassificationData,
     PictureItem,
+    PictureMeta,
 )
 
 from server.indexing.figure_prompts import figure_block_markdown, parse_figure_reply
@@ -43,19 +57,26 @@ class RagweldPictureSerializer(MarkdownPictureSerializer):
         self.classes_by_ref: dict[str, str] = {}
 
     def serialize(self, *, item: PictureItem, doc_serializer: Any, doc: DoclingDocument, **kwargs: Any):  # type: ignore[override]
-        description: DescriptionAnnotation | None = None
-        cls: str | None = None
-        for ann in item.annotations:
-            if isinstance(ann, DescriptionAnnotation) and description is None:
-                description = ann
-            elif isinstance(ann, PictureClassificationData) and ann.predicted_classes and cls is None:
-                cls = ann.predicted_classes[0].class_name.replace("_", " ")
+        meta = item.meta if isinstance(item.meta, PictureMeta) else None
+        description_text: str | None = meta.description.text if meta and meta.description else None
+        cls: str | None = (
+            meta.classification.get_main_prediction().class_name.replace("_", " ")
+            if meta and meta.classification
+            else None
+        )
+        if description_text is None or cls is None:
+            for ann in item.annotations:
+                if description_text is None and isinstance(ann, DescriptionAnnotation):
+                    description_text = ann.text
+                elif cls is None and isinstance(ann, PictureClassificationData) and ann.predicted_classes:
+                    cls = ann.predicted_classes[0].class_name.replace("_", " ")
+
         if cls is not None:
             self.classes_by_ref[item.self_ref] = cls
-        if description is None:
+        if description_text is None:
             return super().serialize(item=item, doc_serializer=doc_serializer, doc=doc, **kwargs)
 
-        fig = parse_figure_reply(description.text)
+        fig = parse_figure_reply(description_text)
         self.figures_by_ref[item.self_ref] = fig
         caption = doc_serializer.serialize_captions(item=item, **kwargs).text
         params = MarkdownParams(**kwargs)
@@ -73,5 +94,15 @@ class RagweldPictureSerializer(MarkdownPictureSerializer):
 
 
 def make_markdown_serializer(doc: DoclingDocument) -> MarkdownDocSerializer:
-    """A Docling markdown serializer whose picture serializer records figure annotations."""
-    return MarkdownDocSerializer(doc=doc, picture_serializer=RagweldPictureSerializer())
+    """A Docling markdown serializer whose picture serializer records figure annotations.
+
+    ``blocked_meta_names`` stops ``DocSerializer.serialize`` from prepending Docling's own
+    ``serialize_meta`` block (raw description JSON, humanized class name) ahead of every item
+    that carries ``item.meta`` — including pictures, which is where the JSON would otherwise
+    leak regardless of what ``RagweldPictureSerializer`` itself renders.
+    """
+    return MarkdownDocSerializer(
+        doc=doc,
+        picture_serializer=RagweldPictureSerializer(),
+        params=MarkdownParams(blocked_meta_names={"description", "classification"}),
+    )
