@@ -52,14 +52,23 @@ type TypedDetail = DocumentNotCapturedDetail | DocumentTooLargeDetail | Record<s
 export function toDocumentViewError(err: unknown): DocumentViewError {
   if (axios.isAxiosError(err)) {
     const status = Number(err.response?.status ?? 0);
-    if (status === 401 || status === 403) {
-      // The auth proxy in front of the API refused the request: the sign-in session ended
-      // (for example after a service restart). Nothing about the document is wrong.
+    if (status === 401) {
+      // The auth proxy in front of the API has no valid session (for example after a service
+      // restart ended it). Nothing about the document is wrong; signing in again fixes it.
       return {
         status,
         code: 'unauthenticated',
         message: 'Your sign-in session has ended, so the document could not be fetched.',
         operatorHint: 'Reload the page to sign in again, then reopen the citation.',
+      };
+    }
+    if (status === 403) {
+      // Authenticated but denied by the access policy: re-signing in cannot change that.
+      return {
+        status,
+        code: 'http',
+        message: 'Access denied: your account is not allowed to read documents on this deployment.',
+        operatorHint: 'Ask the operator to grant your user the required group in the auth policy.',
       };
     }
     const data = err.response?.data as { detail?: TypedDetail | string } | undefined;
