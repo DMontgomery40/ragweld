@@ -75,6 +75,35 @@ flowchart LR
     D --> F["Save path: reconciled\nbefore persisting"]
 ```
 
+## Retrieval surface: the non-chat generation alias is deployment-locked
+
+In production mode, the **RAG → Retrieval** subtab no longer treats the generation alias as a per-corpus knob. The picker is read-only, relabeled, and explained in place (`web/src/components/RAG/RetrievalSubtab.tsx`):
+
+| What you see | What it means |
+|---|---|
+| Label reads **Non-chat generation alias** (instead of **Generation Alias**) | This alias feeds the non-chat answer pipeline (`/api/answer`, eval analysis, synthetic generation) — not Chat. |
+| The model picker is disabled | The value is deployment-owned (`generation.gen_model` is on the production-scoped list above), so the UI cannot edit it per corpus. |
+| Lock note under the picker | "Chat uses its own model picker. This non-chat answer pipeline is locked by the production deployment." — Chat routing follows `chat.litellm.default_model` / `ui.chat_default_model` through the Chat model picker, which stays interactive. |
+
+The lock is exposed accessibly: the `select` carries `aria-describedby` pointing at the lock note, so screen readers announce why the control is disabled. Behavior is covered by the `web/tests/e2e/gateway/production_generation_alias.spec.ts` e2e test.
+
+*Mechanism diagram (this UI lock only — the wider reconciliation flow is the diagram above):*
+
+```mermaid
+flowchart LR
+    A["RAG - Retrieval subtab"] --> B{"ui.runtime_mode == production?"}
+    B -->|"no"| C["Generation Alias picker editable\n(generation.gen_model per corpus)"]
+    B -->|"yes"| D["Picker disabled + relabeled\nNon-chat generation alias"]
+    D --> E["aria-describedby lock note\nChat picker stays interactive"]
+    D --> F["Value comes from the deployment\ngeneration.gen_model\nreconciled on read and save"]
+```
+
+!!! tip "If you need a different non-chat answer model in production"
+    Change `generation.gen_model` in the **global** config (or the deployment render), not in the corpus UI. The retrieval subtab picks up the reconciled value on the next read — see [Configuration](../configuration.md) for the read/patch workflow.
+
+!!! note "Development mode is unchanged"
+    When `ui.runtime_mode=development`, the picker is labeled **Generation Alias** and remains fully editable per corpus. Only production mode locks it.
+
 ## Renderer output safety (`deploy/proxmox/render_config.py`)
 
 The Proxmox production render writes the validated config to disk atomically, and the write path is deliberately defensive. If you run the renderer from cron, systemd units, or a different user than whoever owns the deployed config, these rules are what protect you:
