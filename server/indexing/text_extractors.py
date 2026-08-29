@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from server.models.index import DocumentKind, ExtractionMethod, PageRegion
+from server.models.index import DocumentKind, ExtractionMethod, FigureAnnotation, PageRegion
 
 # Rich-document formats are converted through Docling; code and plain-text
 # formats keep the direct read path by design.
@@ -23,6 +23,8 @@ class SourceSpan:
     char_start: int
     char_end: int
     region: PageRegion
+    figure: FigureAnnotation | None = None
+    figure_class: str | None = None
 
 
 @dataclass(frozen=True)
@@ -34,6 +36,9 @@ class ExtractedDocument:
     kind: DocumentKind
     spans: tuple[SourceSpan, ...] = ()
     unlocated_items: int = 0
+    figures_described: int = 0
+    figures_failed: int = 0
+    figures_skipped: int = 0
 
 
 def extraction_method_for_path(path: Path) -> ExtractionMethod:
@@ -160,6 +165,10 @@ def _build_source_map(doc: Any, serializer: Any, full: str) -> tuple[tuple[Sourc
             continue
         end = pos + len(part)
         cursor = end
+        figures = getattr(getattr(serializer, "picture_serializer", None), "figures_by_ref", {})
+        classes = getattr(getattr(serializer, "picture_serializer", None), "classes_by_ref", {})
+        figure = figures.get(getattr(item, "self_ref", ""))
+        figure_class = classes.get(getattr(item, "self_ref", ""))
         for prov in item.prov:
             page = doc.pages.get(prov.page_no)
             size = getattr(page, "size", None)
@@ -175,37 +184,58 @@ def _build_source_map(doc: Any, serializer: Any, full: str) -> tuple[tuple[Sourc
                     region=PageRegion(
                         page=int(prov.page_no), left=left, top=top, right=right, bottom=bottom
                     ),
+                    figure=figure,
+                    figure_class=figure_class,
                 )
             )
     spans.sort(key=lambda span: (span.char_start, span.char_end))
     return tuple(spans), unlocated
 
 
-def _read_with_docling(path: Path) -> ExtractedDocument | None:
+def _read_with_docling(path: Path, *, converter: Any | None = None) -> ExtractedDocument | None:
     """Convert a rich document to markdown via Docling with a page/bbox source map.
+
+    ``converter`` lets the indexer pass a converter configured for figure enrichment
+    (Task 6); the default is the plain cached converter.
 
     Returns None when the document is unparseable or serializes to nothing. The returned text
     is the whole-document markdown serialization, unmodified, so chunk char offsets index it
     exactly.
     """
     try:
-        from docling_core.transforms.serializer.markdown import MarkdownDocSerializer
+        from docling_core.types.doc import PictureItem
+        from docling_core.types.doc.document import DescriptionAnnotation, PictureMeta
 
-        result = _docling_converter().convert(str(path))
+        from server.indexing.figure_serializer import make_markdown_serializer
+
+        result = (converter or _docling_converter()).convert(str(path))
         doc = result.document
-        serializer = MarkdownDocSerializer(doc=doc)
+        serializer = make_markdown_serializer(doc)
         full = str(serializer.serialize().text or "")
     except Exception:
         return None
     if not full.strip():
         return None
     spans, unlocated = _build_source_map(doc, serializer, full)
+    pictures = [p for p, _ in doc.iterate_items() if isinstance(p, PictureItem)]
+    # A description can live in the current ``item.meta`` shape (live enrichment, and any
+    # fixture that sets meta directly) or the deprecated ``item.annotations`` shape (fixtures
+    # built against the older API); setting meta alone does not populate annotations, so both
+    # must be checked or meta-only pictures would be miscounted as skipped.
+    described = sum(
+        1
+        for p in pictures
+        if (isinstance(p.meta, PictureMeta) and p.meta.description is not None)
+        or any(isinstance(a, DescriptionAnnotation) for a in p.get_annotations())
+    )
     return ExtractedDocument(
         text=full,
         extraction="docling",
         kind=document_kind_for_path(path),
         spans=spans,
         unlocated_items=unlocated,
+        figures_described=described,
+        figures_skipped=max(0, len(pictures) - described),
     )
 
 

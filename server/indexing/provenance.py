@@ -9,10 +9,10 @@ from server.indexing.text_extractors import SourceSpan
 from server.models.index import Chunk, ChunkProvenance, ExtractionMethod, PageRegion
 
 
-def regions_for_span(
+def spans_for_span(
     spans: Sequence[SourceSpan], starts: Sequence[int], char_start: int, char_end: int
-) -> list[PageRegion]:
-    """Regions of every source span overlapping [char_start, char_end), in reading order.
+) -> list[SourceSpan]:
+    """Every source span overlapping [char_start, char_end), in reading order.
 
     ``spans`` must be sorted by ``char_start`` with non-decreasing ``char_end`` (the extractor
     guarantees this: spans are located with a monotonic cursor). Overlap is half-open:
@@ -21,13 +21,20 @@ def regions_for_span(
     if not spans or char_end <= char_start:
         return []
     hi = bisect_left(starts, char_end)  # spans[:hi] start before the chunk ends
-    regions: list[PageRegion] = []
+    found: list[SourceSpan] = []
     index = hi - 1
     while index >= 0 and spans[index].char_end > char_start:
-        regions.append(spans[index].region)
+        found.append(spans[index])
         index -= 1
-    regions.reverse()
-    return regions
+    found.reverse()
+    return found
+
+
+def regions_for_span(
+    spans: Sequence[SourceSpan], starts: Sequence[int], char_start: int, char_end: int
+) -> list[PageRegion]:
+    """Regions of every source span overlapping [char_start, char_end), in reading order."""
+    return [span.region for span in spans_for_span(spans, starts, char_start, char_end)]
 
 
 def stamp_provenance(
@@ -43,8 +50,10 @@ def stamp_provenance(
         raw_start = chunk.metadata.get("char_start")
         raw_end = chunk.metadata.get("char_end")
         regions: list[PageRegion] = []
+        overlapping: list[SourceSpan] = []
         if isinstance(raw_start, int) and isinstance(raw_end, int):
-            regions = regions_for_span(spans, starts, raw_start, raw_end)
+            overlapping = spans_for_span(spans, starts, raw_start, raw_end)
+            regions = [span.region for span in overlapping]
         pages = [region.page for region in regions]
         chunk.provenance = ChunkProvenance(
             extraction=extraction,
@@ -52,3 +61,16 @@ def stamp_provenance(
             page_end=max(pages) if pages else None,
             regions=regions,
         )
+        figure_spans = [span for span in overlapping if span.figure is not None]
+        if not figure_spans or not isinstance(raw_start, int) or not isinstance(raw_end, int):
+            continue
+        covered = sum(
+            max(0, min(span.char_end, raw_end) - max(span.char_start, raw_start)) for span in figure_spans
+        )
+        chunk_len = max(1, raw_end - raw_start)
+        if covered * 2 >= chunk_len:
+            first = figure_spans[0]
+            chunk.metadata["figure"] = first.figure.model_dump(mode="json")
+            if first.figure_class:
+                chunk.metadata["figure_class"] = first.figure_class
+            chunk.metadata["chunk_kind"] = "figure"
