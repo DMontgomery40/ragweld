@@ -287,6 +287,22 @@ def test_every_number_field_advertises_its_pydantic_bounds() -> None:
     are fixed, so the list is gone and the invariant is absolute: no numeric control may
     advertise a bound its model does not have. Both sides are read from the model itself, so
     a later `ge`/`le` change fails here rather than drifting.
+
+    T5/M-25 (twelve further components) added a second, more direct way to attribute a
+    `NumberField` to its config path: an explicit `configPath="a.b.c"` prop, read straight off
+    the element rather than reverse-engineered from a `useConfigField<number>(...)` binding.
+    It is required for controls the binding regex cannot see at all (a value destructured out
+    of a nested object patched as a whole, e.g. `chat.recall_gate.*`, or a control that reads
+    straight off `useConfigStore` instead of `useConfigField`) and is used throughout those
+    twelve files even where the old inference would also have worked, so there is exactly one
+    mechanism to reason about there. `_config_field_bounds` already walks an arbitrary-depth
+    dotted path through nested `BaseModel` fields, so a 3-level path resolves with no change to
+    that helper. A `NumberField` with neither a `configPath` prop nor a recognized
+    `useConfigField<number>` binding is not a persisted config value at all -- a local
+    calculator input (`StorageCalculatorSuite`) or an ad-hoc request parameter
+    (`SyntheticLabSubtab`, `GraphSubtab`'s `maxHops`) -- requirement 1 allows these; they still
+    clamp, there is just no Pydantic model to check them against, so they are skipped rather
+    than asserted.
     """
     sources = sorted((ROOT / "web/src").rglob("*.tsx"))
     assert sources, "no frontend sources found"
@@ -307,14 +323,19 @@ def test_every_number_field_advertises_its_pydantic_bounds() -> None:
         for element in _jsx_elements(source, "NumberField"):
             value_prop = re.search(r"value=\{([^\n]*)", element)
             assert value_prop is not None, f"{rel}: a NumberField has no value prop"
-            # One control reads `value={a || b}`, so take the first identifier in the expression
-            # that is a config binding rather than requiring a bare variable.
-            candidates = [n for n in re.findall(r"\w+", value_prop.group(1)) if n in bindings]
-            assert candidates, (
-                f"{rel}: NumberField value={value_prop.group(1)!r} writes no "
-                "useConfigField<number> binding"
-            )
-            config_path = bindings[candidates[0]]
+
+            config_path_prop = re.search(r'configPath="([\w.]+)"', element)
+            if config_path_prop:
+                config_path = config_path_prop.group(1)
+            else:
+                # One control reads `value={a || b}`, so take the first identifier in the
+                # expression that is a config binding rather than requiring a bare variable.
+                candidates = [n for n in re.findall(r"\w+", value_prop.group(1)) if n in bindings]
+                if not candidates:
+                    # Not bound to a persisted config value -- see the docstring above.
+                    continue
+                config_path = bindings[candidates[0]]
+
             low, high = _config_field_bounds(config_path)
             ui_min = re.search(r"min=\{(-?[\d_.]+)\}", element)
             ui_max = re.search(r"max=\{(-?[\d_.]+)\}", element)
@@ -333,7 +354,7 @@ def test_every_number_field_advertises_its_pydantic_bounds() -> None:
             if found:
                 problems.setdefault(config_path, []).extend(f"{rel}: {config_path} {f}" for f in found)
 
-    assert checked >= 45, f"expected to check every numeric config control, checked {checked}"
+    assert checked >= 100, f"expected to check every numeric config control, checked {checked}"
 
     assert not problems, "NumberField bounds disagree with the config model:\n  " + "\n  ".join(
         detail for path in sorted(problems) for detail in problems[path]
@@ -343,13 +364,38 @@ def test_every_number_field_advertises_its_pydantic_bounds() -> None:
 def test_no_config_editor_still_writes_a_raw_number_input() -> None:
     """Raw `<input type="number">` clamped nothing and wrote on every keystroke.
 
-    The two config editors are the whole numeric-config surface; a new raw numeric input here
-    is a field that bypasses the shared commit-on-blur clamp, which is how out-of-range values
-    reached the PATCH in the first place.
+    `NumberField` (`web/src/components/ui/NumberField.tsx`) is the one place any numeric input
+    is allowed to render a raw `<input type="number">`; every other frontend source is scanned,
+    not just the two config editors this test used to name -- T5/M-25 migrated the remaining
+    eleven components (RerankerTraining/AgentTraining TrainingStudio, StorageCalculatorSuite,
+    ChatSettings, EvalAnalysisTab, RerankerConfigSubtab, DataQualitySubtab, SyntheticLabSubtab,
+    ChatInterface, GraphSubtab, GrafanaConfig) that still had raw, unclamped numeric inputs.
+
+    One documented exception: `ChatInterface.tsx`'s "Top-K (results) for this conversation"
+    control is a *nullable* per-conversation override -- clearing it and blurring reverts to
+    the corpus's configured `final_k`, it is never itself persisted. `NumberField.commit()`
+    always calls `onCommit` with a `number` and treats an empty box as "restore the last
+    committed value", so it has no way to express "the operator cleared this"; adopting it
+    there would silently remove the only way back to the corpus default. It still clamps
+    (1-100) on every keystroke via the same `Math.max`/`Math.min` pattern `NumberField`'s own
+    clamp uses, just inline, and is called out at its call site.
     """
-    for relative in ("web/src/components/RAG/IndexingSubtab.tsx", "web/src/components/RAG/RetrievalSubtab.tsx"):
-        source = (ROOT / relative).read_text(encoding="utf-8")
-        assert 'type="number"' not in source, (
-            f"{relative} still has a raw numeric input; use NumberField so the value is clamped "
-            "to its Pydantic bounds on commit"
-        )
+    exceptions = {"web/src/components/Chat/ChatInterface.tsx"}
+    matches: list[str] = []
+    for path in sorted((ROOT / "web/src").rglob("*.tsx")):
+        rel = path.relative_to(ROOT).as_posix()
+        if rel == "web/src/components/ui/NumberField.tsx" or rel in exceptions:
+            continue
+        source = path.read_text(encoding="utf-8")
+        if 'type="number"' in source:
+            matches.append(rel)
+    assert matches == [], (
+        "raw numeric inputs bypass the shared NumberField clamp: " + ", ".join(matches)
+    )
+
+    # The one exception is pinned to exactly the field it names, not the whole file: if
+    # ChatInterface.tsx grows a second raw numeric input, or drops the one documented here,
+    # this must fail rather than silently widening the allowlist.
+    chat_interface = (ROOT / "web/src/components/Chat/ChatInterface.tsx").read_text(encoding="utf-8")
+    assert chat_interface.count('type="number"') == 1
+    assert 'id="chat-top-k"' in chat_interface
