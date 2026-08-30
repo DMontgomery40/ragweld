@@ -7692,9 +7692,7 @@ DEFAULT_CONFIG = TriBridConfig()
 
 # Set of keys that belong in tribrid_config.json (not .env)
 TRIBRID_CONFIG_KEYS = {
-    # Retrieval params (22 - including MQ_REWRITES alias)
-    'RRF_K_DIV',
-    'LANGGRAPH_FINAL_K',
+    # Retrieval params (including MQ_REWRITES alias)
     'LANGGRAPH_MAX_QUERY_REWRITES',
     'MAX_QUERY_REWRITES',
     'MQ_REWRITES',  # Legacy alias for MAX_QUERY_REWRITES
@@ -7706,16 +7704,12 @@ TRIBRID_CONFIG_KEYS = {
     'CONF_ANY',
     'EVAL_MULTI',
     'QUERY_EXPANSION_ENABLED',
-    'BM25_WEIGHT',
     'BM25_K1',
     'BM25_B',
-    'VECTOR_WEIGHT',
     'CHUNK_SUMMARY_SEARCH_ENABLED',
     'MULTI_QUERY_M',
     'USE_SEMANTIC_SYNONYMS',
     'TRIBRID_SYNONYMS_PATH',
-    'TOPK_DENSE',
-    'TOPK_SPARSE',
     'HYDRATION_MODE',
     'HYDRATION_MAX_CHARS',
     # Semantic cache params (13)
@@ -7975,13 +7969,12 @@ TRIBRID_CONFIG_KEYS = {
 RAG_EVAL_CONFIG_KEYS: set[str] = {
     # BM25 Search
     'BM25_TOKENIZER', 'BM25_STEMMER_LANG',
-    'BM25_K1', 'BM25_B', 'BM25_WEIGHT',
+    'BM25_K1', 'BM25_B',
     # Embedding
     'EMBEDDING_TYPE', 'EMBEDDING_MODEL', 'EMBEDDING_DIM',
     'EMBEDDING_MODEL_LOCAL', 'EMBEDDING_MODEL_MLX', 'EMBEDDING_BATCH_SIZE', 'VOYAGE_MODEL',
     # Retrieval
-    'RRF_K_DIV', 'LANGGRAPH_FINAL_K', 'FINAL_K', 'EVAL_FINAL_K',
-    'TOPK_DENSE', 'TOPK_SPARSE', 'VECTOR_WEIGHT',
+    'FINAL_K', 'EVAL_FINAL_K',
     'CONF_TOP1', 'CONF_AVG5', 'CONF_ANY', 'FALLBACK_CONFIDENCE',
     'CHUNK_SUMMARY_SEARCH_ENABLED', 'MULTI_QUERY_M', 'EVAL_MULTI',
     # Query Expansion (prompts that modify query BEFORE search)
