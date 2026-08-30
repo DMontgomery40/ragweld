@@ -323,12 +323,15 @@ async def test_a_cold_estimate_never_publishes_a_number_it_did_not_measure() -> 
     assert calls, "the probe made no calls"
     assert calls[-1]["status"] == "ready", f"never became ready: {calls}"
 
-    # Every answer before the ready one carries NO counts at all -- not a small estimate.
+    # Every answer before the ready one carries NULL for everything measured -- not a small
+    # estimate, and not a zero an unguarded consumer would render. The file inventory is real,
+    # because the walk genuinely produced it.
     for call in calls[:-1]:
         assert call["status"] in {"warming", "insufficient_sample"}
         assert call["http"] == 200
-        for field in ("total_files", "tokens", "chunks", "sampled_files", "sampled_bytes"):
-            assert call[field] == 0, f"{call['status']} answer carried {field}={call[field]}"
+        for field in ("tokens", "chunks", "sampled_files", "sampled_bytes", "low", "high"):
+            assert call[field] is None, f"{call['status']} answer carried {field}={call[field]}"
+        assert call["total_files"] >= 0
 
     # THE assertion: the cold-path numbers agree with the warm ones.
     ready, warm_tokens = calls[-1], int(result["warm_tokens"])
