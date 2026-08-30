@@ -139,6 +139,12 @@ _DOCLING_EXTRACTION_LOCK = asyncio.Lock()
 # `_run_docling_extraction_locked` only so tests can drive it.
 _DOCLING_WAIT_NOTICE_SECONDS = 15.0
 
+# A single scanned PDF can hold the extractor for many minutes (the Apollo 11 mission report
+# ran 32), and nothing else in the run emits while it does. Past this the conversion says it
+# is still alive, every interval, so a slow file never reads as a wedged worker. Same kind of
+# invariant as the wait notice above, and a parameter for the same reason.
+_DOCLING_HEARTBEAT_SECONDS = 60.0
+
 
 @dataclass(slots=True)
 class DoclingConversion:
@@ -1949,14 +1955,19 @@ async def _run_docling_extraction_locked(
     event_queue: asyncio.Queue[dict[str, Any]] | None = None,
     conversion: DoclingConversion | None = None,
     wait_notice_seconds: float = _DOCLING_WAIT_NOTICE_SECONDS,
+    heartbeat_seconds: float = _DOCLING_HEARTBEAT_SECONDS,
     **kwargs: Any,
 ) -> T:
-    """Serialize Docling conversions process-wide, and put the wait in the run log.
+    """Serialize Docling conversions process-wide, and put both silences in the run log.
 
     Waiting here is invisible from the outside: the queued run keeps its `indexing` status
     and emits nothing at all while the run ahead of it converts. A wait longer than
     `wait_notice_seconds` names the corpus and run that hold the extractor, and the
     acquisition that ends such a wait is logged too, so the run log accounts for the gap.
+
+    The conversion itself is the other silence: one long file emits nothing between its
+    surrounding per-file events, so past `heartbeat_seconds` it reports that it is still
+    running, every interval, until it finishes.
     """
     global _DOCLING_LOCK_HOLDER
 
@@ -2005,6 +2016,7 @@ async def _run_docling_extraction_locked(
         conversion.started_at = datetime.now(UTC)
         _DOCLING_LOCK_HOLDER = conversion
     released = False
+    heartbeat: asyncio.Task[None] | None = None
 
     def _release_lock(_future: object | None = None) -> None:
         nonlocal released
@@ -2016,12 +2028,37 @@ async def _run_docling_extraction_locked(
         # inside `release()` and would otherwise be wiped out by this assignment.
         if _DOCLING_LOCK_HOLDER is conversion:
             _DOCLING_LOCK_HOLDER = None
+        # The beat ends with the conversion, not with whoever is awaiting it: the awaiting
+        # task can be cancelled while the shielded worker runs on.
+        if heartbeat is not None:
+            heartbeat.cancel()
         _DOCLING_EXTRACTION_LOCK.release()
+
+    async def _beat(file: str) -> None:
+        started = time.monotonic()
+        while True:
+            await asyncio.sleep(heartbeat_seconds)
+            _emit_event(
+                event_queue,
+                {
+                    "type": "log",
+                    "message": (
+                        f"Converting {file}: still running "
+                        f"({time.monotonic() - started:.0f}s elapsed)"
+                    ),
+                    "current_file": file,
+                },
+                drop_oldest=True,
+            )
 
     worker_coroutine: Any = None
     worker: asyncio.Task[T] | None = None
     callback_registered = False
     try:
+        # Started before the worker so the release callback can never fire against a
+        # heartbeat that has not been assigned yet, which would leak the beat forever.
+        if conversion is not None and heartbeat_seconds > 0:
+            heartbeat = asyncio.create_task(_beat(conversion.file))
         worker_coroutine = asyncio.to_thread(func, *args, **kwargs)
         worker = asyncio.create_task(worker_coroutine)
         worker.add_done_callback(_release_lock)

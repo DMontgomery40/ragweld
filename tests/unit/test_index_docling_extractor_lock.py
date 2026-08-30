@@ -13,6 +13,7 @@ that agrees with itself.
 from __future__ import annotations
 
 import asyncio
+import re
 import threading
 import time
 from collections.abc import Generator
@@ -172,3 +173,72 @@ def test_an_uncontended_extraction_logs_no_waiting_event() -> None:
 
     assert not _matching(messages, "Waiting for the document extractor"), messages
     assert not _matching(messages, "Document extractor acquired after"), messages
+
+
+HEARTBEAT_PATTERN = re.compile(
+    r"^Converting (?P<file>.+): still running \((?P<elapsed>\d+)s elapsed\)$"
+)
+
+
+def test_a_long_conversion_keeps_saying_it_is_still_running() -> None:
+    """One Docling conversion can outlive every other event, so it has to report itself.
+
+    The Apollo run spent 32 minutes inside single-file conversions. Between them the run
+    log said nothing, which is indistinguishable from a wedged worker.
+    """
+
+    async def scenario() -> tuple[list[str], list[str]]:
+        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        _register(queue, WAITER_CORPUS, WAITER_RUN)
+        await _run_docling_extraction_locked(
+            time.sleep,
+            2.5,
+            event_queue=queue,
+            conversion=DoclingConversion(
+                repo_id=WAITER_CORPUS, run_id=WAITER_RUN, file="apollo-11-mission-report.pdf"
+            ),
+            wait_notice_seconds=0.0,
+            heartbeat_seconds=1.0,
+        )
+        during = _matching(_messages(WAITER_CORPUS, WAITER_RUN), "still running")
+        # The beat has to stop with the conversion, not outlive it as a leaked task.
+        await asyncio.sleep(2.2)
+        after = _matching(_messages(WAITER_CORPUS, WAITER_RUN), "still running")
+        return during, after
+
+    during, after = asyncio.run(scenario())
+
+    assert len(during) >= 2, during
+    elapsed: list[int] = []
+    for message in during:
+        match = HEARTBEAT_PATTERN.match(message)
+        assert match is not None, message
+        assert match.group("file") == "apollo-11-mission-report.pdf", message
+        elapsed.append(int(match.group("elapsed")))
+    assert elapsed[0] >= 1, elapsed
+    assert elapsed == sorted(set(elapsed)), elapsed
+    assert after == during, (during, after)
+
+
+def test_a_short_conversion_emits_no_heartbeat() -> None:
+    """A conversion that finishes inside one interval must not narrate itself at all."""
+
+    async def scenario() -> list[str]:
+        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        _register(queue, WAITER_CORPUS, WAITER_RUN)
+        result = await _run_docling_extraction_locked(
+            lambda: "converted",
+            event_queue=queue,
+            conversion=DoclingConversion(
+                repo_id=WAITER_CORPUS, run_id=WAITER_RUN, file="two-pager.pdf"
+            ),
+            wait_notice_seconds=0.0,
+            heartbeat_seconds=1.0,
+        )
+        assert result == "converted"
+        await asyncio.sleep(1.5)
+        return _messages(WAITER_CORPUS, WAITER_RUN)
+
+    messages = asyncio.run(scenario())
+
+    assert not _matching(messages, "still running"), messages
