@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { indexingApi } from '@/api/indexing';
+import { AssistantMarkdown } from '@/components/ui/AssistantMarkdown';
 import { confirmDialog } from '@/components/ui/confirmDialog';
 import { useAPI } from '@/hooks/useAPI';
 import { useIndexing } from '@/hooks/useIndexing';
@@ -482,7 +483,7 @@ export default function StartTab() {
                   ) : null}
                   {answer ? (
                     <div className="ob-answer visible" data-testid="onboarding-answer">
-                      <div style={{ whiteSpace: 'pre-wrap' }}>{answer.message.content}</div>
+                      <AssistantMarkdown content={answer.message.content} />
                       {answer.sources.length > 0 ? (
                         <div className="ob-hint" data-testid="onboarding-citations" style={{ marginTop: 10 }}>
                           Sources:{' '}

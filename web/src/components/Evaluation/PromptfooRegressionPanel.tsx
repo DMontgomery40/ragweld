@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { evalApi } from '@/api/eval';
+import { AssistantMarkdown } from '@/components/ui/AssistantMarkdown';
 import { CollapsibleSection } from '@/components/ui/CollapsibleSection';
 import type { PromptfooRun, PromptfooRunResult } from '@/types/generated';
 
@@ -281,8 +282,8 @@ export function PromptfooRegressionPanel({ corpusId }: Props) {
                     <div style={{ padding: '0 12px 10px', borderTop: '1px solid var(--line)' }}>
                       <div style={{ color: 'var(--fg-muted)', marginTop: '8px' }}>{result.question}</div>
                       {result.response ? (
-                        <div style={{ marginTop: '6px', whiteSpace: 'pre-wrap' }}>
-                          {result.response.split('</think>').pop()?.trim()}
+                        <div style={{ marginTop: '6px' }} data-testid="promptfoo-result-answer">
+                          <AssistantMarkdown content={(result.response.split('</think>').pop() ?? '').trim()} />
                         </div>
                       ) : null}
                       {result.reason ? (
