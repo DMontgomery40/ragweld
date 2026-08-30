@@ -46,6 +46,31 @@ async def _register(corpus_id: str) -> None:
         await pg.disconnect()
 
 
+async def _seed_chunk(corpus_id: str) -> None:
+    """One real chunk row, so the corpus has an index the status line can be about."""
+    from server.models.index import Chunk
+
+    pg = PostgresClient("postgresql://ignored")
+    await pg.connect()
+    try:
+        await pg.upsert_chunks(
+            corpus_id,
+            [
+                Chunk(
+                    chunk_id=f"{corpus_id}-c1",
+                    content="aurora tidal observatory commissioning note",
+                    file_path="notes/commissioning.md",
+                    start_line=1,
+                    end_line=1,
+                    language="markdown",
+                    token_count=7,
+                )
+            ],
+        )
+    finally:
+        await pg.disconnect()
+
+
 async def _drop(corpus_id: str) -> None:
     pg = PostgresClient("postgresql://ignored")
     await pg.connect()
@@ -80,6 +105,9 @@ async def test_the_status_line_reports_the_completed_run_not_ready_to_index(
     corpus_id = f"dash_status_{uuid.uuid4().hex[:10]}"
     await _register(corpus_id)
     try:
+        # A completed run AND chunks in the store: the ragweld_code shape the row describes.
+        # Without the chunks this is a deleted index, which is a different line (see below).
+        await _seed_chunk(corpus_id)
         index_api._persist_run_summary(_summary(corpus_id, "run_complete"))
 
         response = await client.get("/api/index/status", params={"corpus_id": corpus_id})
@@ -160,5 +188,62 @@ async def test_an_interrupted_run_is_not_reported_as_a_completed_index(
         assert payload["running"] is False
         assert "interrupted" in line
         assert "complete" not in line
+    finally:
+        await _drop(corpus_id)
+
+
+@pytest.mark.asyncio
+async def test_a_completed_run_whose_chunks_are_gone_is_not_reported_as_complete(
+    client: AsyncClient,
+) -> None:
+    """The store's word beats the run record's.
+
+    `_load_latest_run_summary` keeps answering with the last completed run after the index it
+    describes has been deleted, so the ops strip claimed "Indexing complete — 0 chunks" for a
+    corpus with nothing in it — the same dishonesty M-44 removed, pointing the other way.
+    """
+    corpus_id = f"dash_status_{uuid.uuid4().hex[:10]}"
+    await _register(corpus_id)
+    try:
+        # A completed run on a corpus that has no chunks: exactly the post-delete shape.
+        index_api._persist_run_summary(_summary(corpus_id, "run_orphaned"))
+
+        response = await client.get("/api/index/status", params={"corpus_id": corpus_id})
+        assert response.status_code == 200
+        payload = response.json()
+        line = " ".join(payload["lines"])
+
+        assert "complete" not in line.lower(), line
+        assert "0 chunks" not in line
+        assert "ready to index" in line.lower()
+    finally:
+        await _drop(corpus_id)
+
+
+@pytest.mark.asyncio
+async def test_deleting_the_index_discards_the_persisted_runs(client: AsyncClient) -> None:
+    """DELETE must not leave run summaries describing an index that no longer exists."""
+    corpus_id = f"dash_status_{uuid.uuid4().hex[:10]}"
+    await _register(corpus_id)
+    try:
+        index_api._persist_run_summary(_summary(corpus_id, "run_before_delete"))
+        index_api._append_run_event(corpus_id, "run_before_delete", {"type": "log", "message": "hi"})
+        # Summaries and events are written by a background writer thread; the endpoint flushes
+        # it, so read through the API before asserting anything about the directory.
+        latest = await client.get(f"/api/index/{corpus_id}/runs/latest")
+        assert latest.status_code == 200
+        runs_dir = index_api._repo_runs_dir(corpus_id)
+        assert runs_dir.exists(), "precondition: the run directory is on disk"
+
+        deleted = await client.delete(f"/api/index/{corpus_id}")
+        assert deleted.status_code == 200, deleted.text
+
+        assert not runs_dir.exists(), "the run directory outlived the index it describes"
+        gone = await client.get(f"/api/index/{corpus_id}/runs/latest")
+        assert gone.status_code == 404
+
+        response = await client.get("/api/index/status", params={"corpus_id": corpus_id})
+        assert response.status_code == 200
+        assert "ready to index" in " ".join(response.json()["lines"]).lower()
     finally:
         await _drop(corpus_id)

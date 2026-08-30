@@ -419,6 +419,15 @@ def _repo_runs_dir(repo_id: str) -> Path:
     return _INDEX_RUNS_DIR / _sanitize_fs_component(repo_id)
 
 
+
+def _discard_persisted_runs(repo_id: str) -> None:
+    """Remove ``data/index_runs/<corpus>/`` after the index it describes has been deleted."""
+    import shutil
+
+    with contextlib.suppress(Exception):
+        shutil.rmtree(_repo_runs_dir(repo_id), ignore_errors=True)
+
+
 def _run_dir(repo_id: str, run_id: str) -> Path:
     return _repo_runs_dir(repo_id) / _sanitize_fs_component(run_id)
 
@@ -4220,7 +4229,9 @@ async def get_dashboard_index_status(
             lines.append(current_file)
     elif s is not None and s.status == "complete":
         lines = ["✓ Indexing complete"]
-    elif last_run is not None and last_run.status == "complete":
+    elif last_run is not None and last_run.status == "complete" and total_chunks > 0:
+        # `total_chunks > 0` is the store's word against the run record's. A completed run whose
+        # chunks are gone is a deleted index, not a complete one, whatever wrote the summary.
         finished = last_run.completed_at or last_run.started_at
         lines = [
             f"✓ Indexing complete — {total_chunks:,} chunks, "
@@ -4228,6 +4239,10 @@ async def get_dashboard_index_status(
         ]
         if progress is None:
             progress = 1.0
+    elif last_run is not None and last_run.status == "complete":
+        # Completed, but the stores hold nothing: the index was deleted after the run. Reading
+        # as never-indexed is the truth now -- it is what the corpus actually is.
+        lines = ["Ready to index…"]
     elif last_run is not None and last_run.status == "error":
         lines = [f"Last index run failed: {last_run.error or 'unknown error'}"]
     elif last_run is not None and last_run.status == "cancelled":
@@ -4588,6 +4603,11 @@ async def delete_index(corpus_id: str) -> dict[str, Any]:
     finally:
         with contextlib.suppress(Exception):
             await postgres.disconnect()
+    # The persisted runs describe an index that no longer exists. Left behind, they are what
+    # _load_latest_run_summary keeps answering with, so the ops strip reported
+    # "Indexing complete - 0 chunks, <old timestamp>" for a corpus that had just been deleted --
+    # the same dishonesty M-44 was raised to remove, pointing the other way.
+    await asyncio.to_thread(_discard_persisted_runs, repo_id)
     # Best-effort gauges (process-level; no per-corpus labels).
     # Reset to zero to avoid stale dashboards in single-corpus dev flows.
     try:
