@@ -33,6 +33,7 @@
     - PostgreSQL pgvector URL (`POSTGRES_URL`)
     - Neo4j Connection URI (`NEO4J_URI`)
     - Final Top‑K (`FINAL_K`)
+    - Semantic cache controls (`SEMANTIC_CACHE_ENABLED`, similarity thresholds, TTLs)
 
 !!! warning "Typos"
     Misspelled keys break existing tooltips silently. Validate JSON in CI.

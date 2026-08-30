@@ -41,6 +41,7 @@
 |-------|---------|---------|
 | `mcp.enabled` | true | Enable embedded MCP HTTP server |
 | `mcp.mount_path` | `/mcp` | Path prefix |
+| `mcp.public_base_url` | `http://127.0.0.1:58012` | Externally reachable origin MCP clients connect to; the server appends the mount path |
 | `mcp.stateless_http` | true | Stateless handling per request |
 | `mcp.json_response` | true | Prefer JSON over text |
 | `mcp.enable_dns_rebinding_protection` | true | Prevent DNS rebinding |

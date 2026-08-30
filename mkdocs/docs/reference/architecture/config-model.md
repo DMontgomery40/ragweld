@@ -62,7 +62,7 @@ flowchart LR
     root --> n_evaluation
     n_system_prompts["system_prompts\n11 fields"]
     root --> n_system_prompts
-    n_mcp["mcp\n10 fields"]
+    n_mcp["mcp\n11 fields"]
     root --> n_mcp
     n_synthetic["synthetic\n3 fields"]
     root --> n_synthetic
@@ -101,7 +101,7 @@ flowchart LR
 | `hydration` | 2 | Context hydration configuration. | [hydration](../config/hydration.md) |
 | `evaluation` | 14 | Evaluation dataset configuration. | [evaluation](../config/evaluation.md) |
 | `system_prompts` | 11 | System prompts for LLM interactions - affects RAG pipeline behavior. | [system_prompts](../config/system_prompts.md) |
-| `mcp` | 10 | Inbound MCP (Model Context Protocol) server configuration. | [mcp](../config/mcp.md) |
+| `mcp` | 11 | Inbound MCP (Model Context Protocol) server configuration. | [mcp](../config/mcp.md) |
 | `synthetic` | 3 | Top-level synthetic data pipeline configuration. | [synthetic](../config/synthetic.md) |
 | `docker` | 7 | Docker infrastructure configuration. | [docker](../config/docker.md) |
 | `document_viewer` | 3 | Source document evidence viewer: how cited files are rendered back to the user. | [document_viewer](../config/document_viewer.md) |

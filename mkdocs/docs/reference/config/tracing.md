@@ -263,7 +263,7 @@
 ??? info "`tracing.otlp_headers` (`OTLP_HEADERS`) — OTLP Headers"
     **Category**: `general`
 
-    OTLP_HEADERS carries any required authentication or tenant-routing headers for the OTLP exporter. Use it when the collector path sits behind auth or multi-tenant gateways, and keep the values consistent with the endpoint you configured. Header mismatches are a common cause of silent export failures.
+    OTLP_HEADERS carries any required authentication or tenant-routing headers for the OTLP exporter. Use it when the collector path sits behind auth or multi-tenant gateways, and keep the values consistent with the endpoint you configured. Header mismatches are a common cause of silent export failures. An authorization header here is never sent back to the browser: the API replaces its value with [redacted] and restores the stored one when a write returns the marker, so leaving the marker keeps the current credential. Every non-secret header (X-Scope-OrgID and friends) is shown and saved in clear.
 
     **Badges**:
     - Transport auth

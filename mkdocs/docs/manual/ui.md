@@ -175,3 +175,15 @@ If you see “wrong results”, the most common cause is simply that you’re lo
 ??? tip "Where to verify secrets"
     - **Admin → Secrets**
     - `/api/secrets/check?...`
+
+## Shell polish worth knowing (recent changes)
+
+A handful of workbench-shell behaviors changed recently; none change any workflow, but they explain things you may notice:
+
+- **Unknown routes say so.** A URL nothing is routed to now renders a "Page not found" card naming the attempted path, with links to every tab — previously it rendered a silently empty page under a "Home" breadcrumb.
+- **Bad deep links are corrected out loud.** An unknown `?subtab=` or `?corpus=` value is replaced (and the URL cleaned) with a toast naming what was wrong and what you landed on, instead of a silent rewrite that made a broken bookmark look like a working link.
+- **The window title names where you are.** The browser tab reads `Dashboard · Storage — <corpus> — ragweld`, so a multi-tab operator session is tellable apart at a glance.
+- **The glossary is organized by its own data.** Category chips come from the `category` field in `data/glossary.json` (one badge per category), chip counts describe the current search, and search matches on word boundaries — searching `figure` finds the figure settings instead of everything containing "configured".
+- **Keyboard access.** Ctrl+K no longer opens on focus (it opens on click, Enter, or Ctrl+K), traps focus while open and returns it on close; the dock picker supports arrow keys + Enter like Ctrl+K; the top bar's tab stops show a visible focus ring.
+- **Admin → Basic names its scope.** A banner shows which corpus the page writes to, and every field carries its `corpus`/`global` scope chip even in the trimmed Basic view — a save can no longer look like a global default when it is a per-corpus value.
+- **Credential fields explain themselves.** The Postgres DSN shows a "Password configured" chip and a note that `[redacted]` means "kept in the backend", and nested config fields read their units properly ("Timeout (seconds)", not "Timeout S"). See [Security](../security.md).

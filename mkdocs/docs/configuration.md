@@ -36,6 +36,9 @@
 !!! danger "No Adapters"
     If the frontend needs a different shape, change the Pydantic model and regenerate. Adapters introduce drift and are not allowed.
 
+!!! note "Credentials are redacted on the wire"
+    `GET /api/config` serves the password inside `indexing.postgres_url` and the authorization value in `tracing.otlp_headers` as `[redacted]`; a PUT/PATCH that returns the marker restores the stored value, so "leave it unchanged" round-trips safely. Typing a real value rotates the secret, and a marker with nothing stored behind it is a `422`. Run-record config snapshots (eval, reranker, agent, synthetic) are redacted the same way. See [Security](security.md).
+
 ## Derivation Chain
 
 ```mermaid

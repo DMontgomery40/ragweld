@@ -209,7 +209,7 @@
 ??? info "`indexing.postgres_url` (`POSTGRES_URL`) — PostgreSQL URL"
     **Category**: `infrastructure`
 
-    Connection DSN for the PostgreSQL control/state store: the corpus registry and per-corpus config, chunk rows with provenance, chunk summaries, and the semantic/embedding caches. Chunk rows carry no vectors; dense and sparse vectors live in Qdrant and Postgres records the dense and sparse contracts they were built under. Retrieval hydrates graph hits and neighbor chunks from these rows, so Postgres must stay reachable for every leg even though it no longer executes vector or full-text search.
+    Connection DSN for the PostgreSQL control/state store: the corpus registry and per-corpus config, chunk rows with provenance, chunk summaries, and the semantic/embedding caches. Chunk rows carry no vectors; dense and sparse vectors live in Qdrant and Postgres records the dense and sparse contracts they were built under. Retrieval hydrates graph hits and neighbor chunks from these rows, so Postgres must stay reachable for every leg even though it no longer executes vector or full-text search. The password is never sent to the browser: the API replaces it with [redacted] on the way out and puts the stored value back when a write returns the marker unchanged, so leaving the marker in place keeps the current password while host, port, database and user stay editable. Type a real password only to rotate it.
 
     **Links**:
     - [Text2VectorSQL: Bridging SQL and Vector Retrieval (arXiv 2025)](https://arxiv.org/abs/2506.23071)

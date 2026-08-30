@@ -35,25 +35,29 @@
 !!! warning "Auth"
     Use `require_api_key=true` in multi-tenant or exposed deployments.
 
+!!! tip "The advertised URL comes from config"
+    `GET /api/mcp/status` reports the connect URL as `mcp.public_base_url` plus the mount path; behind a proxy, set `public_base_url` to the public origin and add its host to `mcp.allowed_hosts`. See [MCP](../mcp.md) for the full field list.
+
 ## Configuration (Selected)
 
 | Field | Default | Description |
 |-------|---------|-------------|
 | `mcp.enabled` | true | Enable embedded MCP HTTP endpoint |
 | `mcp.mount_path` | `/mcp` | URL path for MCP endpoint |
+| `mcp.public_base_url` | `http://127.0.0.1:58012` | Public origin the status endpoint advertises; the server appends the mount path |
 | `mcp.stateless_http` | true | Stateless mode |
 | `mcp.json_response` | true | Prefer JSON responses |
 | `mcp.enable_dns_rebinding_protection` | true | Defense in depth |
 | `mcp.allowed_hosts` | `localhost:*` | Allowed Host headers |
 | `mcp.allowed_origins` | `http://localhost:*` | Allowed Origin values |
-| `mcp.require_api_key` | false | Require `Authorization: Bearer` |
+| `mcp.require_api_key` | false | Require `Authorization: Bearer $MCP_API_KEY` at the mount (fails closed without the key) |
 | `mcp.default_top_k` | 20 | Default Top-K when omitted |
 | `mcp.default_mode` | `tribrid` | Default retrieval mode |
 
 ```mermaid
 flowchart LR
     Client["MCP Client"] --> HTTP["HTTP /mcp"]
-    HTTP --> RAG["TriBridRAG Tools"]
+    HTTP --> RAG["ragweld tools"]
     RAG --> Search["Search / Answer"]
 ```
 
@@ -62,19 +66,19 @@ flowchart LR
 === "Python"
 ```python
 import httpx
-status = httpx.get("http://localhost:8000/mcp/status").json()
+status = httpx.get("http://127.0.0.1:58012/api/mcp/status").json()
 print(status)
 ```
 
 === "curl"
 ```bash
-curl -sS http://localhost:8000/mcp/status | jq .
+curl -sS http://127.0.0.1:58012/api/mcp/status | jq .
 ```
 
 === "TypeScript"
 ```typescript
 async function mcpStatus() {
-  const s = await (await fetch('/mcp/status')).json();
+  const s = await (await fetch('/api/mcp/status')).json();
   console.log(s);
 }
 ```

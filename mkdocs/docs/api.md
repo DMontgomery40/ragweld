@@ -71,6 +71,9 @@
 | Docker | `/api/docker/*` | GET/POST | Infra status, logs, restart |
 | MCP | `/api/mcp/status` | GET | MCP inbound transport status |
 
+!!! note "Credentials never ride these payloads"
+    Config endpoints (`GET/PUT/PATCH /api/config*`) replace the password inside `indexing.postgres_url` and the authorization value in `tracing.otlp_headers` with `[redacted]`, and every run-record route (`/api/eval/results*`, `/api/reranker/train/run*`, `/api/agent/train/run*`, `/api/synthetic/run*`) redacts the config snapshot it pins. A write that returns the marker keeps the stored credential; a real value rotates it. `GET /api/mcp/status` additionally reports the advertised `url`, `host_allowed`, `public_base_url_configured` and `request_host` for the MCP transport. See [Security](security.md).
+
 !!! tip "Citations you can open"
     `ChunkMatch` now carries typed `provenance` (extraction method; cited pages and normalized regions for Docling PDFs), and `ChatResponse` carries `web_grounding` with validated web citations. See [Source document viewer](manual/source_viewer.md) and [Web search in Chat](manual/web_search.md).
 

@@ -135,6 +135,17 @@ flowchart LR
 
 Unit coverage for these behaviors lives in `tests/unit/test_proxmox_deployment_contract.py` (ownership preservation, ownership-failure rollback, and symlink rejection).
 
+### The public origin, spelled once (Faro and MCP)
+
+`render_config.py` derives every browser-facing endpoint that must agree with the deployment's origin from one constant, `PRODUCTION_PUBLIC_ORIGIN` (`https://ragweld.dtmont.com`):
+
+- `PRODUCTION_FARO_URL` is `{origin}/faro/collect` instead of repeating the host in a second constant.
+- `mcp.public_base_url` is the origin itself — not origin + `/mcp`, because the server appends `mcp.mount_path` and a base that already ends in the mount path would advertise `/mcp/mcp/`.
+- `ragweld.dtmont.com` is appended to `mcp.allowed_hosts` (loopback entries kept) and `https://ragweld.dtmont.com` to `mcp.allowed_origins`; without the host entry the transport answers `421` to clients using the advertised URL.
+- The Caddy site for the advertised origin routes `/mcp*` to the API (inside forward auth); the secondary `me.ragweld.com` host deliberately does not, because that host is not in `mcp.allowed_hosts` and the route could not work there.
+
+Both the rendered config and the Caddy path set are pinned by `tests/unit/test_proxmox_deployment_contract.py`, so opening or moving a public MCP route is a visible, reviewed edit.
+
 ## External link origin refresh
 
 Traces persist across deployments, but the dashboards they deep-link to move. `TraceStore` keeps a mapping from link kind to the current deployment origin and rewrites matching links whenever traces are read:

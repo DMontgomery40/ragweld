@@ -26,7 +26,7 @@
 [Config API & workflow](../../configuration.md){ .md-button }
 [Glossary](../../glossary.md){ .md-button }
 
-**Total parameters**: 10
+**Total parameters**: 11
 
 ??? info "Group index"
     - `(root)`
@@ -42,7 +42,8 @@
 | `mcp.enable_dns_rebinding_protection` | `MCP_HTTP_DNS_REBIND_PROTECTION` | `bool` | `true` | — | Enable DNS rebinding protection for MCP HTTP (recommended). |
 | `mcp.enabled` | `MCP_HTTP_ENABLED` | `bool` | `true` | — | Enable the embedded MCP Streamable HTTP server. |
 | `mcp.json_response` | `MCP_HTTP_JSON_RESPONSE` | `bool` | `true` | — | Prefer JSON responses for MCP Streamable HTTP (recommended). |
-| `mcp.mount_path` | `MCP_HTTP_PATH` | `str` | `"/mcp"` | — | Mount path for the MCP Streamable HTTP endpoint (e.g. /mcp). |
+| `mcp.mount_path` | `MCP_HTTP_PATH` | `str` | `"/mcp"` | min_length=2, pattern=^/[^/\s]+(?:/[^/\s]+)*/?$ | Mount path for the MCP Streamable HTTP endpoint (e.g. /mcp). Must name a path segment: a bare "/" would mount the transport at the site root, shadowing every other route, and leaves nothing for the advertised URL to point at. |
+| `mcp.public_base_url` | `MCP_PUBLIC_BASE_URL` | `str` | `"http://127.0.0.1:58012"` | — | Externally reachable base URL (scheme://host[:port]) that MCP clients should connect to; the mount path is appended to it. Set this to the deployment's public origin when the API sits behind a proxy -- the workbench advertises exactly this value, and deriving it from the request would advertise the proxy's internal hop instead of the address a client can actually reach. Its host must also appear in `allowed_hosts`: with DNS rebinding protection on, the transport answers 421 to any Host header it does not recognise, so advertising a host that is not allowed trades one broken instruction for another. Writing the mount path here too (`https://host/mcp`) is accepted and not doubled -- both spellings advertise the same URL. |
 | `mcp.require_api_key` | `MCP_REQUIRE_API_KEY` | `bool` | `false` | — | Require `Authorization: Bearer $MCP_API_KEY` for MCP HTTP access. |
 | `mcp.stateless_http` | `MCP_HTTP_STATELESS` | `bool` | `true` | — | Run MCP Streamable HTTP in stateless mode (recommended). |
 
