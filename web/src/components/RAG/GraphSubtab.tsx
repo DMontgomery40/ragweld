@@ -5,10 +5,50 @@ import { useGraph } from '@/hooks/useGraph';
 import { useIndexing } from '@/hooks/useIndexing';
 import { SyntheticCallout } from '@/components/RAG/SyntheticCallout';
 import { useRepoStore } from '@/stores/useRepoStore';
+import { DEFAULT_ENTITY_LIMIT, ENTITY_LIMIT_CHOICES } from '@/stores/useGraphStore';
 import type { Community, Entity, IndexStatus, Relationship } from '@/types/generated';
 
 /** Node with computed degree for importance labeling */
 type NodeWithDegree = Entity & { __degree?: number };
+
+/**
+ * The one legend. It reads the entity types actually present in the rendered
+ * graph, so the inline panel and the fullscreen modal can never disagree and the
+ * palette can never describe data that is not on screen (M-59: the inline legend
+ * was a hardcoded person/org/location/event/concept NER palette on a code graph).
+ */
+function GraphLegend({
+  types,
+  colorOf,
+  testId,
+}: {
+  types: string[];
+  colorOf: (type: string) => string;
+  testId: string;
+}) {
+  if (!types.length) return null;
+  return (
+    <div
+      style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '11.5px', flexWrap: 'wrap' }}
+      data-testid={testId}
+    >
+      {types.map((type) => (
+        <span key={type} style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', color: 'var(--fg-muted)' }}>
+          <span
+            style={{
+              width: '10px',
+              height: '10px',
+              borderRadius: '999px',
+              background: colorOf(type),
+              display: 'inline-block',
+            }}
+          />
+          {type}
+        </span>
+      ))}
+    </div>
+  );
+}
 
 function formatEntityLabel(e: Entity): string {
   const name = String(e.name || '').trim();
@@ -56,11 +96,14 @@ export function GraphSubtab() {
     selectedCommunity,
     isLoading,
     error,
+    expansion,
     viewMode,
     maxHops,
+    totalMatched,
+    activeQuery,
     visibleEntityTypes,
     visibleRelationTypes,
-    searchEntities,
+    loadSubgraph,
     loadGraph,
     selectEntity,
     selectCommunity,
@@ -73,6 +116,9 @@ export function GraphSubtab() {
   } = useGraph();
 
   const [entityQuery, setEntityQuery] = useState('');
+  // How many entities the visualizer draws. View state: a per-session display
+  // choice, not a persisted operator tunable (M-61).
+  const [entityLimit, setEntityLimit] = useState<number>(DEFAULT_ENTITY_LIMIT);
   const [accentColor, setAccentColor] = useState<string>('#00ff88');
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [fullscreenAnimating, setFullscreenAnimating] = useState(false);
@@ -342,6 +388,11 @@ export function GraphSubtab() {
     }
   };
 
+  const legendColor = useCallback(
+    (type: string): string => nodeColor({ entity_id: '', name: '', entity_type: type } as Entity),
+    [nodeColor]
+  );
+
   // Custom node rendering for fullscreen mode - shows labels for important nodes
   const fullscreenNodeCanvasObject = useCallback(
     (node: any, ctx: CanvasRenderingContext2D, globalScale: number) => {
@@ -408,6 +459,13 @@ export function GraphSubtab() {
     [selectedEntity, accentColor, importantNodeIds, nodeColor]
   );
 
+  // Types actually drawn right now — what both legends describe (M-59).
+  const renderedEntityTypes = useMemo(() => {
+    return Array.from(new Set(filteredEntities.map((e) => String(e.entity_type || '').trim()).filter(Boolean))).sort(
+      (a, b) => a.localeCompare(b)
+    );
+  }, [filteredEntities]);
+
   const entityTypes = useMemo(() => {
     const types = new Set<string>();
     Object.keys(stats?.entity_breakdown || {}).forEach((k) => {
@@ -432,6 +490,50 @@ export function GraphSubtab() {
     return Array.from(types).sort((a, b) => a.localeCompare(b));
   }, [stats, relationships]);
 
+  /**
+   * An honest count. "200 shown" against 5,179 entities told the operator nothing
+   * about what they were not seeing and offered no way to reach entity 201 (M-61).
+   */
+  const entityCountLabel = useMemo(() => {
+    const shown = filteredEntities.length;
+    const fmt = (n: number) => n.toLocaleString();
+    if (selectedCommunity) return `${fmt(shown)} in this community`;
+    if (expansion?.status === 'ok' && selectedEntity) return `${fmt(shown)} in this neighborhood`;
+    const total = Math.max(totalMatched, shown);
+    const scope = activeQuery ? `matching \u201c${activeQuery}\u201d` : 'in this corpus';
+    const hidden = visibleEntityTypes.length ? ' (type filter applied)' : '';
+    return shown < total
+      ? `Showing ${fmt(shown)} of ${fmt(total)} ${scope}${hidden}`
+      : `${fmt(shown)} ${scope}${hidden}`;
+  }, [
+    filteredEntities.length,
+    totalMatched,
+    activeQuery,
+    selectedCommunity,
+    selectedEntity,
+    expansion,
+    visibleEntityTypes.length,
+  ]);
+
+  /**
+   * Communities are absent for three different reasons and the operator needs the
+   * right one. The old copy was a hardcoded string claiming the graph "has no
+   * linked entities yet" and prescribing an expensive Force re-index, printed two
+   * inches under a Stats panel reading 5,179 entities / 11,779 relationships (M-60).
+   */
+  const communitiesEmptyReason = useMemo(() => {
+    const entities = stats?.total_entities ?? 0;
+    const relationships = stats?.total_relationships ?? 0;
+    if (!stats) return 'No graph stats for this corpus yet.';
+    if (entities === 0) {
+      return 'No communities: this corpus has no entity graph. Enable Semantic KG (concepts + relations) or code-entity indexing in RAG > Indexing, then re-index.';
+    }
+    if (relationships === 0) {
+      return `No communities: this graph has ${entities.toLocaleString()} entities but no relationships between them, so there is nothing to cluster. Semantic KG relation extraction produced no edges on this corpus.`;
+    }
+    return `No communities: ${entities.toLocaleString()} entities and ${relationships.toLocaleString()} relationships are stored, but community detection has not produced any clusters for this graph generation. Communities are written during indexing - re-index this corpus to run detection over the current graph.`;
+  }, [stats]);
+
   const indexProgressPercent = useMemo(() => {
     const raw = Number(activeIndexStatus?.progress ?? 0);
     return Math.max(0, Math.min(100, Math.round(raw * 100)));
@@ -445,12 +547,18 @@ export function GraphSubtab() {
     (!!activeIndexSnapshot?.last_indexed || (stats?.total_entities ?? 0) === 0);
 
   const handleSearch = async () => {
-    await searchEntities(entityQuery, 200);
+    await loadSubgraph(entityLimit, entityQuery);
   };
 
   const handleClear = async () => {
     setEntityQuery('');
+    setEntityLimit(DEFAULT_ENTITY_LIMIT);
     await loadGraph();
+  };
+
+  const handleLimitChange = async (next: number) => {
+    setEntityLimit(next);
+    await loadSubgraph(next, activeQuery);
   };
 
   const handlePickCommunity = async (c: Community | null) => {
@@ -744,9 +852,8 @@ export function GraphSubtab() {
               );
             })}
             {!communities?.length && (
-              <div style={{ fontSize: '12.5px', color: 'var(--fg-muted)', lineHeight: 1.5 }} data-testid="graph-communities-empty">
-                No communities: communities are groups of entities linked by relationships, and this graph has no
-                linked entities yet (run a Force re-index with the semantic knowledge graph enabled).
+              <div style={{ fontSize: '12.5px', color: 'var(--fg-muted)', lineHeight: 1.55 }} data-testid="graph-communities-empty">
+                {communitiesEmptyReason}
               </div>
             )}
           </div>
@@ -756,9 +863,43 @@ export function GraphSubtab() {
         <div style={{ background: 'var(--card-bg)', border: '1px solid var(--line)', borderRadius: '12px', padding: '16px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
             <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--fg)' }}>Entities</div>
-            <div style={{ fontSize: '11px', color: 'var(--fg-muted)' }} data-testid="graph-entity-count">
-              {filteredEntities.length} shown
+            <div style={{ fontSize: '11.5px', color: 'var(--fg-muted)' }} data-testid="graph-entity-count">
+              {entityCountLabel}
             </div>
+          </div>
+
+          <div
+            style={{
+              marginTop: '8px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '10px',
+              fontSize: '11.5px',
+              color: 'var(--fg-muted)',
+            }}
+          >
+            <label htmlFor="graph-entity-limit">Draw at most</label>
+            <select
+              id="graph-entity-limit"
+              value={entityLimit}
+              onChange={(e) => void handleLimitChange(Number(e.target.value))}
+              style={{
+                padding: '6px 8px',
+                background: 'var(--input-bg)',
+                border: '1px solid var(--line)',
+                borderRadius: '6px',
+                color: 'var(--fg)',
+                fontSize: '11.5px',
+              }}
+              data-testid="graph-entity-limit"
+            >
+              {ENTITY_LIMIT_CHOICES.map((n) => (
+                <option key={n} value={n}>
+                  {n.toLocaleString()} entities
+                </option>
+              ))}
+            </select>
           </div>
 
           <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
@@ -1007,20 +1148,7 @@ export function GraphSubtab() {
                 <div style={{ fontSize: '11px', color: 'var(--fg-muted)' }}>
                   {filteredEntities.length} nodes • {vizRelationships.length} edges
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '11px', color: 'var(--fg-muted)' }}>
-                  {[
-                    ['person', '#f97316'],
-                    ['org', '#0ea5e9'],
-                    ['location', '#10b981'],
-                    ['event', '#eab308'],
-                    ['concept', '#94a3b8'],
-                  ].map(([label, color]) => (
-                    <span key={label as string} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                      <span style={{ width: '8px', height: '8px', borderRadius: '999px', background: color as string, display: 'inline-block' }} />
-                      {label as string}
-                    </span>
-                  ))}
-                </div>
+                <GraphLegend types={renderedEntityTypes} colorOf={legendColor} testId="graph-legend" />
                 <button
                   onClick={handleOpenFullscreen}
                   disabled={filteredEntities.length === 0}
@@ -1104,9 +1232,28 @@ export function GraphSubtab() {
               )}
             </div>
 
-            <div style={{ marginTop: '10px', fontSize: '11px', color: 'var(--fg-muted)' }}>
-              Tip: click a node to load its neighborhood.
-            </div>
+            {filteredEntities.length > 0 && vizRelationships.length === 0 ? (
+              <div
+                style={{
+                  marginTop: '10px',
+                  padding: '10px 12px',
+                  borderRadius: '10px',
+                  border: '1px solid var(--line)',
+                  background: 'rgba(var(--accent-rgb), 0.06)',
+                  fontSize: '11.5px',
+                  color: 'var(--fg-muted)',
+                  lineHeight: 1.5,
+                }}
+                data-testid="graph-no-edges-note"
+              >
+                No relationships run between these {filteredEntities.length.toLocaleString()} entities, so they are
+                drawn as unconnected nodes. Click one to load its neighborhood, or Reset for the whole-corpus graph.
+              </div>
+            ) : (
+              <div style={{ marginTop: '10px', fontSize: '11.5px', color: 'var(--fg-muted)' }}>
+                Tip: click a node to load its neighborhood.
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -1189,24 +1336,8 @@ export function GraphSubtab() {
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                  {/* Legend: the entity types present in this graph, in the visualizer's colours */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '12px', flexWrap: 'wrap' }} data-testid="graph-fullscreen-legend">
-                    {Array.from(new Set(filteredEntities.map((e) => e.entity_type)))
-                      .sort()
-                      .map((type) => (
-                        <div key={type} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                          <div
-                            style={{
-                              width: '10px',
-                              height: '10px',
-                              borderRadius: '50%',
-                              background: nodeColor({ entity_id: '', name: '', entity_type: type } as Entity),
-                            }}
-                          />
-                          <span style={{ color: 'var(--fg-muted)' }}>{type}</span>
-                        </div>
-                      ))}
-                  </div>
+                  {/* Same legend component as the inline panel: one source of truth (M-59). */}
+                  <GraphLegend types={renderedEntityTypes} colorOf={legendColor} testId="graph-fullscreen-legend" />
 
                   {/* Close button */}
                   <button

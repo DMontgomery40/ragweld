@@ -60,6 +60,23 @@ _BATCH_SIZE_DEFAULT = 500
 _DEFAULT_REPO_SCOPED_NODE_LABELS: tuple[str, ...] = ("Document", "Chunk", "__Entity__", "Community")
 
 
+# The one entity-name predicate. The entity list and the corpus subgraph must select the
+# SAME entities for a query, or a search would list rows the visualizer never draws.
+ENTITY_NAME_MATCH_CLAUSE = (
+    "(toLower({var}.name) CONTAINS $q "
+    "OR toLower(replace(replace({var}.name, '_', ' '), '-', ' ')) CONTAINS $q)"
+)
+
+
+def normalize_entity_query(query: str | None) -> str:
+    """Lower-cased, separator-folded search term; empty string means "no filter"."""
+    q = (query or "").strip().lower()
+    if not q:
+        return ""
+    q = re.sub(r"[_-]+", " ", q)
+    return re.sub(r"\s+", " ", q).strip()
+
+
 class Neo4jClient:
     def __init__(self, uri: str, user: str, password: str, database: str | None = None):
         self.uri = uri
@@ -590,14 +607,9 @@ class Neo4jClient:
         if entity_type:
             where += " AND n.entity_type = $entity_type"
             params["entity_type"] = entity_type
-        q = (query or "").strip().lower()
+        q = normalize_entity_query(query)
         if q:
-            q = re.sub(r"[_-]+", " ", q)
-            q = re.sub(r"\s+", " ", q).strip()
-            where += (
-                " AND (toLower(n.name) CONTAINS $q "
-                "OR toLower(replace(replace(n.name, '_', ' '), '-', ' ')) CONTAINS $q)"
-            )
+            where += f" AND {ENTITY_NAME_MATCH_CLAUSE.format(var='n')}"
             params["q"] = q
         query = f"""
         MATCH (n:__Entity__)
@@ -756,7 +768,9 @@ class Neo4jClient:
                     )
                 )
 
-        return GraphNeighborsResponse(entities=entities, relationships=rels)
+        return GraphNeighborsResponse(
+            entities=entities, relationships=rels, total_matched=len(entities), limit=lim
+        )
 
     async def get_community_members(
         self, repo_id: str, community_id: str, *, limit: int = 500
@@ -892,23 +906,36 @@ class Neo4jClient:
             return None
         return GraphNeighborsResponse(entities=entities, relationships=rels)
 
-    async def get_repo_subgraph(self, repo_id: str, *, limit: int = 200) -> GraphNeighborsResponse:
-        """Return the induced subgraph over the ``limit`` best-connected entities of a corpus.
+    async def get_repo_subgraph(
+        self, repo_id: str, *, limit: int = 200, query: str | None = None
+    ) -> GraphNeighborsResponse:
+        """Return the induced subgraph over the ``limit`` best-connected matching entities.
 
         The whole-corpus visualizer needs edges, not just the entity list; this is
         the one query that returns both, ranked by degree so a capped view keeps
-        the hubs.
+        the hubs. With ``query`` set it is the search view: the same entities the
+        entity list shows, PLUS the relationships that run between them, so a
+        search stops rendering as unconnected dots (M-62).
+
+        ``total_matched`` reports how many entities matched before ``limit``, so the
+        operator sees a denominator rather than a bare count (M-61).
         """
         lim = int(max(0, limit or 0))
         lim = min(lim, 2000)
-        if lim <= 0:
-            return GraphNeighborsResponse(entities=[], relationships=[])
+        q = normalize_entity_query(query)
+        total = await self.count_entities(repo_id, query=q)
+        if lim <= 0 or total == 0:
+            return GraphNeighborsResponse(
+                entities=[], relationships=[], total_matched=total, limit=lim
+            )
 
         allowed_rels = sorted(ALL_RELATION_TYPES)
         driver = self._require_driver()
-        cypher = """
-        MATCH (e:__Entity__ {repo_id: $repo_id})
-        OPTIONAL MATCH (e)-[r]-(:__Entity__ {repo_id: $repo_id})
+        match_filter = f" AND {ENTITY_NAME_MATCH_CLAUSE.format(var='e')}" if q else ""
+        cypher = f"""
+        MATCH (e:__Entity__)
+        WHERE e.repo_id = $repo_id{match_filter}
+        OPTIONAL MATCH (e)-[r]-(:__Entity__ {{repo_id: $repo_id}})
         WHERE type(r) IN $allowed_rels
         WITH e, count(r) AS degree
         ORDER BY degree DESC, e.name ASC, e.entity_id ASC
@@ -916,36 +943,41 @@ class Neo4jClient:
 
         WITH collect(e) AS nodes
         UNWIND nodes AS a
-        OPTIONAL MATCH (a)-[r]-(b:__Entity__ {repo_id: $repo_id})
+        OPTIONAL MATCH (a)-[r]-(b:__Entity__ {{repo_id: $repo_id}})
         WHERE b IN nodes AND type(r) IN $allowed_rels
         WITH nodes, [x IN collect(DISTINCT r) WHERE x IS NOT NULL] AS rels
 
         RETURN
           [n IN nodes |
-            {
+            {{
               entity_id: n.entity_id,
               name: n.name,
               entity_type: n.entity_type,
               file_path: n.file_path,
               description: n.description,
               properties: properties(n)
-            }
+            }}
           ] AS entities,
           [r IN rels |
-            {
+            {{
               source_id: startNode(r).entity_id,
               target_id: endNode(r).entity_id,
               relation_type: type(r),
               weight: coalesce(r.weight, 1.0),
               properties: properties(r)
-            }
+            }}
           ] AS relationships;
         """
+        params: dict[str, Any] = {"repo_id": repo_id, "allowed_rels": allowed_rels, "limit": lim}
+        if q:
+            params["q"] = q
         async with driver.session(database=self.database) as session:
-            res = await session.run(cypher, repo_id=repo_id, allowed_rels=allowed_rels, limit=lim)
+            res = await session.run(cypher, **params)
             records = await res.data()
         if not records:
-            return GraphNeighborsResponse(entities=[], relationships=[])
+            return GraphNeighborsResponse(
+                entities=[], relationships=[], total_matched=total, limit=lim
+            )
         rec = records[0] or {}
         entities = [
             _entity_from_mapping(item)
@@ -970,7 +1002,27 @@ class Neo4jClient:
                     properties=_relationship_properties_from_mapping(r),
                 )
             )
-        return GraphNeighborsResponse(entities=entities, relationships=rels)
+        return GraphNeighborsResponse(
+            entities=entities, relationships=rels, total_matched=total, limit=lim
+        )
+
+    async def count_entities(self, repo_id: str, *, query: str | None = None) -> int:
+        """How many entities a corpus (optionally a search) has, before any display limit."""
+        q = normalize_entity_query(query)
+        driver = self._require_driver()
+        match_filter = f" AND {ENTITY_NAME_MATCH_CLAUSE.format(var='n')}" if q else ""
+        cypher = f"""
+        MATCH (n:__Entity__)
+        WHERE n.repo_id = $repo_id{match_filter}
+        RETURN count(n) AS total;
+        """
+        params: dict[str, Any] = {"repo_id": repo_id}
+        if q:
+            params["q"] = q
+        async with driver.session(database=self.database) as session:
+            res = await session.run(cypher, **params)
+            rec = await res.single()
+        return int((rec or {}).get("total") or 0)
 
     # Community operations
     async def detect_communities(self, repo_id: str) -> list[Community]:

@@ -150,3 +150,158 @@ async def test_label_propagation_communities_survive_promotion_and_feed_the_subg
                 pass
         await neo.disconnect()
         await client.delete(f"/api/corpora/{active}")
+
+
+def _code_entity(entity_id: str, name: str, entity_type: str) -> Neo4jNode:
+    """A code-graph entity: its id is a corpus-relative source path with `/` and `::`."""
+    return Neo4jNode(
+        id=entity_id,
+        label="Concept",
+        properties={
+            "entity_id": entity_id,
+            "name": name,
+            "entity_type": entity_type,
+            "description": f"{name} ({entity_type})",
+            "file_path": entity_id.split("::", 1)[0],
+        },
+    )
+
+
+async def test_code_entity_ids_round_trip_and_a_search_carries_its_own_edges(
+    client: AsyncClient,
+) -> None:
+    """M-01, M-61, M-62 against a live Neo4j.
+
+    M-01: every entity route must accept an id containing `/` and `::` (every code
+    entity has both) and return the real neighborhood, not 404.
+    M-62: a search must return the relationships that run BETWEEN its results, or the
+    visualizer draws unconnected dots ("101 nodes - 1 edges" on `ragweld_code`).
+    M-61: the response must carry the total match count so the UI can print a
+    denominator instead of an undenominated "200 shown".
+    """
+    active = f"graph-code-{uuid4().hex[:8]}"
+    staging = f"__staging__{active}__{uuid4().hex[:6]}"
+    neo = Neo4jClient(
+        os.environ.get("NEO4J_URI", "bolt://127.0.0.1:7687"),
+        os.environ.get("NEO4J_USER", "neo4j"),
+        os.environ.get("NEO4J_PASSWORD", "password"),
+    )
+    created = await client.post(
+        "/api/corpora", json={"corpus_id": active, "name": active, "path": os.path.abspath(_CORPUS_PATH)}
+    )
+    assert created.status_code in (200, 201), created.text
+
+    reranker = "server/retrieval/rerank.py::Reranker"
+    rerank_init = "server/retrieval/rerank.py::Reranker.__init__"
+    mlx_reranker = "server/retrieval/mlx_qwen3.py::MLXQwen3Reranker"
+    module = "server/retrieval/rerank.py"
+    unrelated = "server/api/graph.py::list_entities"
+
+    await neo.connect()
+    try:
+        await neo.ensure_schema()
+        chunk = Chunk(
+            chunk_id="code-1",
+            content="class Reranker: ...",
+            file_path="server/retrieval/rerank.py",
+            start_line=108,
+            end_line=523,
+            token_count=5,
+            embedding=[0.1, 0.2],
+        )
+        _lexical, lexical_cfg = await write_lexical_graph_with_graphrag(
+            repo_id=staging,
+            run_id="code-live",
+            file_path="server/retrieval/rerank.py",
+            chunks=[chunk],
+        )
+        graph = Neo4jGraph(
+            nodes=[
+                _code_entity(reranker, "Reranker", "class"),
+                _code_entity(rerank_init, "Reranker.__init__", "function"),
+                _code_entity(mlx_reranker, "MLXQwen3Reranker", "class"),
+                _code_entity(module, "rerank.py", "module"),
+                _code_entity(unrelated, "list_entities", "function"),
+            ],
+            relationships=[
+                _rel(module, reranker),
+                _rel(reranker, rerank_init),
+                # MLXQwen3Reranker matches "reranker" too but links only OUTSIDE the
+                # result set, so the induced-edge query must not invent an edge for it.
+                _rel(mlx_reranker, unrelated),
+            ],
+        )
+        await neo.upsert_graphrag_graph(staging, graph, lexical_graph_config=lexical_cfg)
+
+        pg = PostgresClient(os.environ["POSTGRES_DSN"])
+        await pg.connect()
+        try:
+            await pg.set_generation(
+                active, build_generation(run_id="code-live", qdrant_collection=None, graph_repo_id=staging)
+            )
+        finally:
+            await pg.disconnect()
+
+        # M-01: the id travels as a query parameter and every entity route resolves.
+        entity = await client.get(f"/api/graph/{active}/entity", params={"entity_id": reranker})
+        assert entity.status_code == 200, entity.text
+        assert entity.json()["entity_id"] == reranker
+
+        neighbors = await client.get(
+            f"/api/graph/{active}/entity/neighbors",
+            params={"entity_id": reranker, "max_hops": 2, "limit": 200},
+        )
+        assert neighbors.status_code == 200, neighbors.text
+        neighborhood = neighbors.json()
+        # The center plus both hops - a 200 carrying only the center would mean the
+        # neighborhood query itself is broken.
+        assert {e["entity_id"] for e in neighborhood["entities"]} == {reranker, rerank_init, module}
+        assert len(neighborhood["relationships"]) == 2
+
+        rels = await client.get(
+            f"/api/graph/{active}/entity/relationships", params={"entity_id": module}
+        )
+        assert rels.status_code == 200, rels.text
+        assert [r["target_id"] for r in rels.json()] == [reranker]
+
+        # An id that is not in the graph is a 404 that names the id, not a silent empty.
+        missing = await client.get(
+            f"/api/graph/{active}/entity/neighbors", params={"entity_id": "server/does/not.py::Exist"}
+        )
+        assert missing.status_code == 404, missing.text
+        assert "server/does/not.py::Exist" in missing.json()["detail"]
+
+        # M-62: a search returns the edges between its own results, and only those.
+        found = await client.get(f"/api/graph/{active}/subgraph", params={"q": "reranker", "limit": 200})
+        assert found.status_code == 200, found.text
+        payload = found.json()
+        assert {e["entity_id"] for e in payload["entities"]} == {reranker, rerank_init, mlx_reranker}
+        assert {tuple(sorted((r["source_id"], r["target_id"]))) for r in payload["relationships"]} == {
+            tuple(sorted((reranker, rerank_init)))
+        }
+        # M-61: the denominator is the match count, independent of the display limit.
+        assert payload["total_matched"] == 3
+        assert payload["limit"] == 200
+
+        capped = await client.get(f"/api/graph/{active}/subgraph", params={"q": "reranker", "limit": 1})
+        assert capped.status_code == 200, capped.text
+        assert len(capped.json()["entities"]) == 1
+        assert capped.json()["total_matched"] == 3, "the total must not shrink with the display limit"
+
+        whole = await client.get(f"/api/graph/{active}/subgraph", params={"limit": 200})
+        assert whole.status_code == 200, whole.text
+        assert whole.json()["total_matched"] == 5
+
+        # The entity list and the search subgraph must select the SAME entities, or the
+        # list would show rows the visualizer never draws.
+        listed = await client.get(f"/api/graph/{active}/entities", params={"q": "reranker", "limit": 200})
+        assert listed.status_code == 200, listed.text
+        assert {e["entity_id"] for e in listed.json()} == {e["entity_id"] for e in payload["entities"]}
+    finally:
+        for repo_id in (active, staging):
+            try:
+                await neo.delete_graph(repo_id)
+            except Exception:
+                pass
+        await neo.disconnect()
+        await client.delete(f"/api/corpora/{active}")

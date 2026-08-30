@@ -2717,10 +2717,19 @@ class GraphStats(BaseModel):
 
 
 class GraphNeighborsResponse(BaseModel):
-    """Neighbor subgraph centered on a single entity."""
+    """A graph slice: entities plus the relationships induced among exactly those entities.
+
+    Used for an entity neighborhood, a community, and the whole-corpus/search view.
+    ``total_matched`` is what the query found before ``limit`` was applied, so the UI can
+    say "showing 200 of 5,179" instead of an undenominated "200 shown".
+    """
 
     entities: list[Entity] = Field(description="Entities in the neighborhood (includes the center entity)")
     relationships: list[Relationship] = Field(description="Relationships between returned entities")
+    total_matched: int = Field(
+        default=0, ge=0, description="Entities matching the request before `limit` was applied"
+    )
+    limit: int = Field(default=0, ge=0, description="Maximum number of entities the server returned")
 
 
 class EvalDatasetItem(BaseModel):

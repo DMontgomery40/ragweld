@@ -32,6 +32,10 @@ interface GraphStore {
   error: string | null;
   expansion: EntityExpansion | null;
   viewMode: 'viz' | 'table';
+  /** Entities matching the last load before the display limit was applied (the denominator). */
+  totalMatched: number;
+  /** Search term the currently displayed entities were loaded with; '' means the whole corpus. */
+  activeQuery: string;
 
   // Filter state
   visibleEntityTypes: string[];
@@ -48,12 +52,19 @@ interface GraphStore {
   setIsLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   setExpansion: (expansion: EntityExpansion | null) => void;
+  setTotalMatched: (total: number) => void;
+  setActiveQuery: (query: string) => void;
   setViewMode: (mode: 'viz' | 'table') => void;
   setVisibleEntityTypes: (types: string[]) => void;
   setVisibleRelationTypes: (types: string[]) => void;
   setMaxHops: (hops: number) => void;
   reset: () => void;
 }
+
+/** Server cap on `/graph/{corpus}/subgraph?limit=`; the picker must not offer more. */
+export const MAX_ENTITY_LIMIT = 2000;
+export const DEFAULT_ENTITY_LIMIT = 200;
+export const ENTITY_LIMIT_CHOICES = [100, 200, 500, 1000, MAX_ENTITY_LIMIT] as const;
 
 const defaultEntityTypes: string[] = [];
 const defaultRelationTypes: string[] = [];
@@ -70,6 +81,8 @@ export const useGraphStore = create<GraphStore>()((set) => ({
   error: null,
   expansion: null,
   viewMode: 'viz',
+  totalMatched: 0,
+  activeQuery: '',
   visibleEntityTypes: defaultEntityTypes,
   visibleRelationTypes: defaultRelationTypes,
   maxHops: 2,
@@ -84,6 +97,8 @@ export const useGraphStore = create<GraphStore>()((set) => ({
   setIsLoading: (isLoading) => set({ isLoading }),
   setError: (error) => set({ error }),
   setExpansion: (expansion) => set({ expansion }),
+  setTotalMatched: (totalMatched) => set({ totalMatched: Math.max(0, totalMatched) }),
+  setActiveQuery: (activeQuery) => set({ activeQuery }),
   setViewMode: (viewMode) => set({ viewMode }),
   setVisibleEntityTypes: (visibleEntityTypes) => set({ visibleEntityTypes }),
   setVisibleRelationTypes: (visibleRelationTypes) => set({ visibleRelationTypes }),
@@ -99,6 +114,8 @@ export const useGraphStore = create<GraphStore>()((set) => ({
       isLoading: false,
       error: null,
       expansion: null,
+      totalMatched: 0,
+      activeQuery: '',
       viewMode: state.viewMode,
       visibleEntityTypes: defaultEntityTypes,
       visibleRelationTypes: defaultRelationTypes,

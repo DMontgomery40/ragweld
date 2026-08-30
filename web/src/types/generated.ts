@@ -3921,12 +3921,16 @@ export interface GenerationUnavailableResponse {
   detail: GenerationUnavailableDetail;
 }
 
-/** Neighbor subgraph centered on a single entity. */
+/** A graph slice: entities plus the relationships induced among exactly those entities.  Used for an entity neighborhood, a community, and the whole-corpus/search view. ``total_matched`` is what the query found before ``limit`` was applied, so the UI can say "showing 200 of 5,179" instead of an undenominated "200 shown". */
 export interface GraphNeighborsResponse {
   /** Entities in the neighborhood (includes the center entity) */
   entities: Entity[];
   /** Relationships between returned entities */
   relationships: Relationship[];
+  /** Entities matching the request before `limit` was applied */
+  total_matched?: number;
+  /** Maximum number of entities the server returned */
+  limit?: number;
 }
 
 /** System health status payload for /api/health. */

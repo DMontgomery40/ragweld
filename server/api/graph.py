@@ -176,14 +176,26 @@ async def get_community_subgraph(
 
 
 @router.get("/graph/{corpus_id}/subgraph", response_model=GraphNeighborsResponse)
-async def get_repo_subgraph(corpus_id: str, limit: int = 200) -> GraphNeighborsResponse:
-    """Induced subgraph over the best-connected entities of the corpus (whole-corpus visualizer)."""
+async def get_repo_subgraph(
+    corpus_id: str,
+    limit: Annotated[int, Query(ge=1, le=2000)] = 200,
+    q: str | None = None,
+) -> GraphNeighborsResponse:
+    """Induced subgraph over the best-connected entities of the corpus, or of a search.
+
+    `q` filters by entity name with the same predicate as the entity list, and the
+    response carries the relationships between the matched entities plus the total
+    match count, so a search renders as a graph with a denominator rather than as
+    undenominated unconnected dots (M-61, M-62).
+    """
     async with _graph_client(corpus_id, boundary="Graph subgraph API") as scope:
         neo4j = scope.neo4j
         repo_id = scope.graph_repo_id
         if repo_id is None:
-            return GraphNeighborsResponse(entities=[], relationships=[])
-        return await neo4j.get_repo_subgraph(repo_id, limit=limit)
+            return GraphNeighborsResponse(
+                entities=[], relationships=[], total_matched=0, limit=limit
+            )
+        return await neo4j.get_repo_subgraph(repo_id, limit=limit, query=q)
 
 
 @router.get("/graph/{corpus_id}/communities", response_model=list[Community])
