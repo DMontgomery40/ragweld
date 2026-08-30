@@ -1,5 +1,7 @@
 // Second-wave findings on the Indexing and Data Quality subtabs, plus the shared confirmation
 // dialog and the Synthetic Lab jump buttons those two subtabs render.
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { expect, test } from '@playwright/test';
 import { API_BASE, provisionExhaustiveCorpus, type ExhaustiveCorpus } from './corpus_fixture';
 
@@ -161,4 +163,66 @@ test('both subtabs offer the same corpus list', async ({ page, request }) => {
   const afterDelete = await options('indexing', 'target-corpus-select');
   expect(afterDelete).not.toContain(extra.corpusId);
   expect(await options('data-quality', null)).toEqual(afterDelete);
+});
+
+test('no consumer can receive a warming estimate, and none opens a dialog on one', async ({ page }) => {
+  // Two guarantees, checked against the real modules the app loads.
+  //
+  // 1. Every caller of the estimate goes through `indexingApi.estimate`, which polls until the
+  //    estimator has measured something. The Get Started wizard did NOT guard for this and
+  //    opened "Build indexes?" on a payload reading tokens 0 / chunks 0 / $0.0000.
+  // 2. A non-ready payload carries `null` for every measured quantity, so a component that
+  //    forgot to guard cannot render a zero — it fails to compile instead.
+  await page.goto(`rag?subtab=indexing&corpus=${encodeURIComponent(corpus.corpusId)}`, {
+    waitUntil: 'domcontentloaded',
+  });
+
+  await page.evaluate(
+    ([cid, cpath]) => {
+      (window as unknown as { __corpus: string }).__corpus = cid;
+      (window as unknown as { __path: string }).__path = cpath;
+    },
+    [corpus.corpusId, corpus.corpusPath] as const
+  );
+
+  const result = await page.evaluate(async () => {
+    const api = await import('/web/src/api/indexing.ts');
+
+    // Every payload the API layer hands out is measured. Ask a few times over: if the estimator
+    // is cold this waits, and it still must never surface a warming one.
+    const statuses: string[] = [];
+    for (let i = 0; i < 3; i += 1) {
+      const estimate = await (api.indexingApi.estimate as (r: unknown) => Promise<{ status: string }>)({
+        corpus_id: (window as unknown as { __corpus: string }).__corpus,
+        repo_path: (window as unknown as { __path: string }).__path,
+        force_reindex: false,
+      });
+      statuses.push(estimate.status);
+    }
+    return { statuses, hasNotReadyError: typeof api.EstimateNotReadyError === 'function' };
+  });
+
+  expect(result.hasNotReadyError, 'a typed timeout error must exist for the deadline case').toBe(true);
+  expect(result.statuses).toEqual(['ready', 'ready', 'ready']);
+  // Nothing rendered a confirmation during any of that.
+  await expect(page.getByTestId('confirm-dialog')).toHaveCount(0);
+});
+
+test('both estimate call sites funnel through the api layer', () => {
+  // A future component could bypass the guarantee by POSTing the endpoint itself, which is how
+  // the wizard came to open a confirmation on an unmeasured payload. Read the two real modules.
+  const read = (rel: string) => readFileSync(path.resolve(process.cwd(), rel), 'utf-8');
+  const sources = {
+    'RAG > Indexing': read('web/src/components/RAG/IndexingSubtab.tsx'),
+    'Get Started wizard': read('web/src/components/tabs/StartTab.tsx'),
+  };
+
+  for (const [name, source] of Object.entries(sources)) {
+    expect(source, `${name} must not POST the estimate endpoint directly`).not.toContain(
+      "'/index/estimate'"
+    );
+    expect(source, `${name} must go through indexingApi.estimate`).toContain('indexingApi.estimate');
+  }
+  // And the one place that may: the api layer itself.
+  expect(read('web/src/api/indexing.ts')).toContain("'/index/estimate'");
 });

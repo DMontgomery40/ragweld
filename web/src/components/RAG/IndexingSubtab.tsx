@@ -30,6 +30,7 @@ import { EmbeddingMismatchWarning } from '@/components/ui/EmbeddingMismatchWarni
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { confirmDialog } from '@/components/ui/confirmDialog';
 import { indexingApi } from '@/api';
+import type { ReadyIndexEstimate } from '@/api/indexing';
 import { formatBytes, formatCurrency, formatDuration, formatNumber } from '@/utils/formatters';
 import { NumberField } from '@/components/ui/NumberField';
 import type {
@@ -136,12 +137,6 @@ function errorDetail(error: unknown): string {
 
 // Status polling cadence. Fast enough to follow a live run, slow enough that an idle tab
 // is not a request generator.
-// How long to wait out a cold estimator before giving up, and how often to re-ask. The load
-// itself is ~27s; the deadline is generous enough for a loaded box and short enough that a
-// genuinely stuck warm-up becomes an error the operator can see.
-const ESTIMATE_WARMUP_DEADLINE_MS = 120_000;
-const ESTIMATE_WARMUP_POLL_MS = 3000;
-
 const INDEX_POLL_ACTIVE_MS = 3000;
 const INDEX_POLL_IDLE_MS = 30000;
 
@@ -1035,37 +1030,21 @@ export function IndexingSubtab() {
 
       setErrorBanner(null);
       setEstimateLoading(true);
-      let estimate: IndexEstimate;
+      let estimate: ReadyIndexEstimate;
       try {
-        // The estimator's tokenizer loads on first use in a fresh API process (~27s). Rather
-        // than let that ride against the client's 30s timeout, the endpoint answers
-        // immediately with status "warming"; wait it out here, telling the operator what is
-        // happening, and ask again. Bounded, so a warm-up that never finishes surfaces as an
-        // error instead of a spinner that never ends -- and no run starts either way.
-        const deadline = Date.now() + ESTIMATE_WARMUP_DEADLINE_MS;
-        for (;;) {
-          estimate = await indexingApi.estimate(body);
-          // Only 'ready' carries numbers. Both other states carry zeros by construction, so
-          // they must never reach the dialog or the summary line -- an operator approving a
-          // run from "0 chunks" is exactly the failure the consent gate exists to prevent.
-          if (estimate.status === 'ready') break;
-          if (Date.now() >= deadline) {
-            throw new Error(
-              estimate.status === 'insufficient_sample'
-                ? (estimate.assumptions?.[0] ?? 'the estimator could not measure enough of this corpus')
-                : `the estimator is still preparing after ${Math.round(ESTIMATE_WARMUP_DEADLINE_MS / 1000)}s`
-            );
-          }
-          const remaining = Math.max(0, Number(estimate.warmup_seconds_remaining ?? 0));
-          setEstimateWarmup(
-            estimate.status === 'insufficient_sample'
-              ? 'Measuring more of the corpus…'
-              : `Preparing the estimator (about ${Math.max(1, Math.ceil(remaining))}s)…`
-          );
-          await new Promise((resolve) =>
-            setTimeout(resolve, Math.min(ESTIMATE_WARMUP_POLL_MS, Math.max(1000, remaining * 1000)))
-          );
-        }
+        // Waiting out a cold or under-sampled estimator lives in the api layer, so this
+        // component cannot receive a payload with no numbers in it.
+        estimate = await indexingApi.estimate(body, {
+          onWaiting: (pending) =>
+            setEstimateWarmup(
+              pending.status === 'insufficient_sample'
+                ? 'Measuring more of the corpus…'
+                : `Preparing the estimator (about ${Math.max(
+                    1,
+                    Math.ceil(Number(pending.warmup_seconds_remaining ?? 0))
+                  )}s)…`
+            ),
+        });
         setIndexEstimate(estimate);
       } catch (e) {
         // The estimate IS the consent gate: it is the only place the operator sees the file

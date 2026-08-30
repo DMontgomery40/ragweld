@@ -4001,24 +4001,24 @@ export interface IndexEstimate {
   total_size_bytes: number;
   /** Count of files skipped due to size limits */
   skipped_large_files: number;
-  /** Estimated total tokens to be chunked/embedded */
-  estimated_total_tokens: number;
-  /** Estimated number of chunks, measured on the sample */
-  estimated_total_chunks: number;
-  /** Low end of the token estimate's error band */
-  estimated_tokens_low: number;
-  /** High end of the token estimate's error band */
-  estimated_tokens_high: number;
-  /** Low end of the chunk estimate's error band */
-  estimated_chunks_low: number;
-  /** High end of the chunk estimate's error band */
-  estimated_chunks_high: number;
-  /** Half-width of the token/chunk error band as a fraction of the point estimate (model error plus a sampling term for the files that were not measured) */
-  estimate_relative_error: number;
-  /** Files opened, extracted and chunked to produce the estimate */
-  sampled_files: number;
-  /** Bytes covered by the sampled files */
-  sampled_bytes: number;
+  /** Estimated total tokens. None whenever status is not 'ready': nothing was measured, and a consumer that would have rendered a zero fails to compile instead. */
+  estimated_total_tokens?: number | null;
+  /** Estimated chunks; None unless status is 'ready'. */
+  estimated_total_chunks?: number | null;
+  /** Low end of the token band; None unless status is 'ready'. */
+  estimated_tokens_low?: number | null;
+  /** High end of the token band; None unless status is 'ready'. */
+  estimated_tokens_high?: number | null;
+  /** Low end of the chunk band; None unless status is 'ready'. */
+  estimated_chunks_low?: number | null;
+  /** High end of the chunk band; None unless status is 'ready'. */
+  estimated_chunks_high?: number | null;
+  /** Half-width of the token/chunk error band as a fraction of the point estimate (model error plus a sampling term). None unless status is 'ready'. */
+  estimate_relative_error?: number | null;
+  /** Files measured; None unless status is 'ready'. */
+  sampled_files?: number | null;
+  /** Bytes measured; None unless status is 'ready'. */
+  sampled_bytes?: number | null;
   /** Only 'ready' carries numbers. 'warming' means the estimator's tokenizer is still loading; 'insufficient_sample' means it measured too little of the corpus to extrapolate honestly. In BOTH non-ready states every count below is zero -- not a small estimate, no estimate -- and the client must ask again rather than show them or open a confirmation on them. */
   status?: "ready" | "warming" | "insufficient_sample";
   /** Rough seconds until the estimator is ready, when status is 'warming'. */

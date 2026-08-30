@@ -255,36 +255,44 @@ class IndexEstimate(BaseModel):
     total_files: int = Field(ge=0, description="Estimated number of files that will be processed")
     total_size_bytes: int = Field(ge=0, description="Estimated total bytes across included files")
     skipped_large_files: int = Field(ge=0, description="Count of files skipped due to size limits")
-    estimated_total_tokens: int = Field(
-        ge=0, description="Estimated total tokens to be chunked/embedded"
+    estimated_total_tokens: int | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Estimated total tokens. None whenever status is not 'ready': nothing was measured, "
+            "and a consumer that would have rendered a zero fails to compile instead."
+        ),
     )
-    estimated_total_chunks: int = Field(
-        ge=0, description="Estimated number of chunks, measured on the sample"
+    estimated_total_chunks: int | None = Field(
+        default=None, ge=0, description="Estimated chunks; None unless status is 'ready'."
     )
-    estimated_tokens_low: int = Field(
-        ge=0, description="Low end of the token estimate's error band"
+    estimated_tokens_low: int | None = Field(
+        default=None, ge=0, description="Low end of the token band; None unless status is 'ready'."
     )
-    estimated_tokens_high: int = Field(
-        ge=0, description="High end of the token estimate's error band"
+    estimated_tokens_high: int | None = Field(
+        default=None, ge=0, description="High end of the token band; None unless status is 'ready'."
     )
-    estimated_chunks_low: int = Field(
-        ge=0, description="Low end of the chunk estimate's error band"
+    estimated_chunks_low: int | None = Field(
+        default=None, ge=0, description="Low end of the chunk band; None unless status is 'ready'."
     )
-    estimated_chunks_high: int = Field(
-        ge=0, description="High end of the chunk estimate's error band"
+    estimated_chunks_high: int | None = Field(
+        default=None, ge=0, description="High end of the chunk band; None unless status is 'ready'."
     )
-    estimate_relative_error: float = Field(
+    estimate_relative_error: float | None = Field(
+        default=None,
         ge=0.0,
         le=1.0,
         description=(
             "Half-width of the token/chunk error band as a fraction of the point estimate "
-            "(model error plus a sampling term for the files that were not measured)"
+            "(model error plus a sampling term). None unless status is 'ready'."
         ),
     )
-    sampled_files: int = Field(
-        ge=0, description="Files opened, extracted and chunked to produce the estimate"
+    sampled_files: int | None = Field(
+        default=None, ge=0, description="Files measured; None unless status is 'ready'."
     )
-    sampled_bytes: int = Field(ge=0, description="Bytes covered by the sampled files")
+    sampled_bytes: int | None = Field(
+        default=None, ge=0, description="Bytes measured; None unless status is 'ready'."
+    )
     status: Literal["ready", "warming", "insufficient_sample"] = Field(
         default="ready",
         description=(

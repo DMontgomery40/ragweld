@@ -128,10 +128,25 @@ export default function StartTab() {
     const request = { corpus_id: corpus.corpus_id, repo_path: corpus.path, force_reindex: false };
     let estimate;
     try {
-      estimate = await indexingApi.estimate(request);
+      // indexingApi.estimate waits out a cold or under-sampled estimator and only ever resolves
+      // with a measured one, so the confirmation below cannot be built from a payload that has
+      // no numbers in it. Surface the wait rather than sitting silent for up to two minutes.
+      estimate = await indexingApi.estimate(request, {
+        onWaiting: (pending) =>
+          setIndexStatusText(
+            pending.status === 'insufficient_sample'
+              ? 'Measuring more of the corpus…'
+              : `Preparing the estimator (about ${Math.max(
+                  1,
+                  Math.ceil(Number(pending.warmup_seconds_remaining ?? 0))
+                )}s)…`
+          ),
+      });
     } catch (error) {
       setIndexError(`Index estimate failed: ${error instanceof Error ? error.message : 'unknown error'}`);
       return;
+    } finally {
+      setIndexStatusText('');
     }
     const cost = estimate.total_cost_usd ?? estimate.embedding_cost_usd;
     const proceed = await confirmDialog({

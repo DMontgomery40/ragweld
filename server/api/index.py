@@ -3728,28 +3728,35 @@ def _unmeasured_estimate(
     status: Literal["warming", "insufficient_sample"],
     warmup_remaining: float | None,
     reason: str,
+    total_files: int = 0,
+    total_bytes: int = 0,
+    skipped_large_files: int = 0,
 ) -> IndexEstimate:
-    """An estimate that carries no numbers, because none were measured.
+    """An estimate that carries no measurement, because none was taken.
 
-    Every count is zero, including the file inventory: a warming answer that reported
-    "794 files, 0 chunks" is one careless render away from reading as an empty corpus, and this
-    payload's whole job is to be unmistakable for a result.
+    Every measured quantity is None rather than zero. Zero is a number an unguarded consumer
+    will happily render -- "Tokens (est): 0 - Chunks (est): 0 - Cost (est): $0.0000" beside a
+    Build indexes button -- whereas None makes that consumer fail to typecheck. The file
+    inventory is kept because the walk really did produce it.
     """
     return IndexEstimate(
         repo_id=repo_id,
         repo_path=str(root),
-        total_files=0,
-        total_size_bytes=0,
-        skipped_large_files=0,
-        estimated_total_tokens=0,
-        estimated_total_chunks=0,
-        estimated_tokens_low=0,
-        estimated_tokens_high=0,
-        estimated_chunks_low=0,
-        estimated_chunks_high=0,
-        estimate_relative_error=0.0,
-        sampled_files=0,
-        sampled_bytes=0,
+        # The file inventory is real -- the walk is cheap and already done, and telling the
+        # operator what is in scope while the estimator loads is useful. Everything MEASURED is
+        # None, not zero: a consumer that would have rendered "0 chunks" now fails to compile.
+        total_files=int(total_files),
+        total_size_bytes=int(total_bytes),
+        skipped_large_files=int(skipped_large_files),
+        estimated_total_tokens=None,
+        estimated_total_chunks=None,
+        estimated_tokens_low=None,
+        estimated_tokens_high=None,
+        estimated_chunks_low=None,
+        estimated_chunks_high=None,
+        estimate_relative_error=None,
+        sampled_files=None,
+        sampled_bytes=None,
         status=status,
         warmup_seconds_remaining=warmup_remaining,
         elapsed_seconds=0.0,
@@ -3870,6 +3877,9 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
             status="warming",
             warmup_remaining=warmup_seconds_remaining(),
             reason="the estimator's tokenizer is still loading; nothing was measured",
+            total_files=total_files,
+            total_bytes=total_bytes,
+            skipped_large_files=skipped_large_files,
         )
 
     # Measured, not a byte ratio: a sample of every format is extracted and run through the
@@ -3905,6 +3915,9 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
             status="insufficient_sample",
             warmup_remaining=None,
             reason=f"no estimate: {sample.insufficient_reason}",
+            total_files=total_files,
+            total_bytes=total_bytes,
+            skipped_large_files=skipped_large_files,
         )
     est_tokens = sample.total_tokens
     est_chunks = sample.total_chunks
