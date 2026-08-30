@@ -1,5 +1,4 @@
 
-```markdown
 # Indexing a corpus
 
 <div class="grid chunk_summaries" markdown>
@@ -101,7 +100,7 @@ For document corpora, ragweld can additionally **describe figures** — charts, 
 What happens when it is on:
 
 - Docling detects picture regions on each page and (with `indexing.figures.classify`) records the figure kind — chart, diagram, logo, photo
-- Logos, signatures, icons (`indexing.figures.skip_classes`) and figures below `indexing.figures.min_area_fraction` are skipped for description — when the classifier ran, they still render a `Figure (logo)`-style header (or their caption when one exists) plus the image placeholder, so the class name stays searchable text
+- Logos, signatures, icons (`indexing.figures.skip_classes`) and figures below `indexing.figures.min_area_fraction` are skipped for description — the skip applies when the classifier's confident (>= 50%) prediction names one of these classes, not when a listed class merely appears somewhere in the classifier's full prediction list; when the classifier ran, skipped pictures still render a `Figure (logo)`-style header (or their caption when one exists) plus the image placeholder, so the class name stays searchable text
 - Everything else is cropped at `indexing.figures.images_scale` and sent to the vision alias (`indexing.figures.vision_model`) for a structured description
 - The description becomes a **retrievable chunk anchored to the figure's page and normalized bounding box**, so a citation boxes the figure in the [source document viewer](source_viewer.md)
 
@@ -130,6 +129,7 @@ Three details worth knowing:
 - **Only prose gets embedded.** The indexer renders the annotation as prose-only markdown (summary plus labelled lists); the JSON schema itself never enters the embedded text.
 - **Malformed replies degrade, never fail the run.** The parser in `server/indexing/figure_prompts.py` unwraps code-fenced replies, falls back to `kind: other` for unrecognized kinds, and turns a fully non-JSON reply into the plain-text summary — a weird description can make one chunk worse; it cannot fail indexing.
 - **Nothing quietly disappears.** A figure whose caption and summary are both blank keeps its structured lists (`Labels`, `Components`, `Connections`, `Values`, `References`) in the chunk text; a picture the classifier caught but the vision alias skipped still renders a `Figure (chart)`-style header plus the image placeholder; and the prose block appears exactly once even when Docling carries the reply on both the newer `item.meta` shape and its legacy annotations. Rendering itself lives in `server/indexing/figure_serializer.py`, which blocks Docling's meta-serialization block so the raw vision JSON can never reach the markdown.
+- **A blank reply is a failure, not a description.** A vision reply of `""` — the gateway returned nothing, or a reasoning alias spent its whole `max_completion_tokens` budget on its internal reasoning trace before writing any JSON — is treated exactly like no description was ever attached: the picture falls back to the header-only block and is counted as `figures_failed` in the run summary, never parsed into a `FigureAnnotation`.
 
 ### Described figures become figure chunks
 
@@ -139,7 +139,7 @@ A chunk whose text is majority covered by a described figure's source span is st
 - **`figure_class` is only written when classification resolved.** A described-but-unclassified figure gets `chunk_kind` and `figure` but no `figure_class` key — no metadata backed by nothing.
 - **Only the marked chunk carries the annotation.** Text chunks next to a figure get no `figure` key, so retrieval-side filtering on `chunk_kind` can't accidentally pick up prose.
 
-For retrieval, this means figure evidence can be preferred or excluded by chunk metadata without text sniffing, and extraction reports `figures_described` and `figures_skipped` counts (counted across both the live `item.meta` shape and Docling's deprecated `item.annotations` shape) in the run summary.
+For retrieval, this means figure evidence can be preferred or excluded by chunk metadata without text sniffing, and extraction triages every picture into exactly one of three run-summary counts (across both the live `item.meta` shape and Docling's deprecated `item.annotations` shape): `figures_described` (the vision call returned non-blank text), `figures_failed` (the vision call was attempted but the gateway returned nothing — an unreachable alias, or a reasoning alias that exhausted its `max_completion_tokens` budget on its internal trace before writing any JSON), and `figures_skipped` (never attempted: below `min_area_fraction`, a confident `skip_classes` prediction, or `describe` off).
 
 !!! note "Profiles are protocol, not configuration"
     The two prompt templates (`technical_figure`, `schematic`) live in `server/indexing/figure_prompts.py` as code — they are the reply-schema contract between ragweld and the vision alias, not per-corpus config. You choose the profile with `indexing.figures.prompt_profile`; the `schematic` profile additionally asks the model to put drawing number, sheet and revision into `references`, connector/pin/signal designators into `labels`, and every drawn connection into `connections` as `A -> B` with units exactly as printed.
@@ -154,6 +154,7 @@ Knobs that matter:
 | `indexing.figures.prompt_profile` | `technical_figure` | `technical_figure` for reports; `schematic` adds drawing number, sheet, revision and connector conventions |
 | `indexing.figures.images_scale` | `2.0` | Raster scale for figure crops (≈144 DPI at 2.0) |
 | `indexing.figures.min_area_fraction` | `0.02` | Skip icons and decorative marks |
+| `indexing.figures.max_completion_tokens` | `2500` | Output token budget per description; includes any reasoning tokens a reasoning vision alias spends before its JSON reply |
 | `indexing.figures.concurrency` | `4` | Parallel vision calls while converting one document |
 | `indexing.figures.timeout_s` | `90` | Per-figure vision call timeout (seconds) |
 
@@ -194,12 +195,12 @@ Enable it per corpus:
 | `total_cost_usd` | Embedding + (optional) semantic KG + (optional) figures, or `null` when any priced component lacks catalog pricing |
 
 !!! tip "Reading the numbers"
-    The figure line is an estimate of an estimate: the 0.6 figures-per-page factor is a planning heuristic, not a measured count. Use it to decide *whether* to enable figure description on a large scanned corpus; the run summary's `figures_described` / `figures_undescribed` events are the ground truth after indexing. If the figure line is missing entirely, either figures are disabled, `describe` is off, or the corpus has no PDFs in scope.
+    The figure line is an estimate of an estimate: the 0.6 figures-per-page factor is a planning heuristic, not a measured count. Use it to decide *whether* to enable figure description on a large scanned corpus; the run summary's `figures_described` / `figures_failed` / `figures_undescribed` counts are the ground truth after indexing. If the figure line is missing entirely, either figures are disabled, `describe` is off, or the corpus has no PDFs in scope.
 
     In the **RAG → Indexing** tab the breakdown appears as `Embed $X + Semantic KG $Y + Figures $Z (~N)` next to the total, so you can compare the figure budget against the embedding budget before committing the run.
 
 !!! tip "If you're not sure"
-    Leave it off for text-heavy corpora. Turn it on for report/drawing corpora where "which chart shows X?" is a real question, start with the defaults, and check the run summary's skipped-figure counts before widening the filters.
+    Leave it off for text-heavy corpora. Turn it on for report/drawing corpora where "which chart shows X?" is a real question, start with the defaults, and check the run summary's described / failed / skipped counts before widening the filters.
 
 ## Before you index: estimate size/time (optional)
 
@@ -349,7 +350,7 @@ Here’s the short list of “most likely to matter” knobs:
 ??? info "Figure descriptions never appear"
     - Confirm `indexing.figures.enabled` is `true` for this corpus and the corpus was **re-indexed after enabling** — figures are captured during indexing, not retroactively.
     - Check the run summary: figures below `min_area_fraction` or in `skip_classes` are counted as skipped and keep caption-only text.
-    - Watch the run's final `Figure summary` event: `figures_described` vs `figures_undescribed`. If description was enabled but no figure came back described while pictures existed, the run logs a **warning** — Docling absorbs a per-picture vision failure, so an unreachable alias otherwise produces a run that looks completely successful.
+    - Watch the run's final `Figure summary` event: `figures_described`, `figures_failed` (the vision call was attempted but the gateway returned nothing), and `figures_undescribed` (never attempted). If description was enabled but no figure came back described while pictures existed, the run logs a **warning** — Docling absorbs a per-picture vision failure, so an unreachable alias otherwise produces a run that looks completely successful. The warning tells you which shape it is: `figures_failed > 0` points at the gateway, the alias, or the `indexing.figures.max_completion_tokens` budget (the call was attempted and billed but came back empty), while an all-skipped run points back at `min_area_fraction` and `skip_classes`.
     - Use `/api/index/estimate` before re-indexing large PDF corpora; figure descriptions are priced per figure.
 
 ??? question "Starting the run returns 409 with `code: figure_vision_alias`"
