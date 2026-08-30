@@ -36,7 +36,7 @@ from server.db.postgres import PostgresClient
 from server.indexing.chunker import Chunker
 from server.indexing.code_graph import CODE_GRAPH_LANGUAGES, extract_code_graph
 from server.indexing.embedder import Embedder, configure_postgres_embedding_cache_backend
-from server.indexing.estimate import sample_corpus, warm_sampler
+from server.indexing.estimate import ParquetBounds, sample_corpus, warm_sampler
 from server.indexing.generations import (
     DeletionIncompleteError,
     FenceClaim,
@@ -113,6 +113,7 @@ from server.observability.metrics import (
     INDEX_STAGE_LATENCY_SECONDS,
     INDEX_TOKENS_TOTAL,
 )
+from server.reranker.artifacts import resolve_project_path
 from server.retrieval.qdrant_store import QdrantChunkStore
 from server.services.config_store import CorpusNotFoundError
 from server.services.config_store import get_config as load_scoped_config
@@ -189,8 +190,10 @@ _INDEX_RUNS_DIR = Path(__file__).parent.parent.parent / "data" / "index_runs"
 # Corpus roots may be registered relative (the recall corpus is registered as "data/recall"
 # by server/chat/recall_indexer.py). Relative to the process CWD is not a definition -- a
 # uvicorn started anywhere else resolves it somewhere else -- so they resolve against the
-# runtime root that owns data/, the same anchor _INDEX_RUNS_DIR uses.
-_RUNTIME_ROOT = Path(__file__).parent.parent.parent
+# project root, through the SAME helper the reranker and lineage registries already use rather
+# than a private anchor of this module's own. `artifacts` is deliberately pure-stdlib and
+# import-safe, which is why it is the one that can be shared.
+_RUNTIME_ROOT = resolve_project_path(".").resolve()
 
 _ACTIVE_RUNS: dict[str, str] = {}
 _UNKNOWN_COMMITS: dict[str, str] = {}  # runs whose promotion outcome awaits manifest reconciliation
@@ -328,6 +331,13 @@ def _warm_sampler_in_background(cfg: TriBridConfig) -> None:
     global _SAMPLER_WARMED
     if _SAMPLER_WARMED:
         return
+    if _TASKS:
+        # Never warm while a run is in flight. The warm-up and the indexer would both be
+        # importing `transformers` for the first time from different threads, and one of them
+        # gets the half-initialised module: observed as the indexer failing with "cannot import
+        # name 'AutoTokenizer' from 'transformers'". Warming is only useful before a run anyway,
+        # and this returns without latching so the next idle read tries again.
+        return
     _SAMPLER_WARMED = True
 
     async def _warm() -> None:
@@ -371,10 +381,10 @@ def _resolve_corpus_root(repo_path: str) -> Path:
     """Absolute corpus root for a registered path, relative or not.
 
     A relative registry path resolved against the process CWD points at a different directory
-    for every process that reads it; anchoring it to the runtime root makes it one place.
+    for every process that reads it; anchoring it to the project root makes it one place, and
+    the same place the other registries in this codebase already resolve to.
     """
-    raw = Path(str(repo_path or "").strip()).expanduser()
-    return (raw if raw.is_absolute() else (_RUNTIME_ROOT / raw)).resolve()
+    return resolve_project_path(str(repo_path or "").strip()).resolve()
 
 
 def _idle_status(repo_id: str) -> IndexStatus:
@@ -3819,6 +3829,17 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
         sample_corpus,
         files=sized_files,
         chunker=Chunker(cfg.chunking, cfg.tokenization),
+        parquet=ParquetBounds(
+            max_rows=int(getattr(cfg.indexing, "parquet_extract_max_rows", 5000) or 5000),
+            max_chars=int(getattr(cfg.indexing, "parquet_extract_max_chars", 2_000_000) or 2_000_000),
+            max_cell_chars=int(
+                getattr(cfg.indexing, "parquet_extract_max_cell_chars", 20_000) or 20_000
+            ),
+            text_columns_only=bool(getattr(cfg.indexing, "parquet_extract_text_columns_only", True)),
+            include_column_names=bool(
+                getattr(cfg.indexing, "parquet_extract_include_column_names", True)
+            ),
+        ),
     )
     elapsed_seconds = time.monotonic() - sampling_started
     est_tokens = sample.total_tokens

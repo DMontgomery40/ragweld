@@ -104,12 +104,39 @@ def test_a_fully_measured_corpus_carries_no_sampling_error(tmp_path: Path) -> No
     assert sample.relative_error == _MODEL_RELATIVE_ERROR
 
 
-def test_a_partly_sampled_corpus_widens_the_band(tmp_path: Path) -> None:
+def test_a_uniform_corpus_keeps_the_floor_band_however_little_of_it_was_opened(
+    tmp_path: Path,
+) -> None:
+    """400 identical files have nothing left to be uncertain about after the first few.
+
+    The band's sampling term is the observed spread of tokens-per-byte, so a corpus whose files
+    are all alike reports the model floor -- not a penalty for the file count. Charging by
+    ``1/sqrt(n)`` alone, as this did first, would have widened the band on a corpus that could
+    not be more predictable.
+    """
     files = _write_many(tmp_path, 400, "one short note.\n")
     sample = sample_corpus(files=_sized(files), chunker=_chunker())
 
     assert sample.sampled_files < 400
-    assert sample.relative_error > _MODEL_RELATIVE_ERROR
+    assert sample.relative_error == _MODEL_RELATIVE_ERROR
+
+
+def test_a_heterogeneous_corpus_widens_the_band(tmp_path: Path) -> None:
+    """The same file count, wildly different documents: the band has to say so."""
+    files = []
+    for i in range(400):
+        path = tmp_path / f"mixed_{i:04d}.txt"
+        # Alternating dense prose and near-empty files: the token density really does vary.
+        path.write_text("x\n" if i % 2 else "lunar module telemetry sample line.\n" * 40, encoding="utf-8")
+        files.append(path)
+
+    sample = sample_corpus(files=_sized(files), chunker=_chunker())
+
+    assert sample.sampled_files < 400
+    assert sample.relative_error > _MODEL_RELATIVE_ERROR, (
+        "a corpus whose token density varies by an order of magnitude must not report the same "
+        "band as a uniform one"
+    )
 
 
 def test_the_sample_stops_at_the_time_budget(tmp_path: Path) -> None:

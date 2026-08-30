@@ -13,8 +13,7 @@ import { useActiveRepo, useRepoStore } from '@/stores';
 import { RepoSelectorCompact } from '@/components/RAG/RepoSelector';
 import { SyntheticCallout } from '@/components/RAG/SyntheticCallout';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
-import { chunkSummariesApi, keywordsApi } from '@/api';
-import { api, apiClient } from '@/api/client';
+import { chunkSummariesApi, corporaApi, keywordsApi } from '@/api';
 
 function parseList(text: string): string[] {
   return text
@@ -176,8 +175,8 @@ export function DataQualitySubtab() {
       return;
     }
     try {
-      const { data } = await apiClient.get<Corpus>(api(`/corpora/${encodeURIComponent(rid)}`));
-      setKeywords(Array.isArray(data.keywords) ? data.keywords : []);
+      const corpus: Corpus = await corporaApi.get(rid);
+      setKeywords(Array.isArray(corpus.keywords) ? corpus.keywords : []);
       setKeywordsLoaded(true);
     } catch (e) {
       setKeywordsLoaded(false);

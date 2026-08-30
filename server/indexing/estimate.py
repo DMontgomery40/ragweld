@@ -16,12 +16,19 @@ over-weights the largest file in every format and came out 3.3x high on a code c
 scaling measured tokens-per-byte by the exact byte total lands within 10% on all three corpora
 with a completed run to check against.
 
-Accuracy against three live indexes, estimate / actual (16 samples per format, ~2 s):
+Accuracy against three live indexes, estimate / actual (16 samples per format), as produced by
+the constants below:
 
-    corpus shape                      chunks            tokens
-    one 359-page scanned PDF          1,323 / 1,315     267,318 / 244,789
-    2,000 small plain-text documents  2,672 / 3,126     361,906 / 346,731
-    794 files of source and docs      6,089 / 5,806     3,848,895 / 3,531,477
+    corpus shape                      chunks            tokens              status
+    one 359-page scanned PDF          1,315 / 1,315     244,405 / 244,789   CALIBRATION
+    2,000 small plain-text documents  2,672 / 3,126     361,906 / 346,731   validation
+    794 files of source and docs      6,089 / 5,806     3,848,895 / 3,531,477  validation
+
+The first row is the corpus the PDF factors were FITTED on, so its agreement is arithmetic, not
+evidence: 152,753 x 1.60 = 244,405 and 778 x 1.69 = 1,315 by construction. Only the two rows
+marked validation are independent, and neither exercises the PDF path at all. Until a second,
+differently-shaped PDF corpus exists, the honest claim is "the PDF factors are fitted on one
+document".
 """
 
 from __future__ import annotations
@@ -57,8 +64,11 @@ _PDF_TOKEN_FACTOR = 1.60
 _PDF_CHUNK_FACTOR = 1.69
 
 # Band. The model error covers the extraction factors, the chunker's per-format fallbacks and
-# the indexer's streaming path for very large text files; the sampling term is charged only
-# for formats the estimator could not measure in full.
+# the indexer's streaming path for very large text files -- it is a floor, not the whole story.
+# On top of it the sampling term is the standard error of the measured tokens-per-byte across
+# the files actually opened, so a corpus of wildly heterogeneous files reports a wider band than
+# a uniform one instead of both reporting the same number. Charged only for formats that were
+# not measured in full.
 _MODEL_RELATIVE_ERROR = 0.35
 _MAX_RELATIVE_ERROR = 0.90
 
@@ -72,6 +82,19 @@ _OFFICE_PARTS: dict[str, tuple[str, ...]] = {
     ".xlsx": ("xl/sharedStrings.xml",),
 }
 _XML_TAG = re.compile(r"<[^>]+>")
+
+
+
+@dataclass(frozen=True, slots=True)
+class ParquetBounds:
+    """The operator's ``indexing.parquet_extract_*`` values, so a sampled parquet file is read
+    exactly as the indexer will read it. Defaults mirror ``extract_text_for_path``."""
+
+    max_rows: int = 5000
+    max_chars: int = 2_000_000
+    max_cell_chars: int = 20_000
+    text_columns_only: bool = True
+    include_column_names: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -195,7 +218,7 @@ def _read_pdf_text(path: Path) -> tuple[str, float]:
             document.close()
 
 
-def _extracted_text(path: Path, ext: str) -> tuple[str, float, float, float]:
+def _extracted_text(path: Path, ext: str, parquet: ParquetBounds) -> tuple[str, float, float, float]:
     """``(text, page_scale, token_factor, chunk_factor)`` for one sampled file.
 
     Mirrors what the indexer feeds the chunker for every format it can read cheaply. Docling
@@ -211,7 +234,14 @@ def _extracted_text(path: Path, ext: str) -> tuple[str, float, float, float]:
     office_parts = _OFFICE_PARTS.get(ext)
     if office_parts is not None:
         return _read_office_text(path, office_parts), 1.0, 1.0, 1.0
-    extracted = extract_text_for_path(path)
+    extracted = extract_text_for_path(
+        path,
+        parquet_max_rows=parquet.max_rows,
+        parquet_max_chars=parquet.max_chars,
+        parquet_max_cell_chars=parquet.max_cell_chars,
+        parquet_text_columns_only=parquet.text_columns_only,
+        parquet_include_column_names=parquet.include_column_names,
+    )
     if extracted is not None:
         return extracted.text, 1.0, 1.0, 1.0
     # Same last resort as the indexer: read it as UTF-8 and let the NUL check below decide.
@@ -221,9 +251,9 @@ def _extracted_text(path: Path, ext: str) -> tuple[str, float, float, float]:
         return "", 1.0, 1.0, 1.0
 
 
-def _measure(path: Path, ext: str, chunker: Chunker) -> tuple[float, float]:
+def _measure(path: Path, ext: str, chunker: Chunker, parquet: ParquetBounds) -> tuple[float, float]:
     """Chunks and chunk tokens this one file contributes, or ``(0.0, 0.0)`` if the indexer skips it."""
-    text, page_scale, token_factor, chunk_factor = _extracted_text(path, ext)
+    text, page_scale, token_factor, chunk_factor = _extracted_text(path, ext, parquet)
     # The indexer drops any document whose text contains a NUL byte; so does the estimate,
     # or a directory of binaries would be sized as if it were prose.
     if not text or "\x00" in text:
@@ -248,6 +278,29 @@ def _systematic_picks(
 
 
 
+
+def _sampling_error(densities: Sequence[float]) -> float:
+    """Relative standard error of the mean tokens-per-byte across the sampled files.
+
+    Zero when every format was measured in full -- there is nothing left to be uncertain about
+    from sampling. Otherwise ``cv / sqrt(n)``: the sample's own coefficient of variation, so the
+    width reflects how much the corpus actually varies rather than only how many files were
+    opened. A single measured file has no dispersion to estimate, so it is charged the widest
+    sampling term rather than the narrowest.
+    """
+    n = len(densities)
+    if n <= 0:
+        return 0.0
+    if n == 1:
+        return _MAX_RELATIVE_ERROR
+    mean = sum(densities) / n
+    if mean <= 0:
+        return _MAX_RELATIVE_ERROR
+    variance = sum((d - mean) ** 2 for d in densities) / (n - 1)
+    coefficient_of_variation = math.sqrt(variance) / mean
+    return coefficient_of_variation / math.sqrt(n)
+
+
 def warm_sampler(chunker: Chunker) -> None:
     """Load whatever the sampler loads lazily, so the first estimate does not pay for it.
 
@@ -268,8 +321,15 @@ def sample_corpus(
     chunker: Chunker,
     budget_seconds: float = _SAMPLE_BUDGET_SECONDS,
     files_per_format: int = _SAMPLE_FILES_PER_FORMAT,
+    parquet: ParquetBounds | None = None,
 ) -> CorpusSample:
-    """Estimate a corpus's chunk and token totals by measuring a sample of its files."""
+    """Estimate a corpus's chunk and token totals by measuring a sample of its files.
+
+    ``parquet`` carries the operator's ``indexing.parquet_extract_*`` bounds so a parquet file is
+    read the way the indexer reads it; the extractor's own defaults would measure a different
+    document than the run will produce.
+    """
+    bounds = parquet or ParquetBounds()
     if not files:
         return CorpusSample.empty()
 
@@ -283,6 +343,9 @@ def sample_corpus(
     sampled_files = 0
     sampled_bytes = 0
     partial_sampled = 0
+    # Tokens per byte for each file opened in a partially-sampled format: the observed spread of
+    # this is what the sampling half of the band is computed from.
+    partial_densities: list[float] = []
     budget_exhausted = False
     saw_pdf = False
     saw_converted = False
@@ -298,15 +361,23 @@ def sample_corpus(
         measured_bytes = 0
         measured_files = 0
         indexable_files = 0
+        sampled_files_total = sampled_files
+        file_densities: list[float] = []
         for path, size in picks:
-            if measured_files > 0 and (time.monotonic() - started) >= budget_seconds:
+            # The budget is checked before every pick except the very first of the whole run.
+            # Exempting the first pick of EVERY format made the ceiling meaningless on a corpus
+            # with many extensions -- N formats bought N unbudgeted files -- and that is the same
+            # mechanism that made the cold first estimate unbounded.
+            if sampled_files_total + measured_files > 0 and (time.monotonic() - started) >= budget_seconds:
                 budget_exhausted = True
                 break
-            chunks, tokens = _measure(path, ext, chunker)
+            chunks, tokens = _measure(path, ext, chunker, bounds)
             measured_chunks += chunks
             measured_tokens += tokens
             measured_bytes += size
             measured_files += 1
+            if size > 0:
+                file_densities.append(tokens / float(size))
             if chunks > 0:
                 indexable_files += 1
 
@@ -314,6 +385,7 @@ def sample_corpus(
         sampled_bytes += measured_bytes
         if measured_files < group_files:
             partial_sampled += measured_files
+            partial_densities.extend(file_densities)
         if ext == _PDF_SUFFIX:
             saw_pdf = True
         elif ext in _HTML_SUFFIXES or ext in _OFFICE_PARTS:
@@ -330,10 +402,8 @@ def sample_corpus(
         total_tokens += group_tokens
         total_chunks += max(group_chunks, floor)
 
-    relative_error = (
-        _MODEL_RELATIVE_ERROR
-        if partial_sampled <= 0
-        else min(_MAX_RELATIVE_ERROR, _MODEL_RELATIVE_ERROR + 1.0 / math.sqrt(partial_sampled))
+    relative_error = min(
+        _MAX_RELATIVE_ERROR, _MODEL_RELATIVE_ERROR + _sampling_error(partial_densities)
     )
 
     tokens = int(round(total_tokens))
