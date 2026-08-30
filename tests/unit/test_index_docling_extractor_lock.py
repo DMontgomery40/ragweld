@@ -81,7 +81,7 @@ def _heartbeat_times(repo_id: str, run_id: str) -> list[datetime]:
     _flush_run_events_sync()
     return [
         event.ts
-        for event in _load_run_events(repo_id, run_id, limit=500)
+        for event in _load_run_events(repo_id, run_id, limit=500)[0]
         if "still running" in str(event.message or "")
     ]
 

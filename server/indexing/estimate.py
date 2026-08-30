@@ -16,12 +16,12 @@ over-weights the largest file in every format and came out 3.3x high on a code c
 scaling measured tokens-per-byte by the exact byte total lands within 10% on all three corpora
 with a completed run to check against.
 
-Accuracy against live indexes (16 samples per format, ~2 s):
+Accuracy against three live indexes, estimate / actual (16 samples per format, ~2 s):
 
-    corpus                 chunks              tokens
-    nasa-apollo-11         1,323 / 1,315       267,318 / 244,789
-    epstein-files-public   2,672 / 3,126       361,906 / 346,731
-    ragweld_code           6,089 / 5,806       3,848,895 / 3,531,477
+    corpus shape                      chunks            tokens
+    one 359-page scanned PDF          1,323 / 1,315     267,318 / 244,789
+    2,000 small plain-text documents  2,672 / 3,126     361,906 / 346,731
+    794 files of source and docs      6,089 / 5,806     3,848,895 / 3,531,477
 """
 
 from __future__ import annotations
