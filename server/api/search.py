@@ -403,6 +403,14 @@ async def answer_stream(request: AnswerRequest) -> StreamingResponse:
         observation.finish((type(e), e, e.__traceback__))
         raise retrieval_contract_mismatch_http_exception(e) from e
     except RequiredRetrievalLegError as e:
+        # Same close-out as its two sibling branches: the generator never runs on any of
+        # them, so this is the only place that can end the span and the trace.
+        if trace_enabled:
+            await trace_store.add_event(run_id, kind="answer.error", msg=str(e), data={})
+            await trace_store.annotate(run_id, **current_trace_payload_fields())
+            await trace_store.end(run_id)
+        setup_scope.__exit__(type(e), e, e.__traceback__)
+        observation.finish((type(e), e, e.__traceback__))
         raise required_retrieval_leg_http_exception(e) from e
     except Exception as e:
         if trace_enabled:
