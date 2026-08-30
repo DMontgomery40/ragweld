@@ -59,6 +59,7 @@ work is replacement-only.
 - No transition-period dual paths.
 - No keeping broken old subsystems alive "just in case."
 - If a slice is replaced in backend code, the UI/docs/tests/instructions for that slice must move with it in the same branch.
+- Do not market ragweld as fully DSV-compliant today.
 
 Locked target:
 - `vLLM` + `LiteLLM`

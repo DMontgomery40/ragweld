@@ -23,10 +23,12 @@ def test_readme_uses_safe_positioning_claims() -> None:
 
 
 def test_agents_and_docs_prompt_base_block_full_dsv_claims() -> None:
-    agents = _read(ROOT / "AGENTS.md")
+    # AGENTS.md is a thin pointer to CLAUDE.md (bbdd4525); the positioning guardrail
+    # lives in CLAUDE.md's main-canon section now, not in AGENTS.md itself.
+    claude_md = _read(ROOT / "CLAUDE.md")
     docs_prompt = _read(ROOT / "scripts" / "docs_ai" / "docs_prompt_base.md")
 
-    assert "Do not market ragweld as fully DSV-compliant today." in agents
+    assert "Do not market ragweld as fully DSV-compliant today." in claude_md
     assert "Do **not** claim full DSV compliance" in docs_prompt
 
 
