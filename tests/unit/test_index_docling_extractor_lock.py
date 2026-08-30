@@ -69,7 +69,7 @@ def _register(queue: asyncio.Queue[dict[str, Any]], repo_id: str, run_id: str) -
 
 def _messages(repo_id: str, run_id: str) -> list[str]:
     _flush_run_events_sync()
-    return [str(event.message or "") for event in _load_run_events(repo_id, run_id, limit=500)]
+    return [str(event.message or "") for event in _load_run_events(repo_id, run_id, limit=500)[0]]
 
 
 def _matching(messages: list[str], needle: str) -> list[str]:

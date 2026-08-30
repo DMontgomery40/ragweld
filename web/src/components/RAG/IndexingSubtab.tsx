@@ -38,6 +38,7 @@ import type {
   IndexEstimate,
   IndexRequest,
   IndexRunEvent,
+  IndexRunEventPage,
   IndexRunSummary,
   IndexStats,
   IndexStatus,
@@ -45,6 +46,44 @@ import type {
 import { describeEmbeddingProviderStrategy } from '@/utils/embeddingStrategy';
 
 type IndexingComponent = 'embedding' | 'chunking' | 'bm25' | 'enrichment' | 'figures';
+
+/**
+ * One line per conversion instead of forty.
+ *
+ * A Docling conversion emits a "still running" heartbeat while it works, so a long PDF buried
+ * its real events -- the figure summary among them -- under ~40 identical
+ * "Converting A11_MissionReport.pdf: still running (60s...2400s elapsed)" lines. Only the last
+ * beat per file carries information (how long it ended up taking), so the earlier ones are
+ * folded into it and the line says how many there were.
+ */
+const HEARTBEAT_RE = /^(?:.*?\b)?Converting (.+?): still running/;
+
+export function collapseHeartbeats(events: IndexRunEvent[]): IndexRunEvent[] {
+  const beatsByFile = new Map<string, number>();
+  for (const ev of events) {
+    const file = HEARTBEAT_RE.exec(String(ev.message || ''))?.[1];
+    if (file) beatsByFile.set(file, (beatsByFile.get(file) ?? 0) + 1);
+  }
+  const seen = new Map<string, number>();
+  const out: IndexRunEvent[] = [];
+  for (const ev of events) {
+    const file = HEARTBEAT_RE.exec(String(ev.message || ''))?.[1];
+    if (!file) {
+      out.push(ev);
+      continue;
+    }
+    const index = (seen.get(file) ?? 0) + 1;
+    seen.set(file, index);
+    const total = beatsByFile.get(file) ?? 1;
+    if (index < total) continue; // superseded by a later beat for the same file
+    out.push(
+      total > 1
+        ? { ...ev, message: `${String(ev.message || '')} [${total} progress notices]` }
+        : ev
+    );
+  }
+  return out;
+}
 
 const COMPONENT_CARDS: Array<{
   id: IndexingComponent;
@@ -395,6 +434,7 @@ export function IndexingSubtab() {
   const isIndexingRef = useRef(false);
   const [latestRun, setLatestRun] = useState<IndexRunSummary | null>(null);
   const [latestRunEvents, setLatestRunEvents] = useState<IndexRunEvent[]>([]);
+  const [latestRunEventTotal, setLatestRunEventTotal] = useState(0);
   const [indexStats, setIndexStats] = useState<IndexStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
   const [statsExpanded, setStatsExpanded] = useState(false);
@@ -639,6 +679,26 @@ export function IndexingSubtab() {
   // The vision alias sat next to an embedding model that shows its catalog price while
   // showing none of its own. Same catalog fields, same shape of line -- what the run will be
   // charged per 1k tokens, from the row behind the alias.
+  // Which documents lost figures, from the run's own per-document events. The end-of-run
+  // total ("figures_failed=10") named no document, so there was nowhere to look; the
+  // extractor records counts per document, so that is the granularity offered here.
+  const figureOutcomes = useMemo(() => {
+    const rows: Array<{ file: string; described: number; failed: number; undescribed: number }> = [];
+    for (const ev of latestRunEvents) {
+      const meta = (ev.meta ?? {}) as Record<string, unknown>;
+      if (meta.kind !== 'figure_outcome') continue;
+      const file = String(meta.file || '').trim();
+      if (!file) continue;
+      rows.push({
+        file,
+        described: Number(meta.described ?? 0),
+        failed: Number(meta.failed ?? 0),
+        undescribed: Number(meta.undescribed ?? 0),
+      });
+    }
+    return rows;
+  }, [latestRunEvents]);
+
   const visionAliasPricing = useMemo(() => {
     const alias = String(figuresVisionModel || '').trim();
     if (!alias) return '';
@@ -739,12 +799,14 @@ export function IndexingSubtab() {
         setLatestRunEvents([]);
         return;
       }
-      const events: IndexRunEvent[] = await eventsResp.json();
-      setLatestRunEvents(Array.isArray(events) ? events : []);
+      const page: IndexRunEventPage = await eventsResp.json();
+      const events: IndexRunEvent[] = Array.isArray(page.events) ? page.events : [];
+      setLatestRunEvents(events);
+      setLatestRunEventTotal(Number(page.total ?? events.length));
 
-      if (Array.isArray(events) && events.length > 0) {
+      if (events.length > 0) {
         resetTerminal(`Indexing Output (${String(latest.run_id || '').slice(0, 12)})`);
-        for (const ev of events) {
+        for (const ev of collapseHeartbeats(events)) {
           const msg = String(ev.message || '').trim();
           if (!msg) continue;
           if (ev.type === 'error') {
@@ -835,10 +897,12 @@ export function IndexingSubtab() {
             api(`index/${encodeURIComponent(rid)}/runs/${encodeURIComponent(runId)}/events?limit=500`)
           );
           if (!eventsResp.ok) return;
-          const events: IndexRunEvent[] = await eventsResp.json();
-          if (cancelled || !Array.isArray(events)) return;
+          const page: IndexRunEventPage = await eventsResp.json();
+          const events: IndexRunEvent[] = Array.isArray(page.events) ? page.events : [];
+          if (cancelled) return;
           appendEvents(events);
           setLatestRunEvents(events);
+          setLatestRunEventTotal(Number(page.total ?? events.length));
         } catch {
           // best effort only
         }
@@ -1244,8 +1308,12 @@ export function IndexingSubtab() {
               </span>
             ) : null}
             {latestRunEvents.length > 0 ? (
-              <span style={{ fontSize: '11px', color: 'var(--fg-muted)' }}>
-                {latestRunEvents.length} {isIndexing ? 'events so far' : 'replayed events'}
+              <span data-testid="index-run-event-count" style={{ fontSize: '11px', color: 'var(--fg-muted)' }}>
+                {latestRunEventTotal > latestRunEvents.length
+                  ? `showing the most recent ${formatNumber(latestRunEvents.length)} of ${formatNumber(
+                      latestRunEventTotal
+                    )} events`
+                  : `${formatNumber(latestRunEvents.length)} ${isIndexing ? 'events so far' : 'replayed events'}`}
               </span>
             ) : null}
             {foreignRun ? (
@@ -1258,6 +1326,39 @@ export function IndexingSubtab() {
             ) : null}
           </div>
 
+
+          {figureOutcomes.length > 0 && (
+            <div
+              data-testid="index-run-figure-outcomes"
+              style={{
+                marginTop: '10px',
+                padding: '10px 12px',
+                borderRadius: '8px',
+                border: '1px solid var(--warn)',
+                background: 'rgba(var(--warn-rgb), 0.08)',
+                fontSize: '12px',
+                color: 'var(--fg)',
+              }}
+            >
+              <div style={{ fontWeight: 700, marginBottom: '6px' }}>
+                Figures this run did not describe
+              </div>
+              <ul style={{ margin: 0, paddingLeft: '18px', display: 'grid', gap: '2px' }}>
+                {figureOutcomes.map((row) => (
+                  <li key={row.file} style={{ fontFamily: 'var(--font-mono)', wordBreak: 'break-all' }}>
+                    {row.file} — {formatNumber(row.failed)} failed, {formatNumber(row.undescribed)} filtered out,{' '}
+                    {formatNumber(row.described)} described
+                  </li>
+                ))}
+              </ul>
+              <div style={{ marginTop: '6px', fontSize: '11.5px', color: 'var(--fg-muted)' }}>
+                &quot;Failed&quot; means the vision call was made and the gateway returned nothing — check the
+                alias and indexing.figures.max_completion_tokens, then re-run with Force reindex.
+                &quot;Filtered out&quot; means the picture never reached the vision call
+                (indexing.figures.skip_classes, min_area_fraction, or classify).
+              </div>
+            </div>
+          )}
           {(_indexStatus?.error || latestRun?.error) && (
             <div
               style={{

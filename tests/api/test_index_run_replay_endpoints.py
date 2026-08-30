@@ -83,9 +83,13 @@ async def test_latest_run_and_events_endpoints(client: AsyncClient) -> None:
     events = await client.get(f"/api/index/{corpus_id}/runs/{run_id}/events", params={"limit": 50})
     assert events.status_code == 200
     events_payload = events.json()
-    assert len(events_payload) == 2
-    assert events_payload[0]["type"] == "log"
-    assert events_payload[1]["type"] == "error"
+    # The page carries the run's real total, so a cap is never mistaken for a fact.
+    assert events_payload["total"] == 2
+    assert events_payload["first_index"] == 0
+    assert events_payload["corpus_id"] == corpus_id
+    assert len(events_payload["events"]) == 2
+    assert events_payload["events"][0]["type"] == "log"
+    assert events_payload["events"][1]["type"] == "error"
 
 
 @pytest.mark.asyncio
@@ -148,9 +152,10 @@ async def test_latest_run_coerces_stale_indexing_run_to_error(client: AsyncClien
     events = await client.get(f"/api/index/{corpus_id}/runs/{run_id}/events", params={"limit": 50})
     assert events.status_code == 200
     events_payload = events.json()
-    assert len(events_payload) >= 2
-    assert events_payload[-1]["type"] == "error"
-    assert "interrupted before completion" in str(events_payload[-1].get("message") or "").lower()
+    assert len(events_payload["events"]) >= 2
+    assert events_payload["total"] == len(events_payload["events"])
+    assert events_payload["events"][-1]["type"] == "error"
+    assert "interrupted before completion" in str(events_payload["events"][-1].get("message") or "").lower()
 
 
 @pytest.mark.asyncio
@@ -265,3 +270,42 @@ async def test_latest_run_with_finalize_false_still_404s_when_nothing_is_persist
     )
     assert response.status_code == 404
     assert "never-indexed-corpus" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_the_event_page_reports_the_total_not_the_requested_cap(client: AsyncClient) -> None:
+    """The run header printed "500 replayed events" -- exactly the limit it had asked for.
+
+    A slice alone cannot tell a complete log from a truncated one, so the header presented a
+    cap as a fact about the run. The page states the total and where the slice starts.
+    """
+    corpus_id = "event-cap-corpus"
+    run_id = "run_20260227_capped"
+    index_api._persist_run_summary(
+        IndexRunSummary(
+            run_id=run_id,
+            repo_id=corpus_id,
+            status="complete",
+            started_at=datetime.now(UTC),
+            completed_at=datetime.now(UTC),
+            progress=1.0,
+        )
+    )
+    for n in range(37):
+        index_api._append_run_event(corpus_id, run_id, {"type": "log", "message": f"line {n}"})
+
+    capped = await client.get(f"/api/index/{corpus_id}/runs/{run_id}/events", params={"limit": 10})
+    assert capped.status_code == 200
+    page = capped.json()
+    assert len(page["events"]) == 10
+    assert page["total"] == 37
+    assert page["first_index"] == 27
+    # The tail is what is served: the most recent events, oldest first.
+    assert page["events"][0]["message"] == "line 27"
+    assert page["events"][-1]["message"] == "line 36"
+
+    whole = await client.get(f"/api/index/{corpus_id}/runs/{run_id}/events", params={"limit": 500})
+    whole_page = whole.json()
+    assert whole_page["total"] == 37
+    assert whole_page["first_index"] == 0
+    assert len(whole_page["events"]) == 37

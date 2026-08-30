@@ -188,6 +188,30 @@ class IndexRunEvent(BaseModel):
     meta: dict[str, Any] = Field(default_factory=dict, description="Additional event payload")
 
 
+class IndexRunEventPage(BaseModel):
+    """One page of a run's event log, carrying the total so a cap is never shown as a fact.
+
+    The run header used to print `len(events)` as "500 replayed events" for a corpus whose log
+    held far more -- 500 being the limit the UI itself asked for. The page states how many
+    events the run actually recorded and where this slice starts, so the reader can tell a
+    complete log from a truncated one.
+    """
+
+    repo_id: str = Field(
+        description="Corpus identifier",
+        validation_alias=AliasChoices("repo_id", "corpus_id"),
+        serialization_alias="corpus_id",
+    )
+    run_id: str = Field(description="Run identifier")
+    events: list[IndexRunEvent] = Field(
+        default_factory=list, description="The most recent events, oldest first"
+    )
+    total: int = Field(ge=0, description="Events this run recorded in total")
+    first_index: int = Field(
+        ge=0, description="0-based position of events[0] within the run's full log"
+    )
+
+
 class IndexStats(BaseModel):
     """Statistics about an indexed repository."""
 
@@ -587,6 +611,7 @@ __all__ = [
     "IndexRunConflictDetail",
     "IndexRunConflictResponse",
     "IndexRunEvent",
+    "IndexRunEventPage",
     "IndexRunSummary",
     "IndexStats",
     "IndexStatus",

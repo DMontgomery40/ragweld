@@ -83,6 +83,7 @@ from server.models.index import (
     IndexRunConflictDetail,
     IndexRunConflictResponse,
     IndexRunEvent,
+    IndexRunEventPage,
     IndexRunSummary,
     IndexStats,
     IndexStatus,
@@ -513,7 +514,7 @@ async def _finalize_interrupted_run(repo_id: str, run: IndexRunSummary) -> Index
 
     # Append one terminal event if one has not been recorded yet.
     with contextlib.suppress(Exception):
-        tail = _load_run_events(repo_id, run.run_id, limit=5)
+        tail, _total = _load_run_events(repo_id, run.run_id, limit=5)
         has_terminal = any(ev.type in {"complete", "error", "cancelled"} for ev in tail)
         if not has_terminal:
             _append_run_event(
@@ -673,10 +674,15 @@ def _append_run_event(repo_id: str, run_id: str, event: dict[str, Any]) -> None:
     _EVENT_WRITE_QUEUE.put(("append", path, line))
 
 
-def _load_run_events(repo_id: str, run_id: str, *, limit: int) -> list[IndexRunEvent]:
+def _load_run_events(repo_id: str, run_id: str, *, limit: int) -> tuple[list[IndexRunEvent], int]:
+    """The most recent ``limit`` events and the total the run recorded.
+
+    The total is what lets a reader tell "this run had 48 events" from "this is the first
+    page of 1,284"; without it the caller can only report the cap it asked for.
+    """
     path = _run_events_path(repo_id, run_id)
     if not path.exists():
-        return []
+        return [], 0
     out: list[IndexRunEvent] = []
     try:
         for line in path.read_text(encoding="utf-8").splitlines():
@@ -687,9 +693,9 @@ def _load_run_events(repo_id: str, run_id: str, *, limit: int) -> list[IndexRunE
             except Exception:
                 continue
     except Exception:
-        return []
+        return [], 0
     lim = max(1, min(int(limit or 200), 5000))
-    return out[-lim:]
+    return out[-lim:], len(out)
 
 
 def _build_staging_repo_id(repo_id: str, run_id: str) -> str:
@@ -2635,6 +2641,31 @@ async def _run_index_body(
             figures_described_total += extracted.figures_described
             figures_failed_total += extracted.figures_failed
             figures_undescribed_total += extracted.figures_skipped
+            if extracted.figures_failed or extracted.figures_skipped:
+                # Per document, because that is the granularity the extractor records: the
+                # end-of-run "figures_failed=10" total said nothing about WHERE the failures
+                # were, so there was nowhere in the UI to go and look.
+                _emit_event(
+                    event_queue,
+                    {
+                        "type": "warning",
+                        "message": (
+                            f"Figures not described in {rel_path}: "
+                            f"{extracted.figures_failed} failed, "
+                            f"{extracted.figures_skipped} filtered out "
+                            f"({extracted.figures_described} described)"
+                        ),
+                        "current_file": rel_path,
+                        "meta": {
+                            "kind": "figure_outcome",
+                            "file": rel_path,
+                            "described": int(extracted.figures_described),
+                            "failed": int(extracted.figures_failed),
+                            "undescribed": int(extracted.figures_skipped),
+                        },
+                    },
+                    drop_oldest=True,
+                )
             content = extracted.text
             if "\x00" in content:
                 continue
@@ -4232,10 +4263,15 @@ async def get_latest_index_run(
     return await _finalize_interrupted_run(repo_id, run)
 
 
-@router.get("/index/{corpus_id}/runs/{run_id}/events", response_model=list[IndexRunEvent])
+@router.get("/index/{corpus_id}/runs/{run_id}/events", response_model=IndexRunEventPage)
 async def get_index_run_events(
     corpus_id: str, run_id: str, limit: int = Query(default=200, ge=1, le=5000)
-) -> list[IndexRunEvent]:
+) -> IndexRunEventPage:
+    """The most recent ``limit`` events, with the run's real total.
+
+    The list alone could not tell a complete log from a truncated one, so the UI printed the
+    cap it had asked for -- "500 replayed events" -- as a fact about the run.
+    """
     repo_id = str(corpus_id or "").strip()
     rid = str(run_id or "").strip()
     if not repo_id:
@@ -4243,8 +4279,14 @@ async def get_index_run_events(
     if not rid:
         raise HTTPException(status_code=422, detail="run_id is required")
     await _flush_run_events()
-    events = await asyncio.to_thread(_load_run_events, repo_id, rid, limit=limit)
-    return events
+    events, total = await asyncio.to_thread(_load_run_events, repo_id, rid, limit=limit)
+    return IndexRunEventPage(
+        repo_id=repo_id,
+        run_id=rid,
+        events=events,
+        total=total,
+        first_index=max(0, total - len(events)),
+    )
 
 
 @router.get(

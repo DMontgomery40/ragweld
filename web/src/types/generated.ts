@@ -1345,6 +1345,24 @@ export interface IndexRunConflictDetail {
   operator_hint: string;
 }
 
+/** Persisted index terminal event for replay. */
+export interface IndexRunEvent {
+  /** Run identifier */
+  run_id: string;
+  /** Event timestamp (UTC) */
+  ts: string;
+  /** Event type (log/progress/warning/error/complete/cancelled) */
+  type: string;
+  /** Human-readable message */
+  message?: string | null; // default: None
+  /** Progress percentage when present */
+  percent?: number | null; // default: None
+  /** Current file when present */
+  current_file?: string | null; // default: None
+  /** Additional event payload */
+  meta?: Record<string, unknown>;
+}
+
 /** Statistics about an indexed repository. */
 export interface IndexStats {
   /** Corpus identifier */
@@ -4043,22 +4061,18 @@ export interface IndexRunConflictResponse {
   detail: IndexRunConflictDetail | IndexFenceCorruptDetail;
 }
 
-/** Persisted index terminal event for replay. */
-export interface IndexRunEvent {
+/** One page of a run's event log, carrying the total so a cap is never shown as a fact.  The run header used to print `len(events)` as "500 replayed events" for a corpus whose log held far more -- 500 being the limit the UI itself asked for. The page states how many events the run actually recorded and where this slice starts, so the reader can tell a complete log from a truncated one. */
+export interface IndexRunEventPage {
+  /** Corpus identifier */
+  corpus_id: string;
   /** Run identifier */
   run_id: string;
-  /** Event timestamp (UTC) */
-  ts: string;
-  /** Event type (log/progress/warning/error/complete/cancelled) */
-  type: string;
-  /** Human-readable message */
-  message?: string | null;
-  /** Progress percentage when present */
-  percent?: number | null;
-  /** Current file when present */
-  current_file?: string | null;
-  /** Additional event payload */
-  meta?: Record<string, unknown>;
+  /** The most recent events, oldest first */
+  events?: IndexRunEvent[];
+  /** Events this run recorded in total */
+  total: number;
+  /** 0-based position of events[0] within the run's full log */
+  first_index: number;
 }
 
 /** Persisted indexing run summary for replay/status truthfulness. */
