@@ -10,6 +10,8 @@ epstein-files-public by 4.5x on chunks in the other direction.
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from server.db.postgres import PostgresClient
@@ -330,6 +332,8 @@ async def test_a_cold_estimate_never_publishes_a_number_it_did_not_measure() -> 
     assert calls, "the probe made no calls"
     assert calls[-1]["status"] == "ready", f"never became ready: {calls}"
 
+    ready = calls[-1]
+
     # Every answer before the ready one carries NULL for everything measured -- not a small
     # estimate, and not a zero an unguarded consumer would render. The file inventory is real,
     # because the walk genuinely produced it.
@@ -338,10 +342,17 @@ async def test_a_cold_estimate_never_publishes_a_number_it_did_not_measure() -> 
         assert call["http"] == 200
         for field in ("tokens", "chunks", "sampled_files", "sampled_bytes", "low", "high"):
             assert call[field] is None, f"{call['status']} answer carried {field}={call[field]}"
-        assert call["total_files"] >= 0
+        # The inventory follows the status exactly: warming carries nothing at all because the
+        # client only polls through it, while a refusal carries what the walk really found so
+        # the operator can act on it. ">= 0" would accept either from either.
+        expected_files = 0 if call["status"] == "warming" else int(ready["total_files"])
+        assert call["total_files"] == expected_files, (
+            f"{call['status']} answer carried total_files={call['total_files']}, expected "
+            f"{expected_files}"
+        )
 
     # THE assertion: the cold-path numbers agree with the warm ones.
-    ready, warm_tokens = calls[-1], int(result["warm_tokens"])
+    warm_tokens = int(result["warm_tokens"])
     assert warm_tokens > 0
     assert int(ready["low"]) <= warm_tokens <= int(ready["high"]), (
         f"the cold estimate's band {ready['low']}-{ready['high']} excludes the warm result "
@@ -350,3 +361,78 @@ async def test_a_cold_estimate_never_publishes_a_number_it_did_not_measure() -> 
     ratio = int(ready["tokens"]) / warm_tokens
     assert 0.5 <= ratio <= 2.0, f"cold {ready['tokens']} vs warm {warm_tokens} (ratio {ratio:.2f})"
     assert int(ready["sampled_bytes"]) > 0
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_carries_the_walk_and_none_of_the_measurements(tmp_path) -> None:
+    """`insufficient_sample` is the one non-ready answer an operator actually reads.
+
+    It has to say what was found -- "we walked N files and could not measure enough of them" is
+    actionable where a bare refusal is not -- while still publishing no number that was never
+    measured. Forced deterministically by giving one corpus a per-format file floor no sample
+    can reach, rather than by waiting for a corpus shaped badly enough.
+    """
+    import uuid
+
+    from httpx import ASGITransport, AsyncClient
+
+    from server.config import load_config
+    from server.main import app
+
+    repo_id = f"refusal_{uuid.uuid4().hex[:10]}"
+    root = tmp_path / repo_id
+    root.mkdir()
+    for i in range(5):
+        (root / f"note_{i}.md").write_text(f"# note {i}\n\nSome indexable prose.\n", encoding="utf-8")
+
+    pg = PostgresClient("postgresql://ignored")
+    await pg.connect()
+    try:
+        await pg.upsert_corpus(repo_id, name=repo_id, root_path=str(root))
+        cfg = load_config()
+        # No sample of a 5-file corpus can measure 500 files per format.
+        cfg.indexing.estimate.min_files_per_format = 500
+        await pg.upsert_corpus_config_json(repo_id, cfg.model_dump(mode="serialization"))
+    finally:
+        await pg.disconnect()
+
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test", timeout=300) as client:
+            # Warm first, so this measures the refusal and not the tokenizer.
+            for _ in range(60):
+                response = await client.post(
+                    "/api/index/estimate",
+                    json={"corpus_id": repo_id, "repo_path": str(root)},
+                )
+                assert response.status_code == 200, response.text
+                body = response.json()
+                if body["status"] != "warming":
+                    break
+                await asyncio.sleep(2)
+
+        assert body["status"] == "insufficient_sample", body
+        # The walk really ran, and its result is reported.
+        assert body["total_files"] == 5
+        assert body["total_size_bytes"] > 0
+        # Nothing measured is published.
+        for field in (
+            "estimated_total_tokens",
+            "estimated_total_chunks",
+            "estimated_tokens_low",
+            "estimated_tokens_high",
+            "estimated_chunks_low",
+            "estimated_chunks_high",
+            "estimate_relative_error",
+            "sampled_files",
+            "sampled_bytes",
+        ):
+            assert body[field] is None, f"a refusal published {field}={body[field]}"
+        assert any("not measured at all" in a for a in body["assumptions"]), body["assumptions"]
+    finally:
+        pg2 = PostgresClient("postgresql://ignored")
+        await pg2.connect()
+        try:
+            await pg2.delete_corpus_with_data(repo_id)
+        finally:
+            await pg2.disconnect()

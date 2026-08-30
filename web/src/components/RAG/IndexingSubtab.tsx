@@ -36,7 +36,6 @@ import { NumberField } from '@/components/ui/NumberField';
 import type {
   ChatModelInfo,
   ChatModelsResponse,
-  IndexEstimate,
   IndexRequest,
   IndexRunEvent,
   IndexRunEventPage,
@@ -233,7 +232,9 @@ export function IndexingSubtab() {
   const [progress, setProgress] = useState({ current: 0, total: 100, status: 'Ready' });
   const [terminalVisible, setTerminalVisible] = useState(false);
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
-  const [indexEstimate, setIndexEstimate] = useState<IndexEstimate | null>(null);
+  // Only a measured estimate is ever stored: indexingApi.estimate cannot return anything
+  // else, and the narrow type stops a future edit putting a warming payload in here.
+  const [indexEstimate, setIndexEstimate] = useState<ReadyIndexEstimate | null>(null);
   const [estimateLoading, setEstimateLoading] = useState(false);
   const [estimateWarmup, setEstimateWarmup] = useState('');
 

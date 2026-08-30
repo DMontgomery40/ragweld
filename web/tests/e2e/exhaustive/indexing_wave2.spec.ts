@@ -1,6 +1,6 @@
 // Second-wave findings on the Indexing and Data Quality subtabs, plus the shared confirmation
 // dialog and the Synthetic Lab jump buttons those two subtabs render.
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
 import { API_BASE, provisionExhaustiveCorpus, type ExhaustiveCorpus } from './corpus_fixture';
@@ -208,23 +208,29 @@ test('no consumer can receive a warming estimate, and none opens a dialog on one
   await expect(page.getByTestId('confirm-dialog')).toHaveCount(0);
 });
 
-test('both estimate call sites funnel through the api layer', () => {
-  // A future component could bypass the guarantee by POSTing the endpoint itself, which is how
-  // the wizard came to open a confirmation on an unmeasured payload. Read the two real modules.
-  const read = (rel: string) => readFileSync(path.resolve(process.cwd(), rel), 'utf-8');
-  const sources = {
-    'RAG > Indexing': read('web/src/components/RAG/IndexingSubtab.tsx'),
-    'Get Started wizard': read('web/src/components/tabs/StartTab.tsx'),
+test('the api layer is the only place that names the estimate endpoint', () => {
+  // A component could bypass every guarantee above by POSTing the endpoint itself, which is how
+  // the wizard came to open a confirmation on an unmeasured payload. Naming the two components
+  // we know about would not catch a third, so this walks the whole source tree: exactly one
+  // file may contain the literal, and it is the one that polls until the estimate is measured.
+  const root = path.resolve(process.cwd(), 'web/src');
+  const sources: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (/\.tsx?$/.test(entry.name)) sources.push(full);
+    }
   };
+  walk(root);
+  expect(sources.length, 'the walk found no sources; the path is wrong').toBeGreaterThan(50);
 
-  for (const [name, source] of Object.entries(sources)) {
-    expect(source, `${name} must not POST the estimate endpoint directly`).not.toContain(
-      "'/index/estimate'"
-    );
-    expect(source, `${name} must go through indexingApi.estimate`).toContain('indexingApi.estimate');
-  }
-  // And the one place that may: the api layer itself.
-  expect(read('web/src/api/indexing.ts')).toContain("'/index/estimate'");
+  const offenders = sources
+    .filter((file) => readFileSync(file, 'utf-8').includes('/index/estimate'))
+    .map((file) => path.relative(root, file))
+    .sort();
+
+  expect(offenders).toEqual(['api/indexing.ts']);
 });
 
 test('the Get Started wizard opens no dialog until the estimator has measured', async ({ page }) => {
