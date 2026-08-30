@@ -214,6 +214,29 @@ def test_start_rejects_equal_backend_and_frontend_ports() -> None:
     assert "Backend and frontend ports must be different" in result.stderr
 
 
+def test_caller_backend_port_survives_a_dotenv_that_sets_a_different_one() -> None:
+    """A real `.env` (this repo's own, or an operator's) commonly hardcodes
+    BACKEND_PORT for the deployed default. `start.sh` sources `.env` with
+    `source .env` -- a plain shell source overwrites an already-exported
+    variable -- so without care, `.env`'s value would silently clobber a
+    caller-provided BACKEND_PORT override on every run, not just this test
+    fixture. Caller-provided environment must win over `.env`."""
+    caller_port = _unused_tcp_port()
+
+    result = _run(
+        "bash",
+        "start.sh",
+        "--check",
+        "--no-docker",
+        "--no-frontend",
+        "--no-local-model",
+        env={"BACKEND_PORT": str(caller_port)},
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert f"--port {caller_port}" in result.stdout
+
+
 def test_vite_and_launcher_use_namespaced_strict_ports() -> None:
     from server.models.tribrid_config_model import DockerConfig
 

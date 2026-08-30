@@ -329,10 +329,25 @@ fi
 
 if [[ -f .env ]]; then
   log "Loading environment from .env"
+  # Caller-provided environment variables win over .env: snapshot every variable
+  # name and value already exported before sourcing, then restore those exact
+  # names afterward. This makes .env fill in only the keys the caller did not
+  # already set (e.g. BACKEND_PORT=<caller value> must survive a .env that also
+  # sets BACKEND_PORT) instead of silently overwriting them.
+  declare -a __preexisting_env_keys
+  mapfile -t __preexisting_env_keys < <(compgen -e)
+  declare -A __preexisting_env_values=()
+  for __key in "${__preexisting_env_keys[@]}"; do
+    __preexisting_env_values["$__key"]="${!__key}"
+  done
   set -a
   # shellcheck disable=SC1091
   source .env
   set +a
+  for __key in "${__preexisting_env_keys[@]}"; do
+    export "${__key}=${__preexisting_env_values[$__key]}"
+  done
+  unset __preexisting_env_keys __preexisting_env_values __key
 fi
 
 # Upstream provider credentials belong to the LiteLLM container's private
