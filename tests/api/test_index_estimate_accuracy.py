@@ -10,11 +10,13 @@ epstein-files-public by 4.5x on chunks in the other direction.
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from server.db.postgres import PostgresClient
 from server.indexing.chunker import Chunker
-from server.indexing.estimate import sample_corpus
+from server.indexing.estimate import sample_corpus, warm_sampler
 from server.indexing.loader import FileLoader
 from server.services.config_store import CorpusNotFoundError
 from server.services.config_store import get_config as load_scoped_config
@@ -118,4 +120,115 @@ async def test_the_old_byte_ratio_would_have_failed_this_test(repo_id: str) -> N
     assert not (1 / MAX_RATIO <= old_chunks / actual_chunks <= MAX_RATIO), (
         f"{repo_id}: bytes/4/448 gave {old_chunks} against {actual_chunks}, which is inside 2x "
         "-- pick a corpus that discriminates"
+    )
+
+
+# The browser client aborts an estimate at 30 s (web/src/api/client.ts). Since a failed estimate
+# is now a hard block rather than a fall-through to the run, a cold estimate that outruns this
+# turns the first Index Now after a service restart into an error banner.
+CLIENT_TIMEOUT_SECONDS = 30.0
+
+# Cold means a fresh interpreter. Clearing the tokenizer's lru_cache in-process does NOT restore
+# it: measured here, a first-in-process sample of ragweld_code costs ~28 s while the same sample
+# after a cache_clear costs ~4.6 s, because the `transformers` import and the model files stay
+# hot. Anything claiming to measure the cold path from inside a warm process measures the warm one.
+_COLD_PROBE = r"""
+import asyncio, json, time, sys
+
+async def main():
+    from server.services.config_store import get_config
+    from server.indexing.chunker import Chunker
+    from server.indexing.loader import FileLoader
+    from server.indexing.estimate import sample_corpus, warm_sampler
+
+    mode, repo_id, root = sys.argv[1], sys.argv[2], sys.argv[3]
+    cfg = await get_config(repo_id=repo_id)
+    chunker = Chunker(cfg.chunking, cfg.tokenization)
+    loader = FileLoader(ignore_patterns=[])
+    files = []
+    for _rel, path in loader.iter_repo_files(root):
+        try:
+            files.append((path, path.stat().st_size))
+        except OSError:
+            pass
+
+    warmup = 0.0
+    if mode == "warm":
+        started = time.monotonic()
+        warm_sampler(chunker)
+        warmup = time.monotonic() - started
+
+    started = time.monotonic()
+    sample_corpus(files=files, chunker=chunker)
+    sampling = time.monotonic() - started
+    print(json.dumps({"files": len(files), "warmup": warmup, "sampling": sampling}))
+
+asyncio.run(main())
+"""
+
+WIDEST_CORPUS = "ragweld_code"
+WIDEST_ROOT = "/opt/ragweld"
+
+
+def _cold_process_timings(mode: str, repo_id: str, root: str) -> dict[str, float]:
+    """Run one estimate in a genuinely fresh interpreter, with or without the warm-up first."""
+    import json
+    import os
+    import subprocess
+    import sys
+
+    completed = subprocess.run(
+        [sys.executable, "-c", _COLD_PROBE, mode, repo_id, root],
+        capture_output=True,
+        text=True,
+        env=os.environ.copy(),
+        timeout=300,
+        check=False,
+    )
+    if completed.returncode != 0:
+        pytest.skip(f"cold probe could not run here: {completed.stderr.strip()[-300:]}")
+    return json.loads(completed.stdout.strip().splitlines()[-1])
+
+
+async def _require_widest_corpus() -> None:
+    try:
+        _cfg, files, _stats = await _corpus_files(WIDEST_CORPUS)
+    except CorpusNotFoundError:
+        pytest.skip(f"{WIDEST_CORPUS} is not registered on this deployment")
+    if not files:
+        pytest.skip(f"{WIDEST_CORPUS} has no readable files on this host")
+
+
+@pytest.mark.integration
+async def test_a_cold_estimate_finishes_inside_the_client_timeout() -> None:
+    """A fresh process with no warm-up at all, on the widest corpus on this box.
+
+    This is the literal worst case the client can hit: an estimate that pays the whole tokenizer
+    load itself. It fits, but not comfortably -- which is why the warm-up exists.
+    """
+    await _require_widest_corpus()
+
+    timings = _cold_process_timings("nowarm", WIDEST_CORPUS, WIDEST_ROOT)
+
+    assert timings["sampling"] < CLIENT_TIMEOUT_SECONDS, (
+        f"a cold estimate took {timings['sampling']:.1f}s against a "
+        f"{CLIENT_TIMEOUT_SECONDS:.0f}s client timeout"
+    )
+
+
+@pytest.mark.integration
+async def test_the_warmup_moves_the_load_off_the_estimate() -> None:
+    """With the warm-up done, the estimate the operator waits for is a fraction of the budget."""
+    await _require_widest_corpus()
+
+    timings = _cold_process_timings("warm", WIDEST_CORPUS, WIDEST_ROOT)
+
+    assert timings["sampling"] < CLIENT_TIMEOUT_SECONDS / 3, (
+        f"a warmed estimate took {timings['sampling']:.1f}s, which leaves no margin"
+    )
+    # Not a vacuous bound: the warm-up really is most of the cold cost, which is the whole
+    # reason moving it off the request path helps.
+    assert timings["warmup"] > timings["sampling"], (
+        f"warmup {timings['warmup']:.1f}s vs sampling {timings['sampling']:.1f}s -- if sampling "
+        "dominated, warming would buy nothing"
     )

@@ -247,6 +247,21 @@ def _systematic_picks(
     return [items[round(i * (total - 1) / (count - 1))] for i in range(count)]
 
 
+
+def warm_sampler(chunker: Chunker) -> None:
+    """Load whatever the sampler loads lazily, so the first estimate does not pay for it.
+
+    The chunker's tokenizer loads its model on first use -- measured at 29.3 s in a fresh API
+    process against a 30 s client timeout, i.e. the operator's first Index Now after every
+    service restart was a coin flip. Nothing in the sampling budget can help: the budget is
+    checked between files and the load happens inside the first one.
+
+    Cheap and idempotent: the tokenizer caches per model name, so after the first call this
+    costs a few hundred microseconds. Safe to call from anywhere, including a background task.
+    """
+    chunker.chunk_file("warmup.md", "warm the tokenizer with one short line of text.\n")
+
+
 def sample_corpus(
     *,
     files: Sequence[tuple[Path, int]],

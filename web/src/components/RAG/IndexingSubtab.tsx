@@ -1115,9 +1115,9 @@ export function IndexingSubtab() {
           `Chunks (est): ${formatNumber(Number(estimate.estimated_total_chunks || 0))} (${formatNumber(
             Number(estimate.estimated_chunks_low)
           )}–${formatNumber(Number(estimate.estimated_chunks_high))})`,
-          `Measured by chunking ${formatNumber(Number(estimate.sampled_files))} sampled files • band ±${Math.round(
-            Number(estimate.estimate_relative_error) * 100
-          )}%`,
+          `Measured by chunking ${formatNumber(Number(estimate.sampled_files))} sampled files in ${formatDuration(
+            durationMs(Number(estimate.elapsed_seconds))
+          )} • band ±${Math.round(Number(estimate.estimate_relative_error) * 100)}%`,
           `Embedding: ${String(estimate.embedding_provider || '—')}/${String(estimate.embedding_model || '—')} (${
             estimate.embedding_backend
           }, skip_dense=${estimate.skip_dense ? 'yes' : 'no'})`,

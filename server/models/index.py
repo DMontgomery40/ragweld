@@ -285,6 +285,13 @@ class IndexEstimate(BaseModel):
         ge=0, description="Files opened, extracted and chunked to produce the estimate"
     )
     sampled_bytes: int = Field(ge=0, description="Bytes covered by the sampled files")
+    elapsed_seconds: float = Field(
+        ge=0.0,
+        description=(
+            "Wall-clock seconds this estimate spent sampling. The first call in a fresh process "
+            "pays for loading the tokenizer, so the UI can say how long the measurement took."
+        ),
+    )
     embedding_backend: Literal["deterministic", "provider"] = Field(
         description="Embedding backend used for indexing (deterministic has no external cost)"
     )

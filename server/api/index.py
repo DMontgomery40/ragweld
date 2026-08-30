@@ -36,7 +36,7 @@ from server.db.postgres import PostgresClient
 from server.indexing.chunker import Chunker
 from server.indexing.code_graph import CODE_GRAPH_LANGUAGES, extract_code_graph
 from server.indexing.embedder import Embedder, configure_postgres_embedding_cache_backend
-from server.indexing.estimate import sample_corpus
+from server.indexing.estimate import sample_corpus, warm_sampler
 from server.indexing.generations import (
     DeletionIncompleteError,
     FenceClaim,
@@ -313,6 +313,29 @@ _LOCAL_EMBED_TPS_TABLE: dict[str, dict[str, int]] = {
 _SEMANTIC_KG_CALLS_PER_SECOND = 1.0
 
 
+
+
+
+# The estimate samples the corpus through the real tokenizer, which loads its model on first
+# use. Warming it off the request path is what keeps the first Index Now after a restart inside
+# the client's timeout; it is kicked off from the first corpus-status read the Indexing tab
+# makes, so the operator is already on the tab by the time it matters. Fire and forget, once per
+# process, and a failure is not the caller's problem.
+_SAMPLER_WARMED = False
+
+
+def _warm_sampler_in_background(cfg: TriBridConfig) -> None:
+    global _SAMPLER_WARMED
+    if _SAMPLER_WARMED:
+        return
+    _SAMPLER_WARMED = True
+
+    async def _warm() -> None:
+        with contextlib.suppress(Exception):
+            await asyncio.to_thread(warm_sampler, Chunker(cfg.chunking, cfg.tokenization))
+
+    with contextlib.suppress(RuntimeError):
+        asyncio.get_running_loop().create_task(_warm())
 
 
 async def _anchor_registry_root(repo_id: str, root: Path) -> None:
@@ -3782,11 +3805,13 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
 
     # Measured, not a byte ratio: a sample of every format is extracted and run through the
     # chunker the operator just configured. Off the event loop -- it opens files and tokenizes.
+    sampling_started = time.monotonic()
     sample = await asyncio.to_thread(
         sample_corpus,
         files=sized_files,
         chunker=Chunker(cfg.chunking, cfg.tokenization),
     )
+    elapsed_seconds = time.monotonic() - sampling_started
     est_tokens = sample.total_tokens
     est_chunks = sample.total_chunks
 
@@ -3929,6 +3954,7 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
         estimate_relative_error=float(sample.relative_error),
         sampled_files=int(sample.sampled_files),
         sampled_bytes=int(sample.sampled_bytes),
+        elapsed_seconds=float(elapsed_seconds),
         embedding_backend="provider" if embedding_backend == "provider" else "deterministic",
         embedding_provider=embedding_provider,
         embedding_model=embedding_model,
@@ -4123,6 +4149,9 @@ async def get_dashboard_index_status(
 
     # Config + costs + storage breakdown (best-effort)
     cfg = await load_scoped_config(repo_id=repo_id)
+    # The Dashboard is the landing page, so warming from here gives the tokenizer load the whole
+    # time it takes an operator to reach Indexing and click, not just the tab's own mount.
+    _warm_sampler_in_background(cfg)
     embedding_model = cfg.embedding.effective_model
     embedding_provider = cfg.embedding.embedding_type
     embedding_dim = int(cfg.embedding.embedding_dim)
@@ -4371,6 +4400,10 @@ async def get_index_status(corpus_id: str) -> IndexStatus:
         cfg: TriBridConfig | None = await load_scoped_config(repo_id=repo_id)
     except CorpusNotFoundError:
         cfg = None  # persisted run summaries can outlive the corpus registration
+    if cfg is not None:
+        # The Indexing tab reads this on mount, which is the earliest honest moment to start
+        # loading what an Index Now click will need.
+        _warm_sampler_in_background(cfg)
     live: IndexRunFence | None = None
     current_manifest: GenerationManifest | None = None
     if cfg is not None:

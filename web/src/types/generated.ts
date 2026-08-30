@@ -4010,6 +4010,8 @@ export interface IndexEstimate {
   sampled_files: number;
   /** Bytes covered by the sampled files */
   sampled_bytes: number;
+  /** Wall-clock seconds this estimate spent sampling. The first call in a fresh process pays for loading the tokenizer, so the UI can say how long the measurement took. */
+  elapsed_seconds: number;
   /** Embedding backend used for indexing (deterministic has no external cost) */
   embedding_backend: "deterministic" | "provider";
   /** Embedding provider used for indexing (embedding.embedding_type) */
