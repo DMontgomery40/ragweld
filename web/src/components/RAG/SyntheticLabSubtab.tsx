@@ -90,6 +90,21 @@ function SyntheticModelPicker({
   );
 }
 
+// A judge score is a 0–10 mean; the raw value carries 15 decimals, which reads as a
+// debug leak. Two decimals is the reported precision everywhere it is shown.
+function fmtScore(value: number | null | undefined): string {
+  return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(2) : 'n/a';
+}
+
+async function copyText(value: string, onOk: () => void, onErr: () => void): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(value);
+    onOk();
+  } catch {
+    onErr();
+  }
+}
+
 function labelForKind(kind: SyntheticArtifactKind): string {
   if (kind === 'eval_dataset_json') return 'Eval Dataset';
   if (kind === 'semantic_cards_jsonl') return 'Semantic Summaries';
@@ -295,6 +310,7 @@ export function SyntheticLabSubtab() {
   useEffect(() => {
     void loadRunDetail(selectedRunId);
     setPatchPreview(null);
+    setArtifactPreview(null);
     if (!selectedRunId) return;
     setEvents([]);
     const stop = syntheticService.streamRun(
@@ -427,6 +443,46 @@ export function SyntheticLabSubtab() {
       }
     },
     [selectedRunId]
+  );
+
+  const [retrying, setRetrying] = useState(false);
+  // A failed run is not a dead end: re-launch with the same recipe, models, and
+  // parameters the run stored, so the operator does not rebuild the request by hand.
+  const retryRun = useCallback(async () => {
+    if (!selectedRun) return;
+    setRetrying(true);
+    try {
+      const run = await syntheticService.startRun(selectedRun.request);
+      info(`Retry started: ${run.run_id}`);
+      setSelectedRunId(run.run_id);
+      void loadRuns();
+    } catch (e) {
+      notifyError(describeSyntheticFailure(e, 'Failed to retry run'));
+    } finally {
+      setRetrying(false);
+    }
+  }, [selectedRun, info, loadRuns, notifyError]);
+
+  const [artifactPreview, setArtifactPreview] = useState<{ kind: SyntheticArtifactKind; rows: Record<string, unknown>[] } | null>(null);
+  const [previewing, setPreviewing] = useState('');
+  // View an artifact through the read-only preview endpoint (bounded rows), so a
+  // bare server path becomes something the operator can actually inspect in place.
+  const previewArtifact = useCallback(
+    async (kind: SyntheticArtifactKind) => {
+      if (!selectedRunId) return;
+      setPreviewing(kind);
+      try {
+        const { data } = await apiClient.get<{ rows?: Record<string, unknown>[] }>(
+          api(`/synthetic/run/${encodeURIComponent(selectedRunId)}/artifact/preview?kind=${encodeURIComponent(kind)}&limit=20`)
+        );
+        setArtifactPreview({ kind, rows: Array.isArray(data?.rows) ? data.rows : [] });
+      } catch (e) {
+        notifyError(describeSyntheticFailure(e, 'Failed to preview artifact'));
+      } finally {
+        setPreviewing('');
+      }
+    },
+    [selectedRunId, notifyError]
   );
 
   const applyPatch = useCallback(async () => {
@@ -667,6 +723,30 @@ export function SyntheticLabSubtab() {
               <span className="studio-mono">status={selectedRun.status}</span>
             </div>
 
+            {selectedRun.status === 'failed' ? (
+              <div
+                className="studio-callout"
+                data-testid="synthetic-run-failure"
+                style={{ marginBottom: 10, borderColor: 'var(--err)' }}
+              >
+                <div style={{ fontWeight: 600, marginBottom: 4, color: 'var(--err)' }}>Run failed</div>
+                <div style={{ fontSize: 14, color: 'var(--fg)', marginBottom: 6 }}>
+                  {selectedRun.error || 'This run failed without recording a reason.'}
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--fg-muted)', marginBottom: 8 }}>
+                  Open “Live events” below for the run log. Retry re-launches with the same recipe, models, and parameters.
+                </div>
+                <button
+                  className="small-button"
+                  data-testid="synthetic-retry"
+                  disabled={retrying || starting}
+                  onClick={() => void retryRun()}
+                >
+                  {retrying ? 'Retrying…' : 'Retry'}
+                </button>
+              </div>
+            ) : null}
+
             <div style={{ marginBottom: 10 }}>
               <LineageMeta
                 bundleId={selectedRun.bundle_id}
@@ -681,26 +761,39 @@ export function SyntheticLabSubtab() {
             <div className="studio-callout" style={{ marginBottom: 10 }}>
               <div style={{ fontWeight: 600, marginBottom: 6 }}>Quality Gate</div>
               <div className="studio-mono">
-                threshold={selectedRun.summary?.quality_gate_threshold ?? 0.4} top1={selectedRun.summary?.quality_top1_accuracy ?? 'n/a'} topk={selectedRun.summary?.quality_topk_accuracy ?? 'n/a'} mrr={selectedRun.summary?.quality_mrr ?? 'n/a'}
+                threshold={fmtScore(selectedRun.summary?.quality_gate_threshold)} top1={fmtScore(selectedRun.summary?.quality_top1_accuracy)} topk={fmtScore(selectedRun.summary?.quality_topk_accuracy)} mrr={fmtScore(selectedRun.summary?.quality_mrr)} n={selectedRun.summary?.quality_sample_size ?? 0}
               </div>
               {selectedRun.summary?.quality_gate_passed === false ? (
                 <div style={{ color: 'var(--err)', marginTop: 6 }}>
                   blocked: {selectedRun.summary?.quality_failure_reason || 'quality gate failed'}
                 </div>
               ) : selectedRun.summary?.quality_gate_passed === true ? (
-                <div style={{ color: 'var(--ok)', marginTop: 6 }}>passed</div>
+                <div style={{ color: 'var(--ok)', marginTop: 6 }}>
+                  passed on {selectedRun.summary?.quality_sample_size ?? 0} sample question
+                  {(selectedRun.summary?.quality_sample_size ?? 0) === 1 ? '' : 's'}
+                </div>
               ) : (
                 <div style={{ color: 'var(--fg-muted)', marginTop: 6 }}>not evaluated</div>
               )}
+              <div style={{ color: 'var(--fg-muted)', marginTop: 6, fontSize: '13px' }}>
+                The gate retrieves the run's own generated questions against this corpus. It is a self-consistency
+                check on a small, self-generated sample — not external validation — so a perfect score is not
+                evidence of retrieval quality on its own.
+              </div>
             </div>
 
             <div className="studio-callout" style={{ marginBottom: 10 }} data-testid="synthetic-grounding-summary">
               <div style={{ fontWeight: 600, marginBottom: 6 }}>Grounding &amp; Curation</div>
+              <div data-testid="synthetic-avg-judge" style={{ marginBottom: 6 }}>
+                Avg judge score{' '}
+                <span style={{ fontWeight: 600 }}>{fmtScore(selectedRun.summary?.avg_judge_score)}</span> / 10
+                <span style={{ color: 'var(--fg-muted)' }}> ({selectedRun.summary?.items_curated_in ?? 0} judged)</span>
+              </div>
               <div className="studio-mono">
                 sources={selectedRun.summary?.sources_used ?? 0} generated={selectedRun.summary?.items_generated ?? 0}{' '}
                 ungrounded={selectedRun.summary?.items_rejected_ungrounded ?? 0} malformed={selectedRun.summary?.items_rejected_malformed ?? 0}{' '}
                 judged={selectedRun.summary?.items_curated_in ?? 0} kept={selectedRun.summary?.items_curated_out ?? 0}{' '}
-                avg_judge={selectedRun.summary?.avg_judge_score ?? 'n/a'} triplets={selectedRun.summary?.triplets_mined ?? 0}
+                triplets={selectedRun.summary?.triplets_mined ?? 0}
               </div>
               <div style={{ color: 'var(--fg-muted)', marginTop: 6, fontSize: '13px' }}>
                 Rows are kept only when their evidence quote appears verbatim in the source chunk and the judge scores them at or
@@ -713,39 +806,81 @@ export function SyntheticLabSubtab() {
               {(selectedArtifacts || []).map((a) => (
                 <div key={`${a.kind}:${a.path}`} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
                   <span style={{ minWidth: 180 }}>{labelForKind(a.kind)}</span>
-                  <span className="studio-mono" title={a.path} style={{ opacity: 0.75, maxWidth: 520, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  <span className="studio-mono" title={a.path} style={{ color: 'var(--fg-muted)', maxWidth: 520, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {a.path}
                   </span>
-                  {a.kind !== 'report_md'
-                    ? (() => {
-                        const blockedReason = publishBlockReason(a.kind, selectedRun);
-                        const isBlocked = Boolean(blockedReason);
-                        const isPublishing = publishing === a.kind;
-                        const blockedByFailure =
-                          isQualityGatedArtifact(a.kind) && selectedRun?.summary?.quality_gate_passed === false;
-                        return (
-                          <>
-                            <button
-                              className="small-button"
-                              data-testid={`synthetic-publish-${a.kind}`}
-                              title={blockedReason || `Publish ${labelForKind(a.kind)}`}
-                              disabled={isPublishing || isBlocked}
-                              onClick={() => void runPublish(a.kind)}
-                            >
-                              {isPublishing ? 'Publishing...' : isBlocked ? 'Blocked' : 'Publish'}
-                            </button>
-                            {isBlocked && !isPublishing ? (
-                              <span style={{ fontSize: 12, color: blockedByFailure ? 'var(--err)' : 'var(--fg-muted)' }}>
-                                {blockedReason}
-                              </span>
-                            ) : null}
-                          </>
-                        );
-                      })()
-                    : null}
+                  <button
+                    className="small-button"
+                    data-testid={`synthetic-copy-path-${a.kind}`}
+                    title={`Copy path: ${a.path}`}
+                    onClick={() =>
+                      void copyText(
+                        a.path,
+                        () => success('Copied artifact path.'),
+                        () => notifyError('Clipboard unavailable — the full path is on hover.')
+                      )
+                    }
+                  >
+                    Copy path
+                  </button>
+                  {a.kind !== 'report_md' ? (
+                    <button
+                      className="small-button"
+                      data-testid={`synthetic-preview-${a.kind}`}
+                      disabled={previewing === a.kind}
+                      onClick={() => void previewArtifact(a.kind)}
+                    >
+                      {previewing === a.kind ? 'Loading…' : 'Preview'}
+                    </button>
+                  ) : null}
+                  {a.kind !== 'report_md' ? (
+                    (() => {
+                      const blockedReason = publishBlockReason(a.kind, selectedRun);
+                      const isBlocked = Boolean(blockedReason);
+                      const isPublishing = publishing === a.kind;
+                      const blockedByFailure =
+                        isQualityGatedArtifact(a.kind) && selectedRun?.summary?.quality_gate_passed === false;
+                      return (
+                        <>
+                          <button
+                            className="small-button"
+                            data-testid={`synthetic-publish-${a.kind}`}
+                            title={blockedReason || `Publish ${labelForKind(a.kind)}`}
+                            disabled={isPublishing || isBlocked}
+                            onClick={() => void runPublish(a.kind)}
+                          >
+                            {isPublishing ? 'Publishing...' : isBlocked ? 'Blocked' : 'Publish'}
+                          </button>
+                          {isBlocked && !isPublishing ? (
+                            <span style={{ fontSize: 12, color: blockedByFailure ? 'var(--err)' : 'var(--fg-muted)' }}>
+                              {blockedReason}
+                            </span>
+                          ) : null}
+                        </>
+                      );
+                    })()
+                  ) : (
+                    <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
+                      The run report is a human-readable summary; it is not published to a corpus store, so it has no Publish action.
+                    </span>
+                  )}
                 </div>
               ))}
             </div>
+            {artifactPreview ? (
+              <div style={{ marginTop: 12 }} data-testid="synthetic-artifact-preview">
+                <div style={{ fontWeight: 600, marginBottom: 6 }}>
+                  {labelForKind(artifactPreview.kind)} preview ({artifactPreview.rows.length} row
+                  {artifactPreview.rows.length === 1 ? '' : 's'})
+                </div>
+                <pre style={{ maxHeight: 280, overflow: 'auto', background: 'var(--card-bg)', border: '1px solid var(--line)', borderRadius: 8, padding: 10 }}>
+                  {artifactPreview.rows.length ? JSON.stringify(artifactPreview.rows, null, 2) : 'No rows to preview.'}
+                </pre>
+                <button className="small-button" onClick={() => setArtifactPreview(null)}>
+                  Close preview
+                </button>
+              </div>
+            ) : null}
             {patchPreview ? (
               <div style={{ marginTop: 12 }}>
                 <div style={{ fontWeight: 600, marginBottom: 6 }}>Config patch preview</div>
