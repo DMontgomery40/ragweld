@@ -1,3 +1,4 @@
+```markdown
 # API Reference
 
 <div class="grid chunk_summaries" markdown>
@@ -57,9 +58,10 @@
 | Search | `/api/search` | POST | Tri-brid retrieval + fusion (+reranker) |
 | Answer | `/api/answer` | POST | Retrieval + LLM answer generation |
 | Answer | `/api/answer/stream` | POST | Stream answer generation |
-| Graph | `/api/graph/{corpus_id}/entities` | GET | List entities |
-| Graph | `/api/graph/{corpus_id}/entity/{id}` | GET | Entity details |
-| Graph | `/api/graph/{corpus_id}/entity/{id}/neighbors` | GET | Neighborhood |
+| Graph | `/api/graph/{corpus_id}/entities` | GET | List entities (`?q=`, `?limit=`) |
+| Graph | `/api/graph/{corpus_id}/entity` | GET | Entity details (`?entity_id=`) |
+| Graph | `/api/graph/{corpus_id}/entity/neighbors` | GET | Neighborhood (`?entity_id=&max_hops=&limit=`) |
+| Graph | `/api/graph/{corpus_id}/subgraph` | GET | Corpus or search subgraph (`?limit=`, `?q=`) |
 | Models | `/api/models/by-type/{component}` | GET | Models by component `GEN/EMB/RERANK` |
 | Keywords | `/api/keywords/generate` | POST | Generate discriminative keywords |
 | Reranker | `/api/reranker/*` | mixed | Status / mine / train / evaluate |
@@ -72,8 +74,8 @@
 !!! tip "Citations you can open"
     `ChunkMatch` now carries typed `provenance` (extraction method; cited pages and normalized regions for Docling PDFs), and `ChatResponse` carries `web_grounding` with validated web citations. See [Source document viewer](manual/source_viewer.md) and [Web search in Chat](manual/web_search.md).
 
-!!! note "Graph entity ids may contain slashes"
-    Code-graph entity ids are corpus-relative paths (`server/services/traces.py::TraceStore.add_event`). The `/api/graph/{corpus_id}/entity/{entity_id}` routes match ids containing `/`, so pass them as-is without encoding the slashes. See [Graph API](api_graph.md).
+!!! note "Graph entity ids travel as a query parameter"
+    Code-graph entity ids are corpus-relative paths (`server/services/traces.py::TraceStore.add_event`) and carry both `/` and `::`. The entity routes therefore take the id as `?entity_id=…`, never as a path segment — the old `{entity_id:path}` routes were greedy and swallowed the `/neighbors` and `/relationships` suffixes of their own sibling routes, which made every code entity 404. A missing id is a typed `404` whose detail names the id you looked up. See [Graph API](api_graph.md).
 
 ```mermaid
 flowchart TB
@@ -150,3 +152,4 @@ console.log(metrics.split('\n').slice(0,5))
 
 ??? note "Streaming"
     Endpoints that can stream long-running operations (e.g., evaluation logs, training metrics) use Server-Sent Events or chunked JSON. Use backpressure-aware clients.
+

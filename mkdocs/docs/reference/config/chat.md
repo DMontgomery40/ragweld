@@ -26,7 +26,7 @@
 [Config API & workflow](../../configuration.md){ .md-button }
 [Glossary](../../glossary.md){ .md-button }
 
-**Total parameters**: 69
+**Total parameters**: 70
 
 ??? info "Group index"
     - `(root)`
@@ -108,6 +108,7 @@
 | `chat.recall.auto_index` | — | `bool` | `true` | — | — |
 | `chat.recall.chunk_max_tokens` | — | `int` | `256` | ≥ 64, ≤ 1024 | Chat chunks should be smaller than code chunks. |
 | `chat.recall.chunking_strategy` | — | `str` | `"sentence"` | pattern=^(sentence\|paragraph\|turn\|fixed)$ | 'turn'=one chunk per message, 'sentence'=split by sentence. |
+| `chat.recall.corpus_root` | — | `str` | `"data/recall"` | — | Directory a recall corpus is created under, one subdirectory per corpus id. Relative values resolve against the project root; RAGWELD_RECALL_ROOT overrides it for disposable lanes. Only consulted when the corpus is created - after that the registry row's path is authoritative, so every process agrees. |
 | `chat.recall.default_corpus_id` | — | `str` | `"recall_default"` | — | Auto-created at first launch. Users never touch this. |
 | `chat.recall.embedding_model` | — | `str` | `""` | — | Override embedding model. Empty=use global config. |
 | `chat.recall.enabled` | — | `bool` | `true` | — | Enable Recall. ON by default. |
