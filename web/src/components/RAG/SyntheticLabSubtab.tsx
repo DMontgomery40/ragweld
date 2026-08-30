@@ -105,6 +105,25 @@ function isQualityGatedArtifact(kind: SyntheticArtifactKind): boolean {
   return kind === 'eval_dataset_json' || kind === 'triplets_jsonl';
 }
 
+// Mirror of the server gate (`_promotion_block_reason` in server/api/synthetic.py):
+// a run is promotable only when it completed. A gated recipe that fails its gate is
+// marked failed upstream, so a completed run's gate is passed (True) or absent (None,
+// for recipes without a gate) — both promotable; an un-attached run has no target.
+function promotionBlockReason(run: SyntheticRun | null): string | null {
+  if (!run) return 'Select a run to promote.';
+  if (run.status !== 'completed') {
+    return `This run is ${run.status}; only a completed run can be promoted. A run that produced nothing and was never evaluated cannot be an alias target.`;
+  }
+  if (run.summary?.quality_gate_passed === false) {
+    const reason = String(run.summary?.quality_failure_reason || '').trim();
+    return `Quality gate did not pass; promotion blocked. ${reason}`.trim();
+  }
+  if (!String(run.bundle_id || '').trim()) {
+    return 'This run is not attached to a lineage bundle, so there is nothing to promote.';
+  }
+  return null;
+}
+
 function publishBlockReason(kind: SyntheticArtifactKind, run: SyntheticRun | null): string | null {
   if (!run) return 'Select a run to publish.';
   if (!isQualityGatedArtifact(kind)) return null;
@@ -396,6 +415,20 @@ export function SyntheticLabSubtab() {
     [info, notifyError, selectedRun, selectedRunId, success]
   );
 
+  // Promotion goes through the gated synthetic endpoint, not the generic lineage
+  // alias store: the server refuses a failed or un-evaluated run with a typed 409.
+  const promoteRun = useCallback(
+    async (alias: string) => {
+      if (!selectedRunId) return;
+      try {
+        await apiClient.post(api(`/synthetic/run/${encodeURIComponent(selectedRunId)}/promote/${encodeURIComponent(alias)}`));
+      } catch (e) {
+        throw new Error(describeSyntheticFailure(e, `Failed to promote ${alias}`));
+      }
+    },
+    [selectedRunId]
+  );
+
   const applyPatch = useCallback(async () => {
     const corpusId = String(activeRepo || '').trim();
     if (!patchPreview || !corpusId) return;
@@ -640,6 +673,8 @@ export function SyntheticLabSubtab() {
                 inputBundleId={selectedRun.input_bundle_id}
                 lineageRef={selectedRun.lineage_ref}
                 corpusId={String(activeRepo || '')}
+                promotionBlockedReason={promotionBlockReason(selectedRun)}
+                onPromote={promoteRun}
               />
             </div>
 

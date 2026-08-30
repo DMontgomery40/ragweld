@@ -15,7 +15,10 @@ from server.api.dependency_errors import (
     raise_postgres_unavailable_if_applicable,
 )
 from server.dependency_errors import DependencyUnavailableError
+from server.lineage import list_aliases, set_alias
 from server.models.tribrid_config_model import (
+    LineageAliasesResponse,
+    LineageAliasName,
     OkResponse,
     SyntheticArtifactKind,
     SyntheticArtifactPreviewResponse,
@@ -41,6 +44,29 @@ from server.synthetic.storage import events_path
 from server.training.triplet_rows import TripletRowsCorruptError
 
 router = APIRouter(tags=["synthetic"])
+
+
+def _promotion_block_reason(run: SyntheticRun) -> str | None:
+    """Why this run may not be promoted, or None when it may.
+
+    Mirrors the publish gate (``publish_eval_dataset`` -> ``QUALITY_GATE_FAILED``): a run is
+    promotable only when it completed. A gated recipe that fails its quality gate is already
+    marked ``status="failed"`` upstream, so a completed run carries ``quality_gate_passed`` of
+    True (gated, passed) or None (a recipe that has no gate, e.g. semantic_cards/keywords) —
+    both promotable. The explicit ``is False`` branch is defense in depth for a hand-written or
+    legacy run.json, and a run never attached to a lineage bundle has nothing to point at.
+    """
+    if run.status != "completed":
+        return (
+            f"This run is {run.status}; only a completed run can be promoted. "
+            "A run that produced nothing and was never evaluated cannot be an alias target."
+        )
+    if run.summary.quality_gate_passed is False:
+        reason = str(run.summary.quality_failure_reason or "").strip()
+        return ("Quality gate did not pass; promotion blocked. " + reason).strip()
+    if not str(run.bundle_id or "").strip():
+        return "This run is not attached to a lineage bundle, so there is nothing to promote."
+    return None
 
 
 @router.post("/synthetic/run/start", response_model=SyntheticRun, responses=DEPENDENCY_UNAVAILABLE_RESPONSES)
@@ -251,6 +277,41 @@ async def synthetic_run_cancel(run_id: str) -> OkResponse:
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
     return OkResponse(ok=bool(ok))
+
+
+@router.post("/synthetic/run/{run_id}/promote/{alias}", response_model=LineageAliasesResponse)
+async def synthetic_run_promote(run_id: str, alias: LineageAliasName) -> LineageAliasesResponse:
+    """Point a lineage alias (baseline/canary/current/promoted) at this run's bundle.
+
+    Refused with 409 unless the run completed and passed its quality gate — a failed or
+    un-evaluated run produced nothing worth promoting. 404 when the run or its bundle is gone,
+    503 when the lineage store is unavailable. This is the gated path the Synthetic Lab uses;
+    the generic /lineage/aliases/{alias} endpoint stays available for other bundle sources.
+    """
+    try:
+        run = orchestrator.get_run(run_id)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+
+    reason = _promotion_block_reason(run)
+    if reason is not None:
+        raise HTTPException(status_code=409, detail=f"PROMOTION_BLOCKED: {reason}")
+
+    repo_id = str(run.repo_id)
+    bundle_id = str(run.bundle_id or "").strip()
+    try:
+        set_alias(repo_id=repo_id, alias=alias, bundle_id=bundle_id)
+        return LineageAliasesResponse(ok=True, aliases=list_aliases(repo_id=repo_id))
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except DependencyUnavailableError as e:
+        if e.dependency == "lineage_store":
+            raise dependency_unavailable_http_exception(
+                "lineage_store", boundary="Synthetic run promote", exc=e
+            ) from e
+        raise
 
 
 @router.post("/synthetic/run/{run_id}/publish/eval_dataset", response_model=SyntheticPublishResponse)

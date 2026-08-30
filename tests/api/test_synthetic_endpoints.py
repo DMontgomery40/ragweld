@@ -60,7 +60,12 @@ _VALID_TRIPLET_LINE = (
 
 
 def _write_full_stack_run(
-    *, corpus_id: str, run_id: str, gate_passed: bool, triplets_text: str = _VALID_TRIPLET_LINE
+    *,
+    corpus_id: str,
+    run_id: str,
+    gate_passed: bool,
+    triplets_text: str = _VALID_TRIPLET_LINE,
+    bundle_id: str | None = None,
 ) -> Path:
     run_dir = synthetic_runs_dir() / run_id
     artifacts_dir = run_dir / "artifacts"
@@ -125,6 +130,7 @@ def _write_full_stack_run(
             quality_failure_reason=None if gate_passed else "Quality gate failed: top1=0.000 < threshold=0.400",
         ),
         error=None if gate_passed else "Quality gate failed",
+        bundle_id=bundle_id,
     )
     run_json = run_dir / "run.json"
     run_json.write_text(json.dumps(run.model_dump(mode="json", by_alias=True), indent=2), encoding="utf-8")
@@ -239,6 +245,70 @@ async def test_synthetic_start_rejects_direct_provider_model(client) -> None:
     )
     assert res.status_code == 422
     assert "LiteLLM alias" in str(res.json().get("detail", ""))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("alias", ["baseline", "canary", "current", "promoted"])
+async def test_synthetic_promote_is_refused_for_a_failed_run(client, alias: str) -> None:
+    """M-12: a failed run (produced nothing, gate never passed) cannot be promoted. The four
+    lineage aliases are gated server-side with a typed 409, whichever alias is targeted."""
+    corpus_id = f"pytest_synth_promote_{uuid.uuid4().hex[:8]}"
+    run_id = f"{corpus_id}__gate_failed"
+    run_dir = _write_gate_failed_run(corpus_id=corpus_id, run_id=run_id)
+    try:
+        res = await client.post(f"/api/synthetic/run/{run_id}/promote/{alias}")
+        assert res.status_code == 409, res.text
+        detail = str(res.json().get("detail", ""))
+        assert "PROMOTION_BLOCKED" in detail
+        assert "failed" in detail
+    finally:
+        shutil.rmtree(run_dir, ignore_errors=True)
+
+
+@pytest.mark.asyncio
+async def test_synthetic_promote_is_refused_when_the_run_has_no_bundle(client) -> None:
+    """M-12: even a completed run that was never attached to a lineage bundle has no promotion
+    target — the endpoint refuses rather than aliasing an empty string."""
+    corpus_id = f"pytest_synth_promote_{uuid.uuid4().hex[:8]}"
+    run_id = f"{corpus_id}__no_bundle"
+    run_dir = _write_full_stack_run(corpus_id=corpus_id, run_id=run_id, gate_passed=True, bundle_id=None)
+    try:
+        res = await client.post(f"/api/synthetic/run/{run_id}/promote/current")
+        assert res.status_code == 409, res.text
+        assert "not attached to a lineage bundle" in str(res.json().get("detail", ""))
+    finally:
+        shutil.rmtree(run_dir, ignore_errors=True)
+
+
+@pytest.mark.asyncio
+async def test_synthetic_promote_missing_run_is_404(client) -> None:
+    res = await client.post("/api/synthetic/run/pytest_synth_promote_absent__x/promote/current")
+    assert res.status_code == 404, res.text
+
+
+@pytest.mark.asyncio
+async def test_synthetic_promote_points_alias_at_a_completed_run_bundle(client) -> None:
+    """M-12: a completed, gate-passed run that is attached to a real bundle promotes; the alias
+    now points at that bundle. Exercised against the isolated lineage root the conftest provides,
+    with a real bundle written through the lineage registry (no mocks)."""
+    from server.lineage import create_or_update_bundle, list_aliases
+
+    corpus_id = f"pytest_synth_promote_{uuid.uuid4().hex[:8]}"
+    bundle, _aliases = create_or_update_bundle(repo_id=corpus_id, metadata={"source": "pytest-m12"})
+    run_id = f"{corpus_id}__passed"
+    run_dir = _write_full_stack_run(
+        corpus_id=corpus_id, run_id=run_id, gate_passed=True, bundle_id=bundle.bundle_id
+    )
+    try:
+        res = await client.post(f"/api/synthetic/run/{run_id}/promote/canary")
+        assert res.status_code == 200, res.text
+        aliases = {row["alias"]: row["bundle_id"] for row in res.json().get("aliases", [])}
+        assert aliases.get("canary") == bundle.bundle_id, aliases
+        # Persisted through the store, not just echoed.
+        persisted = {a.alias: a.bundle_id for a in list_aliases(repo_id=corpus_id)}
+        assert persisted.get("canary") == bundle.bundle_id, persisted
+    finally:
+        shutil.rmtree(run_dir, ignore_errors=True)
 
 
 @pytest.mark.asyncio

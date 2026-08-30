@@ -14,12 +14,21 @@ export function LineageMeta({
   lineageRef,
   modelArtifactRef,
   corpusId,
+  promotionBlockedReason,
+  onPromote,
 }: {
   bundleId?: string | null;
   inputBundleId?: string | null;
   lineageRef?: LineageRef | null;
   modelArtifactRef?: LineageRef | null;
   corpusId?: string | null;
+  // When set, every alias button is disabled and hovering explains why this
+  // bundle may not be promoted (e.g. a failed or un-evaluated synthetic run).
+  promotionBlockedReason?: string | null;
+  // Route the alias write through a caller-owned, gated endpoint instead of the
+  // generic lineage alias store (the Synthetic Lab promotes through a server
+  // gate that refuses failed runs). When omitted, the generic store is used.
+  onPromote?: (alias: LineageAliasName, bundleId: string) => Promise<void>;
 }) {
   const [savingAlias, setSavingAlias] = useState<LineageAliasName | null>(null);
   // alias name -> bundle id it currently points at (for the scoped corpus)
@@ -75,10 +84,15 @@ export function LineageMeta({
 
   const setAlias = async (alias: LineageAliasName) => {
     if (!bundleId) return;
+    if (promotionBlockedReason) return;
     const scope = scopeCorpus;
     setSavingAlias(alias);
     try {
-      await lineageService.setAlias(alias, bundleId, scope || undefined);
+      if (onPromote) {
+        await onPromote(alias, bundleId);
+      } else {
+        await lineageService.setAlias(alias, bundleId, scope || undefined);
+      }
       showToast(`Lineage alias "${alias}" now points at ${truncateId(bundleId)}`, 'success');
       // The write belonged to `scope`; if the component moved on, its own
       // scope-change effect already fetched the right aliases.
@@ -133,20 +147,23 @@ export function LineageMeta({
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             {ALIASES.map((alias) => {
               const pointsHere = Boolean(bundleId) && aliasTargets[alias] === bundleId;
+              const blocked = Boolean(promotionBlockedReason);
               return (
                 <button
                   key={alias}
                   className="small-button"
                   data-testid={`lineage-set-${alias}`}
                   onClick={() => void setAlias(alias)}
-                  disabled={savingAlias !== null || pointsHere}
+                  disabled={savingAlias !== null || pointsHere || blocked}
                   aria-pressed={pointsHere}
                   title={
-                    pointsHere
-                      ? `"${alias}" already points at this bundle`
-                      : aliasTargets[alias]
-                        ? `"${alias}" currently points at ${truncateId(aliasTargets[alias])}; click to move it here`
-                        : `"${alias}" is unset; click to point it at this bundle`
+                    blocked
+                      ? String(promotionBlockedReason)
+                      : pointsHere
+                        ? `"${alias}" already points at this bundle`
+                        : aliasTargets[alias]
+                          ? `"${alias}" currently points at ${truncateId(aliasTargets[alias])}; click to move it here`
+                          : `"${alias}" is unset; click to point it at this bundle`
                   }
                   style={
                     pointsHere
@@ -159,6 +176,14 @@ export function LineageMeta({
               );
             })}
           </div>
+          {promotionBlockedReason ? (
+            <div
+              data-testid="lineage-promotion-blocked"
+              style={{ fontSize: '11.5px', color: 'var(--err)' }}
+            >
+              {promotionBlockedReason}
+            </div>
+          ) : null}
           {aliasLookupFailed ? (
             <div style={{ fontSize: '11.5px', color: 'var(--warn, var(--fg-muted))' }}>
               Alias state unavailable — the lineage alias lookup failed; buttons still write.
