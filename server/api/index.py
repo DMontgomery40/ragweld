@@ -931,10 +931,13 @@ def _fence_corrupt_conflict(repo_id: str, exc: IndexFenceCorruptError) -> HTTPEx
 def _latest_run_stage(repo_id: str, run_id: str) -> str | None:
     """The last thing a run reported doing, or None when it has logged nothing.
 
-    Blocking (it drains the event writer and reads the run's JSONL log), so callers on the
-    event loop hand it to a thread.
+    Deliberately does NOT drain the event writer first. `_flush_run_events_sync` joins the
+    whole process-wide write queue, and the run this is asked about is by definition a LIVE
+    one that keeps feeding that queue (per-file progress, extractor heartbeats), so the join
+    has no bounded completion. An event still in flight costs this string a second of
+    staleness; waiting for it would hang an error response. Reads the run's JSONL log, so
+    callers on the event loop hand it to a thread.
     """
-    _flush_run_events_sync()
     events = _load_run_events(repo_id, run_id, limit=1)
     if not events:
         return None

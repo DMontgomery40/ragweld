@@ -330,7 +330,7 @@ def test_the_fence_conflict_detail_reports_what_the_holding_run_is_doing(tmp_pat
     from datetime import UTC, datetime
 
     import server.api.index as index_api
-    from server.api.index import _append_run_event, index_run_conflict
+    from server.api.index import _append_run_event, _flush_run_events_sync, index_run_conflict
     from server.indexing.generations import IndexRunFence
     from server.models.index import IndexRunConflictDetail
 
@@ -353,6 +353,10 @@ def test_the_fence_conflict_detail_reports_what_the_holding_run_is_doing(tmp_pat
                 "message": "Converting apollo-11-mission-report.pdf: still running (600s elapsed)",
             },
         )
+        # The reader never drains the writer itself -- joining a live run's write queue has
+        # no bounded completion, so a 409 must not wait on it. This test is the controlled
+        # single-writer case, so it flushes here instead.
+        _flush_run_events_sync()
         conflict = asyncio.run(
             index_run_conflict("nasa-apollo-11", fence, operator_hint="Stop that index run.")
         )
