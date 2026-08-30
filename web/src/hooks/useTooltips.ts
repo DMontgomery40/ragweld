@@ -12,7 +12,7 @@ import { useTooltipStore } from '../stores/useTooltipStore';
  * DO NOT add tooltip definitions here - add them to data/glossary.json instead.
  */
 export function useTooltips() {
-  const { tooltips, loading, initialized, initialize, getTooltip } = useTooltipStore();
+  const { tooltips, terms, loading, initialized, initialize, getTooltip } = useTooltipStore();
 
   // Initialize store on first use
   useEffect(() => {
@@ -23,6 +23,8 @@ export function useTooltips() {
 
   return {
     tooltips,
+    /** The glossary's own records, category and all. */
+    terms,
     loading,
     getTooltip,
     count: Object.keys(tooltips).length

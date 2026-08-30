@@ -6,39 +6,30 @@ import { useState, useMemo } from 'react';
 import { useTooltips } from '@/hooks/useTooltips';
 import './HelpGlossary.css';
 
-// Category definitions for organizing tooltips
-const CATEGORIES = {
-  infrastructure: {
-    title: 'Infrastructure',
-    icon: '🔧',
-    keywords: ['QDRANT', 'REDIS', 'REPO', 'COLLECTION', 'OUT_DIR', 'MCP', 'DOCKER']
-  },
-  models: {
-    title: 'Models & Providers',
-    icon: '🤖',
-    keywords: ['MODEL', 'OPENAI', 'ANTHROPIC', 'GOOGLE', 'OLLAMA', 'VOYAGE', 'COHERE', 'API_KEY', 'EMBEDDING']
-  },
-  retrieval: {
-    title: 'Retrieval & Search',
-    icon: '🔍',
-    keywords: ['TOPK', 'FINAL_K', 'HYBRID', 'ALPHA', 'BM25', 'DENSE', 'SEARCH', 'QUERY']
-  },
-  reranking: {
-    title: 'Reranking',
-    icon: '🎯',
-    keywords: ['RERANK', 'CROSS_ENCODER', 'LEARNING_RANKER', 'TRAINING']
-  },
-  evaluation: {
-    title: 'Evaluation',
-    icon: '📊',
-    keywords: ['EVAL', 'GOLDEN', 'BASELINE', 'METRICS']
-  },
-  advanced: {
-    title: 'Advanced',
-    icon: '⚙️',
-    keywords: ['CUSTOM', 'BOOST', 'LAYER', 'CONTEXT', 'STOP_WORDS', 'MAX_QUERY_REWRITES']
-  }
+// Categories come from `data/glossary.json` itself: every term carries a `category`, and
+// the file is the source of truth. This used to re-derive the category by keyword-matching
+// the term's KEY against a hardcoded six-bucket table, defaulting everything unmatched to
+// "Advanced" -- so the buckets bore no relation to the data, one chip swallowed most of the
+// glossary, and no filter reached the rest (M-133).
+const CATEGORY_ICONS: Record<string, string> = {
+  general: 'GEN',
+  infrastructure: 'INF',
+  models: 'MOD',
+  embedding: 'EMB',
+  chunking: 'CHK',
+  indexing: 'IDX',
+  retrieval: 'RET',
+  reranking: 'RNK',
+  graph: 'GRF',
+  generation: 'GEN',
+  evaluation: 'EVL',
+  ui: 'UI',
 };
+
+function categoryTitle(categoryId: string): string {
+  if (/[A-Z\s&]/.test(categoryId)) return categoryId;
+  return categoryId.charAt(0).toUpperCase() + categoryId.slice(1);
+}
 
 interface TooltipData {
   title: string;
@@ -50,7 +41,23 @@ interface TooltipData {
 interface GlossaryItem extends TooltipData {
   paramName: string;
   category: string;
-  searchText: string;
+  /** Name text (term + key): a hit here outranks a hit in the definition. */
+  nameText: string;
+  bodyText: string;
+}
+
+/**
+ * Prefix-anchored, word-boundary match.
+ *
+ * The old filter was a bare `includes`, so searching `figure` -- a first-class concept in
+ * this build -- returned mostly entries about *con**figure**d* and *con**figure**ation*,
+ * with the genuine hits buried at positions 2 and 8 (M-134). Anchoring at a word boundary
+ * keeps prefix typing working (`figu` still finds "Figures") while refusing to match the
+ * middle of a longer word.
+ */
+function wordPrefixMatcher(query: string): RegExp {
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`\\b${escaped}`, 'i');
 }
 
 // Parse tooltip HTML to extract structured data
@@ -91,82 +98,73 @@ function parseTooltipHTML(html: string): TooltipData {
   };
 }
 
-// Categorize tooltip based on parameter name
-function categorizeTooltip(paramName: string): string {
-  const upperName = paramName.toUpperCase();
-  for (const [categoryId, category] of Object.entries(CATEGORIES)) {
-    if (category.keywords.some(keyword => upperName.includes(keyword))) {
-      return categoryId;
-    }
-  }
-  return 'advanced'; // Default category
-}
-
 export function GlossarySubtab() {
   const [searchQuery, setSearchQuery] = useState('');
   const [currentFilter, setCurrentFilter] = useState('all');
 
   // SINGLE SOURCE OF TRUTH: useTooltips hook loads from Zustand store
   // which reads from glossary.json (data/glossary.json → web/public/glossary.json)
-  const { tooltips, loading } = useTooltips();
+  const { tooltips, terms, loading } = useTooltips();
 
-  // Build glossary items from tooltips
+  // Build glossary items from the glossary's own records.
   const allItems = useMemo(() => {
-    if (Object.keys(tooltips).length === 0) {
-      return [];
-    }
+    if (terms.length === 0) return [];
 
-    const items: GlossaryItem[] = [];
-
-    for (const [paramName, html] of Object.entries(tooltips)) {
-      const parsed = parseTooltipHTML(html as string);
-      const category = categorizeTooltip(paramName);
-
-      items.push({
-        paramName,
-        category,
+    const items: GlossaryItem[] = terms.map((term) => {
+      const parsed = parseTooltipHTML(tooltips[term.key] || '');
+      return {
+        paramName: term.key,
+        category: term.category || 'general',
         ...parsed,
-        searchText: `${paramName} ${parsed.title} ${parsed.body}`.toLowerCase()
-      });
-    }
-
-    // Sort by category, then title
-    items.sort((a, b) => {
-      const catOrder = Object.keys(CATEGORIES);
-      const catCompare = catOrder.indexOf(a.category) - catOrder.indexOf(b.category);
-      if (catCompare !== 0) return catCompare;
-      return a.title.localeCompare(b.title);
+        nameText: `${term.term} ${term.key}`,
+        bodyText: parsed.body,
+      };
     });
 
+    items.sort((a, b) => a.category.localeCompare(b.category) || a.title.localeCompare(b.title));
     return items;
-  }, [tooltips]);
+  }, [terms, tooltips]);
 
-  // Filter items
-  const filteredItems = useMemo(() => {
-    let items = allItems;
+  const categories = useMemo(
+    () => Array.from(new Set(allItems.map((item) => item.category))).sort(),
+    [allItems]
+  );
 
-    // Apply category filter
-    if (currentFilter !== 'all') {
-      items = items.filter(item => item.category === currentFilter);
-    }
+  // Search first, then category. Everything the chips report is computed over the search
+  // result, so the counts always describe what is actually on screen: they used to stay at
+  // their unfiltered totals and still read "All 444" while the list said "No parameters
+  // found" (M-160/A-32).
+  const searchedItems = useMemo(() => {
+    const query = searchQuery.trim();
+    if (!query) return allItems;
+    const matcher = wordPrefixMatcher(query);
+    const scored = allItems
+      .map((item) => ({
+        item,
+        // A name hit outranks a definition hit: "Figures Classify" belongs above a
+        // paragraph that merely mentions figures.
+        score: matcher.test(item.nameText) ? 2 : matcher.test(item.bodyText) ? 1 : 0,
+      }))
+      .filter((entry) => entry.score > 0);
+    scored.sort((a, b) => b.score - a.score || a.item.title.localeCompare(b.item.title));
+    return scored.map((entry) => entry.item);
+  }, [allItems, searchQuery]);
 
-    // Apply search filter
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase();
-      items = items.filter(item => item.searchText.includes(query));
-    }
+  const filteredItems = useMemo(
+    () =>
+      currentFilter === 'all'
+        ? searchedItems
+        : searchedItems.filter((item) => item.category === currentFilter),
+    [currentFilter, searchedItems]
+  );
 
-    return items;
-  }, [allItems, currentFilter, searchQuery]);
-
-  // Calculate category counts
   const categoryCounts = useMemo(() => {
     const counts: Record<string, number> = {};
-    allItems.forEach(item => {
+    searchedItems.forEach((item) => {
       counts[item.category] = (counts[item.category] || 0) + 1;
     });
     return counts;
-  }, [allItems]);
+  }, [searchedItems]);
 
   return (
     <div
@@ -263,14 +261,15 @@ export function GlossarySubtab() {
                     transition: 'all 0.2s ease'
                   }}
                 >
-                  All <span className="filter-count">({allItems.length})</span>
+                  All <span className="filter-count" data-testid="glossary-count-all">({searchedItems.length})</span>
                 </button>
-                {Object.entries(CATEGORIES).map(([categoryId, category]) => {
+                {categories.map((categoryId) => {
                   const count = categoryCounts[categoryId] || 0;
                   if (count === 0) return null;
                   return (
                     <button
                       key={categoryId}
+                      data-testid={`glossary-chip-${categoryId}`}
                       className={`category-filter-btn ${currentFilter === categoryId ? 'active' : ''}`}
                       onClick={() => setCurrentFilter(categoryId)}
                       style={{
@@ -285,7 +284,11 @@ export function GlossarySubtab() {
                         transition: 'all 0.2s ease'
                       }}
                     >
-                      {category.icon} {category.title} <span className="filter-count">({count})</span>
+                      <span aria-hidden="true" style={{ opacity: 0.9, marginRight: '6px', fontFamily: 'var(--font-mono)' }}>
+                        {CATEGORY_ICONS[categoryId] ?? '···'}
+                      </span>
+                      {categoryTitle(categoryId)}{' '}
+                      <span className="filter-count" data-testid={`glossary-count-${categoryId}`}>({count})</span>
                     </button>
                   );
                 })}
@@ -323,7 +326,6 @@ export function GlossarySubtab() {
             ) : (
               <div className="glossary-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: '16px' }}>
                 {filteredItems.map(item => {
-                  const categoryInfo = CATEGORIES[item.category as keyof typeof CATEGORIES] || CATEGORIES.advanced;
                   return (
                     <div
                       key={item.paramName}
@@ -357,8 +359,12 @@ export function GlossarySubtab() {
                             marginBottom: '8px'
                           }}
                         >
-                          <span className="glossary-icon" style={{ fontSize: '20px' }}>
-                            {categoryInfo.icon}
+                          <span
+                            className="glossary-icon"
+                            title={categoryTitle(item.category)}
+                            style={{ fontSize: '12px', fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--fg-muted)' }}
+                          >
+                            {CATEGORY_ICONS[item.category] ?? '···'}
                           </span>
                           <strong style={{ fontSize: '14px', color: 'var(--accent-text)' }}>{item.title}</strong>
                         </div>

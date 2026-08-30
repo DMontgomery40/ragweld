@@ -4,7 +4,7 @@ export type TooltipMap = Record<string, string>;
 
 type GlossaryLink = { text: string; href: string };
 type GlossaryBadge = { text: string; class: string };
-type GlossaryTerm = {
+export type GlossaryTerm = {
   term: string;
   key: string;
   definition: string; // HTML body (no wrapper div)
@@ -87,6 +87,16 @@ async function fetchGlossaryJson(): Promise<GlossaryJson> {
 
 interface TooltipStore {
   tooltips: TooltipMap;
+  /**
+   * The glossary as it is written, not as it renders.
+   *
+   * The Glossary tab used to re-derive a term's category by keyword-matching its key
+   * against a hardcoded six-bucket table, defaulting everything unmatched to "Advanced" --
+   * so the file's own `category` field, which every term carries, was thrown away and one
+   * chip held most of the glossary (M-133). Surfaces that need the structured record read
+   * it here; `tooltips` stays the rendered-HTML map the hover bubbles use.
+   */
+  terms: GlossaryTerm[];
   loading: boolean;
   initialized: boolean;
 
@@ -127,6 +137,7 @@ function buildTooltipHTML(
  */
 export const useTooltipStore = create<TooltipStore>((set, get) => ({
   tooltips: {},
+  terms: [],
   loading: false,
   initialized: false,
 
@@ -137,11 +148,13 @@ export const useTooltipStore = create<TooltipStore>((set, get) => ({
     void fetchGlossaryJson()
       .then((glossary) => {
         const tooltips: TooltipMap = {};
+        const terms: GlossaryTerm[] = [];
         for (const t of glossary?.terms || []) {
           if (!t || typeof t.key !== 'string' || !t.key.trim()) continue;
           tooltips[t.key] = buildTooltipHtmlFromGlossaryTerm(t);
+          terms.push(t);
         }
-        set({ tooltips, loading: false, initialized: true });
+        set({ tooltips, terms, loading: false, initialized: true });
       })
       .catch((e) => {
         console.error('[useTooltipStore] Failed to load glossary tooltips:', e);

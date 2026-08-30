@@ -140,4 +140,68 @@ test.describe('help, search and keyboard access', () => {
     await expect(picker).toHaveCount(0);
     await expect(page.getByTestId('dock-title')).toContainText(/glossary/i);
   });
+
+  test('M-133 / M-160: glossary chips come from the data and count the current search', async ({ page, baseURL }) => {
+    await activateCorpusInBrowser(page, corpusId);
+    await gotoWeb(page, baseURL, 'dashboard?subtab=glossary');
+
+    const all = page.getByTestId('glossary-count-all');
+    await expect(all).toBeVisible({ timeout: 30_000 });
+    const readCount = async (testId: string) =>
+      Number(((await page.getByTestId(testId).innerText()) || '').replace(/[^0-9]/g, ''));
+
+    // Every term is reachable through some chip: the chips sum to the All total.
+    const chips = page.locator('[data-testid^="glossary-chip-"]');
+    await expect(chips.first()).toBeVisible();
+    const chipIds = await chips.evaluateAll((els) =>
+      els.map((el) => (el.getAttribute('data-testid') || '').replace('glossary-chip-', ''))
+    );
+    expect(chipIds.length).toBeGreaterThan(6);
+    let summed = 0;
+    for (const id of chipIds) summed += await readCount(`glossary-count-${id}`);
+    expect(summed, 'the category chips must account for every term').toBe(await readCount('glossary-count-all'));
+
+    // The counts describe the search result, not the unfiltered totals.
+    const unfiltered = await readCount('glossary-count-all');
+    await page.locator('input.glossary-search').fill('figure');
+    await expect(all).not.toHaveText(`(${unfiltered})`);
+    const searched = await readCount('glossary-count-all');
+    expect(searched).toBeGreaterThan(0);
+    expect(searched).toBeLessThan(unfiltered);
+    const searchedChips = await page.locator('[data-testid^="glossary-chip-"]').evaluateAll((els) =>
+      els.map((el) => Number((el.textContent || '').match(/\((\d+)\)/)?.[1] ?? '0'))
+    );
+    expect(searchedChips.reduce((a, b) => a + b, 0)).toBe(searched);
+  });
+
+  test('M-134: glossary search matches on word boundaries, names first', async ({ page, baseURL }) => {
+    await activateCorpusInBrowser(page, corpusId);
+    await gotoWeb(page, baseURL, 'dashboard?subtab=glossary');
+    await expect(page.getByTestId('glossary-count-all')).toBeVisible({ timeout: 30_000 });
+    await page.locator('input.glossary-search').fill('figure');
+
+    const titles = await page.locator('.glossary-card .glossary-card-title strong').allInnerTexts();
+    expect(titles.length).toBeGreaterThan(0);
+    // "Enrichment Model" and friends only matched through *con-figure-d*.
+    expect(titles).not.toContain('Enrichment Model');
+    // The genuine hits lead, rather than sitting at positions 2 and 8.
+    expect(titles[0].toLowerCase()).toContain('figure');
+    expect(titles[1].toLowerCase()).toContain('figure');
+  });
+
+  test('M-132: TOTAL CORPORA has help of its own', async ({ page, baseURL }) => {
+    await activateCorpusInBrowser(page, corpusId);
+    await gotoWeb(page, baseURL, 'dashboard?subtab=system');
+
+    const total = page.locator('text=Total corpora').first();
+    await expect(total).toBeVisible({ timeout: 30_000 });
+    const activeHelp = page.locator('[aria-label="Help: SYS_STATUS_CORPUS"], [title="Help: SYS_STATUS_CORPUS"]');
+    const totalHelp = page.locator(
+      '[aria-label="Help: SYS_STATUS_CORPORA_TOTAL"], [title="Help: SYS_STATUS_CORPORA_TOTAL"]'
+    );
+    // The count and the selection are different questions and must not share one entry.
+    await expect(totalHelp).toHaveCount(1);
+    await expect(activeHelp).toHaveCount(1);
+  });
 });
+

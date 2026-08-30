@@ -1832,6 +1832,21 @@
       ]
     },
     {
+      "term": "Corpora (registered total)",
+      "key": "SYS_STATUS_CORPORA_TOTAL",
+      "definition": "How many corpora are registered on this deployment, indexed or not. It counts rows in the corpus registry, so a corpus that was created but never indexed still appears here; it says nothing about which corpus is currently active, and nothing about how much of the content is searchable. Read it together with the active corpus indicator and the index readiness panel: a total that keeps growing while indexed counts do not is the usual sign of abandoned scratch corpora left behind by interrupted onboarding runs.",
+      "category": "general",
+      "related": [
+        "SYS_STATUS_CORPUS"
+      ],
+      "badges": [
+        {
+          "text": "Core concept",
+          "class": "info"
+        }
+      ]
+    },
+    {
       "term": "Cost Tracking Enabled",
       "key": "COST_TRACKING_ENABLED",
       "definition": "COST_TRACKING_ENABLED turns on best-effort online request cost attribution in the workbench trace path. When enabled, ragweld prefers provider or gateway cost truth and falls back to catalog-derived estimates when only token counts are available. Keep it on when operators need to compare quality, latency, and spend together during debugging or tuning.",
@@ -2037,7 +2052,7 @@
       "term": "DeepSeek Engram Memory",
       "key": "DEEPSEEK_ENGRAM_MODE",
       "definition": "Selects whether to apply Engram-style memory behavior for long-horizon generation and retrieval-grounded dialogue. Engram introduces a structured memory pathway intended to preserve salient context while reducing the cost of keeping every token in raw cache form. For production systems, this knob should be evaluated against two dimensions: answer fidelity at long context lengths, and operational efficiency under concurrent load. If enabled, validate on tasks with delayed references, long legal/technical documents, and multi-hop QA, because memory summarization can sometimes blur rare but important details. Keep this disabled by default unless your benchmarks show stable gains in latency or context retention for your domain. If enabled, combine with stricter trace logging and regression gates for factual consistency.",
-      "category": "Models & Providers",
+      "category": "models",
       "related": [
         "DEEPSEEK_MHC_MODE",
         "DEEPSEEK_KV_CACHE_MODE",
@@ -2076,7 +2091,7 @@
       "term": "DeepSeek KV Cache Strategy",
       "key": "DEEPSEEK_KV_CACHE_MODE",
       "definition": "Determines which key/value cache strategy to use for DeepSeek-family models, including the DualPath-style design published on February 25, 2026. This parameter primarily affects long-context efficiency and stability under sustained decoding. More aggressive cache transformations can improve throughput and reduce memory footprint, but they may alter behavior on prompts that rely on exact token-level retention across very long spans. Treat this as an experimental performance lever: benchmark end-to-end latency, GPU memory peak, and answer fidelity together instead of optimizing one metric in isolation. For retrieval pipelines, monitor citation faithfulness and grounding under long documents, because cache strategy changes can shift which details remain accessible during later decoding steps. Roll out gradually with canary traffic and strict evaluation checkpoints.",
-      "category": "Models & Providers",
+      "category": "models",
       "related": [
         "DEEPSEEK_MHC_MODE",
         "DEEPSEEK_ENGRAM_MODE",
@@ -2115,7 +2130,7 @@
       "term": "DeepSeek mHC Mode",
       "key": "DEEPSEEK_MHC_MODE",
       "definition": "Controls whether inference paths should use the DeepSeek mHC (memory hierarchy compression) strategy described in late-2025 work. In practice, this setting changes how key/value memory is retained, compressed, and recovered over long generation windows. The main tradeoff is latency and throughput versus memory pressure and long-context fidelity. Enabling mHC-style behavior can reduce memory amplification at high context lengths, but you should benchmark quality drift on citation-heavy prompts, chain-of-thought style reasoning, and multi-turn retrieval sessions before treating it as default. Use this parameter with explicit observability: track first-token latency, tokens/sec, cache hit behavior, and output regressions across fixed eval sets. If quality drops in deep-context prompts, pair this with more conservative cache policies and higher rerank confidence thresholds.",
-      "category": "Models & Providers",
+      "category": "models",
       "related": [
         "DEEPSEEK_KV_CACHE_MODE",
         "KV_CACHE_ENABLED",
@@ -12351,7 +12366,7 @@
       "term": "Gateway Alias",
       "key": "GATEWAY_ALIAS",
       "definition": "The application-visible name of one generation route through the LiteLLM gateway. Every GEN row in data/models.json carries a gateway_alias (for example openai.gpt-5.4-mini, derived from the OpenRouter id openai/gpt-5.4-mini by replacing / and : with .) and a gateway_upstream (the LiteLLM litellm_params.model, such as openrouter/openai/gpt-5.4-mini or openai/ragweld-local for the self-hosted vLLM path). infra/litellm-config.yaml is generated from those rows, so the gateway serves exactly the catalog and nothing else. Config fields such as chat.litellm.default_model, generation.gen_model and graph_indexing.semantic_kg_llm_model hold an alias, and a per-request override is written litellm:<alias>. Aliases never contain / or :, so a direct provider identifier can never be mistaken for a gateway route.",
-      "category": "Models & Providers",
+      "category": "models",
       "related": [
         "LITELLM",
         "OPENROUTER",

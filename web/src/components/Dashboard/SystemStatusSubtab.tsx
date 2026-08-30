@@ -290,7 +290,10 @@ export function SystemStatusSubtab() {
                 <StatusItem
                   label={
                     <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      Total corpora <TooltipIcon name="SYS_STATUS_CORPUS" />
+                      {/* Its own entry: this is a registered-corpus COUNT, and pointing it
+                          at SYS_STATUS_CORPUS made the "?" explain active-corpus
+                          selection instead (M-132). */}
+                      Total corpora <TooltipIcon name="SYS_STATUS_CORPORA_TOTAL" />
                     </span>
                   }
                   value={corporaInfo.totalLabel}
