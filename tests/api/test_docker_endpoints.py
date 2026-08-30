@@ -645,6 +645,18 @@ async def test_the_tail_retries_the_resolver_and_recovers_without_a_reconnect() 
 
 
 @pytest.mark.asyncio
+async def test_the_tail_route_refuses_a_remote_client() -> None:
+    """The route is a thin wrapper now, and the localhost guard lives only on it."""
+    transport = ASGITransport(app=app, client=("192.0.2.10", 43120))
+    async with AsyncClient(transport=transport, base_url="http://ragweld.test") as remote_client:
+        response = await remote_client.get(
+            "/api/stream/loki/tail", params={"query": '{ragweld_service="api"}'}
+        )
+
+    assert response.status_code == 403, response.text
+
+
+@pytest.mark.asyncio
 async def test_a_slow_query_range_keeps_the_cached_url() -> None:
     """The tail's guard inherits the same subclass trap as `loki_status`.
 
