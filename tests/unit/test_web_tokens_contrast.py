@@ -555,3 +555,67 @@ def test_line_token_meets_decorative_floor(theme_name: str, surface: str) -> Non
         f"decorative-ink floor (design-legibility.md); a border this faint is "
         f"invisible at dpr 1."
     )
+
+
+# --- Inline-TSX text opacity (ruling 2: scan CSS *and inline TSX*) -----------
+#
+# The two CSS guards above ban dimming text with `opacity` in every stylesheet
+# under web/src. Inline React styles are the other half: `<p style={{ fontSize:
+# '14px', opacity: 0.7 }}>` composites a token that passes its own floor down to
+# ~4:1 or worse on screen (design-legibility.md: "de-emphasize with a ... muted
+# tier, never with opacity on text"). This flags an inline `opacity` strictly
+# between 0 and 0.8 that sits within a few lines of a text signal (`color`,
+# `fontSize`, `lineHeight`, `font`) -- the same de-emphasis-on-text shape the
+# CSS guards catch. Dock/** (owned) must carry none; the rest of the tree is a
+# non-regression ceiling (offenders printed file:line for the owning lane), for
+# the same reason as the font-size ratchet: an inline style beats any class, so
+# a stylesheet cannot fix `EvalDrillDown.tsx`'s or `IndexingSubtab.tsx`'s dimmed
+# text from here.
+
+_TSX_OPACITY_RE = re.compile(r"opacity\s*:\s*([0-9]*\.?[0-9]+)")
+_TSX_TEXT_SIGNAL_RE = re.compile(r"\b(?:color|fontSize|lineHeight|font)\b")
+
+# Measured on origin/main c4a55fd5: 4 inline text-opacity de-emphases, all in
+# non-owned component files (Chat, Dashboard, Evaluation, RAG).
+UNOWNED_TEXT_OPACITY_BASELINE = 4
+
+
+def _tsx_text_opacity_violations(path: Path) -> list[str]:
+    if path.suffix != ".tsx":
+        return []
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    out = []
+    for i, line in enumerate(lines):
+        for m in _TSX_OPACITY_RE.finditer(line):
+            value = float(m.group(1))
+            if not (0.0 < value < 0.8):
+                continue
+            window = "\n".join(lines[max(0, i - 3) : i + 4])
+            if _TSX_TEXT_SIGNAL_RE.search(window):
+                out.append(f"{_rel(path)}:{i + 1}: opacity {value} on text")
+    return out
+
+
+def test_owned_tsx_has_no_text_opacity_below_floor() -> None:
+    """Dock/** inline styles must not dim text via opacity."""
+    violations: list[str] = []
+    for path in CSS_ROOT.glob("**/*.tsx"):
+        if _is_owned(path):
+            violations.extend(_tsx_text_opacity_violations(path))
+    assert not violations, (
+        "inline opacity used to de-emphasize text in an owned Dock surface "
+        "(use a muted color tier instead):\n" + "\n".join(violations)
+    )
+
+
+def test_unowned_tsx_text_opacity_debt_does_not_grow() -> None:
+    """Ratchet: inline text-opacity de-emphasis in other lanes' files may not grow."""
+    offenders: list[str] = []
+    for path in sorted(CSS_ROOT.glob("**/*.tsx")):
+        if not _is_owned(path):
+            offenders.extend(_tsx_text_opacity_violations(path))
+    assert len(offenders) <= UNOWNED_TEXT_OPACITY_BASELINE, (
+        f"inline text-opacity de-emphasis rose to {len(offenders)} "
+        f"(baseline {UNOWNED_TEXT_OPACITY_BASELINE}); replace it with a muted "
+        f"color tier. Offenders:\n" + "\n".join(offenders)
+    )
