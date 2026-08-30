@@ -33,9 +33,11 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ className = ''
 
   const [newQuestion, setNewQuestion] = useState('');
   const [newPaths, setNewPaths] = useState('');
+  const [newAnswer, setNewAnswer] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editQuestion, setEditQuestion] = useState('');
   const [editPaths, setEditPaths] = useState('');
+  const [editAnswer, setEditAnswer] = useState('');
 
   useEffect(() => {
     refreshEntries();
@@ -59,11 +61,13 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ className = ''
     const result = await addEntry({
       question: newQuestion,
       expected_paths: expectedChunks,
+      expected_answer: newAnswer.trim() || undefined,
     });
 
     if (result) {
       setNewQuestion('');
       setNewPaths('');
+      setNewAnswer('');
       showToast('Entry added', 'success');
     }
   };
@@ -77,6 +81,7 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ className = ''
     const result = await updateEntry(entryId, {
       question: editQuestion,
       expected_paths: expectedChunks,
+      expected_answer: editAnswer.trim() || undefined,
     });
 
     if (result) {
@@ -105,12 +110,14 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ className = ''
     setEditingId(entry.entry_id);
     setEditQuestion(entry.question);
     setEditPaths(entry.expected_paths?.join(', ') || '');
+    setEditAnswer(entry.expected_answer || '');
   };
 
   const cancelEditing = () => {
     setEditingId(null);
     setEditQuestion('');
     setEditPaths('');
+    setEditAnswer('');
   };
 
   if (loading && entries.length === 0) {
@@ -177,6 +184,27 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ className = ''
               color: 'var(--fg)',
             }}
           />
+
+          <textarea
+            placeholder="Expected answer (optional — the rubric the Promptfoo grader scores against)"
+            aria-label="Expected answer"
+            data-testid="eval-new-expected-answer"
+            value={newAnswer}
+            onChange={(e) => setNewAnswer(e.target.value)}
+            rows={2}
+            style={{
+              padding: '10px',
+              background: 'var(--input-bg)',
+              border: '1px solid var(--line)',
+              borderRadius: '4px',
+              color: 'var(--fg)',
+              fontSize: '13px',
+              resize: 'vertical',
+            }}
+          />
+          <div style={{ fontSize: '11.5px', color: 'var(--fg-muted)' }}>
+            Entries without an expected answer are skipped by the Promptfoo regression grader.
+          </div>
 
           <div style={{ display: 'flex', gap: '8px' }}>
             <button
@@ -276,6 +304,23 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ className = ''
                         color: 'var(--fg)',
                       }}
                     />
+                    <textarea
+                      value={editAnswer}
+                      onChange={(e) => setEditAnswer(e.target.value)}
+                      placeholder="Expected answer (optional — scored by the Promptfoo grader)"
+                      aria-label="Expected answer"
+                      data-testid="eval-edit-expected-answer"
+                      rows={2}
+                      style={{
+                        padding: '8px',
+                        background: 'var(--input-bg)',
+                        border: '1px solid var(--line)',
+                        borderRadius: '4px',
+                        color: 'var(--fg)',
+                        fontSize: '13px',
+                        resize: 'vertical',
+                      }}
+                    />
                     <div style={{ display: 'flex', gap: '8px' }}>
                       <button
                         onClick={() => entry.entry_id && handleUpdateEntry(entry.entry_id)}
@@ -313,10 +358,15 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ className = ''
                         {entry.question}
                       </div>
                       {entry.expected_paths && entry.expected_paths.length > 0 && (
-                        <div style={{ fontSize: '11px', color: 'var(--fg-muted)' }}>
-                          Expected: {entry.expected_paths.join(', ')}
+                        <div style={{ fontSize: '11.5px', color: 'var(--fg-muted)' }}>
+                          Expected paths: {entry.expected_paths.join(', ')}
                         </div>
                       )}
+                      {entry.expected_answer && entry.expected_answer.trim() ? (
+                        <div data-testid="eval-entry-expected-answer" style={{ fontSize: '11.5px', color: 'var(--fg-muted)', marginTop: '2px' }}>
+                          Expected answer: {entry.expected_answer}
+                        </div>
+                      ) : null}
                       {entry.tags && entry.tags.length > 0 && (
                         <div style={{ fontSize: '10px', color: 'var(--link)', marginTop: '4px' }}>
                           {entry.tags.map(tag => `#${tag}`).join(' ')}
