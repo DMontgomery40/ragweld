@@ -21,8 +21,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import pytest
-
 ROOT = Path(__file__).resolve().parents[2]
 STORE_TS = ROOT / "web" / "src" / "stores" / "useConfigStore.ts"
 FORMATTER_TS = ROOT / "web" / "src" / "utils" / "saveErrorMessage.ts"
@@ -57,10 +55,12 @@ def test_store_routes_every_failure_through_the_formatter() -> None:
     assert "error.message" not in src, (
         "useConfigStore must not forward error.message into the UI; route through formatSaveError"
     )
-    # The formatter is used on every failure path (flushSection, saveConfig, patchSection,
-    # resetConfig, loadConfigOnce flush + load) -- at least five call sites.
+    # Under the uniform staged model there are three commit/load failure paths that surface an
+    # error to the operator -- the Apply PUT (`saveConfig`), the load GET (`loadConfigOnce`) and
+    # `resetConfig` -- and each must route through the formatter (the per-section PATCH paths were
+    # deleted when every surface moved to staging).
     calls = len(re.findall(r"formatSaveError\s*\(", src))
-    assert calls >= 5, f"expected formatSaveError on every failure path, found {calls} call(s)"
+    assert calls >= 3, f"expected formatSaveError on every failure path, found {calls} call(s)"
 
 
 def test_footer_shows_the_server_message_without_the_raw_error_prefix() -> None:

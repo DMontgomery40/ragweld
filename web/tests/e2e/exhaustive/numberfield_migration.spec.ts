@@ -1,15 +1,14 @@
-// NumberField migration (T5/M-25): one behaviour for out-of-range typing across every
-// config-bound numeric input, proven against the real API and the real Pydantic bounds -- no
-// route mocking. Before this, three different surfaces disagreed on what happens when the
-// operator types past a field's bound: Data Quality kept the rejected value and re-sent it on
-// the next Apply (a 422 with no field attribution, C-01/C-02); Retrieval's BM25 b silently
-// clamped and posted the clamped value; Retrieval's MMR Lambda silently reverted on blur and
-// posted nothing at all (C-32). One scenario per surface family named by the brief (Data
-// Quality, Chat Settings, Reranker, a Training Studio): type a value past the field's
-// Pydantic ge/le, Tab away, and assert (a) the box shows the clamped value, (b) the PATCH
-// that actually reached the server carried the clamped value and the raw value was never sent
-// in any request, and (c) a fresh GET /api/config confirms the server persisted the clamped
-// value, not the operator's typed one.
+// NumberField migration (T5/M-25) under the STAGED commit model (T6): one behaviour for
+// out-of-range typing across every config-bound numeric input, proven against the real API and
+// the real Pydantic bounds -- no route mocking. Before T5 three surfaces disagreed on out-of-range
+// typing; T5 unified them on NumberField's clamp-on-blur. T6 then made every config edit STAGE
+// (no PATCH-on-blur) -- so the contract these tests pin moved with the commit model, in this
+// branch (replacement-only: the tests of the replaced slice move with it). One scenario per
+// surface family named by the brief (Data Quality, Chat Settings, Reranker, a Training Studio):
+// type a value past the field's Pydantic ge/le, Tab away, and assert (a) the box shows the clamped
+// value, (b) blur wrote NOTHING and the change staged (the Apply count goes up by one), (c) Apply
+// PUTs the whole config carrying the CLAMPED value and the raw value never reached any request,
+// and (d) a fresh GET /api/config confirms the server persisted the clamped value.
 import { expect, test, type APIRequestContext, type Locator, type Page, type Request } from '@playwright/test';
 import { API_BASE, provisionExhaustiveCorpus, type ExhaustiveCorpus } from './corpus_fixture';
 
@@ -41,42 +40,54 @@ async function configSection<T>(request: APIRequestContext, section: string): Pr
 }
 
 /**
- * Type `raw` into `field`, Tab away, and assert the box shows `clamped` -- `NumberField`'s
- * commit-on-blur clamp, driven by the min/max it advertises (which now equal the field's
- * Pydantic ge/le; see `test_every_number_field_advertises_its_pydantic_bounds`). Waits for the
- * PATCH to `patchUrlSubstring` (e.g. "/api/config/enrichment") to land, and records every PATCH
- * body sent during the interaction so the caller can assert the raw value was never among them
- * -- not just that the clamped one eventually was.
+ * Type `raw` into `field`, Tab away (NumberField clamps in the box to the min/max it advertises,
+ * which equal the field's Pydantic ge/le), assert blur STAGED the clamped value without any
+ * network write and bumped the Apply count, then click Apply and return the whole-config PUT body
+ * plus every PATCH/PUT body seen during the interaction, so the caller can assert the PUT carried
+ * the clamped value and the raw value was never in any request.
  */
-async function commitOutOfRangeValue(
+async function stageAndApplyOutOfRangeValue(
   page: Page,
   field: Locator,
   raw: string,
-  clamped: string,
-  patchUrlSubstring: string
-): Promise<{ patchedBody: string; allPatchBodies: string[] }> {
-  const allPatchBodies: string[] = [];
+  clamped: string
+): Promise<{ putBody: string; allBodies: string[] }> {
+  const allBodies: string[] = [];
   const onRequest = (req: Request) => {
-    if (req.method() === 'PATCH') {
+    if (req.method() === 'PATCH' || req.method() === 'PUT') {
       const body = req.postData();
-      if (body) allPatchBodies.push(body);
+      if (body) allBodies.push(body);
     }
   };
   page.on('request', onRequest);
 
-  const patchResponse = page.waitForResponse(
-    (res) => res.request().method() === 'PATCH' && res.url().includes(patchUrlSubstring),
-    { timeout: 15_000 }
-  );
+  const apply = page.getByTestId('apply-changes');
+  const countBefore = Number((await apply.getAttribute('data-dirty-count')) ?? '0') || 0;
+
+  // Fill past the bound, Tab away -> NumberField clamps in the box and STAGES the clamped value.
   await field.fill(raw);
   await field.press('Tab');
   await expect(field).toHaveValue(clamped);
-  const response = await patchResponse;
-  expect(response.status(), `PATCH ${patchUrlSubstring} failed`).toBe(200);
-  const patchedBody = response.request().postData() ?? '';
+
+  // Staged, not written: no PATCH/PUT on blur, and the footer's dirty count went up by exactly one.
+  expect(allBodies, 'blur must write nothing under the staged model').toEqual([]);
+  await expect(apply).toBeEnabled();
+  await expect
+    .poll(async () => Number((await apply.getAttribute('data-dirty-count')) ?? '0') || 0)
+    .toBe(countBefore + 1);
+
+  // Apply -> one PUT of the whole config carrying the clamped value.
+  const putResponse = page.waitForResponse(
+    (res) => res.request().method() === 'PUT' && /\/api\/config(\?|$)/.test(res.url()),
+    { timeout: 15_000 }
+  );
+  await apply.click();
+  const response = await putResponse;
+  expect(response.status(), 'PUT /api/config failed').toBe(200);
+  const putBody = response.request().postData() ?? '';
 
   page.off('request', onRequest);
-  return { patchedBody, allPatchBodies };
+  return { putBody, allBodies };
 }
 
 test('Data Quality: an out-of-range chunk-summaries max clamps to the Pydantic bound and never posts the raw value', async ({
@@ -90,17 +101,13 @@ test('Data Quality: an out-of-range chunk-summaries max clamps to the Pydantic b
   // The exact probe C-01 used (999999) against enrichment.chunk_summaries_max's Pydantic
   // bound (le=1000) -- C-01 found this reached the server unclamped and came back a 422 whose
   // only signal was a raw axios string; the value stayed in the box and re-sent on Apply.
-  const { patchedBody, allPatchBodies } = await commitOutOfRangeValue(
-    page,
-    field,
-    '999999',
-    '1000',
-    '/api/config/enrichment'
-  );
+  const { putBody, allBodies } = await stageAndApplyOutOfRangeValue(page, field, '999999', '1000');
 
-  expect(patchedBody).toContain('"chunk_summaries_max":1000');
-  for (const body of allPatchBodies) {
-    expect(body, 'no PATCH ever carried the raw out-of-range value').not.toContain('999999');
+  expect(putBody).toContain('"chunk_summaries_max":1000');
+  for (const body of allBodies) {
+    // Field-specific: the whole-config PUT may legitimately hold this number in an unrelated
+    // field, so assert the RAW value never reached THIS field, not that the digits never appear.
+    expect(body, 'no request ever carried the raw out-of-range value').not.toContain('"chunk_summaries_max":999999');
   }
 
   const persisted = await configSection<{ chunk_summaries_max: number }>(request, 'enrichment');
@@ -120,17 +127,11 @@ test('Chat Settings: an out-of-range temperature clamps to the Pydantic bound an
   // a per-corpus GET silently reconciles it back to the operator's global value regardless of
   // what was just PATCHed, which would make the persistence assertion below fail for a reason
   // that has nothing to do with NumberField. chat.temperature carries no such reconciliation.
-  const { patchedBody, allPatchBodies } = await commitOutOfRangeValue(
-    page,
-    field,
-    '9',
-    '2',
-    '/api/config/chat'
-  );
+  const { putBody, allBodies } = await stageAndApplyOutOfRangeValue(page, field, '9', '2');
 
-  expect(patchedBody).toContain('"temperature":2');
-  for (const body of allPatchBodies) {
-    expect(body, 'no PATCH ever carried the raw out-of-range value').not.toMatch(/"temperature":9(?!\d)/);
+  expect(putBody).toContain('"temperature":2');
+  for (const body of allBodies) {
+    expect(body, 'no request ever carried the raw out-of-range value').not.toMatch(/"temperature":9(?!\d)/);
   }
 
   const persisted = await configSection<{ temperature: number }>(request, 'chat');
@@ -151,17 +152,12 @@ test('Reranker: an out-of-range input-snippet-chars clamps to the Pydantic bound
   const field = page.getByTestId('reranker-config-snippet-chars');
   await expect(field).toBeVisible();
 
-  const { patchedBody, allPatchBodies } = await commitOutOfRangeValue(
-    page,
-    field,
-    '50000',
-    '2000',
-    '/api/config/reranking'
-  );
+  const { putBody, allBodies } = await stageAndApplyOutOfRangeValue(page, field, '50000', '2000');
 
-  expect(patchedBody).toContain('"rerank_input_snippet_chars":2000');
-  for (const body of allPatchBodies) {
-    expect(body, 'no PATCH ever carried the raw out-of-range value').not.toContain('50000');
+  expect(putBody).toContain('"rerank_input_snippet_chars":2000');
+  for (const body of allBodies) {
+    // Field-specific: 50000 is a legitimate default elsewhere in the full-config PUT.
+    expect(body, 'no request ever carried the raw out-of-range value').not.toContain('"rerank_input_snippet_chars":50000');
   }
 
   const persisted = await configSection<{ rerank_input_snippet_chars: number }>(request, 'reranking');
@@ -180,17 +176,11 @@ test('Reranker Training Studio: an out-of-range epoch count clamps to the Pydant
   const field = page.getByTestId('training-studio-epochs');
   await expect(field).toBeVisible();
 
-  const { patchedBody, allPatchBodies } = await commitOutOfRangeValue(
-    page,
-    field,
-    '999',
-    '20',
-    '/api/config/training'
-  );
+  const { putBody, allBodies } = await stageAndApplyOutOfRangeValue(page, field, '999', '20');
 
-  expect(patchedBody).toContain('"reranker_train_epochs":20');
-  for (const body of allPatchBodies) {
-    expect(body, 'no PATCH ever carried the raw out-of-range value').not.toContain('"reranker_train_epochs":999');
+  expect(putBody).toContain('"reranker_train_epochs":20');
+  for (const body of allBodies) {
+    expect(body, 'no request ever carried the raw out-of-range value').not.toContain('"reranker_train_epochs":999');
   }
 
   const persisted = await configSection<{ reranker_train_epochs: number }>(request, 'training');
