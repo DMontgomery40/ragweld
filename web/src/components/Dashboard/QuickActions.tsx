@@ -5,7 +5,7 @@ import { useState, useEffect } from 'react';
 import { QuickActionButton } from './QuickActionButton';
 import { LiveTerminalPanel } from './LiveTerminalPanel';
 import { TerminalService } from '../../services/TerminalService';
-import { RepoSwitcherModal } from '../ui/RepoSwitcherModal';
+import { CorpusRegistry } from '../ui/CorpusRegistry';
 import { useRepoStore } from '@/stores/useRepoStore';
 import * as DashAPI from '@/api/dashboard';
 import { configApi, evalApi, keywordsApi } from '@/api';
@@ -35,7 +35,7 @@ export function QuickActions() {
   const [terminalVisible, setTerminalVisible] = useState(false);
   const [statusMessage, setStatusMessage] = useState('Ready');
   const [progress, setProgress] = useState(0);
-  const [showRepoSwitcher, setShowRepoSwitcher] = useState(false);
+  const [showCorpusRegistry, setShowCorpusRegistry] = useState(false);
   const [showEvalDropdown, setShowEvalDropdown] = useState(false);
   const [evalOptions, setEvalOptions] = useState<DashAPI.RerankerOption[]>([]);
   const [evalLoading, setEvalLoading] = useState(false);
@@ -104,8 +104,7 @@ export function QuickActions() {
   };
 
   const handleChangeRepo = () => {
-    // Open the repo switcher modal - proper dropdown UI instead of prompt()
-    setShowRepoSwitcher(true);
+    setShowCorpusRegistry(true);
   };
 
   const handleRunIndexer = () => {
@@ -487,10 +486,10 @@ export function QuickActions() {
       {/* Live Terminal */}
       <LiveTerminalPanel containerId="dash-operations-terminal" isVisible={terminalVisible} />
       
-      {/* Repository Switcher Modal */}
-      <RepoSwitcherModal 
-        isOpen={showRepoSwitcher}
-        onClose={() => setShowRepoSwitcher(false)}
+      {/* Corpus registry: list, switch, create, delete */}
+      <CorpusRegistry
+        isOpen={showCorpusRegistry}
+        onClose={() => setShowCorpusRegistry(false)}
       />
     </div>
   );
