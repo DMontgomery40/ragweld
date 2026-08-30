@@ -128,7 +128,7 @@ export function IntentMatrixEditor() {
               ...EDITOR_ACTION_BUTTON_STYLE,
               border: `1px solid ${isDirty && !jsonError ? 'var(--accent)' : 'var(--line)'}`,
               background: isDirty && !jsonError ? 'rgba(var(--accent-rgb), 0.12)' : 'var(--bg-elev1)',
-              color: isDirty && !jsonError ? 'var(--accent)' : 'var(--fg)',
+              color: isDirty && !jsonError ? 'var(--accent-text)' : 'var(--fg)',
               cursor: !!jsonError || !isDirty ? 'not-allowed' : 'pointer',
               opacity: !!jsonError || !isDirty ? 0.6 : 1,
             }}

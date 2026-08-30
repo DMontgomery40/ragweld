@@ -783,7 +783,7 @@ export const EvalAnalysisTab: React.FC = () => {
           style={{
             padding: '12px 20px',
             background: activeSubtab === 'analysis' ? 'var(--bg)' : 'transparent',
-            color: activeSubtab === 'analysis' ? 'var(--accent)' : 'var(--fg-muted)',
+            color: activeSubtab === 'analysis' ? 'var(--accent-text)' : 'var(--fg-muted)',
             border: 'none',
             borderBottom: activeSubtab === 'analysis' ? '2px solid var(--accent)' : '2px solid transparent',
             fontSize: '13px',
@@ -803,7 +803,7 @@ export const EvalAnalysisTab: React.FC = () => {
           style={{
             padding: '12px 20px',
             background: activeSubtab === 'dataset' ? 'var(--bg)' : 'transparent',
-            color: activeSubtab === 'dataset' ? 'var(--accent)' : 'var(--fg-muted)',
+            color: activeSubtab === 'dataset' ? 'var(--accent-text)' : 'var(--fg-muted)',
             border: 'none',
             borderBottom: activeSubtab === 'dataset' ? '2px solid var(--accent)' : '2px solid transparent',
             fontSize: '13px',
@@ -824,7 +824,7 @@ export const EvalAnalysisTab: React.FC = () => {
           style={{
             padding: '12px 20px',
             background: activeSubtab === 'prompts' ? 'var(--bg)' : 'transparent',
-            color: activeSubtab === 'prompts' ? 'var(--accent)' : 'var(--fg-muted)',
+            color: activeSubtab === 'prompts' ? 'var(--accent-text)' : 'var(--fg-muted)',
             border: 'none',
             borderBottom: activeSubtab === 'prompts' ? '2px solid var(--accent)' : '2px solid transparent',
             fontSize: '13px',
@@ -845,7 +845,7 @@ export const EvalAnalysisTab: React.FC = () => {
           style={{
             padding: '12px 20px',
             background: activeSubtab === 'trace' ? 'var(--bg)' : 'transparent',
-            color: activeSubtab === 'trace' ? 'var(--accent)' : 'var(--fg-muted)',
+            color: activeSubtab === 'trace' ? 'var(--accent-text)' : 'var(--fg-muted)',
             border: 'none',
             borderBottom: activeSubtab === 'trace' ? '2px solid var(--accent)' : '2px solid transparent',
             fontSize: '13px',

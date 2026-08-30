@@ -1313,7 +1313,7 @@ export function IndexingSubtab() {
               style={{
                 fontSize: '14px',
                 fontWeight: 600,
-                color: selectedComponent === comp.id ? 'var(--accent)' : 'var(--fg)',
+                color: selectedComponent === comp.id ? 'var(--accent-text)' : 'var(--fg)',
                 marginBottom: '6px',
               }}
             >
@@ -1421,7 +1421,7 @@ export function IndexingSubtab() {
                         fontWeight: 600,
                         color:
                           String(embeddingType || '').toLowerCase() === String(provider).toLowerCase()
-                            ? 'var(--accent)'
+                            ? 'var(--accent-text)'
                             : 'var(--fg)',
                       }}
                     >

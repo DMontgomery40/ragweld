@@ -10,8 +10,19 @@ type SystemPromptsSubtabProps = {
   className?: string;
 };
 
+// CATEGORY_COLORS feeds a BACKGROUND (the category dot indicator); CATEGORY_TEXT_COLORS
+// feeds the heading TEXT. Only `chat` differs between the two -- --accent as a
+// background dot still passes its own pairing, but as heading text on the page
+// background it needs the lighter --accent-text variant.
 const CATEGORY_COLORS: Record<string, string> = {
   chat: 'var(--accent)',
+  retrieval: 'var(--warn)',
+  indexing: 'var(--info)',
+  evaluation: 'var(--success)',
+};
+
+const CATEGORY_TEXT_COLORS: Record<string, string> = {
+  chat: 'var(--accent-text)',
   retrieval: 'var(--warn)',
   indexing: 'var(--info)',
   evaluation: 'var(--success)',
@@ -181,7 +192,7 @@ export const SystemPromptsSubtab: React.FC<SystemPromptsSubtabProps> = ({ classN
           <h3 style={{
             fontSize: '14px',
             fontWeight: 600,
-            color: CATEGORY_COLORS[category] || 'var(--fg)',
+            color: CATEGORY_TEXT_COLORS[category] || 'var(--fg)',
             textTransform: 'capitalize',
             marginBottom: '12px',
             display: 'flex',

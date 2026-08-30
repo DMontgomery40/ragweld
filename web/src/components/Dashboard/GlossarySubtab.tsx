@@ -421,7 +421,7 @@ export function GlossarySubtab() {
                                 transition: 'color 0.2s ease'
                               }}
                               onMouseEnter={(e) => {
-                                e.currentTarget.style.color = 'var(--accent)';
+                                e.currentTarget.style.color = 'var(--accent-text)';
                               }}
                               onMouseLeave={(e) => {
                                 e.currentTarget.style.color = 'var(--link)';

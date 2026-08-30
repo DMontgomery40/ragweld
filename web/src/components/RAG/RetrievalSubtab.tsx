@@ -558,7 +558,7 @@ export function RetrievalSubtab() {
               style={{
                 fontSize: 13,
                 fontWeight: 700,
-                color: selectedCard === card.id ? 'var(--accent)' : 'var(--fg)',
+                color: selectedCard === card.id ? 'var(--accent-text)' : 'var(--fg)',
                 marginBottom: 6,
               }}
             >
@@ -1399,7 +1399,7 @@ export function RetrievalSubtab() {
                     opsTracingView === 'runtime_compatibility'
                       ? 'rgba(var(--accent-rgb), 0.14)'
                       : 'var(--bg-elev1)',
-                  color: opsTracingView === 'runtime_compatibility' ? 'var(--accent)' : 'var(--fg)',
+                  color: opsTracingView === 'runtime_compatibility' ? 'var(--accent-text)' : 'var(--fg)',
                 }}
               >
                 Runtime Compatibility
@@ -1416,7 +1416,7 @@ export function RetrievalSubtab() {
                     opsTracingView === 'observability_integrations'
                       ? 'rgba(var(--accent-rgb), 0.14)'
                       : 'var(--bg-elev1)',
-                  color: opsTracingView === 'observability_integrations' ? 'var(--accent)' : 'var(--fg)',
+                  color: opsTracingView === 'observability_integrations' ? 'var(--accent-text)' : 'var(--fg)',
                 }}
               >
                 Observability & Integrations

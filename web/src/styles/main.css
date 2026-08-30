@@ -342,7 +342,7 @@
         .sidebar .tab-bar a.active {
             background: var(--bg-elev2);
             border-left-color: var(--accent);
-            color: var(--accent);
+            color: var(--accent-text);
             font-weight: 600;
         }
 
@@ -390,7 +390,7 @@
         .tab-bar a.promoted-tab.active {
             background: var(--bg-elev2);
             border-left-color: var(--accent);
-            color: var(--accent);
+            color: var(--accent-text);
         }
 
         /* RAG Subtabs - Hidden by default, shown when RAG tab active */
@@ -742,7 +742,7 @@
         #profile-tooltip .tooltip-header {
             font-size: 13px;
             font-weight: 600;
-            color: var(--accent);
+            color: var(--accent-text);
             margin-bottom: 10px;
             padding-bottom: 8px;
             border-bottom: 1px solid var(--line);
@@ -942,7 +942,7 @@
             font-size: 14px;
             font-weight: 600;
             margin-bottom: 14px;
-            color: var(--accent);
+            color: var(--accent-text);
             display: flex;
             align-items: center;
             gap: 6px;
@@ -955,13 +955,13 @@
             transition: all 0.2s ease;
         }
 
-        .collapsible-header:hover { color: var(--accent); }
+        .collapsible-header:hover { color: var(--accent-text); }
 
         .collapse-icon {
             display: inline-block;
             margin-right: 8px;
             transition: transform 0.3s ease;
-            color: var(--accent);
+            color: var(--accent-text);
             font-size: 12px;
         }
 
@@ -1015,7 +1015,7 @@
 
         .result-value {
             font-size: 14px;
-            color: var(--accent);
+            color: var(--accent-text);
             font-weight: 600;
             font-family: 'SF Mono', monospace;
         }
@@ -1043,7 +1043,7 @@
 
         .dropzone:hover {
             background: var(--code-bg);
-            color: var(--accent);
+            color: var(--accent-text);
             border-color: var(--accent);
         }
 
@@ -1093,7 +1093,7 @@
 
         .small-button {
             background: var(--bg-elev2);
-            color: var(--accent);
+            color: var(--accent-text);
             border: 1px solid var(--accent);
             padding: 7px 12px;
             border-radius: 4px;
@@ -1148,7 +1148,7 @@
         .tooltip-bubble .tt-badge { font-size: 10px; text-transform: uppercase; letter-spacing: .4px; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--line); color: var(--fg-muted); background: var(--bg-elev2); }
         .tooltip-bubble .tt-badge.warn { color: var(--warn); border-color: var(--line); background: var(--bg-elev1); }
         .tooltip-bubble .tt-badge.info { color: var(--link); border-color: var(--line); background: var(--bg-elev1); }
-        .tooltip-bubble .tt-badge.reindex { color: var(--accent); border-color: var(--line); background: var(--bg-elev1); }
+        .tooltip-bubble .tt-badge.reindex { color: var(--accent-text); border-color: var(--line); background: var(--bg-elev1); }
 
         /* Keyword Manager - Custom select styling */
         select[id^="kw-all-"],
@@ -1673,7 +1673,7 @@
         .mobile-nav-drawer .nav-header h2 {
             margin: 0;
             font-size: 20px;
-            color: var(--accent);
+            color: var(--accent-text);
         }
 
         .mobile-nav-drawer button {
@@ -1698,7 +1698,7 @@
 
         .mobile-nav-drawer button.active {
             background: var(--bg-elev2);
-            color: var(--accent);
+            color: var(--accent-text);
             border-left-color: var(--accent);
             font-weight: 600;
         }
@@ -1760,7 +1760,7 @@
         .action-btn:hover {
             background: var(--panel);
             border-color: var(--accent);
-            color: var(--accent);
+            color: var(--accent-text);
             transform: translateY(-2px);
             box-shadow: 0 4px 12px rgba(0, 255, 136, 0.2);
         }
@@ -1796,7 +1796,7 @@
         .action-btn.success {
             background: color-mix(in oklch, var(--ok) 8%, var(--bg));
             border-color: var(--accent);
-            color: var(--accent);
+            color: var(--accent-text);
         }
 
         .action-btn.success svg {
@@ -1945,7 +1945,7 @@
             display: flex;
             align-items: center;
             gap: 8px;
-            color: var(--accent);
+            color: var(--accent-text);
             font-weight: 600;
             margin-bottom: 8px;
         }
@@ -2158,7 +2158,7 @@
         }
 
         .ob-stage.active span {
-            color: var(--accent);
+            color: var(--accent-text);
             font-weight: 600;
         }
 
@@ -2526,7 +2526,7 @@
         .ob-help-pill:hover {
             background: var(--panel-bg);
             border-color: var(--accent);
-            color: var(--accent);
+            color: var(--accent-text);
         }
 
         .ob-help-link {

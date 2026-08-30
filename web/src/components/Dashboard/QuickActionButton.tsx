@@ -53,7 +53,7 @@ export function QuickActionButton({ id, icon, label, onClick, dataAction, disabl
       onMouseEnter={(e) => {
         e.currentTarget.style.background = 'var(--panel)';
         e.currentTarget.style.borderColor = 'var(--accent)';
-        e.currentTarget.style.color = 'var(--accent)';
+        e.currentTarget.style.color = 'var(--accent-text)';
         e.currentTarget.style.transform = 'translateY(-2px)';
         e.currentTarget.style.boxShadow = '0 4px 12px rgba(0, 255, 136, 0.2)';
         

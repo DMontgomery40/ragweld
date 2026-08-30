@@ -19,7 +19,7 @@
     margin-bottom: 8px;
 }
 
-.storage-calc-header .brand { font-weight: 700; color: var(--accent); }
+.storage-calc-header .brand { font-weight: 700; color: var(--accent-text); }
 
 .storage-calc-header .subtitle {
     color: var(--fg-muted);
@@ -203,7 +203,7 @@
     margin-bottom: 8px;
 }
 
-.total-row .result-value { font-size: 18px; color: var(--accent); }
+.total-row .result-value { font-size: 18px; color: var(--accent-text); }
 
 .warning {
     background: color-mix(in oklch, var(--warn) 8%, var(--bg));
@@ -297,7 +297,7 @@
     font-size: 12px;
 }
 
-.storage-calc-footer a { color: var(--accent); text-decoration: none; }
+.storage-calc-footer a { color: var(--accent-text); text-decoration: none; }
 
 /* ========== RESPONSIVE BREAKPOINTS ========== */
 

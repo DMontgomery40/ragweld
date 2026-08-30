@@ -101,11 +101,11 @@
 .terminal-btn:hover {
   background: var(--bg-elev1);
   border-color: var(--accent);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .terminal-btn.active {
-  color: var(--accent);
+  color: var(--accent-text);
   border-color: var(--accent);
 }
 
@@ -140,7 +140,7 @@
 .progress-label {
   font-family: 'SF Mono', monospace;
   font-size: 11px;
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .progress-percent {

@@ -476,7 +476,7 @@ export function GraphSubtab() {
             style={{
               padding: '8px 10px',
               background: viewMode === 'viz' ? 'rgba(var(--accent-rgb), 0.14)' : 'transparent',
-              color: viewMode === 'viz' ? 'var(--accent)' : 'var(--fg-muted)',
+              color: viewMode === 'viz' ? 'var(--accent-text)' : 'var(--fg-muted)',
               border: viewMode === 'viz' ? '1px solid var(--accent)' : '1px solid var(--line)',
               borderRadius: '10px',
               cursor: 'pointer',
@@ -492,7 +492,7 @@ export function GraphSubtab() {
             style={{
               padding: '8px 10px',
               background: viewMode === 'table' ? 'rgba(var(--accent-rgb), 0.14)' : 'transparent',
-              color: viewMode === 'table' ? 'var(--accent)' : 'var(--fg-muted)',
+              color: viewMode === 'table' ? 'var(--accent-text)' : 'var(--fg-muted)',
               border: viewMode === 'table' ? '1px solid var(--accent)' : '1px solid var(--line)',
               borderRadius: '10px',
               cursor: 'pointer',
@@ -734,7 +734,7 @@ export function GraphSubtab() {
                   }}
                   data-testid={`graph-community-${c.community_id}`}
                 >
-                  <div style={{ fontSize: '13px', fontWeight: 700, color: active ? 'var(--accent)' : 'var(--fg)' }}>
+                  <div style={{ fontSize: '13px', fontWeight: 700, color: active ? 'var(--accent-text)' : 'var(--fg)' }}>
                     {c.name}
                   </div>
                   <div style={{ marginTop: '4px', fontSize: '11px', color: 'var(--fg-muted)' }}>
@@ -895,7 +895,7 @@ export function GraphSubtab() {
                   }}
                   data-testid={`graph-entity-${e.entity_id}`}
                 >
-                  <div style={{ fontSize: '13px', fontWeight: 700, color: active ? 'var(--accent)' : 'var(--fg)' }}>
+                  <div style={{ fontSize: '13px', fontWeight: 700, color: active ? 'var(--accent-text)' : 'var(--fg)' }}>
                     {formatEntityLabel(e)}
                   </div>
                   <div style={{ marginTop: '4px', fontSize: '11px', color: 'var(--fg-muted)' }}>

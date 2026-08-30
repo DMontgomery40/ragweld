@@ -179,7 +179,11 @@ _OPACITY_RE = re.compile(r"opacity\s*:\s*([0-9.]+)(%)?\s*(?:!important)?\s*;?")
 _COLOR_DECL_RE = re.compile(r"(?<![-\w])color\s*:")
 _FONT_SIZE_DECL_RE = re.compile(r"font-size\s*:")
 _SUSPECT_TEXT_SELECTOR_RE = re.compile(r"::placeholder|\.tagline|muted", re.IGNORECASE)
-_SUSPECT_CONTROL_SELECTOR_RE = re.compile(r":disabled|\.is-disabled|\[disabled\]|\.loading", re.IGNORECASE)
+# `.loading` is word-boundaried (`(?![\w-])`) so it matches the exact class
+# `.loading` but not an unrelated compound class like `.loading-spinner` or
+# `.app-loading-screen` (a spinner widget's own opacity is not a disabled-
+# control affordance question).
+_SUSPECT_CONTROL_SELECTOR_RE = re.compile(r":disabled|\.is-disabled|\[disabled\]|\.loading(?![\w-])", re.IGNORECASE)
 _CSS_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
 
 
@@ -295,4 +299,74 @@ def test_no_disabled_or_loading_control_dims_below_floor() -> None:
         "(design-legibility.md: 'Resting opacity on visible controls >= 0.8'; "
         "keep the disabled/loading affordance via cursor/border/color, not "
         "opacity alone):\n" + "\n".join(violations)
+    )
+
+
+# --- Guard: raw --accent never used as TEXT color --------------------------
+#
+# --accent is a dual-purpose token: also a BUTTON BACKGROUND paired with
+# --accent-contrast (~21 sites: .btn-primary, .top-actions button, and
+# component inline styles). Its dark value fails the text-contrast floor
+# (3.72-4.18:1); --accent-text exists specifically so standalone text can use
+# a lightness-adjusted, still-passing variant instead of raw --accent. This
+# guard makes that split durable: it scans every `web/src/**/*.{css,tsx,ts}`
+# file for the `color` property -- never `background*`/`border*`/`outline`/
+# `fill`/`stroke`/`box-shadow`, enforced by the negative lookbehind excluding
+# a preceding `-` or word character, which rules out `border-color`,
+# `backgroundColor`, `borderTopColor`, etc. -- whose value contains a literal
+# `var(--accent)` (not `--accent-text`/`--accent-contrast`, excluded by the
+# trailing negative lookahead).
+#
+# The property's value is matched up to its next `,`/`;`/`}` terminator
+# *allowing embedded newlines*, not just to end of line: a real violation
+# this guard exists to catch (`IndexingSubtab.tsx`, a `color:` ternary
+# spanning several lines) had its `var(--accent)` branch on a different line
+# from the `color:` key, which a same-line-only regex would not see -- that
+# is exactly how it survived the first migration pass in this task.
+#
+# This is a heuristic over source text, not a CSS/JS parser: it cannot see
+# through indirection -- a value assigned via an intermediate variable, prop,
+# or lookup table (e.g. `const accent = ...; color: accent`, or an object
+# literal field consumed elsewhere as `color: card.someField`) is invisible
+# to it. Those are reviewed by hand when introduced or changed; this task
+# found and fixed three of them (`SystemPromptsSubtab.tsx`'s CATEGORY_COLORS
+# map, `IndexDisplayPanels.tsx`'s `card.accent` field) by grepping for every
+# raw `var(--accent)` occurrence and checking where each value ultimately
+# lands, not by this regex alone.
+
+_COLOR_ACCENT_RE = re.compile(r"(?<![-\w])color\s*[:=]\s*((?:(?!,|;|\}).)*)", re.DOTALL)
+_ACCENT_VALUE_RE = re.compile(r"var\(--accent\)(?!-)")
+
+
+def _find_accent_as_text_color(path: Path) -> list[str]:
+    text = path.read_text(encoding="utf-8")
+    violations = []
+    for match in _COLOR_ACCENT_RE.finditer(text):
+        value = match.group(1)
+        accent_match = _ACCENT_VALUE_RE.search(value)
+        if accent_match:
+            # Point at the actual `var(--accent)` text, not the `color:` key --
+            # for a multi-line ternary those can be several lines apart.
+            accent_offset = match.start(1) + accent_match.start()
+            line_no = text.count("\n", 0, accent_offset) + 1
+            snippet = " ".join(value.split())[:80]
+            violations.append(f"{path.relative_to(ROOT)}:{line_no}: color: {snippet}")
+    return violations
+
+
+def test_no_raw_accent_used_as_text_color() -> None:
+    source_files = sorted(
+        p for pattern in ("**/*.css", "**/*.tsx", "**/*.ts") for p in CSS_ROOT.glob(pattern)
+    )
+    assert source_files, f"expected to find stylesheets/components under {CSS_ROOT}"
+
+    violations: list[str] = []
+    for path in source_files:
+        violations.extend(_find_accent_as_text_color(path))
+
+    assert not violations, (
+        "raw --accent used as a `color` (text) value -- it is also a button "
+        "background paired with --accent-contrast, and its dark value fails "
+        "the text-contrast floor on its own; use --accent-text for text "
+        "instead:\n" + "\n".join(violations)
     )
