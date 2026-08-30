@@ -150,6 +150,30 @@ This lets you implement clean retry semantics without inventing new `run_id` val
     
     Reusing a `run_id` first scrubs stale entries from these deques, then appends the new trace. The result is predictable “latest” lookups that point at the newest retry.
 
+## Probe hysteresis on the observability status
+
+`GET /api/observability/status` probes each configured component's readiness URL every time it is called, and a single HTTP probe is a noisy signal — a collector restart, a brief stall or a busy container answers 503 and recovers seconds later. Escalating one miss to a critical incident trains an operator to ignore the deck, so probes are debounced:
+
+- Every component keeps a short **probe history** — the last 8 outcomes, oldest first — exposed as `probe_history` and drawn as a dot strip on the Operator Deck cards.
+- `consecutive_failures` counts failures in a row. Below `tracing.probe_failure_threshold` (default `3`, env `PROBE_FAILURE_THRESHOLD`) a failing probe renders as a **warning** with its streak in the detail text ("failed probe 2 of 3"); at or above it the component escalates (critical for the core observability groups) and an incident is raised.
+- One success clears the streak.
+- Surfaces the API **cannot probe at all** — an auth-protected ingress that redirects off-host, or a component with no URL — report `probeable=false`, never advance the streak, and read "not probeable" instead of sitting permanently on the "Operator attention needed" line. A component that is enabled but unconfigured still counts as an attention item: it has nothing to probe, but it is a configuration fact.
+
+!!! tip "One request, one probe sweep"
+    A request that needs both status and incidents does exactly one readiness sweep — incidents are built from the same probe results rather than re-probing every component. If you poll the Operator Deck, each poll costs one probe per configured component.
+
+## Langfuse deep links: check, then offer
+
+A "Langfuse trace" deep link is only worth offering when Langfuse actually holds that trace. Two questions that used to be conflated are answered separately:
+
+- **Does Langfuse hold the trace?** `GET /api/observability/langfuse/trace/{trace_id}` asks Langfuse's ingestion API with this process's server keys and answers with a typed `LangfuseTraceAccess` (`exists`, `checked`, `url`, `project`, `detail`).
+- **May your browser open it?** Langfuse enforces project membership on the signed-in identity, which no server-side check can stand in for — so every Langfuse link carries a `sign_in_hint` naming the project and what an account without membership sees ("You do not have access to this trace").
+
+The check is honest about failure shapes: `checked=false` means the API could not ask (Langfuse disabled, unconfigured, or unreachable) — never that Langfuse said no. Every surface that renders a trace's external links (the Chat routing trace, the Eval trace viewer, the Operator Deck) uses one shared renderer, which withholds the Langfuse link when Langfuse does not hold the trace and states why on screen instead of sending you to a dead end.
+
+!!! note "The Grafana dashboard link is cluster-wide"
+    The "Grafana dashboard" external link opens the provisioned overview with the time range bounded to the last 15 minutes. Its panels cover **every corpus on this deployment** — the dashboard has no corpus/run template variables, so the link cannot be scoped to the run it was opened from. The link's detail text says so; read it before assuming a card is about your run.
+
 ## Where to look in the UI
 
 - Chat and RAG tabs generate trace events whenever a request flows through routing, retrieval, and generation.

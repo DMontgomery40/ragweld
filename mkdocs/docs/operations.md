@@ -43,7 +43,10 @@
 | `/api/docker/services` | Allowlisted ragweld Compose services |
 | `/api/docker/services/{service}/{action}` | Start/stop/restart one managed service |
 | `/api/docker/services/{service}/logs` | Tail logs for one managed service |
-| `/api/observability/status` | Observability mode, component readiness, incidents |
+| `/api/dev/status` | Host process status, including how the frontend is served (`frontend_mode`) |
+| `/api/observability/status` | Observability mode, component readiness (probe history + hysteresis), incidents |
+| `/api/observability/alerts` | What Alertmanager currently holds (typed 502/503 when it cannot be read) |
+| `/api/observability/langfuse/trace/{trace_id}` | Whether Langfuse holds a trace, and its deep link when it does |
 
 The Docker surface is project-scoped: it only ever exposes the allowlisted ragweld Compose services, never host-wide arbitrary container control.
 

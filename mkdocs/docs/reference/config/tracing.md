@@ -26,7 +26,7 @@
 [Config API & workflow](../../configuration.md){ .md-button }
 [Glossary](../../glossary.md){ .md-button }
 
-**Total parameters**: 28
+**Total parameters**: 29
 
 ??? info "Group index"
     - `(root)`
@@ -54,6 +54,7 @@
 | `tracing.otel_service_name` | `OTEL_SERVICE_NAME` | `str` | `"ragweld-api"` | — | Service name used for emitted OTel spans |
 | `tracing.otlp_endpoint` | `OTLP_ENDPOINT` | `str` | `""` | — | OTLP HTTP endpoint for trace export |
 | `tracing.otlp_headers` | `OTLP_HEADERS` | `str` | `""` | — | Comma-separated OTLP headers (k=v) for the exporter |
+| `tracing.probe_failure_threshold` | `PROBE_FAILURE_THRESHOLD` | `int` | `3` | ≥ 1, ≤ 10 | Consecutive failed readiness probes before an observability component counts as an incident |
 | `tracing.prometheus_base_url` | `PROMETHEUS_BASE_URL` | `str` | `""` | — | Prometheus base URL used for the alert-rule feed and operator deep links (Prometheus scrapes and remote-writes to Mimir) |
 | `tracing.pyroscope_base_url` | `PYROSCOPE_BASE_URL` | `str` | `""` | — | Grafana Pyroscope base URL used for profiling status checks |
 | `tracing.tempo_base_url` | `TEMPO_BASE_URL` | `str` | `""` | — | Tempo or Grafana explore base URL used for trace deep links |
@@ -269,6 +270,15 @@
 
     **Links**:
     - [OTLP Exporter Configuration](https://opentelemetry.io/docs/languages/sdk-configuration/otlp-exporter/)
+
+??? info "`tracing.probe_failure_threshold` (`PROBE_FAILURE_THRESHOLD`) — Probe Failure Threshold"
+    **Category**: `infrastructure`
+
+    How many readiness probes in a row must fail before an observability component counts as a real incident on the Operator Deck. A single HTTP probe is a noisy signal - a collector restart, a brief stall or a busy container answers 503 and recovers seconds later - so escalating one miss to a critical incident trains operators to ignore the deck. Below the threshold a failing probe is shown as a warning with its last-N probe history; at or above it the component becomes an incident. Surfaces the API cannot probe at all, such as an ingress that redirects off-host to the auth provider, never advance the streak.
+
+    **Links**:
+    - [Prometheus Alerting Rules (for)](https://prometheus.io/docs/prometheus/latest/configuration/alerting_rules/)
+    - [Google SRE Workbook: Alerting on SLOs](https://sre.google/workbook/alerting-on-slos/)
 
 ??? info "`tracing.prometheus_base_url` (`PROMETHEUS_BASE_URL`) — Prometheus Base URL"
     **Category**: `infrastructure`

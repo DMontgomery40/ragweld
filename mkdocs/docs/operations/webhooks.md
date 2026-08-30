@@ -62,6 +62,20 @@ flowchart LR
   F --> G["Slack / PagerDuty / Custom"]
 ```
 
+## Reading what Alertmanager is holding right now
+
+Delivery is one half of alerting; the other half is seeing what is currently firing. `GET /api/observability/alerts` reads Alertmanager's own `/api/v2/alerts` route on **every request**, so the answer is always what Alertmanager holds right now — not a webhook log that a restarted API would lose. The **Dashboard → Monitoring** alerts panel renders this response directly.
+
+Each alert is a typed payload: `fingerprint`, `name` (the `alertname` label), `severity`, Alertmanager's own `state`, the rule's `summary`/`description` annotations, `silenced`/`inhibited` flags, and `starts_at`. The response also carries `total_count` and `firing_count` — where firing means active and **neither silenced nor inhibited**, so a suppressed alert is shown but never counted as firing.
+
+!!! tip "A read failure is a failure, never an empty list"
+    When Alertmanager cannot be read, the endpoint answers `503` (unconfigured or unreachable) or `502` (Alertmanager answered, but not with alerts) with a typed `alertmanager_unavailable` detail: which of the three failure shapes occurred (`not_configured`, `unreachable`, `bad_status`), the base URL that was attempted, and an `operator_hint` naming the fix — typically setting `tracing.alertmanager_base_url` to the Alertmanager your Prometheus rules deliver to. The Dashboard panel renders that hint in place with a **Retry** button and a jump to **Infrastructure → Monitoring**; it never shows a bare "Failed to load" or an empty panel that would read as good news.
+
+??? note "Where each half of alerting lives"
+    - **Delivery policy** (severity allowlist, resolved handling, timeout, targets) — this page and the `tracing.*` alert keys in the [config reference](../reference/config/tracing.md).
+    - **Current firing state** — `GET /api/observability/alerts`, rendered on **Dashboard → Monitoring**.
+    - **Full controls** (Alertmanager endpoints, receivers, silences) — **Infrastructure → Monitoring**, backed by `infra/alertmanager.yml`.
+
 !!! tip "API first, MCP second"
     Alerts are part of ragweld’s API-first contract and operate independently of agent tooling. MCP integrations can react to alerts, but webhook delivery doesn’t depend on MCP being present.
 

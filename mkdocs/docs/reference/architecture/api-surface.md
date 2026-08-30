@@ -5,7 +5,7 @@
     mount prefixes in `server/main.py` on every docs-autopilot run. The wire schemas are the registered
     Pydantic models; see the configuration reference for their fields.
 
-167 routes across 24 routers, all served by the FastAPI app in `server/main.py`.
+169 routes across 24 routers, all served by the FastAPI app in `server/main.py`.
 
 ```mermaid
 flowchart LR
@@ -44,7 +44,7 @@ flowchart LR
     app --> n_lineage
     n_models["models\n5 routes: GET, POST"]
     app --> n_models
-    n_observability["observability\n4 routes: GET"]
+    n_observability["observability\n6 routes: GET"]
     app --> n_observability
     n_prompts["prompts\n4 routes: GET, POST, PUT"]
     app --> n_prompts
@@ -547,26 +547,32 @@ flowchart LR
 | `GET` | `/api/models/providers/{provider}` | `get_models_for_provider` | `list[ModelCatalogEntry]` |
 | `POST` | `/api/models/upsert` | `upsert_model` | `ModelCatalogUpsertResponse` |
 
-### `observability` (4 routes)
+### `observability` (6 routes)
 
 ```mermaid
 flowchart LR
     n_observability["observability\nserver/api/observability.py"]
     n_observability_0["GET /api/observability/alert-rules\n-> ObservabilityAlertRulesResponse"]
     n_observability --> n_observability_0
-    n_observability_1["GET /api/observability/catalog\n-> ObservabilityCatalogResponse"]
+    n_observability_1["GET /api/observability/alerts\n-> AlertmanagerAlertsResponse"]
     n_observability --> n_observability_1
-    n_observability_2["GET /api/observability/incidents\n-> ObservabilityIncidentsResponse"]
+    n_observability_2["GET /api/observability/catalog\n-> ObservabilityCatalogResponse"]
     n_observability --> n_observability_2
-    n_observability_3["GET /api/observability/status\n-> ObservabilityStatusResponse"]
+    n_observability_3["GET /api/observability/incidents\n-> ObservabilityIncidentsResponse"]
     n_observability --> n_observability_3
+    n_observability_4["GET /api/observability/langfuse/trace/{trace_id}\n-> LangfuseTraceAccess"]
+    n_observability --> n_observability_4
+    n_observability_5["GET /api/observability/status\n-> ObservabilityStatusResponse"]
+    n_observability --> n_observability_5
 ```
 
 | Method | Path | Handler | Response model |
 |---|---|---|---|
 | `GET` | `/api/observability/alert-rules` | `observability_alert_rules` | `ObservabilityAlertRulesResponse` |
+| `GET` | `/api/observability/alerts` | `observability_alerts` | `AlertmanagerAlertsResponse` |
 | `GET` | `/api/observability/catalog` | `observability_catalog` | `ObservabilityCatalogResponse` |
 | `GET` | `/api/observability/incidents` | `observability_incidents` | `ObservabilityIncidentsResponse` |
+| `GET` | `/api/observability/langfuse/trace/{trace_id}` | `observability_langfuse_trace` | `LangfuseTraceAccess` |
 | `GET` | `/api/observability/status` | `observability_status` | `ObservabilityStatusResponse` |
 
 ### `prompts` (4 routes)

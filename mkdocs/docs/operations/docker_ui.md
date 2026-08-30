@@ -31,7 +31,22 @@
 
 ## What the surface shows
 
-The Docker subtab lists the **allowlisted ragweld Compose services** and their live state. A service that has not been created yet shows as **Missing**; the Proxmox ingress overlay services (`caddy`, `authelia`, `cloudflared`) are labeled deployment-only.
+The Docker subtab lists the **allowlisted ragweld Compose services** and their live state. A service that has not been created yet shows as **Missing**; the Proxmox ingress overlay services (`caddy`, `authelia`, `authelia-redis`, `cloudflared`) are labeled deployment-only — Authelia keeps its sessions in its own Redis, so an operator signed out unexpectedly should look there first.
+
+Two services are deliberately **optional**: `api` and `postgres-exporter`. A missing optional container reads as "— Optional, not deployed" on both the Docker and Services subtabs, and it is the same wording on both pages: the ragweld API normally runs as a host process, so its absence is expected in the default local topology, not a fault. "Missing" is reserved for a service the topology genuinely needs.
+
+### Host processes: backend and frontend serving mode
+
+`GET /api/dev/status` reports the two host processes (backend and frontend). The backend card is a plain process probe; the frontend card answers a different question — *how is the frontend served?* — via `frontend_mode`:
+
+| `frontend_mode` | Meaning | Services subtab wording |
+|-----------------|---------|-------------------------|
+| `dev_server` | A Vite dev server is reachable (the dev topology) | "● Dev server running" |
+| `built_bundle` | No dev server, but `web/dist/index.html` exists — the deployed topology, where a reverse proxy serves the built bundle; `frontend_bundle_built_at` records when it was written | "● Served from build" |
+| `absent` | Neither | "○ Not built and no dev server" |
+
+!!! tip "A missing dev server is not an outage"
+    On a deployed host, the "Frontend" row used to sit permanently red because the probe looked for a dev server that legitimately does not exist there — while that very frontend was serving the page you were reading. `frontend_mode=built_bundle` is that deployment's healthy answer: the detail line names the bundle path (`web/dist`) and its build time. Only `absent` is actionable, and the card says what to run.
 
 ## What it deliberately does not do
 

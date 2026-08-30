@@ -48,7 +48,7 @@ flowchart LR
     root --> n_chunk_summaries
     n_keywords["keywords\n5 fields"]
     root --> n_keywords
-    n_tracing["tracing\n28 fields"]
+    n_tracing["tracing\n29 fields"]
     root --> n_tracing
     n_training["training\n46 fields"]
     root --> n_training
@@ -94,7 +94,7 @@ flowchart LR
 | `enrichment` | 6 | Code enrichment and chunk_summary generation configuration. | [enrichment](../config/enrichment.md) |
 | `chunk_summaries` | 8 | Chunk summary builder filtering configuration. | [chunk_summaries](../config/chunk_summaries.md) |
 | `keywords` | 5 | Discriminative keywords configuration. | [keywords](../config/keywords.md) |
-| `tracing` | 28 | Observability and tracing configuration. | [tracing](../config/tracing.md) |
+| `tracing` | 29 | Observability and tracing configuration. | [tracing](../config/tracing.md) |
 | `training` | 46 | Reranker training configuration. | [training](../config/training.md) |
 | `ui` | 45 | User interface configuration. | [ui](../config/ui.md) |
 | `chat` | 21 | Top-level chat configuration. Lives at TriBridConfig.chat. | [chat](../config/chat.md) |

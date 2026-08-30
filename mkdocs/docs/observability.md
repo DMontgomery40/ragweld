@@ -39,14 +39,14 @@
 
 | Service | Port | Notes |
 |---------|------|-------|
-| Prometheus | 9090 | Scrapes `/api/metrics` and exporter |
-| Grafana | 3001 | Embedded dashboard in UI |
-| Loki | 3100 | Log aggregation |
+| Prometheus | 59090 | Scrapes `/api/metrics` and the Postgres exporter |
+| Grafana | 3301 | Embedded dashboard in UI |
+| Loki | 53100 | Log aggregation |
 | Promtail | — | Ships container/host logs |
 
 ```mermaid
 flowchart LR
-    App["TriBridRAG"] --> METRICS["/api/metrics"]
+    App["ragweld API"] --> METRICS["/api/metrics"]
     METRICS --> PROM["Prometheus"]
     PROM --> GRAF["Grafana"]
     LOGS["Docker Logs"] --> PROMTAIL["Promtail"]
@@ -70,6 +70,17 @@ curl -sS http://127.0.0.1:8012/api/metrics | head -n 20
 const m = await (await fetch('/api/metrics')).text();
 console.log(m.split('\n').slice(0,5));
 ```
+
+## "Latest" ML-quality gauges are read from persisted runs
+
+The four "Latest" series behind the **Eval / Benchmark / Prompt Regressions** dashboard — `tribrid_eval_last_top1_accuracy`, `tribrid_eval_last_topk_accuracy`, `tribrid_promptfoo_last_pass_ratio`, and `tribrid_benchmark_last_avg_latency_ms` — are scraped from the **most recently persisted** eval / Promptfoo / benchmark run at scrape time, not set from whichever request happened to complete a run inside the current process. What that means operationally:
+
+- **Restarting the API cannot zero them.** A freshly started process reports the persisted truth immediately; there is no window where the dashboard shows a green 0% beside runs that are on disk.
+- **No persisted run means no series at all.** An absent series is the only honest encoding of "no data" Prometheus has, so the Grafana panels render "No data" instead of 0. A genuine 0% run is still exported as 0 — and the dashboard's thresholds render it red, never green.
+- **The benchmark directory follows config.** The reader resolves `chat.benchmark.results_path`, the same field the benchmark writer uses, so moving where benchmark runs land does not strand the latency gauge on a permanent "No data".
+
+!!! note "Probe hysteresis on the observability status"
+    Component readiness behind `/api/observability/status` and the in-app Operator Deck debounces flapping probes: an incident needs `tracing.probe_failure_threshold` (default `3`, env `PROBE_FAILURE_THRESHOLD`) **consecutive** failed probes, each component shows its last-8 probe history, and surfaces the API cannot probe at all (an auth-protected ingress that redirects off-host) never count as failures. See [Tracing](operations/tracing.md).
 
 ??? info "Dashboards"
     Mount your own Grafana provisioning under `infra/grafana/provisioning` to add/override dashboards and datasources.

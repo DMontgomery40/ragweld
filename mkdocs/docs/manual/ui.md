@@ -141,6 +141,16 @@ Runtime-managed corpora are excluded from this panel: the chat Recall corpus (`r
 !!! warning "If something looks empty"
     Most RAG panels depend on a **selected corpus** and a **completed index**. If you haven’t indexed yet, start at [Indexing](indexing.md).
 
+### Dashboard → Monitoring: alerts read live from Alertmanager
+
+The Monitoring subtab's **Alerts** panel calls `GET /api/observability/alerts`, which reads Alertmanager's own alerts route on every refresh — so what you see is what Alertmanager is holding right now, with a firing count that excludes silenced and inhibited alerts.
+
+- **Alert rows carry severity tones** — critical/page in red, warning in amber, everything else neutral — and silenced/inhibited rows are labeled, so you can tell why something is being held back rather than wondering where it went.
+- **An empty result is evidence, not a guess** — the empty state names the Alertmanager URL that was read.
+- **A failure is a typed error card** — if Alertmanager is unconfigured, unreachable, or answering with something other than alerts, the panel shows the API's own reason and operator hint (typically: set `tracing.alertmanager_base_url`), with a **Retry** button and a link into **Infrastructure → Monitoring**. It never falls back to a bare "Failed to load" or an empty list that would read as good news.
+
+Full alerting controls (Alertmanager endpoints, receivers, delivery policy) live in [Alert webhooks](../operations/webhooks.md).
+
 ## The single most important UI control: corpus selection
 
 Many screens include a corpus selector (sometimes labeled “repo”). This determines the `corpus_id` used for:
