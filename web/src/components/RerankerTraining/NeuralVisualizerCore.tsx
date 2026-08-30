@@ -454,11 +454,9 @@ export function NeuralVisualizerCore({
           // uses explicit light colors (not the theme-following --studio-text, which turns
           // dark in light mode) to stay legible against it.
           <div className="neural-overlay" data-testid="neural-awaiting-telemetry">
-            <div style={{ textAlign: 'center', maxWidth: '36ch' }}>
-              <div style={{ fontWeight: 600, marginBottom: '4px', fontSize: '14px', color: '#e8f0ff' }}>
-                No training telemetry yet
-              </div>
-              <div style={{ fontSize: '13px', color: '#b9c6df' }}>
+            <div className="neural-empty">
+              <div className="neural-empty-title">No training telemetry yet</div>
+              <div className="neural-empty-body">
                 Start a run (or mine triplets and train) to plot the optimization trajectory here.
               </div>
             </div>

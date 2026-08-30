@@ -193,6 +193,14 @@
   letter-spacing: 0.06em;
 }
 
+.studio-label-center {
+  align-self: center;
+}
+
+.studio-note-tight {
+  margin: 2px 0 0;
+}
+
 .studio-value {
   color: var(--studio-text);
   font-size: 0.82rem;
@@ -805,6 +813,26 @@
   font-size: 0.82rem;
   pointer-events: none;
   z-index: 3;
+}
+
+.neural-empty {
+  text-align: center;
+  max-width: 36ch;
+  margin-inline: auto;
+}
+
+/* The canvas ground is a fixed dark navy in every theme, so the empty state uses explicit
+   light colors (not the theme-following --studio-text, which turns dark in light mode). */
+.neural-empty-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+  font-size: 14px;
+  color: #e8f0ff;
+}
+
+.neural-empty-body {
+  font-size: 13px;
+  color: #b9c6df;
 }
 
 .neural-renderer-loading {

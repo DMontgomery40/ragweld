@@ -1660,7 +1660,7 @@ export function TrainingStudio() {
                   />
                   Include raw logits
                 </label>
-                <p className="studio-panel-subtitle" style={{ margin: '2px 0 0' }}>
+                <p className="studio-panel-subtitle studio-note-tight">
                   Adds the model's pre-sigmoid output values to the result for debugging; leave off for the plain relevance score.
                 </p>
 
@@ -2000,7 +2000,7 @@ export function TrainingStudio() {
         </div>
 
         <div className="studio-header-actions">
-          <span className="studio-label" style={{ alignSelf: 'center' }}>Runs</span>
+          <span className="studio-label studio-label-center">Runs</span>
           <button
             className="small-button"
             onClick={() => setScope('corpus')}
