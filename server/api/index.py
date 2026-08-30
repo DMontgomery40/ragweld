@@ -12,6 +12,7 @@ import queue
 import re
 import sys
 import threading
+import time
 import uuid
 from collections import defaultdict
 from collections.abc import AsyncGenerator, Callable
@@ -130,6 +131,30 @@ _EVENT_QUEUES: dict[str, asyncio.Queue[dict[str, Any]]] = {}
 _LAST_STARTED_REPO: str | None = None
 # Keep Docling OCR serialized even if an awaiting index task is cancelled.
 _DOCLING_EXTRACTION_LOCK = asyncio.Lock()
+
+# One Docling conversion runs at a time in this process, so a second index run's every file
+# queues here. A queue longer than this looks exactly like a hung run from the outside (the
+# LXC100 case: 19 minutes, no events, 99% idle CPU), so the run log names what it is waiting
+# on. An invariant of the run log, not an operator tunable: it is a parameter of
+# `_run_docling_extraction_locked` only so tests can drive it.
+_DOCLING_WAIT_NOTICE_SECONDS = 15.0
+
+
+@dataclass(slots=True)
+class DoclingConversion:
+    """Which run is converting which file, published while that run holds the extractor lock.
+
+    Internal to the indexing pipeline: it exists so a queued run can name the run ahead of
+    it in its own run log. It crosses no serialized boundary and is not a wire contract.
+    """
+
+    repo_id: str
+    run_id: str
+    file: str
+    started_at: datetime | None = None
+
+
+_DOCLING_LOCK_HOLDER: DoclingConversion | None = None
 
 _MODELS_JSON_PATH = Path(__file__).parent.parent.parent / "data" / "models.json"
 _INDEX_RUNS_DIR = Path(__file__).parent.parent.parent / "data" / "index_runs"
@@ -1910,20 +1935,87 @@ async def _record_document(
     )
 
 
+def _describe_docling_holder(holder: DoclingConversion | None) -> str:
+    """The parenthetical that names the run holding the extractor, or nothing when unknown."""
+    if holder is None:
+        return ""
+    return f" ({holder.repo_id} run {holder.run_id[:8]})"
+
+
 async def _run_docling_extraction_locked(
     func: Callable[..., T],
     /,
     *args: Any,
+    event_queue: asyncio.Queue[dict[str, Any]] | None = None,
+    conversion: DoclingConversion | None = None,
+    wait_notice_seconds: float = _DOCLING_WAIT_NOTICE_SECONDS,
     **kwargs: Any,
 ) -> T:
-    await _DOCLING_EXTRACTION_LOCK.acquire()
+    """Serialize Docling conversions process-wide, and put the wait in the run log.
+
+    Waiting here is invisible from the outside: the queued run keeps its `indexing` status
+    and emits nothing at all while the run ahead of it converts. A wait longer than
+    `wait_notice_seconds` names the corpus and run that hold the extractor, and the
+    acquisition that ends such a wait is logged too, so the run log accounts for the gap.
+    """
+    global _DOCLING_LOCK_HOLDER
+
+    notified = False
+    wait_started = time.monotonic()
+
+    async def _notice_wait() -> None:
+        nonlocal notified
+        await asyncio.sleep(wait_notice_seconds)
+        notified = True
+        _emit_event(
+            event_queue,
+            {
+                "type": "log",
+                "message": (
+                    "Waiting for the document extractor: another index run is converting"
+                    f"{_describe_docling_holder(_DOCLING_LOCK_HOLDER)}"
+                    f" — queued {wait_notice_seconds:.0f}s"
+                ),
+                **({"current_file": conversion.file} if conversion is not None else {}),
+            },
+            drop_oldest=True,
+        )
+
+    notice: asyncio.Task[None] | None = None
+    if wait_notice_seconds > 0:
+        notice = asyncio.create_task(_notice_wait())
+    try:
+        await _DOCLING_EXTRACTION_LOCK.acquire()
+    finally:
+        if notice is not None:
+            notice.cancel()
+    if notified:
+        _emit_event(
+            event_queue,
+            {
+                "type": "log",
+                "message": (
+                    f"Document extractor acquired after {time.monotonic() - wait_started:.0f}s"
+                ),
+                **({"current_file": conversion.file} if conversion is not None else {}),
+            },
+            drop_oldest=True,
+        )
+    if conversion is not None:
+        conversion.started_at = datetime.now(UTC)
+        _DOCLING_LOCK_HOLDER = conversion
     released = False
 
     def _release_lock(_future: object | None = None) -> None:
         nonlocal released
+        global _DOCLING_LOCK_HOLDER
         if released:
             return
         released = True
+        # Clear the holder before the release: the next waiter acquires synchronously
+        # inside `release()` and would otherwise be wiped out by this assignment.
+        if _DOCLING_LOCK_HOLDER is conversion:
+            _DOCLING_LOCK_HOLDER = None
         _DOCLING_EXTRACTION_LOCK.release()
 
     worker_coroutine: Any = None
@@ -1961,11 +2053,15 @@ async def _extract_text_for_index(
     parquet_max_cell_chars: int = 20_000,
     parquet_text_columns_only: bool = True,
     parquet_include_column_names: bool = True,
+    event_queue: asyncio.Queue[dict[str, Any]] | None = None,
+    conversion: DoclingConversion | None = None,
 ) -> ExtractedDocument | None:
     if extraction_method_for_path(path) == "docling":
         return await _run_docling_extraction_locked(
             _extract_text_for_index_sync,
             path,
+            event_queue=event_queue,
+            conversion=conversion,
             figures=figures,
             gateway=gateway,
             parquet_max_rows=parquet_max_rows,
@@ -2364,6 +2460,10 @@ async def _run_index_body(
                         parquet_include_column_names=bool(
                             getattr(cfg.indexing, "parquet_extract_include_column_names", True)
                         ),
+                        # Docling conversion is process-wide serial: this run says so in its
+                        # own log rather than going silent behind another run's conversion.
+                        event_queue=event_queue,
+                        conversion=DoclingConversion(repo_id=repo_id, run_id=run_id, file=rel_path),
                     )
             except Exception as exc:
                 INDEX_STAGE_ERRORS_TOTAL.labels(stage="file_read").inc()
