@@ -219,5 +219,57 @@ test.describe('help, search and keyboard access', () => {
     expect(labels.length).toBeGreaterThan(3);
     for (const label of labels) expect(['corpus', 'global']).toContain(label.trim());
   });
+
+  test('M-131: every Ops & Tracing and Semantic Cache control carries help', async ({ page, baseURL }) => {
+    await activateCorpusInBrowser(page, corpusId);
+    await gotoWeb(page, baseURL, 'rag?subtab=retrieval');
+
+    const opsPill = page.getByRole('button', { name: /Ops & Tracing/i }).first();
+    await expect(opsPill).toBeVisible({ timeout: 30_000 });
+    await opsPill.click();
+
+    // Tooltip coverage stopped at this tab: ~24 controls with no "?" at all, precisely the
+    // settings whose defaults an operator can least reason about. Both inner pills.
+    const cacheHelp = page.locator('[aria-label^="Help: SEMANTIC_CACHE_"]');
+    await expect(cacheHelp).toHaveCount(13);
+
+    await page.getByRole('button', { name: /Observability/i }).first().click();
+    await expect(page.getByTestId('retrieval-section-ops-integrations')).toBeVisible();
+    for (const key of [
+      'OTLP_ENDPOINT',
+      'OTEL_SERVICE_NAME',
+      'OTLP_HEADERS',
+      'COST_TRACKING_ENABLED',
+      'LANGFUSE_ENABLED',
+      'LANGFUSE_BASE_URL',
+      'LANGFUSE_PUBLIC_BASE_URL',
+      'LANGFUSE_PROJECT',
+      'LANGFUSE_PUBLIC_KEY',
+      'TEMPO_BASE_URL',
+      'ALLOY_BASE_URL',
+    ]) {
+      await expect(
+        page.locator(`[aria-label="Help: ${key}"]`),
+        `${key} must carry a help icon`
+      ).toHaveCount(1);
+    }
+
+    // Every one of those keys resolves to real glossary copy, not the fallback.
+    const glossary = await page.evaluate(async () => {
+      const res = await fetch('/web/glossary.json', { cache: 'no-store' });
+      const data = await res.json();
+      return (data.terms || []).map((t: { key: string; definition: string }) => [t.key, t.definition.length]);
+    });
+    const byKey = new Map<string, number>(glossary as Array<[string, number]>);
+    for (const key of [
+      'SEMANTIC_CACHE_ENABLED',
+      'SEMANTIC_CACHE_MODE',
+      'SEMANTIC_CACHE_MAX_TEMPERATURE_FOR_WRITE',
+      'OTLP_HEADERS',
+      'ALLOY_BASE_URL',
+    ]) {
+      expect(byKey.get(key) ?? 0, `${key} needs a substantial definition`).toBeGreaterThan(120);
+    }
+  });
 });
 

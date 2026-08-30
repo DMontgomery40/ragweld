@@ -1762,12 +1762,12 @@ export function RetrievalSubtab() {
                           <span className="toggle-thumb"></span>
                         </span>
                         <span className="toggle-label">
-                          Cache Enabled
+                          Cache Enabled <TooltipIcon name="SEMANTIC_CACHE_ENABLED" />
                         </span>
                       </label>
                     </div>
                     <div className="input-group">
-                      <label>Cache Mode</label>
+                      <label>Cache Mode <TooltipIcon name="SEMANTIC_CACHE_MODE" /></label>
                       <select
                         value={semanticCacheMode}
                         onChange={(e) => setSemanticCacheMode(e.target.value as 'read_write' | 'read_only' | 'write_only')}
@@ -1779,7 +1779,7 @@ export function RetrievalSubtab() {
                       </select>
                     </div>
                     <div className="input-group">
-                      <label>Max Entries</label>
+                      <label>Max Entries <TooltipIcon name="SEMANTIC_CACHE_MAX_ENTRIES" /></label>
                       <NumberField
                         min={100}
                         max={500000}
@@ -1789,7 +1789,7 @@ export function RetrievalSubtab() {
                       />
                     </div>
                     <div className="input-group">
-                      <label>Min Query Chars</label>
+                      <label>Min Query Chars <TooltipIcon name="SEMANTIC_CACHE_MIN_QUERY_CHARS" /></label>
                       <NumberField
                         min={1}
                         max={200}
@@ -1802,7 +1802,7 @@ export function RetrievalSubtab() {
 
                   <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
                     <div className="input-group">
-                      <label>Similarity Threshold (Search)</label>
+                      <label>Similarity Threshold (Search) <TooltipIcon name="SEMANTIC_CACHE_SIMILARITY_THRESHOLD_SEARCH" /></label>
                       <NumberField
                         min={0}
                         max={1}
@@ -1813,7 +1813,7 @@ export function RetrievalSubtab() {
                       />
                     </div>
                     <div className="input-group">
-                      <label>Similarity Threshold (Answer)</label>
+                      <label>Similarity Threshold (Answer) <TooltipIcon name="SEMANTIC_CACHE_SIMILARITY_THRESHOLD_ANSWER" /></label>
                       <NumberField
                         min={0}
                         max={1}
@@ -1824,7 +1824,7 @@ export function RetrievalSubtab() {
                       />
                     </div>
                     <div className="input-group">
-                      <label>Similarity Threshold (Chat)</label>
+                      <label>Similarity Threshold (Chat) <TooltipIcon name="SEMANTIC_CACHE_SIMILARITY_THRESHOLD_CHAT" /></label>
                       <NumberField
                         min={0}
                         max={1}
@@ -1838,7 +1838,7 @@ export function RetrievalSubtab() {
 
                   <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
                     <div className="input-group">
-                      <label>TTL Seconds (Search)</label>
+                      <label>TTL Seconds (Search) <TooltipIcon name="SEMANTIC_CACHE_TTL_SECONDS_SEARCH" /></label>
                       <NumberField
                         min={10}
                         max={86400}
@@ -1848,7 +1848,7 @@ export function RetrievalSubtab() {
                       />
                     </div>
                     <div className="input-group">
-                      <label>TTL Seconds (Answer)</label>
+                      <label>TTL Seconds (Answer) <TooltipIcon name="SEMANTIC_CACHE_TTL_SECONDS_ANSWER" /></label>
                       <NumberField
                         min={10}
                         max={86400}
@@ -1858,7 +1858,7 @@ export function RetrievalSubtab() {
                       />
                     </div>
                     <div className="input-group">
-                      <label>TTL Seconds (Chat)</label>
+                      <label>TTL Seconds (Chat) <TooltipIcon name="SEMANTIC_CACHE_TTL_SECONDS_CHAT" /></label>
                       <NumberField
                         min={10}
                         max={86400}
@@ -1871,7 +1871,7 @@ export function RetrievalSubtab() {
 
                   <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
                     <div className="input-group">
-                      <label>Chat History Window</label>
+                      <label>Chat History Window <TooltipIcon name="SEMANTIC_CACHE_CHAT_HISTORY_WINDOW" /></label>
                       <NumberField
                         min={0}
                         max={50}
@@ -1892,12 +1892,12 @@ export function RetrievalSubtab() {
                           <span className="toggle-thumb"></span>
                         </span>
                         <span className="toggle-label">
-                          Bypass if Images
+                          Bypass if Images <TooltipIcon name="SEMANTIC_CACHE_BYPASS_IF_IMAGES" />
                         </span>
                       </label>
                     </div>
                     <div className="input-group">
-                      <label>Max Temperature for Write</label>
+                      <label>Max Temperature for Write <TooltipIcon name="SEMANTIC_CACHE_MAX_TEMPERATURE_FOR_WRITE" /></label>
                       <NumberField
                         min={0}
                         max={2}
@@ -2117,7 +2117,7 @@ export function RetrievalSubtab() {
                       />
                     </div>
                     <div className="input-group">
-                      <label>OTLP Endpoint</label>
+                      <label>OTLP Endpoint <TooltipIcon name="OTLP_ENDPOINT" /></label>
                       <input
                         type="text"
                         value={otlpEndpoint}
@@ -2126,7 +2126,7 @@ export function RetrievalSubtab() {
                       />
                     </div>
                     <div className="input-group">
-                      <label>OTel Service Name</label>
+                      <label>OTel Service Name <TooltipIcon name="OTEL_SERVICE_NAME" /></label>
                       <input
                         type="text"
                         value={otelServiceName}
@@ -2138,13 +2138,21 @@ export function RetrievalSubtab() {
 
                   <div className="input-row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                     <div className="input-group">
-                      <label>OTLP Headers</label>
+                      <label>OTLP Headers <TooltipIcon name="OTLP_HEADERS" /></label>
                       <input
                         type="text"
                         value={otlpHeaders}
                         onChange={(e) => setOtlpHeaders(e.target.value)}
-                        placeholder="Authorization=Bearer ...,X-Scope-OrgID=1"
+                        placeholder="X-Scope-OrgID=1"
                       />
+                      <div
+                        data-testid="otlp-headers-secret-note"
+                        style={{ fontSize: '11.5px', color: 'var(--fg-muted)', marginTop: '6px', lineHeight: 1.5 }}
+                      >
+                        An authorization header is stored in the backend and served back as
+                        [redacted]; leave that placeholder in place to keep it. Everything else
+                        here is shown and saved in clear.
+                      </div>
                     </div>
                     <div className="input-group">
                       <label className="toggle">
@@ -2157,7 +2165,7 @@ export function RetrievalSubtab() {
                           <span className="toggle-thumb"></span>
                         </span>
                         <span className="toggle-label">
-                          Cost Tracking
+                          Cost Tracking <TooltipIcon name="COST_TRACKING_ENABLED" />
                         </span>
                       </label>
                     </div>
@@ -2182,12 +2190,12 @@ export function RetrievalSubtab() {
                           <span className="toggle-thumb"></span>
                         </span>
                         <span className="toggle-label">
-                          Langfuse Enabled
+                          Langfuse Enabled <TooltipIcon name="LANGFUSE_ENABLED" />
                         </span>
                       </label>
                     </div>
                     <div className="input-group">
-                      <label>Langfuse Base URL</label>
+                      <label>Langfuse Base URL <TooltipIcon name="LANGFUSE_BASE_URL" /></label>
                       <input
                         type="text"
                         value={langfuseBaseUrl}
@@ -2196,7 +2204,7 @@ export function RetrievalSubtab() {
                       />
                     </div>
                     <div className="input-group">
-                      <label>Langfuse Browser URL</label>
+                      <label>Langfuse Browser URL <TooltipIcon name="LANGFUSE_PUBLIC_BASE_URL" /></label>
                       <input
                         data-testid="retrieval-langfuse-public-base-url"
                         type="text"
@@ -2212,7 +2220,7 @@ export function RetrievalSubtab() {
                       </div>
                     </div>
                     <div className="input-group">
-                      <label>Langfuse Project</label>
+                      <label>Langfuse Project <TooltipIcon name="LANGFUSE_PROJECT" /></label>
                       <input
                         type="text"
                         value={langfuseProject}
@@ -2224,7 +2232,7 @@ export function RetrievalSubtab() {
 
                   <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
                     <div className="input-group">
-                      <label>Tempo Base URL</label>
+                      <label>Tempo Base URL <TooltipIcon name="TEMPO_BASE_URL" /></label>
                       <input
                         type="text"
                         value={tempoBaseUrl}
@@ -2233,7 +2241,7 @@ export function RetrievalSubtab() {
                       />
                     </div>
                     <div className="input-group">
-                      <label>Alloy Base URL</label>
+                      <label>Alloy Base URL <TooltipIcon name="ALLOY_BASE_URL" /></label>
                       <input
                         type="text"
                         value={alloyBaseUrl}
@@ -2242,7 +2250,7 @@ export function RetrievalSubtab() {
                       />
                     </div>
                     <div className="input-group">
-                      <label>Langfuse Keys</label>
+                      <label>Langfuse Keys <TooltipIcon name="LANGFUSE_PUBLIC_KEY" /></label>
                       <div style={{ display: 'grid', gap: 8 }}>
                         <ApiKeyStatus keyName="LANGFUSE_PUBLIC_KEY" label="Langfuse Public Key" />
                         <ApiKeyStatus keyName="LANGFUSE_SECRET_KEY" label="Langfuse Secret Key" />
