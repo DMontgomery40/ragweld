@@ -363,6 +363,14 @@ class MCPHTTPTransportStatus(BaseModel):
     port: int = Field(ge=1, le=65535, description="Port for the MCP HTTP transport.")
     path: str | None = Field(default=None, description="HTTP path prefix (if applicable).")
     running: bool = Field(description="Whether the transport is reachable/responding.")
+    url: str = Field(
+        description=(
+            "The canonical URL to point an MCP client at, built from "
+            "`config.mcp.public_base_url` and the mount path. The server owns this string: "
+            "the workbench used to assemble `http://{host}:{port}{path}` itself, which "
+            "advertised plain HTTP on port 80 for a deployment that is HTTPS-only."
+        ),
+    )
 
 
 class MCPToolInfo(BaseModel):
@@ -413,6 +421,16 @@ class MCPConfig(BaseModel):
     mount_path: str = Field(
         default="/mcp",
         description="Mount path for the MCP Streamable HTTP endpoint (e.g. /mcp).",
+    )
+    public_base_url: str = Field(
+        default="http://127.0.0.1:58012",
+        description=(
+            "Externally reachable base URL (scheme://host[:port]) that MCP clients should "
+            "connect to; the mount path is appended to it. Set this to the deployment's "
+            "public origin when the API sits behind a proxy -- the workbench advertises "
+            "exactly this value, and deriving it from the request would advertise the "
+            "proxy's internal hop instead of the address a client can actually reach."
+        ),
     )
     stateless_http: bool = Field(
         default=True,

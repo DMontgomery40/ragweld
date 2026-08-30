@@ -9,6 +9,7 @@ import { ModelPicker as ChatModelPicker } from '@/components/Chat/ModelPicker';
 import { PromptLink } from '@/components/ui/PromptLink';
 import { ApiKeyStatus } from '@/components/ui/ApiKeyStatus';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
+import { SECRET_REDACTED } from '@/api/secrets';
 import { createAlertError, createInlineError } from '@/utils/errorHelpers';
 import { NumberField } from '@/components/ui/NumberField';
 import { useAPI, useConfig, useConfigField } from '@/hooks';
@@ -2149,9 +2150,9 @@ export function RetrievalSubtab() {
                         data-testid="otlp-headers-secret-note"
                         style={{ fontSize: '11.5px', color: 'var(--fg-muted)', marginTop: '6px', lineHeight: 1.5 }}
                       >
-                        An authorization header is stored in the backend and served back as
-                        [redacted]; leave that placeholder in place to keep it. Everything else
-                        here is shown and saved in clear.
+                        An authorization header is held in the backend and served back as{' '}
+                        <code>{SECRET_REDACTED}</code>; leave that marker in place to keep it.
+                        Everything else here is shown and saved in clear.
                       </div>
                     </div>
                     <div className="input-group">

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { ApiKeyStatus } from '@/components/ui/ApiKeyStatus';
+import { SECRET_REDACTED } from '@/api/secrets';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { useConfig, useConfigField } from '@/hooks';
 import { useRepoStore } from '@/stores/useRepoStore';
@@ -111,13 +112,32 @@ export function PathsSubtab() {
           <label>
             PostgreSQL DSN
             <TooltipIcon name="POSTGRES_URL" />
+            {postgresUrl.includes(SECRET_REDACTED) ? (
+              <span
+                data-testid="postgres-url-configured"
+                style={{
+                  marginLeft: 8,
+                  padding: '1px 8px',
+                  borderRadius: 999,
+                  border: '1px solid var(--line)',
+                  background: 'var(--bg-elev1)',
+                  color: 'var(--fg-muted)',
+                  fontSize: '11.5px',
+                  fontWeight: 700,
+                  letterSpacing: '0.04em',
+                  textTransform: 'uppercase',
+                }}
+              >
+                Password configured
+              </span>
+            ) : null}
           </label>
           <input
             data-testid="postgres-url"
             type="text"
             value={postgresUrl}
             onChange={(e) => setPostgresUrl(e.target.value)}
-            placeholder="postgresql://postgres:postgres@localhost:5432/tribrid_rag"
+            placeholder="postgresql://user@localhost:5432/tribrid_rag"
             style={{
               width: '100%',
               padding: '8px',
@@ -127,6 +147,18 @@ export function PathsSubtab() {
               color: 'var(--fg)',
             }}
           />
+          {/* The DSN used to arrive here with its password in clear, sitting on screen and
+              in every screenshot, two fields above a Neo4j password the same form already
+              handles as env-only (M-88). The backend withholds it now; this says so, so
+              the marker does not read as a corrupted value. */}
+          <div
+            data-testid="postgres-url-secret-note"
+            style={{ fontSize: '11.5px', color: 'var(--fg-muted)', marginTop: '6px', lineHeight: 1.5 }}
+          >
+            The password is held in the backend and served back as{' '}
+            <code>{SECRET_REDACTED}</code>. Leave that marker in place to keep it — host,
+            port, database and user stay editable. Type a real password only to rotate it.
+          </div>
         </div>
         <div className="input-group">
           <label>

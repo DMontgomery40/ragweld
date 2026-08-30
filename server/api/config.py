@@ -844,16 +844,23 @@ async def mcp_status(request: Request) -> MCPStatusResponse:
         cfg = load_global_config()
         if cfg.mcp.enabled:
             if python_stdio_available:
+                # `host`/`port` describe the hop this request arrived on; they are reported
+                # for diagnosis and are NOT what a client should connect to. Deriving the
+                # advertised URL from the request advertised the proxy's internal hop --
+                # `http://ragweld.dtmont.com:80/mcp/`, plain HTTP on an HTTPS-only
+                # deployment (M-91). The connection URL comes from typed config.
                 host = request.url.hostname or "127.0.0.1"
                 port = request.url.port or (443 if request.url.scheme == "https" else 80)
                 # Starlette mounts require a trailing slash for the mount root.
                 # Advertise the canonical URL that does not redirect for POST.
                 path = str(cfg.mcp.mount_path).rstrip("/") + "/"
+                url = f"{str(cfg.mcp.public_base_url).rstrip('/')}{path}"
                 python_http = MCPHTTPTransportStatus(
                     host=str(host),
                     port=int(port),
                     path=path,
                     running=True,
+                    url=url,
                 )
                 from server.mcp.server import get_mcp_server
 
@@ -863,7 +870,7 @@ async def mcp_status(request: Request) -> MCPStatusResponse:
                 ]
                 details.append(
                     f"Python HTTP MCP transport is enabled and mounted at {cfg.mcp.mount_path} "
-                    f"(connect to http://{host}:{port}{path})."
+                    f"(connect to {url})."
                 )
             else:
                 details.append(

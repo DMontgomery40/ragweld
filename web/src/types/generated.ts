@@ -1605,6 +1605,8 @@ export interface MCPConfig {
   enabled?: boolean; // default: True
   /** Mount path for the MCP Streamable HTTP endpoint (e.g. /mcp). */
   mount_path?: string; // default: "/mcp"
+  /** Externally reachable base URL (scheme://host[:port]) that MCP clients should connect to; the mount path is appended to it. Set this to the deployment's public origin when the API sits behind a proxy -- the workbench advertises exactly this value, and deriving it from the request would advertise the proxy's internal hop instead of the address a client can actually reach. */
+  public_base_url?: string; // default: "http://127.0.0.1:58012"
   /** Run MCP Streamable HTTP in stateless mode (recommended). */
   stateless_http?: boolean; // default: True
   /** Prefer JSON responses for MCP Streamable HTTP (recommended). */
@@ -1633,6 +1635,8 @@ export interface MCPHTTPTransportStatus {
   path?: string | null; // default: None
   /** Whether the transport is reachable/responding. */
   running: boolean;
+  /** The canonical URL to point an MCP client at, built from `config.mcp.public_base_url` and the mount path. The server owns this string: the workbench used to assemble `http://{host}:{port}{path}` itself, which advertised plain HTTP on port 80 for a deployment that is HTTPS-only. */
+  url: string;
 }
 
 /** One tool registered on the embedded MCP server. */

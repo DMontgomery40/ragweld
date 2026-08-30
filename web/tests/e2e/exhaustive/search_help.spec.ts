@@ -307,5 +307,62 @@ test.describe('help, search and keyboard access', () => {
       expect(byKey.get(key) ?? 0, `${key} needs a substantial definition`).toBeGreaterThan(120);
     }
   });
+
+  test('M-91: the MCP endpoint advertised is the configured public origin', async ({ page, baseURL, request }) => {
+    const status = await (await request.get(`${API_BASE}/mcp/status`)).json();
+    const http = status.python_http;
+    test.skip(!http, 'the MCP HTTP transport is not enabled on this deployment');
+
+    const config = await (await request.get(`${API_BASE}/config`)).json();
+    const expected = `${String(config.mcp.public_base_url).replace(/\/+$/, '')}${http.path}`;
+    // The server owns the string; the workbench must render exactly it. The old client-side
+    // build produced `http://<request host>:80/mcp/` -- plain HTTP on an HTTPS-only box.
+    expect(http.url).toBe(expected);
+
+    await activateCorpusInBrowser(page, corpusId);
+    await gotoWeb(page, baseURL, 'infrastructure?subtab=mcp');
+    const link = page.getByTestId('mcp-http-url');
+    await expect(link).toBeVisible({ timeout: 30_000 });
+    await expect(link).toHaveText(http.url);
+    await expect(link).toHaveAttribute('href', http.url);
+    // Nothing on the page reconstructs a scheme/host of its own any more.
+    expect(await link.innerText()).not.toMatch(/:80\//);
+  });
+
+  test('M-88: the DSN field says the password is withheld, and keeps it on save', async ({ page, baseURL, request }) => {
+    const config = await (await request.get(`${API_BASE}/config`)).json();
+    const dsn = String(config.indexing.postgres_url);
+    expect(dsn, 'the API must already be withholding the password').toContain('[redacted]');
+
+    await activateCorpusInBrowser(page, corpusId);
+    await gotoWeb(page, baseURL, 'infrastructure?subtab=paths');
+    const field = page.getByTestId('postgres-url');
+    await expect(field).toBeVisible({ timeout: 30_000 });
+    await expect(field).toHaveValue(dsn);
+    // The marker is explained rather than left looking like a corrupted value.
+    await expect(page.getByTestId('postgres-url-configured')).toBeVisible();
+    await expect(page.getByTestId('postgres-url-secret-note')).toContainText('[redacted]');
+    // And the field never shows a credential pair, not even as a placeholder.
+    expect(await field.getAttribute('placeholder')).not.toMatch(/:[^@/]+@/);
+  });
+
+  test('M-80: the Frontend row reports how the frontend is actually served', async ({ page, baseURL, request }) => {
+    const dev = await (await request.get(`${API_BASE}/dev/status`)).json();
+    expect(['dev_server', 'built_bundle', 'absent']).toContain(dev.frontend_mode);
+
+    await activateCorpusInBrowser(page, corpusId);
+    await gotoWeb(page, baseURL, 'dashboard?subtab=system');
+    const row = page.getByTestId('dash-frontend-status');
+    await expect(row).toBeVisible({ timeout: 30_000 });
+
+    // A red "stopped" must mean something is wrong. A built bundle behind a proxy is a
+    // healthy deployment and had been reported as a permanent failure (M-80).
+    if (dev.frontend_mode === 'absent') {
+      await expect(row).toContainText('not built');
+    } else {
+      await expect(row).not.toContainText('stopped');
+      await expect(row).toContainText(dev.frontend_mode === 'dev_server' ? 'dev server' : 'built bundle');
+    }
+  });
 });
 

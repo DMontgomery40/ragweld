@@ -3,7 +3,7 @@
 // a real search probe. Nothing here starts or stops a process: the transport is
 // mounted inside the API (config.mcp.enabled / mount_path).
 
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { StatusIndicator } from '@/components/ui/StatusIndicator';
 import { useMCPServer } from '@/hooks/useMCPServer';
@@ -21,12 +21,11 @@ export function MCPSubtab() {
   };
 
   const http = status?.python_http || null;
-  const httpHref = useMemo(() => {
-    if (!http) return null;
-    const rawPath = String(http.path || '').trim();
-    const path = !rawPath ? '' : rawPath.startsWith('/') ? rawPath : `/${rawPath}`;
-    return `http://${http.host}:${http.port}${path}`;
-  }, [http]);
+  // The server owns this string. Assembling `http://{host}:{port}{path}` here advertised
+  // plain HTTP on port 80 to operators of an HTTPS-only deployment, because host/port
+  // describe the hop the status request arrived on rather than the address an MCP client
+  // can reach (M-91). It now comes from `config.mcp.public_base_url`.
+  const httpHref = http?.url || null;
 
   const canProbe = Boolean(activeRepo) && question.trim().length > 0 && !probing;
 
@@ -51,7 +50,8 @@ export function MCPSubtab() {
       <p style={{ marginTop: 0, color: 'var(--fg-muted)', fontSize: '13px', lineHeight: '1.6' }}>
         ragweld exposes its retrieval as MCP tools over Streamable HTTP, mounted inside the API process at{' '}
         <span className="mono">config.mcp.mount_path</span>. Point an MCP client at the URL below; there is no separate daemon to
-        start.
+        start. The advertised URL is <span className="mono">config.mcp.public_base_url</span> plus that mount path — set it to
+        this deployment&rsquo;s public origin so clients are not sent to an address only the proxy can reach.
       </p>
 
       {error && (

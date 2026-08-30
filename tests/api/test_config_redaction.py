@@ -8,6 +8,8 @@ than through the redacting endpoint that is under test.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from httpx import AsyncClient
 
@@ -149,3 +151,37 @@ async def test_the_registry_does_not_publish_a_credential_shaped_default(
     assert dsn_default is not None
     assert SECRET_REDACTED in dsn_default
     assert "postgres:postgres@" not in dsn_default
+
+
+def test_the_frontend_and_the_api_agree_on_the_marker() -> None:
+    """One marker, pinned on both sides.
+
+    The workbench has to recognise the withheld value to say "configured" instead of
+    rendering it as a corrupted DSN, so the literal necessarily exists in TypeScript too.
+    This is the contract test that keeps the two from drifting apart silently.
+    """
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[2]
+    marker_module = repo_root / "web" / "src" / "api" / "secrets.ts"
+    assert marker_module.exists(), f"{marker_module} is the frontend's single copy of the marker"
+
+    text = marker_module.read_text(encoding="utf-8")
+    declared = re.search(r"export const SECRET_REDACTED = '([^']+)';", text)
+    assert declared, f"SECRET_REDACTED is not declared in {marker_module.name}:\n{text}"
+    assert declared.group(1) == SECRET_REDACTED, (
+        f"the frontend marker {declared.group(1)!r} does not match the API's "
+        f"{SECRET_REDACTED!r}; a rendered secret field would stop being recognised"
+    )
+
+    # And nobody re-spells it: the surfaces that show these fields must import it.
+    for rel in (
+        "web/src/components/Infrastructure/PathsSubtab.tsx",
+        "web/src/components/RAG/RetrievalSubtab.tsx",
+    ):
+        source = (repo_root / rel).read_text(encoding="utf-8")
+        assert "SECRET_REDACTED" in source, f"{rel} does not reference the shared marker"
+        assert SECRET_REDACTED not in source, (
+            f"{rel} spells the marker literally instead of importing SECRET_REDACTED"
+        )
+

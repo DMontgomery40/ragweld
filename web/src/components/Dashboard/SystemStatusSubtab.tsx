@@ -13,6 +13,42 @@ import { useHealthStore } from '@/stores/useHealthStore';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import type { IndexRunSummary } from '@/types/generated';
 
+// M-80: this row reported `frontend_running` -- a probe for a Vite dev server on
+// :55173 -- so on the deployed topology, where a reverse proxy serves a built bundle,
+// it sat permanently red saying "stopped" about the very frontend rendering the page.
+// A red row must mean something is actually wrong. `frontend_mode` is the API's typed
+// answer to "how is the frontend served", and all three of its values are healthy or
+// honestly unhealthy on their own terms.
+type FrontendMode = 'dev_server' | 'built_bundle' | 'absent';
+
+function frontendPresentation(
+  mode: FrontendMode,
+  port: number,
+  bundlePath: string | null | undefined
+): { tone: 'online' | 'offline'; label: string; title: string } {
+  if (mode === 'dev_server') {
+    return {
+      tone: 'online',
+      label: `dev server :${port}`,
+      title: 'A Vite dev server is reachable on this host.',
+    };
+  }
+  if (mode === 'built_bundle') {
+    return {
+      tone: 'online',
+      label: 'built bundle',
+      title: bundlePath
+        ? `Served from the built bundle at ${bundlePath} (a reverse proxy serves it; there is no dev server on this host).`
+        : 'Served from a built bundle; a reverse proxy serves it, so there is no dev server on this host.',
+    };
+  }
+  return {
+    tone: 'offline',
+    label: 'not built',
+    title: 'No dev server is reachable and no built bundle exists on disk.',
+  };
+}
+
 export function SystemStatusSubtab() {
   const navigate = useNavigate();
   const [health, setHealth] = useState<string>('—');
@@ -232,6 +268,14 @@ export function SystemStatusSubtab() {
       /* store owns error state */
     });
   }, [reposLoading, reposError, devStackStatus?.backend_running, loadRepos]);
+
+  const frontend = devStackStatus
+    ? frontendPresentation(
+        devStackStatus.frontend_mode as FrontendMode,
+        devStackStatus.frontend_port,
+        devStackStatus.frontend_bundle_path
+      )
+    : null;
 
   return (
     <div
@@ -464,29 +508,21 @@ export function SystemStatusSubtab() {
                         fontFamily: "'SF Mono', monospace",
                         color: devStackLoading
                           ? 'var(--fg-muted)'
-                          : devStackStatus
-                            ? (devStackStatus.frontend_running ? 'var(--ok)' : 'var(--err)')
+                          : frontend
+                            ? (frontend.tone === 'online' ? 'var(--ok)' : 'var(--err)')
                             : 'var(--fg-muted)',
                       }}
+                      title={frontend?.title}
+                      data-testid="dash-frontend-status"
                     >
                       <StatusIndicator
-                        status={
-                          devStackLoading
-                            ? 'loading'
-                            : devStackStatus
-                              ? (devStackStatus.frontend_running ? 'online' : 'offline')
-                              : 'idle'
-                        }
+                        status={devStackLoading ? 'loading' : frontend ? frontend.tone : 'idle'}
                         showLabel={false}
                         size="sm"
                         pulse
-                        ariaLabel="Dev frontend status"
+                        ariaLabel="Frontend status"
                       />
-                      {devStackLoading
-                        ? 'checking'
-                        : devStackStatus
-                          ? (devStackStatus.frontend_running ? `running :${devStackStatus.frontend_port}` : 'stopped')
-                          : 'unknown'}
+                      {devStackLoading ? 'checking' : frontend ? frontend.label : 'unknown'}
                     </span>
                     </div>
                     <div
