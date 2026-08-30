@@ -105,28 +105,43 @@ async def _get_graph_stats_or_none(neo4j: Neo4jClient, repo_id: str) -> GraphSta
         await _disconnect_neo4j_quietly(neo4j)
 
 
+def _corpus_from_row(row: dict[str, Any]) -> Corpus:
+    """Map one `corpora` row onto the wire model.
+
+    One mapping for every read path. `internal` is derived here from the row's own
+    `meta.system_kind` -- the marker `ensure_recall_corpus` already writes -- so operator
+    surfaces have a typed answer instead of a hardcoded `recall_default` check, and a second
+    construction site cannot forget to derive it.
+
+    `get_corpus`/`list_corpora` rename `root_path` to `path`; `update_corpus` returns the
+    raw column. Both shapes describe the same row, so both are read here rather than at
+    every call site.
+    """
+    meta = row.get("meta") or {}
+    repo_id = str(row["repo_id"])
+    return Corpus(
+        repo_id=repo_id,
+        name=row["name"],
+        path=row.get("path") or row["root_path"],
+        slug=meta.get("slug") or repo_id,
+        branch=meta.get("branch"),
+        default=meta.get("default"),
+        exclude_paths=meta.get("exclude_paths"),
+        keywords=meta.get("keywords"),
+        path_boosts=meta.get("path_boosts"),
+        layer_bonuses=meta.get("layer_bonuses"),
+        description=row.get("description"),
+        internal=bool(meta.get("system_kind")),
+        created_at=row.get("created_at") or datetime.now(UTC),
+        last_indexed=row.get("last_indexed"),
+    )
+
+
 @router.get("/repos", response_model=list[Corpus])
 async def list_repos() -> list[Corpus]:
     pg = await _get_postgres()
     rows = await pg.list_corpora()
-    return [
-        Corpus(
-            repo_id=r["repo_id"],
-            name=r["name"],
-            path=r["path"],
-            slug=(r.get("meta") or {}).get("slug") or r["repo_id"],
-            branch=(r.get("meta") or {}).get("branch"),
-            default=(r.get("meta") or {}).get("default"),
-            exclude_paths=(r.get("meta") or {}).get("exclude_paths"),
-            keywords=(r.get("meta") or {}).get("keywords"),
-            path_boosts=(r.get("meta") or {}).get("path_boosts"),
-            layer_bonuses=(r.get("meta") or {}).get("layer_bonuses"),
-            description=r.get("description"),
-            created_at=r.get("created_at") or datetime.now(UTC),
-            last_indexed=r.get("last_indexed"),
-        )
-        for r in rows
-    ]
+    return [_corpus_from_row(r) for r in rows]
 
 
 @router.get("/corpora", response_model=list[Corpus])
@@ -179,6 +194,7 @@ async def add_repo(request: CorpusCreateRequest) -> Corpus:
                 "Use Neo4j Enterprise image + license (or switch neo4j_database_mode='shared').",
             )
 
+    # A corpus an operator just created carries no `system_kind`, so `internal` stays False.
     return Corpus(
         repo_id=corpus_id,
         name=request.name,
@@ -202,22 +218,7 @@ async def get_repo(corpus_id: str) -> Corpus:
     row = await pg.get_corpus(repo_id)
     if row is None:
         raise HTTPException(status_code=404, detail=f"Corpus not found: {repo_id}")
-    meta = row.get("meta") or {}
-    return Corpus(
-        repo_id=row["repo_id"],
-        name=row["name"],
-        path=row["path"],
-        slug=meta.get("slug") or row["repo_id"],
-        branch=meta.get("branch"),
-        default=meta.get("default"),
-        exclude_paths=meta.get("exclude_paths"),
-        keywords=meta.get("keywords"),
-        path_boosts=meta.get("path_boosts"),
-        layer_bonuses=meta.get("layer_bonuses"),
-        description=row.get("description"),
-        created_at=row.get("created_at") or datetime.now(UTC),
-        last_indexed=row.get("last_indexed"),
-    )
+    return _corpus_from_row(row)
 
 
 @router.get("/corpora/{corpus_id}", response_model=Corpus)
@@ -260,21 +261,7 @@ async def update_repo(corpus_id: str, request: CorpusUpdateRequest) -> Corpus:
     if updated is None:
         raise HTTPException(status_code=404, detail=f"Corpus not found: {repo_id}")
 
-    meta = updated.get("meta") or {}
-    return Corpus(
-        repo_id=updated["repo_id"],
-        name=updated["name"],
-        path=updated["root_path"],
-        slug=updated["repo_id"],
-        branch=meta.get("branch"),
-        default=meta.get("default"),
-        exclude_paths=meta.get("exclude_paths"),
-        keywords=meta.get("keywords"),
-        path_boosts=meta.get("path_boosts"),
-        layer_bonuses=meta.get("layer_bonuses"),
-        created_at=updated.get("created_at") or datetime.now(UTC),
-        last_indexed=updated.get("last_indexed"),
-    )
+    return _corpus_from_row(updated)
 
 
 @router.patch("/corpora/{corpus_id}", response_model=Corpus)

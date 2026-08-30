@@ -481,6 +481,14 @@ class Corpus(BaseModel):
         description="Optional layer bonus overrides (intent->layer->multiplier)",
     )
     description: str | None = Field(default=None, description="Optional description")
+    internal: bool = Field(
+        default=False,
+        description=(
+            "True for a corpus the runtime registers and manages itself (the chat Recall "
+            "corpus), rather than one an operator created. Operator surfaces that list "
+            "corpora as work the operator is responsible for exclude these."
+        ),
+    )
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         description="When the corpus was created",

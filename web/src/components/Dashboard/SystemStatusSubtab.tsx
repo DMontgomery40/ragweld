@@ -145,7 +145,10 @@ export function SystemStatusSubtab() {
     const generation = recentRunsGenerationRef.current + 1;
     recentRunsGenerationRef.current = generation;
 
-    const corpora = Array.isArray(repos) ? repos : [];
+    // Internal corpora are registered by the runtime, not by an operator, and index through
+    // their own path: the chat Recall corpus has no persisted index run, so it sat in this
+    // panel reading "never indexed" forever. `internal` is the typed marker from `Corpus`.
+    const corpora = (Array.isArray(repos) ? repos : []).filter((corpus) => !corpus.internal);
     if (corpora.length === 0) {
       setRecentRuns([]);
       setRecentRunsLoading(false);

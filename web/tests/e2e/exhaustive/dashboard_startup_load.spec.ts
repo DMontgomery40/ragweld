@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 import {
+  API_BASE,
   activateCorpusInBrowser,
   provisionExhaustiveCorpus,
   type ExhaustiveCorpus,
@@ -93,5 +94,32 @@ test.describe('Recent index runs panel', () => {
     // The acceptance fixture has no PDFs, so this run described no figures: the column stays
     // empty rather than printing a zero for every corpus indexed before figures existed.
     await expect(row.locator('td').nth(4)).toHaveText('—');
+  });
+
+  // The chat Recall corpus is registered by the runtime and indexes through its own path, so
+  // it has no persisted index run: the panel listed it as "never indexed" forever.
+  test('omits the runtime-managed Recall corpus', async ({ page, request, baseURL }) => {
+    const provisioned = corpus;
+    expect(provisioned, 'the corpus fixture must have provisioned').not.toBeNull();
+    const corpusId = provisioned!.corpusId;
+
+    // The API has to actually be serving the internal marker, or the assertion below is
+    // vacuous: a corpus that is simply absent would also not be rendered.
+    const listed = await request.get(`${API_BASE}/corpora`);
+    expect(listed.ok()).toBe(true);
+    const corpora = (await listed.json()) as Array<{ corpus_id: string; internal?: boolean }>;
+    const recall = corpora.find((c) => c.corpus_id === 'recall_default');
+    expect(recall, 'the Recall corpus must exist for this assertion to mean anything').toBeTruthy();
+    expect(recall!.internal).toBe(true);
+    expect(corpora.find((c) => c.corpus_id === corpusId)?.internal).toBe(false);
+
+    await activateCorpusInBrowser(page, corpusId);
+    await page.goto(new URL('dashboard', baseURL).toString());
+    await page.waitForURL(/\/dashboard(?:\?|$)/);
+
+    await expect(page.getByTestId('dash-recent-runs')).toBeVisible();
+    // The operator's own corpus is still listed, so the filter did not empty the panel.
+    await expect(page.getByTestId(`dash-recent-run-${corpusId}`)).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId('dash-recent-run-recall_default')).toHaveCount(0);
   });
 });

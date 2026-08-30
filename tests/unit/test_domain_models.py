@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 
+from server.api.repos import _corpus_from_row
 from server.models.index import (
     Chunk,
     IndexRequest,
@@ -23,6 +24,7 @@ from server.models.tribrid_config_model import (
     ChatResponse,
     ChunkMatch,
     Community,
+    Corpus,
     Entity,
     EvalComparisonResult,
     EvalDatasetItem,
@@ -585,3 +587,76 @@ class TestIndexModels:
         assert stats.total_chunks == 1500
         assert stats.file_breakdown[".py"] == 80
         assert stats.embedding_model == "text-embedding-3-large"
+
+
+class TestCorpusRowMapping:
+    """`corpora` row -> `Corpus`, the one mapping every read path shares.
+
+    The Recall corpus is registered by the chat runtime, not by an operator, and the
+    dashboard's Recent-index-runs panel listed it as "never indexed" forever: it has no
+    persisted index run because recall indexes through a different path. `internal` is
+    derived from the `meta.system_kind` marker `ensure_recall_corpus` already writes, so the
+    UI has a typed answer instead of a hardcoded corpus id.
+    """
+
+    def test_a_system_registered_corpus_is_marked_internal(self) -> None:
+        corpus = _corpus_from_row(
+            {
+                "repo_id": "recall_default",
+                "name": "Recall",
+                "path": "data/recall",
+                "description": "Persistent chat recall corpus (auto-managed)",
+                "meta": {"system_kind": "recall", "pinned": True},
+                "created_at": datetime(2026, 8, 30, tzinfo=UTC),
+                "last_indexed": None,
+            }
+        )
+
+        assert corpus.internal is True
+        assert corpus.repo_id == "recall_default"
+        assert corpus.slug == "recall_default"
+
+    def test_an_operator_corpus_is_not_internal(self) -> None:
+        corpus = _corpus_from_row(
+            {
+                "repo_id": "nasa-apollo-11",
+                "name": "NASA Apollo 11 Mission Report",
+                "path": "/srv/corpora/apollo",
+                "description": None,
+                "meta": {"slug": "nasa-apollo-11", "keywords": ["lunar"]},
+                "created_at": datetime(2026, 8, 30, tzinfo=UTC),
+                "last_indexed": datetime(2026, 8, 30, tzinfo=UTC),
+            }
+        )
+
+        assert corpus.internal is False
+        assert corpus.keywords == ["lunar"]
+
+    def test_the_mapping_accepts_both_row_shapes(self) -> None:
+        """`get_corpus` renames root_path to path; `update_corpus` returns the raw column."""
+        raw = _corpus_from_row(
+            {
+                "repo_id": "nasa-apollo-11",
+                "name": "NASA Apollo 11 Mission Report",
+                "root_path": "/srv/corpora/apollo",
+                "description": "mission report",
+                "meta": {},
+                "created_at": datetime(2026, 8, 30, tzinfo=UTC),
+                "last_indexed": None,
+            }
+        )
+
+        assert raw.path == "/srv/corpora/apollo"
+        assert raw.description == "mission report"
+        assert raw.internal is False
+
+    def test_internal_defaults_to_false_on_the_wire_model(self) -> None:
+        """A corpus built without a row (corpus creation) is an operator corpus."""
+        assert (
+            Corpus(
+                repo_id="fresh",
+                name="Fresh",
+                path="/srv/corpora/fresh",
+            ).internal
+            is False
+        )
