@@ -183,6 +183,21 @@ Enable it per corpus:
 !!! warning "Vision costs are per figure"
     A dense scanned PDF can hold hundreds of figures. Run `/api/index/estimate` first — the estimate includes the figure cost before you commit. There is no per-file figure cap: bound cost with `min_area_fraction`, `skip_classes`, and `max_completion_tokens`, and point hard scanned schematics at a stronger vision alias per corpus.
 
+### How the estimate prices figures
+
+`POST /api/index/estimate` counts the PDF pages in scope (real page counts via pypdfium2, skipping files it cannot open), multiplies by the shipped heuristic of **0.6 describable figures per page**, and prices the result from the model catalog:
+
+| Estimate field | Meaning |
+|----------------|---------|
+| `estimated_figures` | Figures expected to be described — PDF pages × 0.6, only when `indexing.figures.enabled` **and** `describe` are on and the corpus has PDFs |
+| `figure_description_cost_usd` | Vision-call cost for those figures: ~1,200 input tokens per figure (image crop at `images_scale=2.0` plus the prompt) plus `indexing.figures.max_completion_tokens` output tokens, priced from `data/models.json` for `indexing.figures.vision_model` |
+| `total_cost_usd` | Embedding + (optional) semantic KG + (optional) figures, or `null` when any priced component lacks catalog pricing |
+
+!!! tip "Reading the numbers"
+    The figure line is an estimate of an estimate: the 0.6 figures-per-page factor is a planning heuristic, not a measured count. Use it to decide *whether* to enable figure description on a large scanned corpus; the run summary's `figures_described` / `figures_undescribed` events are the ground truth after indexing. If the figure line is missing entirely, either figures are disabled, `describe` is off, or the corpus has no PDFs in scope.
+
+    In the **RAG → Indexing** tab the breakdown appears as `Embed $X + Semantic KG $Y + Figures $Z (~N)` next to the total, so you can compare the figure budget against the embedding budget before committing the run.
+
 !!! tip "If you're not sure"
     Leave it off for text-heavy corpora. Turn it on for report/drawing corpora where "which chart shows X?" is a real question, start with the defaults, and check the run summary's skipped-figure counts before widening the filters.
 
