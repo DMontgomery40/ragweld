@@ -2,7 +2,7 @@
   "domain_modules": [
     "server.models.index"
   ],
-  "model_count": 262,
+  "model_count": 287,
   "module": "server.models.tribrid_config_model",
   "root_models": {
     "ActiveSources": {
@@ -1388,6 +1388,19 @@
           "title": "Tracking Backend",
           "type": "string"
         },
+        "tracking_experiment_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "External experiment identifier in the tracking system when available.",
+          "title": "Tracking Experiment Id"
+        },
         "tracking_run_id": {
           "anyOf": [
             {
@@ -2606,6 +2619,18 @@
               "title": "Metadata",
               "type": "object"
             },
+            "provenance": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ChunkProvenance"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Extraction and page provenance; None for chunks indexed before provenance capture"
+            },
             "score": {
               "description": "Relevance score from retrieval",
               "title": "Score",
@@ -2637,6 +2662,109 @@
             "source"
           ],
           "title": "ChunkMatch",
+          "type": "object"
+        },
+        "ChunkProvenance": {
+          "description": "Where a chunk came from in its source document: extraction method plus page regions.\n\nDirect text/code extraction has line spans only (``regions`` empty, pages ``None``).\nDocling extraction carries one region per contributing layout item.",
+          "properties": {
+            "extraction": {
+              "description": "How the source text was extracted",
+              "enum": [
+                "docling",
+                "direct"
+              ],
+              "title": "Extraction",
+              "type": "string"
+            },
+            "page_end": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Last cited page (1-based)",
+              "title": "Page End"
+            },
+            "page_start": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "First cited page (1-based)",
+              "title": "Page Start"
+            },
+            "regions": {
+              "description": "Layout regions the chunk text was taken from",
+              "items": {
+                "$ref": "#/$defs/PageRegion"
+              },
+              "title": "Regions",
+              "type": "array"
+            }
+          },
+          "required": [
+            "extraction"
+          ],
+          "title": "ChunkProvenance",
+          "type": "object"
+        },
+        "PageRegion": {
+          "description": "One cited region on a page: top-left origin, normalized to the page size (0..1).",
+          "properties": {
+            "bottom": {
+              "description": "Bottom edge as a fraction of page height",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Bottom",
+              "type": "number"
+            },
+            "left": {
+              "description": "Left edge as a fraction of page width",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Left",
+              "type": "number"
+            },
+            "page": {
+              "description": "1-based page number",
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            },
+            "right": {
+              "description": "Right edge as a fraction of page width",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Right",
+              "type": "number"
+            },
+            "top": {
+              "description": "Top edge as a fraction of page height",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Top",
+              "type": "number"
+            }
+          },
+          "required": [
+            "page",
+            "left",
+            "top",
+            "right",
+            "bottom"
+          ],
+          "title": "PageRegion",
           "type": "object"
         },
         "RecallFusionOverrides": {
@@ -4317,6 +4445,51 @@
           "title": "ChatMultimodalConfig",
           "type": "object"
         },
+        "ChatWebConfig": {
+          "additionalProperties": false,
+          "description": "Server-owned OpenRouter web-search policy for ordinary chat.",
+          "properties": {
+            "enabled": {
+              "default": true,
+              "description": "Allow opt-in web search in Chat.",
+              "title": "Enabled",
+              "type": "boolean"
+            },
+            "engine": {
+              "default": "auto",
+              "enum": [
+                "auto",
+                "native",
+                "exa"
+              ],
+              "title": "Engine",
+              "type": "string"
+            },
+            "max_characters": {
+              "default": 12000,
+              "maximum": 50000,
+              "minimum": 1000,
+              "title": "Max Characters",
+              "type": "integer"
+            },
+            "max_results": {
+              "default": 5,
+              "maximum": 20,
+              "minimum": 1,
+              "title": "Max Results",
+              "type": "integer"
+            },
+            "max_total_results": {
+              "default": 5,
+              "maximum": 20,
+              "minimum": 1,
+              "title": "Max Total Results",
+              "type": "integer"
+            }
+          },
+          "title": "ChatWebConfig",
+          "type": "object"
+        },
         "ImageGenConfig": {
           "description": "Two tiers:\n- LOCAL: Direct CLI/subprocess (free, self-hosted)\n- CLOUD: Paid APIs (ComfyUI API, Replicate, DALL-E)\n\nComfyUI is typically self-hosted. We do NOT use ComfyUI as the local P0 path; local P0 is\ndirect CLI/subprocess. `comfyui_api` is a remote endpoint (self-hosted or paid).",
           "properties": {
@@ -4417,6 +4590,12 @@
               "description": "'turn'=one chunk per message, 'sentence'=split by sentence.",
               "pattern": "^(sentence|paragraph|turn|fixed)$",
               "title": "Chunking Strategy",
+              "type": "string"
+            },
+            "corpus_root": {
+              "default": "data/recall",
+              "description": "Directory a recall corpus is created under, one subdirectory per corpus id. Relative values resolve against the project root; RAGWELD_RECALL_ROOT overrides it for disposable lanes. Only consulted when the corpus is created - after that the registry row's path is authoritative, so every process agrees.",
+              "title": "Corpus Root",
               "type": "string"
             },
             "default_corpus_id": {
@@ -4709,6 +4888,9 @@
         },
         "vllm": {
           "$ref": "#/$defs/VLLMConfig"
+        },
+        "web": {
+          "$ref": "#/$defs/ChatWebConfig"
         }
       },
       "title": "ChatConfig",
@@ -6060,6 +6242,12 @@
           "default": null,
           "description": "Override retrieval.final_k for this message (leave null to use config default)",
           "title": "Top K"
+        },
+        "web_enabled": {
+          "default": false,
+          "description": "Allow the server-owned web-search tool for this message.",
+          "title": "Web Enabled",
+          "type": "boolean"
         }
       },
       "required": [
@@ -6524,6 +6712,18 @@
               "title": "Metadata",
               "type": "object"
             },
+            "provenance": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ChunkProvenance"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Extraction and page provenance; None for chunks indexed before provenance capture"
+            },
             "score": {
               "description": "Relevance score from retrieval",
               "title": "Score",
@@ -6557,6 +6757,61 @@
           "title": "ChunkMatch",
           "type": "object"
         },
+        "ChunkProvenance": {
+          "description": "Where a chunk came from in its source document: extraction method plus page regions.\n\nDirect text/code extraction has line spans only (``regions`` empty, pages ``None``).\nDocling extraction carries one region per contributing layout item.",
+          "properties": {
+            "extraction": {
+              "description": "How the source text was extracted",
+              "enum": [
+                "docling",
+                "direct"
+              ],
+              "title": "Extraction",
+              "type": "string"
+            },
+            "page_end": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Last cited page (1-based)",
+              "title": "Page End"
+            },
+            "page_start": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "First cited page (1-based)",
+              "title": "Page Start"
+            },
+            "regions": {
+              "description": "Layout regions the chunk text was taken from",
+              "items": {
+                "$ref": "#/$defs/PageRegion"
+              },
+              "title": "Regions",
+              "type": "array"
+            }
+          },
+          "required": [
+            "extraction"
+          ],
+          "title": "ChunkProvenance",
+          "type": "object"
+        },
         "Message": {
           "description": "Chat message in a conversation.",
           "properties": {
@@ -6587,6 +6842,54 @@
             "content"
           ],
           "title": "Message",
+          "type": "object"
+        },
+        "PageRegion": {
+          "description": "One cited region on a page: top-left origin, normalized to the page size (0..1).",
+          "properties": {
+            "bottom": {
+              "description": "Bottom edge as a fraction of page height",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Bottom",
+              "type": "number"
+            },
+            "left": {
+              "description": "Left edge as a fraction of page width",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Left",
+              "type": "number"
+            },
+            "page": {
+              "description": "1-based page number",
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            },
+            "right": {
+              "description": "Right edge as a fraction of page width",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Right",
+              "type": "number"
+            },
+            "top": {
+              "description": "Top edge as a fraction of page height",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Top",
+              "type": "number"
+            }
+          },
+          "required": [
+            "page",
+            "left",
+            "top",
+            "right",
+            "bottom"
+          ],
+          "title": "PageRegion",
           "type": "object"
         },
         "RecallFusionOverrides": {
@@ -6890,6 +7193,78 @@
           ],
           "title": "RerankDebugInfo",
           "type": "object"
+        },
+        "WebCitation": {
+          "description": "One validated URL citation returned by the generation gateway.",
+          "properties": {
+            "end_index": {
+              "description": "Exclusive character offset in the final answer.",
+              "exclusiveMinimum": 0,
+              "title": "End Index",
+              "type": "integer"
+            },
+            "start_index": {
+              "description": "Inclusive character offset in the final answer.",
+              "minimum": 0,
+              "title": "Start Index",
+              "type": "integer"
+            },
+            "title": {
+              "default": "",
+              "description": "Provider-supplied citation title.",
+              "title": "Title",
+              "type": "string"
+            },
+            "url": {
+              "description": "Validated HTTP(S) citation URL.",
+              "title": "Url",
+              "type": "string"
+            }
+          },
+          "required": [
+            "url",
+            "start_index",
+            "end_index"
+          ],
+          "title": "WebCitation",
+          "type": "object"
+        },
+        "WebGroundingMetadata": {
+          "description": "Terminal web-grounding facts; never inferred from inline answer text.",
+          "properties": {
+            "citations": {
+              "items": {
+                "$ref": "#/$defs/WebCitation"
+              },
+              "title": "Citations",
+              "type": "array"
+            },
+            "web_grounded": {
+              "default": false,
+              "title": "Web Grounded",
+              "type": "boolean"
+            },
+            "web_requested": {
+              "default": false,
+              "title": "Web Requested",
+              "type": "boolean"
+            },
+            "web_search_requests": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Web Search Requests"
+            }
+          },
+          "title": "WebGroundingMetadata",
+          "type": "object"
         }
       },
       "description": "Response from chat endpoint.",
@@ -6952,6 +7327,9 @@
           "description": "Tokens consumed",
           "title": "Tokens Used",
           "type": "integer"
+        },
+        "web_grounding": {
+          "$ref": "#/$defs/WebGroundingMetadata"
         }
       },
       "required": [
@@ -6965,7 +7343,157 @@
       "title": "ChatResponse",
       "type": "object"
     },
+    "ChatWebConfig": {
+      "additionalProperties": false,
+      "description": "Server-owned OpenRouter web-search policy for ordinary chat.",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "Allow opt-in web search in Chat.",
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "engine": {
+          "default": "auto",
+          "enum": [
+            "auto",
+            "native",
+            "exa"
+          ],
+          "title": "Engine",
+          "type": "string"
+        },
+        "max_characters": {
+          "default": 12000,
+          "maximum": 50000,
+          "minimum": 1000,
+          "title": "Max Characters",
+          "type": "integer"
+        },
+        "max_results": {
+          "default": 5,
+          "maximum": 20,
+          "minimum": 1,
+          "title": "Max Results",
+          "type": "integer"
+        },
+        "max_total_results": {
+          "default": 5,
+          "maximum": 20,
+          "minimum": 1,
+          "title": "Max Total Results",
+          "type": "integer"
+        }
+      },
+      "title": "ChatWebConfig",
+      "type": "object"
+    },
     "Chunk": {
+      "$defs": {
+        "ChunkProvenance": {
+          "description": "Where a chunk came from in its source document: extraction method plus page regions.\n\nDirect text/code extraction has line spans only (``regions`` empty, pages ``None``).\nDocling extraction carries one region per contributing layout item.",
+          "properties": {
+            "extraction": {
+              "description": "How the source text was extracted",
+              "enum": [
+                "docling",
+                "direct"
+              ],
+              "title": "Extraction",
+              "type": "string"
+            },
+            "page_end": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Last cited page (1-based)",
+              "title": "Page End"
+            },
+            "page_start": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "First cited page (1-based)",
+              "title": "Page Start"
+            },
+            "regions": {
+              "description": "Layout regions the chunk text was taken from",
+              "items": {
+                "$ref": "#/$defs/PageRegion"
+              },
+              "title": "Regions",
+              "type": "array"
+            }
+          },
+          "required": [
+            "extraction"
+          ],
+          "title": "ChunkProvenance",
+          "type": "object"
+        },
+        "PageRegion": {
+          "description": "One cited region on a page: top-left origin, normalized to the page size (0..1).",
+          "properties": {
+            "bottom": {
+              "description": "Bottom edge as a fraction of page height",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Bottom",
+              "type": "number"
+            },
+            "left": {
+              "description": "Left edge as a fraction of page width",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Left",
+              "type": "number"
+            },
+            "page": {
+              "description": "1-based page number",
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            },
+            "right": {
+              "description": "Right edge as a fraction of page width",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Right",
+              "type": "number"
+            },
+            "top": {
+              "description": "Top edge as a fraction of page height",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Top",
+              "type": "number"
+            }
+          },
+          "required": [
+            "page",
+            "left",
+            "top",
+            "right",
+            "bottom"
+          ],
+          "title": "PageRegion",
+          "type": "object"
+        }
+      },
       "description": "A code chunk from the indexed repository.",
       "properties": {
         "chunk_id": {
@@ -7023,6 +7551,18 @@
           "title": "Metadata",
           "type": "object"
         },
+        "provenance": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChunkProvenance"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Extraction and page provenance; None only for rows indexed before provenance capture"
+        },
         "start_line": {
           "description": "Starting line number in source file",
           "title": "Start Line",
@@ -7059,6 +7599,111 @@
       "type": "object"
     },
     "ChunkMatch": {
+      "$defs": {
+        "ChunkProvenance": {
+          "description": "Where a chunk came from in its source document: extraction method plus page regions.\n\nDirect text/code extraction has line spans only (``regions`` empty, pages ``None``).\nDocling extraction carries one region per contributing layout item.",
+          "properties": {
+            "extraction": {
+              "description": "How the source text was extracted",
+              "enum": [
+                "docling",
+                "direct"
+              ],
+              "title": "Extraction",
+              "type": "string"
+            },
+            "page_end": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Last cited page (1-based)",
+              "title": "Page End"
+            },
+            "page_start": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "First cited page (1-based)",
+              "title": "Page Start"
+            },
+            "regions": {
+              "description": "Layout regions the chunk text was taken from",
+              "items": {
+                "$ref": "#/$defs/PageRegion"
+              },
+              "title": "Regions",
+              "type": "array"
+            }
+          },
+          "required": [
+            "extraction"
+          ],
+          "title": "ChunkProvenance",
+          "type": "object"
+        },
+        "PageRegion": {
+          "description": "One cited region on a page: top-left origin, normalized to the page size (0..1).",
+          "properties": {
+            "bottom": {
+              "description": "Bottom edge as a fraction of page height",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Bottom",
+              "type": "number"
+            },
+            "left": {
+              "description": "Left edge as a fraction of page width",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Left",
+              "type": "number"
+            },
+            "page": {
+              "description": "1-based page number",
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            },
+            "right": {
+              "description": "Right edge as a fraction of page width",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Right",
+              "type": "number"
+            },
+            "top": {
+              "description": "Top edge as a fraction of page height",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Top",
+              "type": "number"
+            }
+          },
+          "required": [
+            "page",
+            "left",
+            "top",
+            "right",
+            "bottom"
+          ],
+          "title": "PageRegion",
+          "type": "object"
+        }
+      },
       "description": "Unified result shape for vector/sparse/graph retrieval.",
       "properties": {
         "chunk_id": {
@@ -7100,6 +7745,18 @@
           "title": "Metadata",
           "type": "object"
         },
+        "provenance": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChunkProvenance"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Extraction and page provenance; None for chunks indexed before provenance capture"
+        },
         "score": {
           "description": "Relevance score from retrieval",
           "title": "Score",
@@ -7131,6 +7788,111 @@
         "source"
       ],
       "title": "ChunkMatch",
+      "type": "object"
+    },
+    "ChunkProvenance": {
+      "$defs": {
+        "PageRegion": {
+          "description": "One cited region on a page: top-left origin, normalized to the page size (0..1).",
+          "properties": {
+            "bottom": {
+              "description": "Bottom edge as a fraction of page height",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Bottom",
+              "type": "number"
+            },
+            "left": {
+              "description": "Left edge as a fraction of page width",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Left",
+              "type": "number"
+            },
+            "page": {
+              "description": "1-based page number",
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            },
+            "right": {
+              "description": "Right edge as a fraction of page width",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Right",
+              "type": "number"
+            },
+            "top": {
+              "description": "Top edge as a fraction of page height",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Top",
+              "type": "number"
+            }
+          },
+          "required": [
+            "page",
+            "left",
+            "top",
+            "right",
+            "bottom"
+          ],
+          "title": "PageRegion",
+          "type": "object"
+        }
+      },
+      "description": "Where a chunk came from in its source document: extraction method plus page regions.\n\nDirect text/code extraction has line spans only (``regions`` empty, pages ``None``).\nDocling extraction carries one region per contributing layout item.",
+      "properties": {
+        "extraction": {
+          "description": "How the source text was extracted",
+          "enum": [
+            "docling",
+            "direct"
+          ],
+          "title": "Extraction",
+          "type": "string"
+        },
+        "page_end": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Last cited page (1-based)",
+          "title": "Page End"
+        },
+        "page_start": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "First cited page (1-based)",
+          "title": "Page Start"
+        },
+        "regions": {
+          "description": "Layout regions the chunk text was taken from",
+          "items": {
+            "$ref": "#/$defs/PageRegion"
+          },
+          "title": "Regions",
+          "type": "array"
+        }
+      },
+      "required": [
+        "extraction"
+      ],
+      "title": "ChunkProvenance",
       "type": "object"
     },
     "ChunkSummariesBuildRequest": {
@@ -8693,6 +9455,12 @@
           "description": "Paths to exclude during indexing",
           "title": "Exclude Paths"
         },
+        "internal": {
+          "default": false,
+          "description": "True for a corpus the runtime registers and manages itself -- it carries a system_kind marker and indexes through its own path, so it has no operator-run index run. Today that is the chat Recall corpus and the two Codex session corpora. Operator surfaces that list corpora as work the operator is responsible for exclude these.",
+          "title": "Internal",
+          "type": "boolean"
+        },
         "keywords": {
           "anyOf": [
             {
@@ -9351,6 +10119,27 @@
           "description": "Estimated embedding cost (USD) when pricing data is available.",
           "title": "Embedding Cost"
         },
+        "figure_description_cost": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Ceiling on the vision-call cost (USD) of the latest run's figure descriptions, as that run recorded it; null when no run described a figure or its alias is unpriced.",
+          "title": "Figure Description Cost"
+        },
+        "figures_described": {
+          "default": 0,
+          "description": "Figures the latest indexing run described.",
+          "minimum": 0,
+          "title": "Figures Described",
+          "type": "integer"
+        },
         "semantic_kg_cost": {
           "anyOf": [
             {
@@ -9376,7 +10165,7 @@
             }
           ],
           "default": null,
-          "description": "Estimated total indexing cost (USD): embedding + semantic KG (when applicable).",
+          "description": "Estimated total indexing cost (USD): embedding + semantic KG + figure description (each when applicable); null when any applicable component has no known price.",
           "title": "Total Cost"
         },
         "total_tokens": {
@@ -9560,6 +10349,27 @@
               "description": "Estimated embedding cost (USD) when pricing data is available.",
               "title": "Embedding Cost"
             },
+            "figure_description_cost": {
+              "anyOf": [
+                {
+                  "minimum": 0.0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Ceiling on the vision-call cost (USD) of the latest run's figure descriptions, as that run recorded it; null when no run described a figure or its alias is unpriced.",
+              "title": "Figure Description Cost"
+            },
+            "figures_described": {
+              "default": 0,
+              "description": "Figures the latest indexing run described.",
+              "minimum": 0,
+              "title": "Figures Described",
+              "type": "integer"
+            },
             "semantic_kg_cost": {
               "anyOf": [
                 {
@@ -9585,7 +10395,7 @@
                 }
               ],
               "default": null,
-              "description": "Estimated total indexing cost (USD): embedding + semantic KG (when applicable).",
+              "description": "Estimated total indexing cost (USD): embedding + semantic KG + figure description (each when applicable); null when any applicable component has no known price.",
               "title": "Total Cost"
             },
             "total_tokens": {
@@ -9817,6 +10627,27 @@
               "description": "Estimated embedding cost (USD) when pricing data is available.",
               "title": "Embedding Cost"
             },
+            "figure_description_cost": {
+              "anyOf": [
+                {
+                  "minimum": 0.0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Ceiling on the vision-call cost (USD) of the latest run's figure descriptions, as that run recorded it; null when no run described a figure or its alias is unpriced.",
+              "title": "Figure Description Cost"
+            },
+            "figures_described": {
+              "default": 0,
+              "description": "Figures the latest indexing run described.",
+              "minimum": 0,
+              "title": "Figures Described",
+              "type": "integer"
+            },
             "semantic_kg_cost": {
               "anyOf": [
                 {
@@ -9842,7 +10673,7 @@
                 }
               ],
               "default": null,
-              "description": "Estimated total indexing cost (USD): embedding + semantic KG (when applicable).",
+              "description": "Estimated total indexing cost (USD): embedding + semantic KG + figure description (each when applicable); null when any applicable component has no known price.",
               "title": "Total Cost"
             },
             "total_tokens": {
@@ -10273,6 +11104,44 @@
           "title": "Details",
           "type": "array"
         },
+        "frontend_bundle_built_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "When the built frontend bundle was last written.",
+          "title": "Frontend Bundle Built At"
+        },
+        "frontend_bundle_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Repo-relative path of the built frontend bundle when one exists.",
+          "title": "Frontend Bundle Path"
+        },
+        "frontend_mode": {
+          "default": "absent",
+          "description": "How the frontend is served: a reachable Vite dev server, a built bundle on disk (the deployed topology, where a reverse proxy serves it), or neither.",
+          "enum": [
+            "dev_server",
+            "built_bundle",
+            "absent"
+          ],
+          "title": "Frontend Mode",
+          "type": "string"
+        },
         "frontend_port": {
           "description": "Port for dev frontend (Vite).",
           "maximum": 65535,
@@ -10603,6 +11472,691 @@
         }
       },
       "title": "DockerStatus",
+      "type": "object"
+    },
+    "DocumentNotCapturedDetail": {
+      "description": "Public error detail (HTTP 409): a rich document has no captured markdown to show.",
+      "properties": {
+        "code": {
+          "const": "document_not_captured",
+          "default": "document_not_captured",
+          "title": "Code",
+          "type": "string"
+        },
+        "corpus_id": {
+          "description": "Corpus the file belongs to",
+          "title": "Corpus Id",
+          "type": "string"
+        },
+        "file_path": {
+          "description": "Corpus-root-relative POSIX path",
+          "title": "File Path",
+          "type": "string"
+        },
+        "message": {
+          "description": "Stable, non-sensitive summary",
+          "title": "Message",
+          "type": "string"
+        },
+        "operator_hint": {
+          "description": "What the operator can do next",
+          "title": "Operator Hint",
+          "type": "string"
+        }
+      },
+      "required": [
+        "corpus_id",
+        "file_path",
+        "message",
+        "operator_hint"
+      ],
+      "title": "DocumentNotCapturedDetail",
+      "type": "object"
+    },
+    "DocumentNotCapturedResponse": {
+      "$defs": {
+        "DocumentNotCapturedDetail": {
+          "description": "Public error detail (HTTP 409): a rich document has no captured markdown to show.",
+          "properties": {
+            "code": {
+              "const": "document_not_captured",
+              "default": "document_not_captured",
+              "title": "Code",
+              "type": "string"
+            },
+            "corpus_id": {
+              "description": "Corpus the file belongs to",
+              "title": "Corpus Id",
+              "type": "string"
+            },
+            "file_path": {
+              "description": "Corpus-root-relative POSIX path",
+              "title": "File Path",
+              "type": "string"
+            },
+            "message": {
+              "description": "Stable, non-sensitive summary",
+              "title": "Message",
+              "type": "string"
+            },
+            "operator_hint": {
+              "description": "What the operator can do next",
+              "title": "Operator Hint",
+              "type": "string"
+            }
+          },
+          "required": [
+            "corpus_id",
+            "file_path",
+            "message",
+            "operator_hint"
+          ],
+          "title": "DocumentNotCapturedDetail",
+          "type": "object"
+        }
+      },
+      "description": "FastAPI response envelope for a not-captured rich document.",
+      "properties": {
+        "detail": {
+          "$ref": "#/$defs/DocumentNotCapturedDetail"
+        }
+      },
+      "required": [
+        "detail"
+      ],
+      "title": "DocumentNotCapturedResponse",
+      "type": "object"
+    },
+    "DocumentPdfView": {
+      "$defs": {
+        "PageSize": {
+          "description": "PDF page size in points (72 per inch).",
+          "properties": {
+            "height": {
+              "description": "Page height in points",
+              "exclusiveMinimum": 0.0,
+              "title": "Height",
+              "type": "number"
+            },
+            "width": {
+              "description": "Page width in points",
+              "exclusiveMinimum": 0.0,
+              "title": "Width",
+              "type": "number"
+            }
+          },
+          "required": [
+            "width",
+            "height"
+          ],
+          "title": "PageSize",
+          "type": "object"
+        }
+      },
+      "description": "PDF document: pages are rendered on demand through the page endpoint.",
+      "properties": {
+        "kind": {
+          "const": "pdf",
+          "default": "pdf",
+          "title": "Kind",
+          "type": "string"
+        },
+        "page_count": {
+          "description": "Number of pages",
+          "minimum": 1,
+          "title": "Page Count",
+          "type": "integer"
+        },
+        "page_sizes": {
+          "description": "Page sizes in points, index 0 = page 1",
+          "items": {
+            "$ref": "#/$defs/PageSize"
+          },
+          "title": "Page Sizes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "page_count",
+        "page_sizes"
+      ],
+      "title": "DocumentPdfView",
+      "type": "object"
+    },
+    "DocumentProvenanceCaptured": {
+      "description": "The file has a provenance record from indexing.",
+      "properties": {
+        "byte_size": {
+          "description": "File size at index time",
+          "minimum": 0,
+          "title": "Byte Size",
+          "type": "integer"
+        },
+        "extraction": {
+          "description": "How the file was extracted at index time",
+          "enum": [
+            "docling",
+            "direct"
+          ],
+          "title": "Extraction",
+          "type": "string"
+        },
+        "indexed_at": {
+          "description": "When the provenance record was written",
+          "format": "date-time",
+          "title": "Indexed At",
+          "type": "string"
+        },
+        "sha256": {
+          "description": "SHA-256 of the file at index time",
+          "maxLength": 64,
+          "minLength": 64,
+          "title": "Sha256",
+          "type": "string"
+        },
+        "stale": {
+          "description": "True when the file on disk no longer matches sha256",
+          "title": "Stale",
+          "type": "boolean"
+        },
+        "state": {
+          "const": "captured",
+          "default": "captured",
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "extraction",
+        "sha256",
+        "byte_size",
+        "indexed_at",
+        "stale"
+      ],
+      "title": "DocumentProvenanceCaptured",
+      "type": "object"
+    },
+    "DocumentProvenanceNotCaptured": {
+      "description": "The file was indexed before provenance capture existed; re-index to enable it.",
+      "properties": {
+        "message": {
+          "description": "Stable, non-sensitive summary",
+          "title": "Message",
+          "type": "string"
+        },
+        "operator_hint": {
+          "description": "What the operator can do next",
+          "title": "Operator Hint",
+          "type": "string"
+        },
+        "state": {
+          "const": "not_captured",
+          "default": "not_captured",
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "message",
+        "operator_hint"
+      ],
+      "title": "DocumentProvenanceNotCaptured",
+      "type": "object"
+    },
+    "DocumentRichView": {
+      "description": "Rich document (docx/pptx/xlsx/html) shown as the Docling markdown the chunks were cut from.",
+      "properties": {
+        "kind": {
+          "const": "rich",
+          "default": "rich",
+          "title": "Kind",
+          "type": "string"
+        },
+        "markdown": {
+          "description": "Docling markdown export captured at index time",
+          "title": "Markdown",
+          "type": "string"
+        }
+      },
+      "required": [
+        "markdown"
+      ],
+      "title": "DocumentRichView",
+      "type": "object"
+    },
+    "DocumentTextView": {
+      "description": "Plain text/code document content for the viewer.",
+      "properties": {
+        "kind": {
+          "const": "text",
+          "default": "text",
+          "title": "Kind",
+          "type": "string"
+        },
+        "line_count": {
+          "description": "Number of lines in text",
+          "minimum": 0,
+          "title": "Line Count",
+          "type": "integer"
+        },
+        "text": {
+          "description": "Full file text decoded exactly as the indexer decoded it",
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "line_count"
+      ],
+      "title": "DocumentTextView",
+      "type": "object"
+    },
+    "DocumentTooLargeDetail": {
+      "description": "Public error detail (HTTP 413): a text document exceeds the viewer size limit.",
+      "properties": {
+        "byte_size": {
+          "description": "Current file size on disk",
+          "minimum": 0,
+          "title": "Byte Size",
+          "type": "integer"
+        },
+        "code": {
+          "const": "document_too_large",
+          "default": "document_too_large",
+          "title": "Code",
+          "type": "string"
+        },
+        "corpus_id": {
+          "description": "Corpus the file belongs to",
+          "title": "Corpus Id",
+          "type": "string"
+        },
+        "file_path": {
+          "description": "Corpus-root-relative POSIX path",
+          "title": "File Path",
+          "type": "string"
+        },
+        "max_text_bytes": {
+          "description": "Configured document_viewer.max_text_bytes",
+          "minimum": 0,
+          "title": "Max Text Bytes",
+          "type": "integer"
+        },
+        "message": {
+          "description": "Stable, non-sensitive summary",
+          "title": "Message",
+          "type": "string"
+        },
+        "operator_hint": {
+          "description": "What the operator can do next",
+          "title": "Operator Hint",
+          "type": "string"
+        }
+      },
+      "required": [
+        "corpus_id",
+        "file_path",
+        "byte_size",
+        "max_text_bytes",
+        "message",
+        "operator_hint"
+      ],
+      "title": "DocumentTooLargeDetail",
+      "type": "object"
+    },
+    "DocumentTooLargeResponse": {
+      "$defs": {
+        "DocumentTooLargeDetail": {
+          "description": "Public error detail (HTTP 413): a text document exceeds the viewer size limit.",
+          "properties": {
+            "byte_size": {
+              "description": "Current file size on disk",
+              "minimum": 0,
+              "title": "Byte Size",
+              "type": "integer"
+            },
+            "code": {
+              "const": "document_too_large",
+              "default": "document_too_large",
+              "title": "Code",
+              "type": "string"
+            },
+            "corpus_id": {
+              "description": "Corpus the file belongs to",
+              "title": "Corpus Id",
+              "type": "string"
+            },
+            "file_path": {
+              "description": "Corpus-root-relative POSIX path",
+              "title": "File Path",
+              "type": "string"
+            },
+            "max_text_bytes": {
+              "description": "Configured document_viewer.max_text_bytes",
+              "minimum": 0,
+              "title": "Max Text Bytes",
+              "type": "integer"
+            },
+            "message": {
+              "description": "Stable, non-sensitive summary",
+              "title": "Message",
+              "type": "string"
+            },
+            "operator_hint": {
+              "description": "What the operator can do next",
+              "title": "Operator Hint",
+              "type": "string"
+            }
+          },
+          "required": [
+            "corpus_id",
+            "file_path",
+            "byte_size",
+            "max_text_bytes",
+            "message",
+            "operator_hint"
+          ],
+          "title": "DocumentTooLargeDetail",
+          "type": "object"
+        }
+      },
+      "description": "FastAPI response envelope for an over-limit text document.",
+      "properties": {
+        "detail": {
+          "$ref": "#/$defs/DocumentTooLargeDetail"
+        }
+      },
+      "required": [
+        "detail"
+      ],
+      "title": "DocumentTooLargeResponse",
+      "type": "object"
+    },
+    "DocumentView": {
+      "$defs": {
+        "DocumentPdfView": {
+          "description": "PDF document: pages are rendered on demand through the page endpoint.",
+          "properties": {
+            "kind": {
+              "const": "pdf",
+              "default": "pdf",
+              "title": "Kind",
+              "type": "string"
+            },
+            "page_count": {
+              "description": "Number of pages",
+              "minimum": 1,
+              "title": "Page Count",
+              "type": "integer"
+            },
+            "page_sizes": {
+              "description": "Page sizes in points, index 0 = page 1",
+              "items": {
+                "$ref": "#/$defs/PageSize"
+              },
+              "title": "Page Sizes",
+              "type": "array"
+            }
+          },
+          "required": [
+            "page_count",
+            "page_sizes"
+          ],
+          "title": "DocumentPdfView",
+          "type": "object"
+        },
+        "DocumentProvenanceCaptured": {
+          "description": "The file has a provenance record from indexing.",
+          "properties": {
+            "byte_size": {
+              "description": "File size at index time",
+              "minimum": 0,
+              "title": "Byte Size",
+              "type": "integer"
+            },
+            "extraction": {
+              "description": "How the file was extracted at index time",
+              "enum": [
+                "docling",
+                "direct"
+              ],
+              "title": "Extraction",
+              "type": "string"
+            },
+            "indexed_at": {
+              "description": "When the provenance record was written",
+              "format": "date-time",
+              "title": "Indexed At",
+              "type": "string"
+            },
+            "sha256": {
+              "description": "SHA-256 of the file at index time",
+              "maxLength": 64,
+              "minLength": 64,
+              "title": "Sha256",
+              "type": "string"
+            },
+            "stale": {
+              "description": "True when the file on disk no longer matches sha256",
+              "title": "Stale",
+              "type": "boolean"
+            },
+            "state": {
+              "const": "captured",
+              "default": "captured",
+              "title": "State",
+              "type": "string"
+            }
+          },
+          "required": [
+            "extraction",
+            "sha256",
+            "byte_size",
+            "indexed_at",
+            "stale"
+          ],
+          "title": "DocumentProvenanceCaptured",
+          "type": "object"
+        },
+        "DocumentProvenanceNotCaptured": {
+          "description": "The file was indexed before provenance capture existed; re-index to enable it.",
+          "properties": {
+            "message": {
+              "description": "Stable, non-sensitive summary",
+              "title": "Message",
+              "type": "string"
+            },
+            "operator_hint": {
+              "description": "What the operator can do next",
+              "title": "Operator Hint",
+              "type": "string"
+            },
+            "state": {
+              "const": "not_captured",
+              "default": "not_captured",
+              "title": "State",
+              "type": "string"
+            }
+          },
+          "required": [
+            "message",
+            "operator_hint"
+          ],
+          "title": "DocumentProvenanceNotCaptured",
+          "type": "object"
+        },
+        "DocumentRichView": {
+          "description": "Rich document (docx/pptx/xlsx/html) shown as the Docling markdown the chunks were cut from.",
+          "properties": {
+            "kind": {
+              "const": "rich",
+              "default": "rich",
+              "title": "Kind",
+              "type": "string"
+            },
+            "markdown": {
+              "description": "Docling markdown export captured at index time",
+              "title": "Markdown",
+              "type": "string"
+            }
+          },
+          "required": [
+            "markdown"
+          ],
+          "title": "DocumentRichView",
+          "type": "object"
+        },
+        "DocumentTextView": {
+          "description": "Plain text/code document content for the viewer.",
+          "properties": {
+            "kind": {
+              "const": "text",
+              "default": "text",
+              "title": "Kind",
+              "type": "string"
+            },
+            "line_count": {
+              "description": "Number of lines in text",
+              "minimum": 0,
+              "title": "Line Count",
+              "type": "integer"
+            },
+            "text": {
+              "description": "Full file text decoded exactly as the indexer decoded it",
+              "title": "Text",
+              "type": "string"
+            }
+          },
+          "required": [
+            "text",
+            "line_count"
+          ],
+          "title": "DocumentTextView",
+          "type": "object"
+        },
+        "PageSize": {
+          "description": "PDF page size in points (72 per inch).",
+          "properties": {
+            "height": {
+              "description": "Page height in points",
+              "exclusiveMinimum": 0.0,
+              "title": "Height",
+              "type": "number"
+            },
+            "width": {
+              "description": "Page width in points",
+              "exclusiveMinimum": 0.0,
+              "title": "Width",
+              "type": "number"
+            }
+          },
+          "required": [
+            "width",
+            "height"
+          ],
+          "title": "PageSize",
+          "type": "object"
+        }
+      },
+      "description": "Source document as served to the evidence viewer.",
+      "properties": {
+        "byte_size": {
+          "description": "Current file size on disk",
+          "minimum": 0,
+          "title": "Byte Size",
+          "type": "integer"
+        },
+        "content": {
+          "discriminator": {
+            "mapping": {
+              "pdf": "#/$defs/DocumentPdfView",
+              "rich": "#/$defs/DocumentRichView",
+              "text": "#/$defs/DocumentTextView"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/DocumentTextView"
+            },
+            {
+              "$ref": "#/$defs/DocumentPdfView"
+            },
+            {
+              "$ref": "#/$defs/DocumentRichView"
+            }
+          ],
+          "title": "Content"
+        },
+        "corpus_id": {
+          "description": "Corpus the file belongs to",
+          "title": "Corpus Id",
+          "type": "string"
+        },
+        "file_path": {
+          "description": "Corpus-root-relative POSIX path",
+          "title": "File Path",
+          "type": "string"
+        },
+        "provenance": {
+          "discriminator": {
+            "mapping": {
+              "captured": "#/$defs/DocumentProvenanceCaptured",
+              "not_captured": "#/$defs/DocumentProvenanceNotCaptured"
+            },
+            "propertyName": "state"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/DocumentProvenanceCaptured"
+            },
+            {
+              "$ref": "#/$defs/DocumentProvenanceNotCaptured"
+            }
+          ],
+          "title": "Provenance"
+        }
+      },
+      "required": [
+        "corpus_id",
+        "file_path",
+        "byte_size",
+        "content",
+        "provenance"
+      ],
+      "title": "DocumentView",
+      "type": "object"
+    },
+    "DocumentViewerConfig": {
+      "description": "Source document evidence viewer: how cited files are rendered back to the user.",
+      "properties": {
+        "max_text_bytes": {
+          "default": 5000000,
+          "description": "Largest text/code file the viewer will serve in full",
+          "maximum": 50000000,
+          "minimum": 65536,
+          "title": "Max Text Bytes",
+          "type": "integer"
+        },
+        "page_render_scale": {
+          "default": 2.0,
+          "description": "PDF page raster scale for the viewer (1.0 = 72 dpi; 2.0 = 144 dpi)",
+          "maximum": 4.0,
+          "minimum": 1.0,
+          "title": "Page Render Scale",
+          "type": "number"
+        },
+        "thumbnail_render_scale": {
+          "default": 0.5,
+          "description": "PDF page raster scale for citation thumbnails in chat",
+          "maximum": 1.0,
+          "minimum": 0.25,
+          "title": "Thumbnail Render Scale",
+          "type": "number"
+        }
+      },
+      "title": "DocumentViewerConfig",
       "type": "object"
     },
     "EmbeddingConfig": {
@@ -13221,6 +14775,155 @@
       "title": "FeedbackResponse",
       "type": "object"
     },
+    "FigureAnnotation": {
+      "description": "Structured description of one figure, produced by the vision alias at index time.\n\nPersisted in ``Chunk.metadata[\"figure\"]`` so callouts and part numbers are searchable\nverbatim and a later schematic graph can consume ``components``/``connections``.",
+      "properties": {
+        "components": {
+          "description": "Named parts or entities depicted",
+          "items": {
+            "type": "string"
+          },
+          "title": "Components",
+          "type": "array"
+        },
+        "connections": {
+          "description": "'A -> B' relations stated or drawn",
+          "items": {
+            "type": "string"
+          },
+          "title": "Connections",
+          "type": "array"
+        },
+        "kind": {
+          "default": "other",
+          "description": "Figure kind as judged by the vision model",
+          "enum": [
+            "diagram",
+            "chart",
+            "schematic",
+            "photo",
+            "table",
+            "drawing",
+            "other"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "labels": {
+          "description": "Legible callouts, axis labels, legend entries, part numbers",
+          "items": {
+            "type": "string"
+          },
+          "title": "Labels",
+          "type": "array"
+        },
+        "references": {
+          "description": "Sheet/figure/table/section cross-references printed on the figure",
+          "items": {
+            "type": "string"
+          },
+          "title": "References",
+          "type": "array"
+        },
+        "summary": {
+          "default": "",
+          "description": "Dense prose description; this is what gets embedded",
+          "title": "Summary",
+          "type": "string"
+        },
+        "values": {
+          "description": "Numbers with units as printed",
+          "items": {
+            "type": "string"
+          },
+          "title": "Values",
+          "type": "array"
+        }
+      },
+      "title": "FigureAnnotation",
+      "type": "object"
+    },
+    "FigureRouteConflictDetail": {
+      "description": "Public error detail (HTTP 409) when indexing.figures.vision_model cannot be used.",
+      "properties": {
+        "alias": {
+          "description": "The configured indexing.figures.vision_model alias",
+          "title": "Alias",
+          "type": "string"
+        },
+        "code": {
+          "const": "figure_vision_alias",
+          "default": "figure_vision_alias",
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "description": "Stable, non-sensitive summary",
+          "title": "Message",
+          "type": "string"
+        },
+        "operator_hint": {
+          "description": "What the operator can do next",
+          "title": "Operator Hint",
+          "type": "string"
+        }
+      },
+      "required": [
+        "alias",
+        "message",
+        "operator_hint"
+      ],
+      "title": "FigureRouteConflictDetail",
+      "type": "object"
+    },
+    "FigureRouteConflictResponse": {
+      "$defs": {
+        "FigureRouteConflictDetail": {
+          "description": "Public error detail (HTTP 409) when indexing.figures.vision_model cannot be used.",
+          "properties": {
+            "alias": {
+              "description": "The configured indexing.figures.vision_model alias",
+              "title": "Alias",
+              "type": "string"
+            },
+            "code": {
+              "const": "figure_vision_alias",
+              "default": "figure_vision_alias",
+              "title": "Code",
+              "type": "string"
+            },
+            "message": {
+              "description": "Stable, non-sensitive summary",
+              "title": "Message",
+              "type": "string"
+            },
+            "operator_hint": {
+              "description": "What the operator can do next",
+              "title": "Operator Hint",
+              "type": "string"
+            }
+          },
+          "required": [
+            "alias",
+            "message",
+            "operator_hint"
+          ],
+          "title": "FigureRouteConflictDetail",
+          "type": "object"
+        }
+      },
+      "description": "FastAPI response envelope for an unusable figure vision alias (HTTP 409).",
+      "properties": {
+        "detail": {
+          "$ref": "#/$defs/FigureRouteConflictDetail"
+        }
+      },
+      "required": [
+        "detail"
+      ],
+      "title": "FigureRouteConflictResponse",
+      "type": "object"
+    },
     "FusionConfig": {
       "description": "Configuration for tri-brid fusion of vector + sparse + graph results.",
       "properties": {
@@ -13295,7 +14998,7 @@
         "gen_max_tokens": {
           "default": 512,
           "description": "Max tokens for generation",
-          "maximum": 8192,
+          "maximum": 16000,
           "minimum": 100,
           "title": "Gen Max Tokens",
           "type": "integer"
@@ -13737,6 +15440,12 @@
           "title": "Ast Inherits Weight",
           "type": "number"
         },
+        "build_code_graph": {
+          "default": false,
+          "description": "Build an AST code graph during indexing: module, class and function entities with contains/inherits/imports/calls relationships (tree-sitter; Python, TypeScript, JavaScript), each linked to the chunk that defines it",
+          "title": "Build Code Graph",
+          "type": "boolean"
+        },
         "build_lexical_graph": {
           "default": true,
           "description": "Build lexical graph (Document/Chunk nodes + NEXT_CHUNK relationships)",
@@ -14088,7 +15797,7 @@
           "type": "object"
         }
       },
-      "description": "Neighbor subgraph centered on a single entity.",
+      "description": "A graph slice: entities plus the relationships induced among exactly those entities.\n\nUsed for an entity neighborhood, a community, and the whole-corpus/search view.\n``total_matched`` is what the query found before ``limit`` was applied, so the UI can\nsay \"showing 200 of 5,179\" instead of an undenominated \"200 shown\".",
       "properties": {
         "entities": {
           "description": "Entities in the neighborhood (includes the center entity)",
@@ -14098,6 +15807,13 @@
           "title": "Entities",
           "type": "array"
         },
+        "limit": {
+          "default": 0,
+          "description": "Cap applied to `entities`; `len(entities) <= limit` on every producer",
+          "minimum": 0,
+          "title": "Limit",
+          "type": "integer"
+        },
         "relationships": {
           "description": "Relationships between returned entities",
           "items": {
@@ -14105,6 +15821,13 @@
           },
           "title": "Relationships",
           "type": "array"
+        },
+        "total_matched": {
+          "default": 0,
+          "description": "Entities the request matched before `limit` was applied: the corpus or search match count, the reachable neighbourhood size including the centre, or the community's member count. Never capped by `limit`.",
+          "minimum": 0,
+          "title": "Total Matched",
+          "type": "integer"
         }
       },
       "required": [
@@ -14700,7 +16423,7 @@
       "type": "object"
     },
     "IndexEstimate": {
-      "description": "Best-effort estimate for indexing cost/time before running the indexer.\n\nNotes:\n- Token count is an approximation (byte-based heuristic).\n- Time is an intentionally rough range (depends on machine, provider latency,\n  GraphRAG extraction scope, and local hardware throughput).",
+      "description": "Best-effort estimate for indexing cost/time before running the indexer.\n\nNotes:\n- Tokens and chunks are measured: a sample of the corpus is extracted and run through the\n  configured chunker, then scaled by byte share. ``sampled_files``/``sampled_bytes`` say\n  how much was measured and the ``*_low``/``*_high`` bounds carry the error band.\n- Time is an intentionally rough range (depends on machine, provider latency,\n  GraphRAG extraction scope, and local hardware throughput).",
       "properties": {
         "assumptions": {
           "description": "Human-readable assumptions used for the estimate",
@@ -14709,6 +16432,12 @@
           },
           "title": "Assumptions",
           "type": "array"
+        },
+        "elapsed_seconds": {
+          "description": "Wall-clock seconds this estimate spent sampling. The first call in a fresh process pays for loading the tokenizer, so the UI can say how long the measurement took.",
+          "minimum": 0.0,
+          "title": "Elapsed Seconds",
+          "type": "number"
         },
         "embedding_backend": {
           "description": "Embedding backend used for indexing (deterministic has no external cost)",
@@ -14743,6 +16472,105 @@
           "title": "Embedding Provider",
           "type": "string"
         },
+        "estimate_relative_error": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Half-width of the token/chunk error band as a fraction of the point estimate (model error plus a sampling term). None unless status is 'ready'.",
+          "title": "Estimate Relative Error"
+        },
+        "estimated_chunks_high": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "High end of the chunk band; None unless status is 'ready'.",
+          "title": "Estimated Chunks High"
+        },
+        "estimated_chunks_low": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Low end of the chunk band; None unless status is 'ready'.",
+          "title": "Estimated Chunks Low"
+        },
+        "estimated_figures": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Figures expected to be described (heuristic: PDF pages x 0.4, rounded; omitted entirely when it rounds to zero), when indexing.figures is enabled",
+          "title": "Estimated Figures"
+        },
+        "estimated_seconds": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Point estimate for total indexing time (seconds). The phase fields below plus estimated_seconds_overhead sum to exactly this; low/high are it scaled.",
+          "title": "Estimated Seconds"
+        },
+        "estimated_seconds_embedding": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Estimated embedding phase time (seconds), stated rather than derived by subtraction.",
+          "title": "Estimated Seconds Embedding"
+        },
+        "estimated_seconds_figures": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Estimated figure-description phase time (seconds) when indexing.figures is enabled: the estimated figure count at ~20 s per vision call, divided by indexing.figures.concurrency.",
+          "title": "Estimated Seconds Figures"
+        },
         "estimated_seconds_high": {
           "anyOf": [
             {
@@ -14771,6 +16599,20 @@
           "description": "Very rough low-end estimate for total indexing time (seconds)",
           "title": "Estimated Seconds Low"
         },
+        "estimated_seconds_overhead": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Fixed startup/teardown time (seconds) included in the point estimate.",
+          "title": "Estimated Seconds Overhead"
+        },
         "estimated_seconds_semantic_kg": {
           "anyOf": [
             {
@@ -14785,17 +16627,75 @@
           "description": "Estimated GraphRAG semantic phase time (seconds) when enabled.",
           "title": "Estimated Seconds Semantic Kg"
         },
+        "estimated_tokens_high": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "High end of the token band; None unless status is 'ready'.",
+          "title": "Estimated Tokens High"
+        },
+        "estimated_tokens_low": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Low end of the token band; None unless status is 'ready'.",
+          "title": "Estimated Tokens Low"
+        },
         "estimated_total_chunks": {
-          "description": "Estimated number of chunks (heuristic)",
-          "minimum": 0,
-          "title": "Estimated Total Chunks",
-          "type": "integer"
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Estimated chunks; None unless status is 'ready'.",
+          "title": "Estimated Total Chunks"
         },
         "estimated_total_tokens": {
-          "description": "Estimated total tokens to be chunked/embedded",
-          "minimum": 0,
-          "title": "Estimated Total Tokens",
-          "type": "integer"
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Estimated total tokens. None whenever status is not 'ready': nothing was measured, and a consumer that would have rendered a zero fails to compile instead.",
+          "title": "Estimated Total Tokens"
+        },
+        "figure_description_cost_usd": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Estimated vision-call cost (USD) to describe figures, from catalog pricing for indexing.figures.vision_model",
+          "title": "Figure Description Cost Usd"
         },
         "repo_id": {
           "description": "Corpus identifier",
@@ -14806,6 +16706,34 @@
           "description": "Resolved path on disk used for the estimate",
           "title": "Repo Path",
           "type": "string"
+        },
+        "sampled_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Bytes measured; None unless status is 'ready'.",
+          "title": "Sampled Bytes"
+        },
+        "sampled_files": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Files measured; None unless status is 'ready'.",
+          "title": "Sampled Files"
         },
         "semantic_kg_cost_usd": {
           "anyOf": [
@@ -14832,6 +16760,17 @@
           "title": "Skipped Large Files",
           "type": "integer"
         },
+        "status": {
+          "default": "ready",
+          "description": "Only 'ready' carries numbers. 'warming' means the estimator's tokenizer is still loading; 'insufficient_sample' means it measured too little of the corpus to extrapolate honestly. In BOTH non-ready states every count below is zero -- not a small estimate, no estimate -- and the client must ask again rather than show them or open a confirmation on them.",
+          "enum": [
+            "ready",
+            "warming",
+            "insufficient_sample"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
         "total_cost_usd": {
           "anyOf": [
             {
@@ -14843,7 +16782,7 @@
             }
           ],
           "default": null,
-          "description": "Estimated total indexing cost (USD): embedding + semantic KG (when applicable).",
+          "description": "Estimated total indexing cost (USD): embedding + semantic KG + figure description (each when applicable).",
           "title": "Total Cost Usd"
         },
         "total_files": {
@@ -14857,6 +16796,20 @@
           "minimum": 0,
           "title": "Total Size Bytes",
           "type": "integer"
+        },
+        "warmup_seconds_remaining": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Rough seconds until the estimator is ready, when status is 'warming'.",
+          "title": "Warmup Seconds Remaining"
         }
       },
       "required": [
@@ -14865,8 +16818,7 @@
         "total_files",
         "total_size_bytes",
         "skipped_large_files",
-        "estimated_total_tokens",
-        "estimated_total_chunks",
+        "elapsed_seconds",
         "embedding_backend",
         "embedding_provider",
         "embedding_model",
@@ -14970,10 +16922,34 @@
           "title": "Owner",
           "type": "string"
         },
+        "phase": {
+          "default": "building",
+          "description": "Fence phase of the holding run: building the index, or retiring the previous generation",
+          "enum": [
+            "building",
+            "retiring"
+          ],
+          "title": "Phase",
+          "type": "string"
+        },
         "run_id": {
           "description": "Index run that holds the fence",
           "title": "Run Id",
           "type": "string"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "What the holding run last reported doing (its most recent log/progress run event), when it has logged one",
+          "title": "Stage"
         },
         "started_at": {
           "description": "When the holding run started",
@@ -15064,10 +17040,34 @@
               "title": "Owner",
               "type": "string"
             },
+            "phase": {
+              "default": "building",
+              "description": "Fence phase of the holding run: building the index, or retiring the previous generation",
+              "enum": [
+                "building",
+                "retiring"
+              ],
+              "title": "Phase",
+              "type": "string"
+            },
             "run_id": {
               "description": "Index run that holds the fence",
               "title": "Run Id",
               "type": "string"
+            },
+            "stage": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "What the holding run last reported doing (its most recent log/progress run event), when it has logged one",
+              "title": "Stage"
             },
             "started_at": {
               "description": "When the holding run started",
@@ -15191,6 +17191,126 @@
       "title": "IndexRunEvent",
       "type": "object"
     },
+    "IndexRunEventPage": {
+      "$defs": {
+        "IndexRunEvent": {
+          "description": "Persisted index terminal event for replay.",
+          "properties": {
+            "current_file": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Current file when present",
+              "title": "Current File"
+            },
+            "message": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Human-readable message",
+              "title": "Message"
+            },
+            "meta": {
+              "additionalProperties": true,
+              "description": "Additional event payload",
+              "title": "Meta",
+              "type": "object"
+            },
+            "percent": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Progress percentage when present",
+              "title": "Percent"
+            },
+            "run_id": {
+              "description": "Run identifier",
+              "title": "Run Id",
+              "type": "string"
+            },
+            "ts": {
+              "description": "Event timestamp (UTC)",
+              "format": "date-time",
+              "title": "Ts",
+              "type": "string"
+            },
+            "type": {
+              "description": "Event type (log/progress/warning/error/complete/cancelled)",
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          "required": [
+            "run_id",
+            "ts",
+            "type"
+          ],
+          "title": "IndexRunEvent",
+          "type": "object"
+        }
+      },
+      "description": "One page of a run's event log, carrying the total so a cap is never shown as a fact.\n\nThe run header used to print `len(events)` as \"500 replayed events\" for a corpus whose log\nheld far more -- 500 being the limit the UI itself asked for. The page states how many\nevents the run actually recorded and where this slice starts, so the reader can tell a\ncomplete log from a truncated one.",
+      "properties": {
+        "events": {
+          "description": "The most recent events, oldest first",
+          "items": {
+            "$ref": "#/$defs/IndexRunEvent"
+          },
+          "title": "Events",
+          "type": "array"
+        },
+        "first_index": {
+          "description": "0-based position of events[0] within the run's full log",
+          "minimum": 0,
+          "title": "First Index",
+          "type": "integer"
+        },
+        "repo_id": {
+          "description": "Corpus identifier",
+          "title": "Repo Id",
+          "type": "string"
+        },
+        "run_id": {
+          "description": "Run identifier",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "total": {
+          "description": "Events this run recorded in total",
+          "minimum": 0,
+          "title": "Total",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "repo_id",
+        "run_id",
+        "total",
+        "first_index"
+      ],
+      "title": "IndexRunEventPage",
+      "type": "object"
+    },
     "IndexRunSummary": {
       "description": "Persisted indexing run summary for replay/status truthfulness.",
       "properties": {
@@ -15260,6 +17380,41 @@
           "default": null,
           "description": "Error message when status='error'",
           "title": "Error"
+        },
+        "figure_description_cost_usd": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Ceiling on the vision-call cost (USD) of this run's figure descriptions, from catalog pricing for the run's indexing.figures.vision_model charged over the full max_completion_tokens budget; null when nothing was described or the alias is unpriced",
+          "title": "Figure Description Cost Usd"
+        },
+        "figures_described": {
+          "default": 0,
+          "description": "Figures this run described with the vision alias",
+          "minimum": 0,
+          "title": "Figures Described",
+          "type": "integer"
+        },
+        "figures_failed": {
+          "default": 0,
+          "description": "Figures this run sent for description that came back empty or errored",
+          "minimum": 0,
+          "title": "Figures Failed",
+          "type": "integer"
+        },
+        "figures_undescribed": {
+          "default": 0,
+          "description": "Figures this run left undescribed (filtered by class, area, or describe=false)",
+          "minimum": 0,
+          "title": "Figures Undescribed",
+          "type": "integer"
         },
         "progress": {
           "default": 0.0,
@@ -15490,7 +17645,199 @@
       "title": "IndexStatus",
       "type": "object"
     },
+    "IndexedDocumentRecord": {
+      "description": "Persistence boundary for the ``documents`` table (not a frontend wire type).",
+      "properties": {
+        "byte_size": {
+          "description": "File size at index time",
+          "minimum": 0,
+          "title": "Byte Size",
+          "type": "integer"
+        },
+        "extraction": {
+          "description": "How the file was extracted",
+          "enum": [
+            "docling",
+            "direct"
+          ],
+          "title": "Extraction",
+          "type": "string"
+        },
+        "file_path": {
+          "description": "Corpus-root-relative POSIX path",
+          "title": "File Path",
+          "type": "string"
+        },
+        "indexed_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Set by the database on write",
+          "title": "Indexed At"
+        },
+        "kind": {
+          "description": "Viewer content kind",
+          "enum": [
+            "text",
+            "pdf",
+            "rich"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "markdown": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Docling markdown export; stored for rich kinds only",
+          "title": "Markdown"
+        },
+        "sha256": {
+          "description": "SHA-256 of the file at index time",
+          "maxLength": 64,
+          "minLength": 64,
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file_path",
+        "kind",
+        "extraction",
+        "sha256",
+        "byte_size"
+      ],
+      "title": "IndexedDocumentRecord",
+      "type": "object"
+    },
     "IndexingConfig": {
+      "$defs": {
+        "IndexingEstimateConfig": {
+          "description": "Floors under the pre-run estimate's sample, so it refuses to guess rather than guess wrong.\n\nThe estimate is the consent gate: an operator approves a run from the numbers in it. One cold\nrun measured 8 bytes of 8.5 MB and reported 15,437 tokens for a 3,531,477-token corpus, so\nbelow these floors the endpoint returns no point estimate at all.\n\nNeither floor is a share of bytes. Sampling 1.31% of a corpus of 2,000 similar files gives an\naccurate estimate, and any byte floor strict enough to catch the cold case would refuse every\nformat group of more than a few hundred files. What actually distinguishes the two is whether\na group was measured at all, and whether the measured spread leaves the band meaningless.",
+          "properties": {
+            "max_relative_error": {
+              "default": 0.9,
+              "description": "Widest error band that may still be published as a point estimate. The band is computed from the measured spread of tokens-per-byte, so it saturates exactly when the sample says nothing about the corpus -- which is the honest signal, unlike a share-of-bytes floor that would refuse 2,000 similar small files whose estimate is accurate.",
+              "exclusiveMinimum": 0.0,
+              "maximum": 1.0,
+              "title": "Max Relative Error",
+              "type": "number"
+            },
+            "min_files_per_format": {
+              "default": 1,
+              "description": "Files that must be measured in every format group present. A group that measured nothing contributes neither tokens, chunks, nor its one-chunk-per-file floor, so the corpus total would silently omit it.",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Min Files Per Format",
+              "type": "integer"
+            }
+          },
+          "title": "IndexingEstimateConfig",
+          "type": "object"
+        },
+        "IndexingFiguresConfig": {
+          "description": "Figure/chart/drawing description during indexing (Docling picture enrichment via the gateway).",
+          "properties": {
+            "classify": {
+              "default": true,
+              "description": "Run Docling's local figure classifier (chart, diagram, logo, photo) before describing",
+              "title": "Classify",
+              "type": "boolean"
+            },
+            "concurrency": {
+              "default": 4,
+              "description": "Parallel vision calls while converting one document",
+              "maximum": 16,
+              "minimum": 1,
+              "title": "Concurrency",
+              "type": "integer"
+            },
+            "describe": {
+              "default": true,
+              "description": "Send each figure to the vision alias for a structured description",
+              "title": "Describe",
+              "type": "boolean"
+            },
+            "enabled": {
+              "default": false,
+              "description": "Describe and classify figures inside Docling-converted PDFs so they become retrievable chunks",
+              "title": "Enabled",
+              "type": "boolean"
+            },
+            "images_scale": {
+              "default": 2.0,
+              "description": "Docling raster scale for figure crops (2.0 is about 144 DPI)",
+              "maximum": 4.0,
+              "minimum": 1.0,
+              "title": "Images Scale",
+              "type": "number"
+            },
+            "max_completion_tokens": {
+              "default": 2500,
+              "description": "Output token budget per figure description; includes any reasoning tokens a reasoning model spends before the JSON reply",
+              "maximum": 8000,
+              "minimum": 64,
+              "title": "Max Completion Tokens",
+              "type": "integer"
+            },
+            "min_area_fraction": {
+              "default": 0.02,
+              "description": "Skip figures smaller than this fraction of the page area (icons, logos)",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Min Area Fraction",
+              "type": "number"
+            },
+            "prompt_profile": {
+              "default": "technical_figure",
+              "description": "Prompt template for figure descriptions: technical figures or engineering schematics",
+              "enum": [
+                "technical_figure",
+                "schematic"
+              ],
+              "title": "Prompt Profile",
+              "type": "string"
+            },
+            "skip_classes": {
+              "description": "Classifier classes that are never sent for description",
+              "items": {
+                "type": "string"
+              },
+              "title": "Skip Classes",
+              "type": "array"
+            },
+            "timeout_s": {
+              "default": 90,
+              "description": "Per-figure vision call timeout in seconds",
+              "maximum": 600,
+              "minimum": 5,
+              "title": "Timeout S",
+              "type": "integer"
+            },
+            "vision_model": {
+              "default": "z-ai.glm-5.3-flash",
+              "description": "Gateway alias used to describe figures; must be vision-capable in the model catalog",
+              "title": "Vision Model",
+              "type": "string"
+            }
+          },
+          "title": "IndexingFiguresConfig",
+          "type": "object"
+        }
+      },
       "description": "Indexing and vector storage configuration.",
       "properties": {
         "bm25_stemmer_lang": {
@@ -15506,6 +17853,9 @@
           "title": "Bm25 Tokenizer",
           "type": "string"
         },
+        "estimate": {
+          "$ref": "#/$defs/IndexingEstimateConfig"
+        },
         "estimated_tokens_per_second_local": {
           "anyOf": [
             {
@@ -15520,6 +17870,9 @@
           "default": null,
           "description": "Optional local embedding throughput override for index-time estimates (tokens/sec).",
           "title": "Estimated Tokens Per Second Local"
+        },
+        "figures": {
+          "$ref": "#/$defs/IndexingFiguresConfig"
         },
         "generation_retention_seconds": {
           "default": 600,
@@ -15635,6 +17988,118 @@
         }
       },
       "title": "IndexingConfig",
+      "type": "object"
+    },
+    "IndexingEstimateConfig": {
+      "description": "Floors under the pre-run estimate's sample, so it refuses to guess rather than guess wrong.\n\nThe estimate is the consent gate: an operator approves a run from the numbers in it. One cold\nrun measured 8 bytes of 8.5 MB and reported 15,437 tokens for a 3,531,477-token corpus, so\nbelow these floors the endpoint returns no point estimate at all.\n\nNeither floor is a share of bytes. Sampling 1.31% of a corpus of 2,000 similar files gives an\naccurate estimate, and any byte floor strict enough to catch the cold case would refuse every\nformat group of more than a few hundred files. What actually distinguishes the two is whether\na group was measured at all, and whether the measured spread leaves the band meaningless.",
+      "properties": {
+        "max_relative_error": {
+          "default": 0.9,
+          "description": "Widest error band that may still be published as a point estimate. The band is computed from the measured spread of tokens-per-byte, so it saturates exactly when the sample says nothing about the corpus -- which is the honest signal, unlike a share-of-bytes floor that would refuse 2,000 similar small files whose estimate is accurate.",
+          "exclusiveMinimum": 0.0,
+          "maximum": 1.0,
+          "title": "Max Relative Error",
+          "type": "number"
+        },
+        "min_files_per_format": {
+          "default": 1,
+          "description": "Files that must be measured in every format group present. A group that measured nothing contributes neither tokens, chunks, nor its one-chunk-per-file floor, so the corpus total would silently omit it.",
+          "maximum": 1000,
+          "minimum": 1,
+          "title": "Min Files Per Format",
+          "type": "integer"
+        }
+      },
+      "title": "IndexingEstimateConfig",
+      "type": "object"
+    },
+    "IndexingFiguresConfig": {
+      "description": "Figure/chart/drawing description during indexing (Docling picture enrichment via the gateway).",
+      "properties": {
+        "classify": {
+          "default": true,
+          "description": "Run Docling's local figure classifier (chart, diagram, logo, photo) before describing",
+          "title": "Classify",
+          "type": "boolean"
+        },
+        "concurrency": {
+          "default": 4,
+          "description": "Parallel vision calls while converting one document",
+          "maximum": 16,
+          "minimum": 1,
+          "title": "Concurrency",
+          "type": "integer"
+        },
+        "describe": {
+          "default": true,
+          "description": "Send each figure to the vision alias for a structured description",
+          "title": "Describe",
+          "type": "boolean"
+        },
+        "enabled": {
+          "default": false,
+          "description": "Describe and classify figures inside Docling-converted PDFs so they become retrievable chunks",
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "images_scale": {
+          "default": 2.0,
+          "description": "Docling raster scale for figure crops (2.0 is about 144 DPI)",
+          "maximum": 4.0,
+          "minimum": 1.0,
+          "title": "Images Scale",
+          "type": "number"
+        },
+        "max_completion_tokens": {
+          "default": 2500,
+          "description": "Output token budget per figure description; includes any reasoning tokens a reasoning model spends before the JSON reply",
+          "maximum": 8000,
+          "minimum": 64,
+          "title": "Max Completion Tokens",
+          "type": "integer"
+        },
+        "min_area_fraction": {
+          "default": 0.02,
+          "description": "Skip figures smaller than this fraction of the page area (icons, logos)",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Min Area Fraction",
+          "type": "number"
+        },
+        "prompt_profile": {
+          "default": "technical_figure",
+          "description": "Prompt template for figure descriptions: technical figures or engineering schematics",
+          "enum": [
+            "technical_figure",
+            "schematic"
+          ],
+          "title": "Prompt Profile",
+          "type": "string"
+        },
+        "skip_classes": {
+          "description": "Classifier classes that are never sent for description",
+          "items": {
+            "type": "string"
+          },
+          "title": "Skip Classes",
+          "type": "array"
+        },
+        "timeout_s": {
+          "default": 90,
+          "description": "Per-figure vision call timeout in seconds",
+          "maximum": 600,
+          "minimum": 5,
+          "title": "Timeout S",
+          "type": "integer"
+        },
+        "vision_model": {
+          "default": "z-ai.glm-5.3-flash",
+          "description": "Gateway alias used to describe figures; must be vision-capable in the model catalog",
+          "title": "Vision Model",
+          "type": "string"
+        }
+      },
+      "title": "IndexingFiguresConfig",
       "type": "object"
     },
     "IndexingRuntimeCapabilities": {
@@ -17640,8 +20105,16 @@
         },
         "mount_path": {
           "default": "/mcp",
-          "description": "Mount path for the MCP Streamable HTTP endpoint (e.g. /mcp).",
+          "description": "Mount path for the MCP Streamable HTTP endpoint (e.g. /mcp). Must name a path segment: a bare \"/\" would mount the transport at the site root, shadowing every other route, and leaves nothing for the advertised URL to point at.",
+          "minLength": 2,
+          "pattern": "^/[^/\\s]+(?:/[^/\\s]+)*/?$",
           "title": "Mount Path",
+          "type": "string"
+        },
+        "public_base_url": {
+          "default": "http://127.0.0.1:58012",
+          "description": "Externally reachable base URL (scheme://host[:port]) that MCP clients should connect to; the mount path is appended to it. Set this to the deployment's public origin when the API sits behind a proxy -- the workbench advertises exactly this value, and deriving it from the request would advertise the proxy's internal hop instead of the address a client can actually reach. Its host must also appear in `allowed_hosts`: with DNS rebinding protection on, the transport answers 421 to any Host header it does not recognise, so advertising a host that is not allowed trades one broken instruction for another. Writing the mount path here too (`https://host/mcp`) is accepted and not doubled -- both spellings advertise the same URL.",
+          "title": "Public Base Url",
           "type": "string"
         },
         "require_api_key": {
@@ -17668,6 +20141,12 @@
           "title": "Host",
           "type": "string"
         },
+        "host_allowed": {
+          "default": true,
+          "description": "Whether the host a client would actually use passes the transport's own Host check. False means that client is answered 421 by DNS rebinding protection until the host is added to `config.mcp.allowed_hosts`. When `public_base_url` is still the unconfigured loopback default this is evaluated for the PUBLIC host the request arrived on, not for the loopback address the URL names -- the loopback is always allowed, so evaluating it would report a reachable endpoint to an operator who cannot reach it.",
+          "title": "Host Allowed",
+          "type": "boolean"
+        },
         "path": {
           "anyOf": [
             {
@@ -17688,16 +20167,34 @@
           "title": "Port",
           "type": "integer"
         },
+        "public_base_url_configured": {
+          "default": true,
+          "description": "False when `config.mcp.public_base_url` is still the model default while the request reached the API from somewhere other than loopback -- i.e. the deployment is proxied and nobody has set the public origin, so the advertised URL is a loopback address no client on that origin can reach.",
+          "title": "Public Base Url Configured",
+          "type": "boolean"
+        },
+        "request_host": {
+          "default": "",
+          "description": "The host this status request arrived on (X-Forwarded-Host, else Host). Reported so the workbench can name the value an operator should configure.",
+          "title": "Request Host",
+          "type": "string"
+        },
         "running": {
           "description": "Whether the transport is reachable/responding.",
           "title": "Running",
           "type": "boolean"
+        },
+        "url": {
+          "description": "The canonical URL to point an MCP client at, built from `config.mcp.public_base_url` and the mount path. The server owns this string: the workbench used to assemble `http://{host}:{port}{path}` itself, which advertised plain HTTP on port 80 for a deployment that is HTTPS-only.",
+          "title": "Url",
+          "type": "string"
         }
       },
       "required": [
         "host",
         "port",
-        "running"
+        "running",
+        "url"
       ],
       "title": "MCPHTTPTransportStatus",
       "type": "object"
@@ -17809,6 +20306,18 @@
               "title": "Metadata",
               "type": "object"
             },
+            "provenance": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ChunkProvenance"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Extraction and page provenance; None for chunks indexed before provenance capture"
+            },
             "score": {
               "description": "Relevance score from retrieval",
               "title": "Score",
@@ -17840,6 +20349,109 @@
             "source"
           ],
           "title": "ChunkMatch",
+          "type": "object"
+        },
+        "ChunkProvenance": {
+          "description": "Where a chunk came from in its source document: extraction method plus page regions.\n\nDirect text/code extraction has line spans only (``regions`` empty, pages ``None``).\nDocling extraction carries one region per contributing layout item.",
+          "properties": {
+            "extraction": {
+              "description": "How the source text was extracted",
+              "enum": [
+                "docling",
+                "direct"
+              ],
+              "title": "Extraction",
+              "type": "string"
+            },
+            "page_end": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Last cited page (1-based)",
+              "title": "Page End"
+            },
+            "page_start": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "First cited page (1-based)",
+              "title": "Page Start"
+            },
+            "regions": {
+              "description": "Layout regions the chunk text was taken from",
+              "items": {
+                "$ref": "#/$defs/PageRegion"
+              },
+              "title": "Regions",
+              "type": "array"
+            }
+          },
+          "required": [
+            "extraction"
+          ],
+          "title": "ChunkProvenance",
+          "type": "object"
+        },
+        "PageRegion": {
+          "description": "One cited region on a page: top-left origin, normalized to the page size (0..1).",
+          "properties": {
+            "bottom": {
+              "description": "Bottom edge as a fraction of page height",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Bottom",
+              "type": "number"
+            },
+            "left": {
+              "description": "Left edge as a fraction of page width",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Left",
+              "type": "number"
+            },
+            "page": {
+              "description": "1-based page number",
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            },
+            "right": {
+              "description": "Right edge as a fraction of page width",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Right",
+              "type": "number"
+            },
+            "top": {
+              "description": "Top edge as a fraction of page height",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Top",
+              "type": "number"
+            }
+          },
+          "required": [
+            "page",
+            "left",
+            "top",
+            "right",
+            "bottom"
+          ],
+          "title": "PageRegion",
           "type": "object"
         }
       },
@@ -17900,6 +20512,12 @@
               "title": "Host",
               "type": "string"
             },
+            "host_allowed": {
+              "default": true,
+              "description": "Whether the host a client would actually use passes the transport's own Host check. False means that client is answered 421 by DNS rebinding protection until the host is added to `config.mcp.allowed_hosts`. When `public_base_url` is still the unconfigured loopback default this is evaluated for the PUBLIC host the request arrived on, not for the loopback address the URL names -- the loopback is always allowed, so evaluating it would report a reachable endpoint to an operator who cannot reach it.",
+              "title": "Host Allowed",
+              "type": "boolean"
+            },
             "path": {
               "anyOf": [
                 {
@@ -17920,16 +20538,34 @@
               "title": "Port",
               "type": "integer"
             },
+            "public_base_url_configured": {
+              "default": true,
+              "description": "False when `config.mcp.public_base_url` is still the model default while the request reached the API from somewhere other than loopback -- i.e. the deployment is proxied and nobody has set the public origin, so the advertised URL is a loopback address no client on that origin can reach.",
+              "title": "Public Base Url Configured",
+              "type": "boolean"
+            },
+            "request_host": {
+              "default": "",
+              "description": "The host this status request arrived on (X-Forwarded-Host, else Host). Reported so the workbench can name the value an operator should configure.",
+              "title": "Request Host",
+              "type": "string"
+            },
             "running": {
               "description": "Whether the transport is reachable/responding.",
               "title": "Running",
               "type": "boolean"
+            },
+            "url": {
+              "description": "The canonical URL to point an MCP client at, built from `config.mcp.public_base_url` and the mount path. The server owns this string: the workbench used to assemble `http://{host}:{port}{path}` itself, which advertised plain HTTP on port 80 for a deployment that is HTTPS-only.",
+              "title": "Url",
+              "type": "string"
             }
           },
           "required": [
             "host",
             "port",
-            "running"
+            "running",
+            "url"
           ],
           "title": "MCPHTTPTransportStatus",
           "type": "object"
@@ -18027,6 +20663,21 @@
         "name"
       ],
       "title": "MCPToolInfo",
+      "type": "object"
+    },
+    "MCPUnauthorizedResponse": {
+      "description": "Body returned when the MCP mount refuses a request for want of a bearer token.",
+      "properties": {
+        "detail": {
+          "description": "Operator-facing reason the MCP request was refused, and how to fix it.",
+          "title": "Detail",
+          "type": "string"
+        }
+      },
+      "required": [
+        "detail"
+      ],
+      "title": "MCPUnauthorizedResponse",
       "type": "object"
     },
     "Message": {
@@ -19785,6 +22436,13 @@
           "title": "Configured",
           "type": "boolean"
         },
+        "consecutive_failures": {
+          "default": 0,
+          "description": "How many readiness probes in a row have failed; an incident needs tracing.probe_failure_threshold.",
+          "minimum": 0,
+          "title": "Consecutive Failures",
+          "type": "integer"
+        },
         "detail": {
           "anyOf": [
             {
@@ -19839,6 +22497,25 @@
           "default": null,
           "description": "Component-local operator hint.",
           "title": "Operator Hint"
+        },
+        "probe_history": {
+          "description": "Most recent readiness-probe outcomes, oldest first.",
+          "items": {
+            "enum": [
+              "ok",
+              "failed",
+              "unprobeable"
+            ],
+            "type": "string"
+          },
+          "title": "Probe History",
+          "type": "array"
+        },
+        "probeable": {
+          "default": true,
+          "description": "Whether this component can be probed from the API at all (false behind a protected ingress).",
+          "title": "Probeable",
+          "type": "boolean"
         },
         "reachable": {
           "anyOf": [
@@ -21021,6 +23698,13 @@
               "title": "Configured",
               "type": "boolean"
             },
+            "consecutive_failures": {
+              "default": 0,
+              "description": "How many readiness probes in a row have failed; an incident needs tracing.probe_failure_threshold.",
+              "minimum": 0,
+              "title": "Consecutive Failures",
+              "type": "integer"
+            },
             "detail": {
               "anyOf": [
                 {
@@ -21075,6 +23759,25 @@
               "default": null,
               "description": "Component-local operator hint.",
               "title": "Operator Hint"
+            },
+            "probe_history": {
+              "description": "Most recent readiness-probe outcomes, oldest first.",
+              "items": {
+                "enum": [
+                  "ok",
+                  "failed",
+                  "unprobeable"
+                ],
+                "type": "string"
+              },
+              "title": "Probe History",
+              "type": "array"
+            },
+            "probeable": {
+              "default": true,
+              "description": "Whether this component can be probed from the API at all (false behind a protected ingress).",
+              "title": "Probeable",
+              "type": "boolean"
             },
             "reachable": {
               "anyOf": [
@@ -21382,6 +24085,77 @@
         "ok"
       ],
       "title": "OkResponse",
+      "type": "object"
+    },
+    "PageRegion": {
+      "description": "One cited region on a page: top-left origin, normalized to the page size (0..1).",
+      "properties": {
+        "bottom": {
+          "description": "Bottom edge as a fraction of page height",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Bottom",
+          "type": "number"
+        },
+        "left": {
+          "description": "Left edge as a fraction of page width",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Left",
+          "type": "number"
+        },
+        "page": {
+          "description": "1-based page number",
+          "minimum": 1,
+          "title": "Page",
+          "type": "integer"
+        },
+        "right": {
+          "description": "Right edge as a fraction of page width",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Right",
+          "type": "number"
+        },
+        "top": {
+          "description": "Top edge as a fraction of page height",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Top",
+          "type": "number"
+        }
+      },
+      "required": [
+        "page",
+        "left",
+        "top",
+        "right",
+        "bottom"
+      ],
+      "title": "PageRegion",
+      "type": "object"
+    },
+    "PageSize": {
+      "description": "PDF page size in points (72 per inch).",
+      "properties": {
+        "height": {
+          "description": "Page height in points",
+          "exclusiveMinimum": 0.0,
+          "title": "Height",
+          "type": "number"
+        },
+        "width": {
+          "description": "Page width in points",
+          "exclusiveMinimum": 0.0,
+          "title": "Width",
+          "type": "number"
+        }
+      },
+      "required": [
+        "width",
+        "height"
+      ],
+      "title": "PageSize",
       "type": "object"
     },
     "PersistedStateCorruptDetail": {
@@ -22828,6 +25602,12 @@
           "description": "'turn'=one chunk per message, 'sentence'=split by sentence.",
           "pattern": "^(sentence|paragraph|turn|fixed)$",
           "title": "Chunking Strategy",
+          "type": "string"
+        },
+        "corpus_root": {
+          "default": "data/recall",
+          "description": "Directory a recall corpus is created under, one subdirectory per corpus id. Relative values resolve against the project root; RAGWELD_RECALL_ROOT overrides it for disposable lanes. Only consulted when the corpus is created - after that the registry row's path is authoritative, so every process agrees.",
+          "title": "Corpus Root",
           "type": "string"
         },
         "default_corpus_id": {
@@ -27766,6 +30546,18 @@
               "title": "Metadata",
               "type": "object"
             },
+            "provenance": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ChunkProvenance"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Extraction and page provenance; None for chunks indexed before provenance capture"
+            },
             "score": {
               "description": "Relevance score from retrieval",
               "title": "Score",
@@ -27797,6 +30589,109 @@
             "source"
           ],
           "title": "ChunkMatch",
+          "type": "object"
+        },
+        "ChunkProvenance": {
+          "description": "Where a chunk came from in its source document: extraction method plus page regions.\n\nDirect text/code extraction has line spans only (``regions`` empty, pages ``None``).\nDocling extraction carries one region per contributing layout item.",
+          "properties": {
+            "extraction": {
+              "description": "How the source text was extracted",
+              "enum": [
+                "docling",
+                "direct"
+              ],
+              "title": "Extraction",
+              "type": "string"
+            },
+            "page_end": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Last cited page (1-based)",
+              "title": "Page End"
+            },
+            "page_start": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "First cited page (1-based)",
+              "title": "Page Start"
+            },
+            "regions": {
+              "description": "Layout regions the chunk text was taken from",
+              "items": {
+                "$ref": "#/$defs/PageRegion"
+              },
+              "title": "Regions",
+              "type": "array"
+            }
+          },
+          "required": [
+            "extraction"
+          ],
+          "title": "ChunkProvenance",
+          "type": "object"
+        },
+        "PageRegion": {
+          "description": "One cited region on a page: top-left origin, normalized to the page size (0..1).",
+          "properties": {
+            "bottom": {
+              "description": "Bottom edge as a fraction of page height",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Bottom",
+              "type": "number"
+            },
+            "left": {
+              "description": "Left edge as a fraction of page width",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Left",
+              "type": "number"
+            },
+            "page": {
+              "description": "1-based page number",
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            },
+            "right": {
+              "description": "Right edge as a fraction of page width",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Right",
+              "type": "number"
+            },
+            "top": {
+              "description": "Top edge as a fraction of page height",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Top",
+              "type": "number"
+            }
+          },
+          "required": [
+            "page",
+            "left",
+            "top",
+            "right",
+            "bottom"
+          ],
+          "title": "PageRegion",
           "type": "object"
         }
       },
@@ -30689,6 +33584,32 @@
               "default": null,
               "description": "Vector leg results returned.",
               "title": "Vector Results"
+            },
+            "web_grounded": {
+              "default": false,
+              "description": "Whether validated web citations support the response.",
+              "title": "Web Grounded",
+              "type": "boolean"
+            },
+            "web_requested": {
+              "default": false,
+              "description": "Whether the caller enabled web search.",
+              "title": "Web Requested",
+              "type": "boolean"
+            },
+            "web_search_requests": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Provider-reported web-search request count; unknown when omitted.",
+              "title": "Web Search Requests"
             }
           },
           "required": [
@@ -31233,6 +34154,32 @@
           "default": null,
           "description": "Vector leg results returned.",
           "title": "Vector Results"
+        },
+        "web_grounded": {
+          "default": false,
+          "description": "Whether validated web citations support the response.",
+          "title": "Web Grounded",
+          "type": "boolean"
+        },
+        "web_requested": {
+          "default": false,
+          "description": "Whether the caller enabled web search.",
+          "title": "Web Requested",
+          "type": "boolean"
+        },
+        "web_search_requests": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Provider-reported web-search request count; unknown when omitted.",
+          "title": "Web Search Requests"
         }
       },
       "required": [
@@ -31777,6 +34724,32 @@
               "default": null,
               "description": "Vector leg results returned.",
               "title": "Vector Results"
+            },
+            "web_grounded": {
+              "default": false,
+              "description": "Whether validated web citations support the response.",
+              "title": "Web Grounded",
+              "type": "boolean"
+            },
+            "web_requested": {
+              "default": false,
+              "description": "Whether the caller enabled web search.",
+              "title": "Web Requested",
+              "type": "boolean"
+            },
+            "web_search_requests": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Provider-reported web-search request count; unknown when omitted.",
+              "title": "Web Search Requests"
             }
           },
           "required": [
@@ -31897,6 +34870,12 @@
           "title": "Langfuse Project",
           "type": "string"
         },
+        "langfuse_public_base_url": {
+          "default": "http://127.0.0.1:53000",
+          "description": "Public Langfuse URL used for browser-facing operator deep links",
+          "title": "Langfuse Public Base Url",
+          "type": "string"
+        },
         "log_level": {
           "default": "INFO",
           "description": "Logging level",
@@ -31946,6 +34925,14 @@
           "title": "Otlp Headers",
           "type": "string"
         },
+        "probe_failure_threshold": {
+          "default": 3,
+          "description": "Consecutive failed readiness probes before an observability component counts as an incident",
+          "maximum": 10,
+          "minimum": 1,
+          "title": "Probe Failure Threshold",
+          "type": "integer"
+        },
         "prometheus_base_url": {
           "default": "",
           "description": "Prometheus base URL used for the alert-rule feed and operator deep links (Prometheus scrapes and remote-writes to Mimir)",
@@ -31979,6 +34966,12 @@
           "minimum": 0.0,
           "title": "Trace Sampling Rate",
           "type": "number"
+        },
+        "trace_store_path": {
+          "default": "",
+          "description": "Persistent workbench trace-store JSON path; empty keeps the store in memory only",
+          "title": "Trace Store Path",
+          "type": "string"
         },
         "tracing_enabled": {
           "default": true,
@@ -32189,6 +35182,12 @@
           "minItems": 1,
           "title": "Ragweld Agent Lora Target Modules",
           "type": "array"
+        },
+        "ragweld_agent_mlflow_console_base_url": {
+          "default": "http://127.0.0.1:55500",
+          "description": "Public MLflow console URL used for browser-facing operator deep links.",
+          "title": "Ragweld Agent Mlflow Console Base Url",
+          "type": "string"
         },
         "ragweld_agent_mlflow_experiment_name": {
           "default": "ragweld-learning-agent",
@@ -32603,6 +35602,9 @@
             },
             "vllm": {
               "$ref": "#/$defs/VLLMConfig"
+            },
+            "web": {
+              "$ref": "#/$defs/ChatWebConfig"
             }
           },
           "title": "ChatConfig",
@@ -32659,6 +35661,51 @@
             }
           },
           "title": "ChatMultimodalConfig",
+          "type": "object"
+        },
+        "ChatWebConfig": {
+          "additionalProperties": false,
+          "description": "Server-owned OpenRouter web-search policy for ordinary chat.",
+          "properties": {
+            "enabled": {
+              "default": true,
+              "description": "Allow opt-in web search in Chat.",
+              "title": "Enabled",
+              "type": "boolean"
+            },
+            "engine": {
+              "default": "auto",
+              "enum": [
+                "auto",
+                "native",
+                "exa"
+              ],
+              "title": "Engine",
+              "type": "string"
+            },
+            "max_characters": {
+              "default": 12000,
+              "maximum": 50000,
+              "minimum": 1000,
+              "title": "Max Characters",
+              "type": "integer"
+            },
+            "max_results": {
+              "default": 5,
+              "maximum": 20,
+              "minimum": 1,
+              "title": "Max Results",
+              "type": "integer"
+            },
+            "max_total_results": {
+              "default": 5,
+              "maximum": 20,
+              "minimum": 1,
+              "title": "Max Total Results",
+              "type": "integer"
+            }
+          },
+          "title": "ChatWebConfig",
           "type": "object"
         },
         "ChunkSummaryConfig": {
@@ -32936,6 +35983,37 @@
             }
           },
           "title": "DockerConfig",
+          "type": "object"
+        },
+        "DocumentViewerConfig": {
+          "description": "Source document evidence viewer: how cited files are rendered back to the user.",
+          "properties": {
+            "max_text_bytes": {
+              "default": 5000000,
+              "description": "Largest text/code file the viewer will serve in full",
+              "maximum": 50000000,
+              "minimum": 65536,
+              "title": "Max Text Bytes",
+              "type": "integer"
+            },
+            "page_render_scale": {
+              "default": 2.0,
+              "description": "PDF page raster scale for the viewer (1.0 = 72 dpi; 2.0 = 144 dpi)",
+              "maximum": 4.0,
+              "minimum": 1.0,
+              "title": "Page Render Scale",
+              "type": "number"
+            },
+            "thumbnail_render_scale": {
+              "default": 0.5,
+              "description": "PDF page raster scale for citation thumbnails in chat",
+              "maximum": 1.0,
+              "minimum": 0.25,
+              "title": "Thumbnail Render Scale",
+              "type": "number"
+            }
+          },
+          "title": "DocumentViewerConfig",
           "type": "object"
         },
         "EmbeddingConfig": {
@@ -33313,7 +36391,7 @@
             "gen_max_tokens": {
               "default": 512,
               "description": "Max tokens for generation",
-              "maximum": 8192,
+              "maximum": 16000,
               "minimum": 100,
               "title": "Gen Max Tokens",
               "type": "integer"
@@ -33404,6 +36482,12 @@
               "minimum": 0.0,
               "title": "Ast Inherits Weight",
               "type": "number"
+            },
+            "build_code_graph": {
+              "default": false,
+              "description": "Build an AST code graph during indexing: module, class and function entities with contains/inherits/imports/calls relationships (tree-sitter; Python, TypeScript, JavaScript), each linked to the chunk that defines it",
+              "title": "Build Code Graph",
+              "type": "boolean"
             },
             "build_lexical_graph": {
               "default": true,
@@ -33902,6 +36986,9 @@
               "title": "Bm25 Tokenizer",
               "type": "string"
             },
+            "estimate": {
+              "$ref": "#/$defs/IndexingEstimateConfig"
+            },
             "estimated_tokens_per_second_local": {
               "anyOf": [
                 {
@@ -33916,6 +37003,9 @@
               "default": null,
               "description": "Optional local embedding throughput override for index-time estimates (tokens/sec).",
               "title": "Estimated Tokens Per Second Local"
+            },
+            "figures": {
+              "$ref": "#/$defs/IndexingFiguresConfig"
             },
             "generation_retention_seconds": {
               "default": 600,
@@ -34031,6 +37121,118 @@
             }
           },
           "title": "IndexingConfig",
+          "type": "object"
+        },
+        "IndexingEstimateConfig": {
+          "description": "Floors under the pre-run estimate's sample, so it refuses to guess rather than guess wrong.\n\nThe estimate is the consent gate: an operator approves a run from the numbers in it. One cold\nrun measured 8 bytes of 8.5 MB and reported 15,437 tokens for a 3,531,477-token corpus, so\nbelow these floors the endpoint returns no point estimate at all.\n\nNeither floor is a share of bytes. Sampling 1.31% of a corpus of 2,000 similar files gives an\naccurate estimate, and any byte floor strict enough to catch the cold case would refuse every\nformat group of more than a few hundred files. What actually distinguishes the two is whether\na group was measured at all, and whether the measured spread leaves the band meaningless.",
+          "properties": {
+            "max_relative_error": {
+              "default": 0.9,
+              "description": "Widest error band that may still be published as a point estimate. The band is computed from the measured spread of tokens-per-byte, so it saturates exactly when the sample says nothing about the corpus -- which is the honest signal, unlike a share-of-bytes floor that would refuse 2,000 similar small files whose estimate is accurate.",
+              "exclusiveMinimum": 0.0,
+              "maximum": 1.0,
+              "title": "Max Relative Error",
+              "type": "number"
+            },
+            "min_files_per_format": {
+              "default": 1,
+              "description": "Files that must be measured in every format group present. A group that measured nothing contributes neither tokens, chunks, nor its one-chunk-per-file floor, so the corpus total would silently omit it.",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Min Files Per Format",
+              "type": "integer"
+            }
+          },
+          "title": "IndexingEstimateConfig",
+          "type": "object"
+        },
+        "IndexingFiguresConfig": {
+          "description": "Figure/chart/drawing description during indexing (Docling picture enrichment via the gateway).",
+          "properties": {
+            "classify": {
+              "default": true,
+              "description": "Run Docling's local figure classifier (chart, diagram, logo, photo) before describing",
+              "title": "Classify",
+              "type": "boolean"
+            },
+            "concurrency": {
+              "default": 4,
+              "description": "Parallel vision calls while converting one document",
+              "maximum": 16,
+              "minimum": 1,
+              "title": "Concurrency",
+              "type": "integer"
+            },
+            "describe": {
+              "default": true,
+              "description": "Send each figure to the vision alias for a structured description",
+              "title": "Describe",
+              "type": "boolean"
+            },
+            "enabled": {
+              "default": false,
+              "description": "Describe and classify figures inside Docling-converted PDFs so they become retrievable chunks",
+              "title": "Enabled",
+              "type": "boolean"
+            },
+            "images_scale": {
+              "default": 2.0,
+              "description": "Docling raster scale for figure crops (2.0 is about 144 DPI)",
+              "maximum": 4.0,
+              "minimum": 1.0,
+              "title": "Images Scale",
+              "type": "number"
+            },
+            "max_completion_tokens": {
+              "default": 2500,
+              "description": "Output token budget per figure description; includes any reasoning tokens a reasoning model spends before the JSON reply",
+              "maximum": 8000,
+              "minimum": 64,
+              "title": "Max Completion Tokens",
+              "type": "integer"
+            },
+            "min_area_fraction": {
+              "default": 0.02,
+              "description": "Skip figures smaller than this fraction of the page area (icons, logos)",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Min Area Fraction",
+              "type": "number"
+            },
+            "prompt_profile": {
+              "default": "technical_figure",
+              "description": "Prompt template for figure descriptions: technical figures or engineering schematics",
+              "enum": [
+                "technical_figure",
+                "schematic"
+              ],
+              "title": "Prompt Profile",
+              "type": "string"
+            },
+            "skip_classes": {
+              "description": "Classifier classes that are never sent for description",
+              "items": {
+                "type": "string"
+              },
+              "title": "Skip Classes",
+              "type": "array"
+            },
+            "timeout_s": {
+              "default": 90,
+              "description": "Per-figure vision call timeout in seconds",
+              "maximum": 600,
+              "minimum": 5,
+              "title": "Timeout S",
+              "type": "integer"
+            },
+            "vision_model": {
+              "default": "z-ai.glm-5.3-flash",
+              "description": "Gateway alias used to describe figures; must be vision-capable in the model catalog",
+              "title": "Vision Model",
+              "type": "string"
+            }
+          },
+          "title": "IndexingFiguresConfig",
           "type": "object"
         },
         "KeywordsConfig": {
@@ -34218,8 +37420,16 @@
             },
             "mount_path": {
               "default": "/mcp",
-              "description": "Mount path for the MCP Streamable HTTP endpoint (e.g. /mcp).",
+              "description": "Mount path for the MCP Streamable HTTP endpoint (e.g. /mcp). Must name a path segment: a bare \"/\" would mount the transport at the site root, shadowing every other route, and leaves nothing for the advertised URL to point at.",
+              "minLength": 2,
+              "pattern": "^/[^/\\s]+(?:/[^/\\s]+)*/?$",
               "title": "Mount Path",
+              "type": "string"
+            },
+            "public_base_url": {
+              "default": "http://127.0.0.1:58012",
+              "description": "Externally reachable base URL (scheme://host[:port]) that MCP clients should connect to; the mount path is appended to it. Set this to the deployment's public origin when the API sits behind a proxy -- the workbench advertises exactly this value, and deriving it from the request would advertise the proxy's internal hop instead of the address a client can actually reach. Its host must also appear in `allowed_hosts`: with DNS rebinding protection on, the transport answers 421 to any Host header it does not recognise, so advertising a host that is not allowed trades one broken instruction for another. Writing the mount path here too (`https://host/mcp`) is accepted and not doubled -- both spellings advertise the same URL.",
+              "title": "Public Base Url",
               "type": "string"
             },
             "require_api_key": {
@@ -34272,6 +37482,12 @@
               "description": "'turn'=one chunk per message, 'sentence'=split by sentence.",
               "pattern": "^(sentence|paragraph|turn|fixed)$",
               "title": "Chunking Strategy",
+              "type": "string"
+            },
+            "corpus_root": {
+              "default": "data/recall",
+              "description": "Directory a recall corpus is created under, one subdirectory per corpus id. Relative values resolve against the project root; RAGWELD_RECALL_ROOT overrides it for disposable lanes. Only consulted when the corpus is created - after that the registry row's path is authoritative, so every process agrees.",
+              "title": "Corpus Root",
               "type": "string"
             },
             "default_corpus_id": {
@@ -35281,6 +38497,12 @@
               "title": "Langfuse Project",
               "type": "string"
             },
+            "langfuse_public_base_url": {
+              "default": "http://127.0.0.1:53000",
+              "description": "Public Langfuse URL used for browser-facing operator deep links",
+              "title": "Langfuse Public Base Url",
+              "type": "string"
+            },
             "log_level": {
               "default": "INFO",
               "description": "Logging level",
@@ -35330,6 +38552,14 @@
               "title": "Otlp Headers",
               "type": "string"
             },
+            "probe_failure_threshold": {
+              "default": 3,
+              "description": "Consecutive failed readiness probes before an observability component counts as an incident",
+              "maximum": 10,
+              "minimum": 1,
+              "title": "Probe Failure Threshold",
+              "type": "integer"
+            },
             "prometheus_base_url": {
               "default": "",
               "description": "Prometheus base URL used for the alert-rule feed and operator deep links (Prometheus scrapes and remote-writes to Mimir)",
@@ -35363,6 +38593,12 @@
               "minimum": 0.0,
               "title": "Trace Sampling Rate",
               "type": "number"
+            },
+            "trace_store_path": {
+              "default": "",
+              "description": "Persistent workbench trace-store JSON path; empty keeps the store in memory only",
+              "title": "Trace Store Path",
+              "type": "string"
             },
             "tracing_enabled": {
               "default": true,
@@ -35573,6 +38809,12 @@
               "minItems": 1,
               "title": "Ragweld Agent Lora Target Modules",
               "type": "array"
+            },
+            "ragweld_agent_mlflow_console_base_url": {
+              "default": "http://127.0.0.1:55500",
+              "description": "Public MLflow console URL used for browser-facing operator deep links.",
+              "title": "Ragweld Agent Mlflow Console Base Url",
+              "type": "string"
             },
             "ragweld_agent_mlflow_experiment_name": {
               "default": "ragweld-learning-agent",
@@ -36123,6 +39365,9 @@
         "docker": {
           "$ref": "#/$defs/DockerConfig"
         },
+        "document_viewer": {
+          "$ref": "#/$defs/DocumentViewerConfig"
+        },
         "embedding": {
           "$ref": "#/$defs/EmbeddingConfig"
         },
@@ -36588,6 +39833,115 @@
         }
       },
       "title": "VectorSearchConfig",
+      "type": "object"
+    },
+    "WebCitation": {
+      "description": "One validated URL citation returned by the generation gateway.",
+      "properties": {
+        "end_index": {
+          "description": "Exclusive character offset in the final answer.",
+          "exclusiveMinimum": 0,
+          "title": "End Index",
+          "type": "integer"
+        },
+        "start_index": {
+          "description": "Inclusive character offset in the final answer.",
+          "minimum": 0,
+          "title": "Start Index",
+          "type": "integer"
+        },
+        "title": {
+          "default": "",
+          "description": "Provider-supplied citation title.",
+          "title": "Title",
+          "type": "string"
+        },
+        "url": {
+          "description": "Validated HTTP(S) citation URL.",
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url",
+        "start_index",
+        "end_index"
+      ],
+      "title": "WebCitation",
+      "type": "object"
+    },
+    "WebGroundingMetadata": {
+      "$defs": {
+        "WebCitation": {
+          "description": "One validated URL citation returned by the generation gateway.",
+          "properties": {
+            "end_index": {
+              "description": "Exclusive character offset in the final answer.",
+              "exclusiveMinimum": 0,
+              "title": "End Index",
+              "type": "integer"
+            },
+            "start_index": {
+              "description": "Inclusive character offset in the final answer.",
+              "minimum": 0,
+              "title": "Start Index",
+              "type": "integer"
+            },
+            "title": {
+              "default": "",
+              "description": "Provider-supplied citation title.",
+              "title": "Title",
+              "type": "string"
+            },
+            "url": {
+              "description": "Validated HTTP(S) citation URL.",
+              "title": "Url",
+              "type": "string"
+            }
+          },
+          "required": [
+            "url",
+            "start_index",
+            "end_index"
+          ],
+          "title": "WebCitation",
+          "type": "object"
+        }
+      },
+      "description": "Terminal web-grounding facts; never inferred from inline answer text.",
+      "properties": {
+        "citations": {
+          "items": {
+            "$ref": "#/$defs/WebCitation"
+          },
+          "title": "Citations",
+          "type": "array"
+        },
+        "web_grounded": {
+          "default": false,
+          "title": "Web Grounded",
+          "type": "boolean"
+        },
+        "web_requested": {
+          "default": false,
+          "title": "Web Requested",
+          "type": "boolean"
+        },
+        "web_search_requests": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Web Search Requests"
+        }
+      },
+      "title": "WebGroundingMetadata",
       "type": "object"
     }
   }
