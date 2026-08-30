@@ -311,6 +311,58 @@ async def test_synthetic_promote_points_alias_at_a_completed_run_bundle(client) 
         shutil.rmtree(run_dir, ignore_errors=True)
 
 
+@pytest.mark.requires_postgres
+@pytest.mark.asyncio
+async def test_generic_lineage_alias_endpoint_refuses_a_failed_synthetic_bundle(client, tmp_path: Path) -> None:
+    """The direct-caller hole: `POST /api/lineage/aliases/{alias}` must refuse to point an alias
+    at a failed synthetic run's bundle, the same way the Synthetic Lab promote endpoint does — a
+    raw curl cannot bypass the gate. A completed run's bundle, and a bundle no synthetic run owns
+    (benchmark/eval/reranker), still promote."""
+    from server.lineage import create_or_update_bundle
+
+    corpus_id = f"pytest_synth_gate_generic_{uuid.uuid4().hex[:8]}"
+    corpus_root = tmp_path / "corpus"
+    corpus_root.mkdir()
+    created = await client.post("/api/corpora", json={"corpus_id": corpus_id, "name": corpus_id, "path": str(corpus_root)})
+    assert created.status_code == 200, created.text
+
+    run_dirs: list[Path] = []
+    try:
+        good_bundle, _ = create_or_update_bundle(repo_id=corpus_id, metadata={"src": "pytest-good"})
+        run_dirs.append(
+            _write_full_stack_run(corpus_id=corpus_id, run_id=f"{corpus_id}__passed", gate_passed=True, bundle_id=good_bundle.bundle_id)
+        )
+        failed_bundle_id = "bundle__failedseed000000000000"
+        run_dirs.append(
+            _write_full_stack_run(corpus_id=corpus_id, run_id=f"{corpus_id}__failed", gate_passed=False, bundle_id=failed_bundle_id)
+        )
+
+        # The hole is closed: the generic endpoint refuses the failed run's bundle for every alias.
+        for alias in ("baseline", "canary", "current", "promoted"):
+            blocked = await client.post(
+                f"/api/lineage/aliases/{alias}?corpus_id={corpus_id}", json={"bundle_id": failed_bundle_id}
+            )
+            assert blocked.status_code == 409, (alias, blocked.text)
+            assert "PROMOTION_BLOCKED" in str(blocked.json().get("detail", ""))
+
+        # A completed, gate-passed run's bundle still promotes through the generic endpoint.
+        ok = await client.post(
+            f"/api/lineage/aliases/canary?corpus_id={corpus_id}", json={"bundle_id": good_bundle.bundle_id}
+        )
+        assert ok.status_code == 200, ok.text
+
+        # A bundle no synthetic run owns (a benchmark-style bundle) is not over-refused.
+        other_bundle, _ = create_or_update_bundle(repo_id=corpus_id, metadata={"src": "benchmark-like"})
+        ok2 = await client.post(
+            f"/api/lineage/aliases/baseline?corpus_id={corpus_id}", json={"bundle_id": other_bundle.bundle_id}
+        )
+        assert ok2.status_code == 200, ok2.text
+    finally:
+        for run_dir in run_dirs:
+            shutil.rmtree(run_dir, ignore_errors=True)
+        await client.delete(f"/api/corpora/{corpus_id}")
+
+
 @pytest.mark.asyncio
 async def test_synthetic_publish_endpoints_blocked_when_quality_gate_failed(client) -> None:
     corpus_id = f"pytest_synth_gate_{uuid.uuid4().hex[:8]}"

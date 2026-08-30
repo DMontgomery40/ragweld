@@ -123,6 +123,60 @@ def get_runs(*, corpus_id: str | None, limit: int) -> tuple[list[Any], list[Any]
     return [redact_run_record(run) for run in runs], artifacts
 
 
+def promotion_block_reason(run: SyntheticRun) -> str | None:
+    """Why this run may not be promoted, or None when it may.
+
+    Mirrors the publish gate (``publish_eval_dataset`` -> ``QUALITY_GATE_FAILED``): a run is
+    promotable only when it completed. A gated recipe that fails its quality gate is already
+    marked ``status="failed"`` upstream, so a completed run carries ``quality_gate_passed`` of
+    True (gated, passed) or None (a recipe that has no gate, e.g. semantic_cards/keywords) —
+    both promotable. The explicit ``is False`` branch is defense in depth for a hand-written or
+    legacy run.json, and a run never attached to a lineage bundle has nothing to point at.
+    """
+    if run.status != "completed":
+        return (
+            f"This run is {run.status}; only a completed run can be promoted. "
+            "A run that produced nothing and was never evaluated cannot be an alias target."
+        )
+    if run.summary.quality_gate_passed is False:
+        reason = str(run.summary.quality_failure_reason or "").strip()
+        return ("Quality gate did not pass; promotion blocked. " + reason).strip()
+    if not str(run.bundle_id or "").strip():
+        return "This run is not attached to a lineage bundle, so there is nothing to promote."
+    return None
+
+
+def promotion_block_reason_for_bundle(repo_id: str, bundle_id: str) -> str | None:
+    """Block reason if ``bundle_id`` is a synthetic run's own bundle that may not be promoted.
+
+    Returns None when no synthetic run of ``repo_id`` owns that bundle (so benchmark/eval/
+    reranker bundles pass through untouched) or when the owning run is promotable. A synthetic
+    run's ``bundle_id`` is content-addressed and specific to that run, so matching on it
+    identifies exactly the run a promoter would be pointing an alias at. This lets the generic
+    lineage alias endpoint refuse a failed run's bundle for a direct caller, not just the UI.
+    """
+    target = str(bundle_id or "").strip()
+    if not target:
+        return None
+    try:
+        metas, _unreadable = get_runs(corpus_id=repo_id, limit=2000)
+    except Exception:
+        # No readable synthetic runs for this corpus -> nothing to block here. The
+        # authoritative UI-facing gate is /synthetic/run/{id}/promote/{alias}.
+        return None
+    for meta in metas:
+        if str(getattr(meta, "bundle_id", "") or "").strip() != target:
+            continue
+        try:
+            run = get_run(str(meta.run_id))
+        except Exception:
+            continue
+        reason = promotion_block_reason(run)
+        if reason is not None:
+            return reason
+    return None
+
+
 def _coerce_eval_items(payload: Any) -> list[EvalDatasetItem]:
     if not isinstance(payload, list):
         return []

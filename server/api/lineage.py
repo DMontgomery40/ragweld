@@ -29,6 +29,7 @@ from server.models.tribrid_config_model import (
 )
 from server.services.config_store import CorpusNotFoundError
 from server.services.config_store import get_config as load_scoped_config
+from server.synthetic.orchestrator import promotion_block_reason_for_bundle
 
 router = APIRouter(prefix="/api/lineage", tags=["lineage"], responses=DEPENDENCY_UNAVAILABLE_RESPONSES)
 
@@ -134,6 +135,13 @@ async def update_alias(
     scope: CorpusScope = _CORPUS_SCOPE_DEP,
 ) -> LineageAliasesResponse:
     repo_id = await _require_repo_id(scope)
+    # Promotion authority: refuse to point any alias at a synthetic run's bundle unless that
+    # run completed and passed its quality gate. This closes the direct-caller path — the
+    # Synthetic Lab UI is gated at /synthetic/run/{id}/promote/{alias}, but a raw POST here
+    # must be refused too. Non-synthetic bundles (benchmark/eval/reranker) are unaffected.
+    block_reason = promotion_block_reason_for_bundle(repo_id, body.bundle_id)
+    if block_reason is not None:
+        raise HTTPException(status_code=409, detail=f"PROMOTION_BLOCKED: {block_reason}")
     try:
         set_alias(repo_id=repo_id, alias=alias, bundle_id=body.bundle_id)
     except FileNotFoundError as e:

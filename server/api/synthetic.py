@@ -46,29 +46,6 @@ from server.training.triplet_rows import TripletRowsCorruptError
 router = APIRouter(tags=["synthetic"])
 
 
-def _promotion_block_reason(run: SyntheticRun) -> str | None:
-    """Why this run may not be promoted, or None when it may.
-
-    Mirrors the publish gate (``publish_eval_dataset`` -> ``QUALITY_GATE_FAILED``): a run is
-    promotable only when it completed. A gated recipe that fails its quality gate is already
-    marked ``status="failed"`` upstream, so a completed run carries ``quality_gate_passed`` of
-    True (gated, passed) or None (a recipe that has no gate, e.g. semantic_cards/keywords) —
-    both promotable. The explicit ``is False`` branch is defense in depth for a hand-written or
-    legacy run.json, and a run never attached to a lineage bundle has nothing to point at.
-    """
-    if run.status != "completed":
-        return (
-            f"This run is {run.status}; only a completed run can be promoted. "
-            "A run that produced nothing and was never evaluated cannot be an alias target."
-        )
-    if run.summary.quality_gate_passed is False:
-        reason = str(run.summary.quality_failure_reason or "").strip()
-        return ("Quality gate did not pass; promotion blocked. " + reason).strip()
-    if not str(run.bundle_id or "").strip():
-        return "This run is not attached to a lineage bundle, so there is nothing to promote."
-    return None
-
-
 @router.post("/synthetic/run/start", response_model=SyntheticRun, responses=DEPENDENCY_UNAVAILABLE_RESPONSES)
 async def synthetic_run_start(request: SyntheticRunStartRequest) -> SyntheticRun:
     try:
@@ -295,7 +272,7 @@ async def synthetic_run_promote(run_id: str, alias: LineageAliasName) -> Lineage
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
 
-    reason = _promotion_block_reason(run)
+    reason = orchestrator.promotion_block_reason(run)
     if reason is not None:
         raise HTTPException(status_code=409, detail=f"PROMOTION_BLOCKED: {reason}")
 
