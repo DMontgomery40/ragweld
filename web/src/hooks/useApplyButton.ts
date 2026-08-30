@@ -112,7 +112,11 @@ export function useApplyButton() {
       }
 
       const savedConfig = useConfigStore.getState().config || currentConfig;
+      // A transient acknowledgement: show "Saved", then go quiet. The timeout also stops the
+      // ack from surviving a corpus switch (which replaces config/persisted, leaving isDirty
+      // false) and reading "Saved" on a corpus that was never saved here.
       setJustSaved(true);
+      window.setTimeout(() => setJustSaved(false), 2500);
 
       if (w.showStatus) {
         w.showStatus('Settings saved successfully', 'success');

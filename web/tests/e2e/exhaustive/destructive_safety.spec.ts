@@ -53,3 +53,31 @@ test('delete-index confirm focuses Cancel and stays disabled until the corpus id
   await page.waitForTimeout(400);
   expect(deleteCalls, `cancelling must issue no DELETE: ${deleteCalls.join(' | ')}`).toEqual([]);
 });
+
+test('a danger confirm with no typed gate focuses Cancel (Paths save)', async ({ page, baseURL }) => {
+  // The Paths "Save Configuration" confirm is danger with no requireTyped, so it exercises the
+  // shared primitive's other focus branch: focus lands on Cancel, not the confirm.
+  const writes: string[] = [];
+  page.on('request', (req) => {
+    const url = req.url();
+    if ((req.method() === 'PATCH' || req.method() === 'PUT') && /\/api\/config/.test(url)) writes.push(url);
+  });
+
+  await page.goto(new URL(`infrastructure?subtab=paths&corpus=${CORPUS}`, baseURL).toString());
+
+  const save = page.getByRole('button', { name: 'Save Configuration' });
+  await expect(save).toBeVisible({ timeout: 60_000 });
+  await save.click();
+
+  const dialog = page.getByTestId('confirm-dialog');
+  await expect(dialog).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId('confirm-dialog-message')).toContainText(/database connection/i);
+
+  const focusedTestId = await page.evaluate(() => document.activeElement?.getAttribute('data-testid') || '');
+  expect(focusedTestId).toBe('confirm-dialog-cancel');
+
+  await page.getByTestId('confirm-dialog-cancel').click();
+  await expect(dialog).not.toBeVisible();
+  await page.waitForTimeout(300);
+  expect(writes, `cancelling the save must write nothing: ${writes.join(' | ')}`).toEqual([]);
+});
