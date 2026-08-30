@@ -132,3 +132,23 @@ test('the runtime-managed Recall corpus is listed but cannot be deleted here', a
   await expect(page.getByTestId(`corpus-internal-${recallId}`)).toBeVisible();
   await expect(page.getByTestId(`corpus-delete-${recallId}`)).toBeDisabled();
 });
+
+test('the corpus registry is reachable from the top bar on a non-Dashboard page', async ({ page }) => {
+  // The Dashboard tile was the ONLY corpus control in the product (X-18). The registry now
+  // has a home in the top bar, which every route renders.
+  await page.goto('chat?subtab=ui', { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.topbar', { timeout: 90_000 });
+
+  const control = page.getByTestId('topbar-corpus');
+  await expect(control).toBeVisible({ timeout: 60_000 });
+  // It names the corpus everything on the page is scoped to, not just an icon.
+  await expect(control).not.toHaveText(/^\s*$/);
+
+  await control.click();
+  const registry = page.getByTestId('corpus-registry');
+  await expect(registry).toBeVisible({ timeout: 10_000 });
+  await assertOverlayCoversViewport(registry);
+
+  await page.getByTestId('corpus-registry-close').click();
+  await expect(registry).toBeHidden({ timeout: 10_000 });
+});
