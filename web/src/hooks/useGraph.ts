@@ -233,13 +233,17 @@ export function useGraph() {
    */
   const selectEntity = useCallback(
     async (entity: Entity | null) => {
-      setSelectedEntity(entity);
       setSelectedCommunity(null);
       setExpansion(null);
-
-      if (entity) {
-        await getNeighbors(entity.entity_id);
+      if (!entity) {
+        setSelectedEntity(null);
+        return;
       }
+      // The selection moves only once its neighborhood is on screen. Moving it first and
+      // keeping the previous results on a failure would label entity A's 180 relationships
+      // with entity B's name (M-01: keep the results, but do not misattribute them).
+      const loaded = await getNeighbors(entity.entity_id);
+      if (loaded) setSelectedEntity(entity);
     },
     [setSelectedEntity, setSelectedCommunity, setExpansion, getNeighbors]
   );

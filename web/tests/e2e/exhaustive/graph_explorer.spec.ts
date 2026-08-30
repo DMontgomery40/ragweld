@@ -55,7 +55,7 @@ async function searchEntities(page: Page, term: string): Promise<void> {
   await expect(page.getByTestId('graph-entity-count')).toContainText(term, { timeout: 30_000 });
 }
 
-test.describe.serial('Graph Explorer on the ragweld_code code graph', () => {
+test.describe('Graph Explorer on the ragweld_code code graph', () => {
   test('M-01/M-62/M-61: a code entity expands, the search carries its edges, and the count has a denominator', async ({
     page,
     baseURL,
@@ -86,8 +86,8 @@ test.describe.serial('Graph Explorer on the ragweld_code code graph', () => {
     expect(searched.nodes).toBeGreaterThan(50);
     expect(searched.edges, 'a search must carry the edges among its results').toBeGreaterThan(1);
     await expect(page.getByTestId('graph-no-edges-note')).toHaveCount(0);
-    const listedBefore = await page.locator('[data-testid^="graph-entity-"][data-testid*="::"]').count();
-    expect(listedBefore).toBeGreaterThan(0);
+    const listedBefore = await page.getByTestId('graph-entities').locator('> button').count();
+    expect(listedBefore).toBe(searched.nodes);
 
     // M-01: the entity whose id carries `/` and `::` expands instead of 404ing, and the
     // operator's view is not wiped.
@@ -192,6 +192,19 @@ test.describe.serial('Graph Explorer on the ragweld_code code graph', () => {
     await expect.poll(() => zoomLevel(page, 'graph-zoom-level'), { timeout: 10_000 }).toBeLessThan(afterWheel);
     await page.getByTestId('graph-zoom-fit').click();
 
+    // M-63: hub labels are legible in the INLINE panel at the zoom the operator lands on
+    // (it rests near k = 0.01, where a canvas-unit font cap rendered sub-pixel text).
+    const inlineInk = await page.evaluate(() => {
+      const el = document.querySelector('[data-testid="graph-viz-canvas"] canvas') as HTMLCanvasElement;
+      const data = el.getContext('2d')!.getImageData(0, 0, el.width, el.height).data;
+      let ink = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        if (data[i] > 230 && data[i + 1] > 230 && data[i + 2] > 230 && data[i + 3] > 200) ink += 1;
+      }
+      return ink;
+    });
+    expect(inlineInk, 'inline hub labels must be painted at the resting zoom').toBeGreaterThan(100);
+
     // M-149 / C-40: hub labels are painted in the pass after the nodes, so they survive
     // on top. Sample the canvas for the near-white label ink over the dark pill.
     await page.getByTestId('graph-expand-btn').click();
@@ -243,7 +256,9 @@ test.describe.serial('Graph Explorer on the ragweld_code code graph', () => {
   }) => {
     await gotoGraph(page, baseURL, CODE_CORPUS);
     await searchEntities(page, SEARCH_TERM);
-    const listed = await page.locator('[data-testid^="graph-entity-"][data-testid*="::"]').count();
+    // Count the list's own buttons: a `graph-entity-` prefix match would also pick up the
+    // count, search box and limit picker, and an id filter on `::` would drop modules.
+    const listed = await page.getByTestId('graph-entities').locator('> button').count();
     expect(listed).toBeGreaterThan(0);
 
     await page.getByTestId('graph-view-table').click();
@@ -263,19 +278,23 @@ test.describe.serial('Graph Explorer on the ragweld_code code graph', () => {
     // A failed expansion: a real transport failure, not an intercepted route. The results
     // must survive it and the reason must be on screen (M-01, and the empty state must not
     // tell the operator to do the thing that just failed - M-65).
+    const selectedBefore = await page.getByTestId('graph-entity-details').innerText();
+    const relsBefore = await relRows.count();
     await context.setOffline(true);
-    const survivor = page.locator('[data-testid^="graph-entity-row-"]').nth(1);
-    const survivorId = await survivor.getAttribute('data-testid');
-    await survivor.click();
-    await expect(page.getByTestId('graph-error')).toBeVisible({ timeout: 30_000 });
+    await page.locator('[data-testid^="graph-entity-row-"]').nth(1).click();
+
+    await expect(page.getByTestId('graph-expansion-failed')).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId('graph-expansion-failed')).toContainText('unchanged');
+    await expect(page.getByTestId('graph-error')).toBeVisible();
     expect(await entityRows.count(), 'a failed expansion must not clear the results').toBe(afterExpand);
-    const empty = page.getByTestId('graph-relationships-empty');
-    if (await empty.count()) {
-      await expect(empty).toContainText('Your entity list is unchanged');
-      await expect(empty).not.toContainText('Select an entity to load its neighborhood');
-    }
+    expect(await relRows.count(), 'a failed expansion must not clear the graph').toBe(relsBefore);
+    // The selection must not move to an entity whose neighborhood never loaded, or the
+    // panel would show the previous entity's relationships under the new entity's name.
+    expect(await page.getByTestId('graph-entity-details').innerText()).toBe(selectedBefore);
+    // ...and no empty state anywhere may tell the operator to redo what just failed.
+    const looping = page.getByText('Select an entity to load its neighborhood');
+    expect(await looping.count()).toBe(0);
     await context.setOffline(false);
-    expect(survivorId).toBeTruthy();
   });
 });
 

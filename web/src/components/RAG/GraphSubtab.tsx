@@ -83,7 +83,7 @@ function makeLabelPainter(
   labelledIds: Set<string>
 ): (ctx: CanvasRenderingContext2D, globalScale: number) => void {
   return (ctx, globalScale) => {
-    if (!labelledIds.size || globalScale < 0.4) return;
+    if (!labelledIds.size || globalScale <= 0) return;
     const placed: Array<[number, number, number, number]> = [];
     const ordered = nodes
       .filter((n) => labelledIds.has(n.entity_id))
@@ -96,7 +96,10 @@ function makeLabelPainter(
       const pos = node as NodeWithDegree & { x?: number; y?: number };
       if (typeof pos.x !== 'number' || typeof pos.y !== 'number') continue;
       const label = node.name || node.entity_id;
-      const fontSize = Math.min(26, Math.max(11.5, 12 / globalScale));
+      // Screen-constant 12px. A `Math.min(26, ...)` cap here meant that at the inline
+      // panel's resting scale (k ~= 0.01 for 200 nodes) a label rendered a quarter of a
+      // device pixel tall - drawn, and invisible.
+      const fontSize = 12 / globalScale;
       ctx.font = `600 ${fontSize}px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`;
 
       const padding = 4 / globalScale;
@@ -240,6 +243,8 @@ export function GraphSubtab() {
   const fgRef = useRef<any>(null);
   const fullscreenFgRef = useRef<any>(null);
   const vizCanvasRef = useRef<HTMLDivElement | null>(null);
+  const layoutRef = useRef<HTMLDivElement | null>(null);
+  const [layoutWidth, setLayoutWidth] = useState(0);
   const fullscreenCanvasRef = useRef<HTMLDivElement | null>(null);
   const [vizSize, setVizSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
   const [fullscreenSize, setFullscreenSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
@@ -388,6 +393,18 @@ export function GraphSubtab() {
   // left the inline canvas frozen at whatever width it had on mount - 2px at 1280 wide,
   // before minmax(0, 1fr) (M-63). Layout size, not getBoundingClientRect: a transformed
   // ancestor would size the canvas short.
+  // Three columns only fit when there is room for them. Below that the visualization takes
+  // its own full-width row instead of being squeezed to 145px beside the entity list (M-63).
+  useEffect(() => {
+    const el = layoutRef.current;
+    if (!el) return;
+    const update = () => setLayoutWidth(Math.floor(el.clientWidth));
+    update();
+    const observer = new ResizeObserver(() => update());
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
   useEffect(() => {
     if (viewMode !== 'viz') return;
     const el = vizCanvasRef.current;
@@ -665,9 +682,6 @@ export function GraphSubtab() {
    * selected one - and whose selection had 404ed (M-65, M-01).
    */
   const relationshipsEmptyReason = useMemo(() => {
-    if (expansion?.status === 'failed') {
-      return `Could not load this entity's neighborhood. ${expansion.detail} Your entity list is unchanged - pick another entity or press Reset.`;
-    }
     if (selectedEntity) {
       return `${selectedEntity.name} has no relationships in this graph generation. It is an isolated node.`;
     }
@@ -677,7 +691,7 @@ export function GraphSubtab() {
       return 'No relationships of the selected types. Clear the relationship-type filter to see the rest.';
     }
     return 'These entities have no relationships between them. Click one to load its neighborhood.';
-  }, [expansion, selectedEntity, selectedCommunity, filteredEntities.length, visibleRelationTypes.length]);
+  }, [selectedEntity, selectedCommunity, filteredEntities.length, visibleRelationTypes.length]);
 
   const entitiesEmptyReason = useMemo(() => {
     if (visibleEntityTypes.length) return 'No entities of the selected types. Clear the entity-type filter to see the rest.';
@@ -685,6 +699,9 @@ export function GraphSubtab() {
     if (selectedCommunity) return 'No entities in this community.';
     return 'This corpus has no entity graph yet.';
   }, [visibleEntityTypes.length, activeQuery, selectedCommunity]);
+
+  /** Room for a third column? Below this the visualization gets its own row. */
+  const wideLayout = layoutWidth === 0 || layoutWidth >= 1080;
 
   const indexProgressPercent = useMemo(() => {
     const raw = Number(activeIndexStatus?.progress ?? 0);
@@ -892,6 +909,24 @@ export function GraphSubtab() {
         </div>
       ) : null}
 
+      {expansion?.status === 'failed' ? (
+        <div
+          style={{
+            background: 'rgba(var(--error-rgb), 0.08)',
+            border: '1px solid var(--error)',
+            borderRadius: '10px',
+            padding: '10px 14px',
+            marginBottom: '16px',
+            color: 'var(--fg)',
+            fontSize: '12.5px',
+            lineHeight: 1.55,
+          }}
+          data-testid="graph-expansion-failed"
+        >
+          {expansion.detail} Your entity list and the graph on screen are unchanged.
+        </div>
+      ) : null}
+
       {error && (
         <div
           style={{
@@ -1051,10 +1086,11 @@ export function GraphSubtab() {
           hairball in a ~320x300 box" of M-63. minmax(0, 1fr) is what makes the panel a
           panel. */}
       <div
+        ref={layoutRef}
         style={{
           display: 'grid',
           gridTemplateColumns:
-            viewMode === 'table' ? '320px minmax(0, 1fr)' : '320px minmax(0, 1fr) minmax(0, 1.5fr)',
+            viewMode === 'table' || !wideLayout ? '320px minmax(0, 1fr)' : '320px minmax(0, 1fr) minmax(0, 1.5fr)',
           gap: '16px',
           alignItems: 'start',
         }}
@@ -1143,13 +1179,17 @@ export function GraphSubtab() {
             </select>
           </div>
 
-          <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+          {/* `flex: 1` without `minWidth: 0` keeps the input at its placeholder's min-content
+              width, so this row overflowed its grid track and the Search/Reset buttons ended
+              up UNDER the visualization canvas, where a click never lands. */}
+          <div style={{ display: 'flex', gap: '8px', marginTop: '10px', flexWrap: 'wrap' }}>
             <input
               value={entityQuery}
               onChange={(e) => setEntityQuery(e.target.value)}
-              placeholder="Search entities by name…"
+              placeholder="Search entities…"
               style={{
-                flex: 1,
+                flex: '1 1 120px',
+                minWidth: 0,
                 padding: '10px 12px',
                 background: 'var(--input-bg)',
                 border: '1px solid var(--line)',
@@ -1436,6 +1476,7 @@ export function GraphSubtab() {
               padding: '16px',
               overflow: 'hidden',
               minWidth: 0,
+              gridColumn: wideLayout ? 'auto' : '1 / -1',
             }}
             data-testid="graph-viz-panel"
           >
