@@ -152,7 +152,7 @@ def _read_config(path: Path) -> dict[str, object]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _compose_config(*files: str) -> dict[str, Any]:
+def _compose_config(*files: str, extra_env: dict[str, str] | None = None) -> dict[str, Any]:
     if shutil.which("docker") is None:
         pytest.skip("docker CLI is unavailable")
     version = subprocess.run(
@@ -167,6 +167,7 @@ def _compose_config(*files: str) -> dict[str, Any]:
 
     merged_env = dict(os.environ)
     merged_env.update(PROXMOX_CONTRACT_ENV)
+    merged_env.update(extra_env or {})
     args = ["docker", "compose", "--project-name", "ragweld"]
     for file_name in files:
         args.extend(["-f", file_name])
@@ -922,10 +923,13 @@ def test_proxmox_compose_uses_only_allowlisted_secret_mounts_and_origins() -> No
 
 
 def test_proxmox_authelia_session_store_is_private_healthchecked_and_owner_run() -> None:
+    # Distinctive values, so the rendered user proves the service really maps
+    # RAGWELD_RUNTIME_UID/GID instead of only matching the interpolation default.
     config = _compose_config(
         "docker-compose.yml",
         "infra/docker-compose.observability.yml",
         "deploy/proxmox/docker-compose.yml",
+        extra_env={"RAGWELD_RUNTIME_UID": "4242", "RAGWELD_RUNTIME_GID": "4343"},
     )
     services = config["services"]
     authelia_redis = services["authelia-redis"]
@@ -937,7 +941,7 @@ def test_proxmox_authelia_session_store_is_private_healthchecked_and_owner_run()
     # The redis entrypoint chowns /data to uid 999 and re-execs under it when it
     # starts as root, which would rewrite the bind mount owner and permanently
     # fail the owner-only preflight in start-runtime.sh.
-    assert authelia_redis["user"] == "1000:1000"
+    assert authelia_redis["user"] == "4242:4343"
     assert authelia_redis["volumes"] == [
         {
             "type": "bind",
@@ -2437,6 +2441,10 @@ def test_proxmox_start_runtime_sources_generated_runtime_and_langfuse_env_before
         secret_root / "langfuse-oidc-client-secret"
     ).read_text(encoding="utf-8").strip()
     assert services["langfuse-postgres"]["environment"]["POSTGRES_PASSWORD"] == langfuse_env["LANGFUSE_POSTGRES_PASSWORD"]
+    # The session store must run as the uid/gid that owns the secret root, or the
+    # redis entrypoint rewrites the bind mount owner and the owner-only preflight
+    # fails on every later start.
+    assert services["authelia-redis"]["user"] == f"{os.getuid()}:{os.getgid()}"
     assert "start --no-docker --no-local-model --no-frontend" in host_capture.read_text(encoding="utf-8")
 
 
