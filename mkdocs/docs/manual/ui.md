@@ -83,6 +83,8 @@ This panel controls when memory is indexed and when recall is injected per messa
 
 Every citation under a chat answer is clickable. PDF citations render as a page-thumbnail card with the cited region boxed; text citations open the file scrolled to the cited lines. Either way the document opens in the right rail's **Source** mode, so you can verify evidence without leaving the chat.
 
+Figure citations are flagged on top of that: a citation whose chunk is a described figure (see [Indexing a corpus](indexing.md)) carries a **Figure** pill — `Figure · chart` when the vision model named a kind — and the page viewer labels its text panel **Figure description** instead of **Cited text**. Ordinary page-text citations are never marked.
+
 - Source viewer guide: [Source document viewer](source_viewer.md)
 - Web-search citations: [Web search in Chat](web_search.md)
 

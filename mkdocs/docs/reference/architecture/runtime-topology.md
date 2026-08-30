@@ -4,7 +4,7 @@
     Drawn from `docker-compose.yml`, `infra/docker-compose.observability.yml` and
     `deploy/proxmox/docker-compose.yml` on every docs-autopilot run. Edit the compose files, not this page.
 
-26 services; an arrow means *depends on*. Host ports are the defaults from the compose files
+27 services; an arrow means *depends on*. Host ports are the defaults from the compose files
 (`HOST->CONTAINER`), all bound to `127.0.0.1`; the pve1 overlay exposes the app only through Cloudflare Tunnel -> Caddy -> Authelia.
 
 ```mermaid
@@ -49,10 +49,14 @@ flowchart LR
         n_caddy["caddy\ncaddy:2.11.4-alpine"]
         n_authelia["authelia\nauthelia/authelia:4.39.20\nports 59091->9091"]
     end
+    subgraph n_other["Other services"]
+        n_authelia_redis["authelia-redis\nredis:7-alpine"]
+    end
     n_alloy --> n_tempo
     n_api --> n_postgres
     n_api --> n_neo4j
     n_api --> n_litellm
+    n_authelia --> n_authelia_redis
     n_caddy --> n_authelia
     n_cloudflared --> n_caddy
     n_grafana --> n_prometheus
@@ -77,7 +81,8 @@ flowchart LR
 | `alertmanager` | `prom/alertmanager:v0.27.0` | 59093->9093 | - | observability overlay |
 | `alloy` | `grafana/alloy:v1.8.3` | 52345->12345, 54319->4317, 54320->4318, 52347->12347 | `tempo` | observability overlay, pve1 production overlay |
 | `api` | `(built from repo)` | 58012->8000 | `postgres`, `neo4j`, `litellm` | base |
-| `authelia` | `authelia/authelia:4.39.20` | 59091->9091 | - | pve1 production overlay |
+| `authelia` | `authelia/authelia:4.39.20` | 59091->9091 | `authelia-redis` | pve1 production overlay |
+| `authelia-redis` | `redis:7-alpine` | - | - | pve1 production overlay |
 | `caddy` | `caddy:2.11.4-alpine` | - | `authelia` | pve1 production overlay |
 | `cloudflared` | `cloudflare/cloudflared:2026.7.2` | - | `caddy` | pve1 production overlay |
 | `flyte` | `cr.flyte.org/flyteorg/flyte-sandbox-bundled:sha-51877f899c9f95e0cb5efe90444eb0c6c6ea48a9` | 30080->30080, 30002->30002 | - | base |

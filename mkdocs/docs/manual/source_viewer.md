@@ -50,6 +50,8 @@ The viewer header always shows the corpus, the corpus-relative path, the content
 !!! note "Figure-description chunks"
     When `indexing.figures` is enabled, described figures inside Docling-converted PDFs become their own chunks, anchored to the figure's page and normalized bounding box. These chunks carry `chunk_kind: "figure"` in chunk metadata (with the parsed `FigureAnnotation` under `figure` and `figure_class` when the classifier resolved one), so retrieval can identify figure evidence by metadata rather than text sniffing. Clicking such a citation renders the page with the figure region boxed — the same evidence behavior as any other PDF citation, but the highlighted region is the chart or drawing itself rather than a text span.
 
+    A figure citation is also visibly marked: chat citations carry a **Figure** pill (`Figure · chart` when the vision model named a kind), and the page viewer labels its text panel **Figure description** instead of **Cited text**. The marking reads the chunk metadata directly — the Qdrant payload carries `chunk_kind` and `figure` — so it appears whichever retrieval leg produced the hit.
+
 *Sequence diagram (this viewer only; retrieval itself is documented on the [generated retrieval-pipeline page](../reference/architecture/retrieval-pipeline.md)):*
 
 ```mermaid
@@ -135,7 +137,7 @@ httpx.patch(
     - Corpora indexed before provenance capture still open, but show the "not captured" notice until you re-index.
 
 ??? question "The viewer shows 'Signed out' instead of the document"
-    - The auth proxy in front of the API has no valid session for you (HTTP 401) — most often because your sign-in session ended, for example after a service restart.
+    - The auth proxy in front of the API has no valid session for you (HTTP 401). On the production ingress (Authelia) sessions live in a redis-backed store with a 12-hour expiration and a 4-hour inactivity timeout, so restarting the stack no longer signs you out — being idle long enough does.
     - Nothing is wrong with the document: reload the page to sign in again, then click the citation again.
     - The error card says this directly ("Your sign-in session has ended, so the document could not be fetched") with a *Reload the page to sign in again* hint, instead of a generic `Could not load document (HTTP 401)` — so you don't go hunting for an indexing problem that doesn't exist.
 

@@ -139,6 +139,9 @@ A chunk whose text is majority covered by a described figure's source span is st
 - **`figure_class` is only written when classification resolved.** A described-but-unclassified figure gets `chunk_kind` and `figure` but no `figure_class` key — no metadata backed by nothing.
 - **Only the marked chunk carries the annotation.** Text chunks next to a figure get no `figure` key, so retrieval-side filtering on `chunk_kind` can't accidentally pick up prose.
 
+!!! note "The figure marking rides the vector payload"
+    The Qdrant writer carries `chunk_kind` and `figure` in the point payload (`server/retrieval/qdrant_store.py`), so **dense and sparse** hits read back as figures without a Postgres hydration step — previously only graph-hydrated chunks carried the marking, and a figure hit on the dense or sparse leg looked like ordinary page text to the citation UI. `figure_class` is deliberately not carried in the payload: nothing downstream reads the local classifier's class at retrieval time. Corpora indexed before this change still hold the metadata in Postgres; re-index to mark dense/sparse figure hits.
+
 For retrieval, this means figure evidence can be preferred or excluded by chunk metadata without text sniffing, and extraction triages every picture into exactly one of three run-summary counts (across both the live `item.meta` shape and Docling's deprecated `item.annotations` shape): `figures_described` (the vision call returned non-blank text), `figures_failed` (the vision call was attempted but the gateway returned nothing — an unreachable alias, or a reasoning alias that exhausted its `max_completion_tokens` budget on its internal trace before writing any JSON), and `figures_skipped` (never attempted: below `min_area_fraction`, a confident `skip_classes` prediction, or `describe` off).
 
 To measure whether these figure chunks actually move retrieval on a document corpus, score a page-grounded question set with the [figure grounding eval](../guides/eval_figure_grounding.md).
@@ -183,21 +186,24 @@ Enable it per corpus:
 
 1. Sectional PATCH is validated by Pydantic; re-index the corpus to describe figures
 
+!!! tip "Figures & Vision card in the UI"
+    The **RAG → Indexing** tab has a **Figures & Vision** component card with the same knobs in one place: enable/classify/describe toggles, a vision-alias picker filtered to vision-capable catalog aliases, the prompt profile, image scale, min area fraction, skip classes, concurrency, per-figure timeout, and the completion-token budget. The card warns in place when the selected alias is missing or not flagged vision-capable — the same condition that makes the run refuse to start with `409 figure_vision_alias` — and the skip-classes field accepts a comma-separated list that is trimmed, de-duplicated and lower-cased to match Docling's classifier output.
+
 !!! warning "Vision costs are per figure"
     A dense scanned PDF can hold hundreds of figures. Run `/api/index/estimate` first — the estimate includes the figure cost before you commit. There is no per-file figure cap: bound cost with `min_area_fraction`, `skip_classes`, and `max_completion_tokens`, and point hard scanned schematics at a stronger vision alias per corpus.
 
 ### How the estimate prices figures
 
-`POST /api/index/estimate` counts the PDF pages in scope (real page counts via pypdfium2, skipping files it cannot open), multiplies by the shipped heuristic of **0.6 describable figures per page**, and prices the result from the model catalog:
+`POST /api/index/estimate` counts the PDF pages in scope (real page counts via pypdfium2, skipping files it cannot open), multiplies by the shipped heuristic of **0.4 describable figures per page** (rounded; omitted entirely when it rounds to zero), and prices the result from the model catalog:
 
 | Estimate field | Meaning |
 |----------------|---------|
-| `estimated_figures` | Figures expected to be described — PDF pages × 0.6, only when `indexing.figures.enabled` **and** `describe` are on and the corpus has PDFs |
+| `estimated_figures` | Figures expected to be described — PDF pages × 0.4 (rounded), only when `indexing.figures.enabled` **and** `describe` are on and the corpus has PDFs; omitted entirely when the heuristic rounds to zero |
 | `figure_description_cost_usd` | Vision-call cost for those figures: ~1,200 input tokens per figure (image crop at `images_scale=2.0` plus the prompt) plus `indexing.figures.max_completion_tokens` output tokens, priced from `data/models.json` for `indexing.figures.vision_model` |
 | `total_cost_usd` | Embedding + (optional) semantic KG + (optional) figures, or `null` when any priced component lacks catalog pricing |
 
 !!! tip "Reading the numbers"
-    The figure line is an estimate of an estimate: the 0.6 figures-per-page factor is a planning heuristic, not a measured count. Use it to decide *whether* to enable figure description on a large scanned corpus; the run summary's `figures_described` / `figures_failed` / `figures_undescribed` counts are the ground truth after indexing. If the figure line is missing entirely, either figures are disabled, `describe` is off, or the corpus has no PDFs in scope.
+    The figure line is an estimate of an estimate: the 0.4 figures-per-page factor is a planning heuristic, not a measured count. Use it to decide *whether* to enable figure description on a large scanned corpus; the run summary's `figures_described` / `figures_failed` / `figures_undescribed` counts are the ground truth after indexing. If the figure line is missing entirely, either figures are disabled, `describe` is off, the corpus has no PDFs in scope, or the page count is too small for the heuristic to round up to a single figure.
 
     In the **RAG → Indexing** tab the breakdown appears as `Embed $X + Semantic KG $Y + Figures $Z (~N)` next to the total, so you can compare the figure budget against the embedding budget before committing the run.
 
