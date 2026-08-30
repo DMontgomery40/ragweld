@@ -225,5 +225,5 @@ For the operator walkthrough (cost estimation, per-corpus tuning, troubleshootin
     - Embedding timeouts: retried with backoff; chunk remains un-embedded if persistent.
     - Graph build failures: retrieval continues with vector/sparse; flagged in logs.
     - Code graph: extraction is skipped entirely for unsupported languages (empty graph, not an error); only Python, TypeScript, and JavaScript are parsed.
-    - Docling extraction is serialized process-wide: a run queued behind another run's conversion logs `Waiting for the document extractor …` notices with the measured elapsed wait, and a long conversion emits `Converting <file>: still running (Ns elapsed)` heartbeats, so neither silence reads as a hang. See [Indexing a corpus](manual/indexing.md).
+    - Docling extraction is serialized process-wide: a run queued behind another run's conversion logs `Waiting for the document extractor …` notices with the measured elapsed wait, and a long conversion emits `Converting <file>: still running (Ns elapsed)` heartbeats — the first lands after ~60 seconds to rule out a wedged worker, then the interval widens (to ~5 minutes) so a 40-minute conversion narrates itself a handful of times instead of forty identical lines. See [Indexing a corpus](manual/indexing.md).
 

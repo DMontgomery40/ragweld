@@ -35,6 +35,9 @@
 !!! warning "Cross-Corpus Leakage"
     Never mix `corpus_id` across requests. Isolation is enforced in storage and graph layers.
 
+!!! note "Runtime-managed corpora carry a typed `internal` flag"
+    Some corpora are registered by the runtime, not by an operator: the chat Recall corpus (`recall_default`) and the Codex session corpora. Each carries a `meta.system_kind` marker, and the `Corpus` wire model now derives a typed `internal` flag from it (`server/api/repos.py` `_corpus_from_row`; see `tests/unit/test_domain_models.py`). These corpora index through their own path and never have an operator-run index run, so operator surfaces exclude them: the Dashboard's **Recent Index Runs** panel filters them out (they would otherwise read "never indexed" forever), and "delete all unindexed corpora" cleanup skips them via `internal` instead of a hardcoded `recall_default` check. See [UI tour](../manual/ui.md).
+
 ## Models Using corpus_id
 
 | Model | Fields |

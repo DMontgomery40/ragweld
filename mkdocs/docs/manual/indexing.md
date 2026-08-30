@@ -192,6 +192,9 @@ Enable it per corpus:
 !!! tip "Figures & Vision card in the UI"
     The **RAG → Indexing** tab has a **Figures & Vision** component card with the same knobs in one place: enable/classify/describe toggles, a vision-alias picker filtered to vision-capable catalog aliases, the prompt profile, image scale, min area fraction, skip classes, concurrency, per-figure timeout, and the completion-token budget. The card warns in place when the selected alias is missing or not flagged vision-capable — the same condition that makes the run refuse to start with `409 figure_vision_alias` — and the skip-classes field accepts a comma-separated list that is trimmed, de-duplicated and lower-cased to match Docling's classifier output.
 
+!!! tip "Deep links from global search"
+    A global-search hit (Ctrl+K) for any `indexing.figures.*` setting opens **RAG → Indexing** with this card selected and highlights the matching control, instead of landing on a raw Admin registry row (`web/src/config/configDeepLinks.ts`). The `?component=<id>` link parameter is a one-shot navigation aid: it is applied and then stripped from the URL, so a shared or reloaded link cannot stick and re-open the card against the operator's will — pick a different card, leave the subtab and come back, and it stays where you left it. Inside the `/rag` dock the card still opens, but the URL is not rewritten.
+
 !!! warning "Vision costs are per figure"
     A dense scanned PDF can hold hundreds of figures. Run `/api/index/estimate` first — the estimate includes the figure cost before you commit. There is no per-file figure cap: bound cost with `min_area_fraction`, `skip_classes`, and `max_completion_tokens`, and point hard scanned schematics at a stronger vision alias per corpus.
 
@@ -316,7 +319,7 @@ flowchart LR
 Docling conversion (rich documents and PDFs — the same path that powers the figure descriptions above) is serialized **process-wide**: only one index run converts at a time, and a second run's files queue behind it while its status still reads `indexing`. On a busy box that wait can stretch for many minutes, so the run log now narrates both silences instead of leaving a queued run looking like a hang:
 
 - **Queued waits.** After roughly 15 seconds waiting on the extractor, the run logs `Waiting for the document extractor: another index run is converting (<corpus> run <run id>) — queued Ns`, and repeats the notice every ~60 seconds with the **measured** elapsed wait (not a repeated constant, so a 20-minute queue never reads as "queued 15s" twenty times). The acquisition itself is logged too (`Document extractor acquired after Ns`), so the gap is accounted for.
-- **Long conversions.** One scanned PDF can hold the extractor for tens of minutes. Past roughly 60 seconds inside a single conversion, the run logs `Converting <file>: still running (Ns elapsed)` every ~60 seconds until the conversion finishes — a slow file never reads as a wedged worker.
+- **Long conversions.** One scanned PDF can hold the extractor for tens of minutes. Past roughly 60 seconds inside a single conversion, the run logs `Converting <file>: still running (Ns elapsed)` — the first beat answers "is it wedged?", and every beat after it repeats at a wider interval (~5 minutes) so a 40-minute conversion narrates itself a handful of times instead of writing 40 identical lines that bury every other event in the run log. A slow file never reads as a wedged worker, and the log around it stays readable.
 
 *Concept diagram (the process-wide extractor lock only — the full fused pipeline is on the [generated retrieval-pipeline page](../reference/architecture/retrieval-pipeline.md)):*
 
