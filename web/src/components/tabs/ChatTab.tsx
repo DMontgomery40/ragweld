@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { TraceExternalLinks } from '@/components/Observability/TraceExternalLinks';
 import { ChatSubtabs } from '@/components/Chat/ChatSubtabs';
 import { ChatInterface } from '@/components/Chat/ChatInterface';
 import { ChatSettings } from '@/components/Chat/ChatSettings';
@@ -278,29 +279,7 @@ export default function ChatTab() {
                 </div>
               </div>
             )}
-            {trace?.external_links?.length ? (
-              <div style={{ marginTop: '10px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                {trace.external_links.map((link, index) => (
-                  <a
-                    key={`${link.url}-${index}`}
-                    href={link.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{
-                      fontSize: '11px',
-                      color: 'var(--accent-text)',
-                      textDecoration: 'none',
-                      border: '1px solid var(--line)',
-                      borderRadius: '999px',
-                      padding: '4px 8px',
-                      background: 'var(--bg)',
-                    }}
-                  >
-                    {link.label}
-                  </a>
-                ))}
-              </div>
-            ) : null}
+            <TraceExternalLinks links={trace?.external_links} traceId={trace?.trace_id} />
             <div
               id="chat-trace-output"
               aria-live="polite"

@@ -1,5 +1,6 @@
 import React from 'react';
 import { useTrace } from '@/hooks/useTrace';
+import { TraceExternalLinks } from '@/components/Observability/TraceExternalLinks';
 
 type TraceViewerProps = {
   className?: string;
@@ -150,26 +151,8 @@ export const TraceViewer: React.FC<TraceViewerProps> = ({ className = '' }) => {
 
     if (Array.isArray(trace.external_links) && trace.external_links.length > 0) {
       parts.push(
-        <div key="links" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '16px' }}>
-          {trace.external_links.map((link, idx) => (
-            <a
-              key={`${link.url}-${idx}`}
-              href={link.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{
-                fontSize: '11px',
-                color: 'var(--accent-text)',
-                textDecoration: 'none',
-                border: '1px solid var(--line)',
-                borderRadius: '999px',
-                padding: '4px 8px',
-                background: 'var(--bg)',
-              }}
-            >
-              {link.label}
-            </a>
-          ))}
+        <div key="links" style={{ marginBottom: '16px' }}>
+          <TraceExternalLinks links={trace.external_links} traceId={trace.trace_id} />
         </div>
       );
     }
