@@ -249,8 +249,8 @@ export function TrainingStudio() {
   const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
   const [diagnostics, setDiagnostics] = useState<RerankerTrainDiagnosticRecord[]>([]);
 
-  const [probeQuery, setProbeQuery] = useState('auth login flow');
-  const [probeDocument, setProbeDocument] = useState('auth login token flow good');
+  const [probeQuery, setProbeQuery] = useState('');
+  const [probeDocument, setProbeDocument] = useState('');
   const [probeIncludeLogits, setProbeIncludeLogits] = useState(false);
   const [probeLoading, setProbeLoading] = useState(false);
   const [probeResult, setProbeResult] = useState<RerankerScoreResponse | null>(null);
@@ -1096,7 +1096,22 @@ export function TrainingStudio() {
     { id: 'debug-score', label: 'Debug Score Pair' },
   ];
 
-  const disabledLegacy = status.running;
+  // Real preconditions for the toolbar actions. Mining needs a corpus; training and
+  // evaluation additionally need mined triplets for that corpus — running either with
+  // triplets=0 can only fail or waste a run (drive D-23). The reason is shown on hover.
+  const noTriplets = (stats.tripletCount ?? 0) <= 0;
+  const mineBlockReason = status.running
+    ? 'A run is already active'
+    : !activeCorpus
+      ? 'Select a corpus first'
+      : null;
+  const trainBlockReason = status.running
+    ? 'A run is already active'
+    : !activeCorpus
+      ? 'Select a corpus first'
+      : noTriplets
+        ? 'Mine triplets first — training and evaluation need mined triplets for this corpus'
+        : null;
 
   const renderRunsPanel = useCallback(() => {
     return (
@@ -1600,7 +1615,18 @@ export function TrainingStudio() {
             <section className="studio-panel studio-compact-panel" data-testid="studio-debug-score-panel">
               <header className="studio-panel-header">
                 <h3 className="studio-panel-title">Debug Score Pair</h3>
-                <button className="small-button" onClick={handleProbeScore} disabled={probeLoading || !activeCorpus}>
+                <button
+                  className="small-button"
+                  onClick={handleProbeScore}
+                  disabled={probeLoading || !activeCorpus || !probeQuery.trim() || !probeDocument.trim()}
+                  title={
+                    !activeCorpus
+                      ? 'Select a corpus first'
+                      : !probeQuery.trim() || !probeDocument.trim()
+                        ? 'Enter a query and a document to score'
+                        : 'Score this query/document pair with the current reranker'
+                  }
+                >
                   {probeLoading ? 'Scoring…' : 'Score'}
                 </button>
               </header>
@@ -1608,12 +1634,22 @@ export function TrainingStudio() {
               <div className="studio-form-grid one">
                 <div className="input-group">
                   <label>Query</label>
-                  <textarea value={probeQuery} onChange={(e) => setProbeQuery(e.target.value)} rows={3} />
+                  <textarea
+                    value={probeQuery}
+                    onChange={(e) => setProbeQuery(e.target.value)}
+                    rows={3}
+                    placeholder="A question from this corpus, e.g. what a searcher would type"
+                  />
                 </div>
 
                 <div className="input-group">
                   <label>Document</label>
-                  <textarea value={probeDocument} onChange={(e) => setProbeDocument(e.target.value)} rows={4} />
+                  <textarea
+                    value={probeDocument}
+                    onChange={(e) => setProbeDocument(e.target.value)}
+                    rows={4}
+                    placeholder="A chunk or passage from this corpus to score against the query"
+                  />
                 </div>
 
                 <label className="studio-checkbox-inline">
@@ -1622,8 +1658,11 @@ export function TrainingStudio() {
                     checked={probeIncludeLogits}
                     onChange={(e) => setProbeIncludeLogits(e.target.checked)}
                   />
-                  include logits
+                  Include raw logits
                 </label>
+                <p className="studio-panel-subtitle" style={{ margin: '2px 0 0' }}>
+                  Adds the model's pre-sigmoid output values to the result for debugging; leave off for the plain relevance score.
+                </p>
 
                 {probeResult ? (
                   <pre className="studio-pre" data-testid="studio-debug-score-result">{JSON.stringify(probeResult, null, 2)}</pre>
@@ -1961,10 +2000,23 @@ export function TrainingStudio() {
         </div>
 
         <div className="studio-header-actions">
-          <button className="small-button" onClick={() => setScope('corpus')} data-active={scope === 'corpus'}>
+          <span className="studio-label" style={{ alignSelf: 'center' }}>Runs</span>
+          <button
+            className="small-button"
+            onClick={() => setScope('corpus')}
+            data-active={scope === 'corpus'}
+            aria-pressed={scope === 'corpus'}
+            title="List training runs for the active corpus only"
+          >
             This corpus
           </button>
-          <button className="small-button" onClick={() => setScope('all')} data-active={scope === 'all'}>
+          <button
+            className="small-button"
+            onClick={() => setScope('all')}
+            data-active={scope === 'all'}
+            aria-pressed={scope === 'all'}
+            title="List training runs across all corpora"
+          >
             All corpora
           </button>
           <button className="small-button" onClick={onStartRun} disabled={!activeCorpus} data-testid="studio-start-run">
@@ -1975,9 +2027,33 @@ export function TrainingStudio() {
 
       <div className="studio-command-bar">
         <div className="studio-command-group">
-          <button className="small-button" onClick={handleMine} disabled={disabledLegacy}>Mine Triplets</button>
-          <button className="small-button" onClick={handleTrain} disabled={disabledLegacy}>Train</button>
-          <button className="small-button" onClick={handleEvaluate} disabled={disabledLegacy}>Evaluate</button>
+          <button
+            className="small-button"
+            data-testid="studio-mine-triplets"
+            onClick={handleMine}
+            disabled={Boolean(mineBlockReason)}
+            title={mineBlockReason || 'Mine reranker triplets for this corpus'}
+          >
+            Mine Triplets
+          </button>
+          <button
+            className="small-button"
+            data-testid="studio-train"
+            onClick={handleTrain}
+            disabled={Boolean(trainBlockReason)}
+            title={trainBlockReason || 'Train the reranker on the mined triplets'}
+          >
+            Train
+          </button>
+          <button
+            className="small-button"
+            data-testid="studio-evaluate"
+            onClick={handleEvaluate}
+            disabled={Boolean(trainBlockReason)}
+            title={trainBlockReason || 'Evaluate the reranker on the mined triplets'}
+          >
+            Evaluate
+          </button>
           <button
             className="small-button"
             onClick={onPromote}
@@ -2032,8 +2108,12 @@ export function TrainingStudio() {
       {showSetupRow ? (
         <div className="studio-run-setup">
           <div className="studio-run-setup-item">
-            <span className="studio-label">Corpus</span>
+            <span className="studio-label">Active corpus</span>
             <span className="studio-value studio-mono">{activeCorpus || '—'}</span>
+          </div>
+          <div className="studio-run-setup-item">
+            <span className="studio-label">Runs shown</span>
+            <span className="studio-value studio-mono">{scope === 'all' ? 'All corpora' : 'This corpus'}</span>
           </div>
           <div className="studio-run-setup-item">
             <span className="studio-label">
@@ -2063,7 +2143,7 @@ export function TrainingStudio() {
             </div>
           </div>
           <div className="studio-run-setup-item">
-            <span className="studio-label">Triplet status</span>
+            <span className="studio-label">Triplet status{activeCorpus ? ` (${activeCorpus})` : ''}</span>
             <span className="studio-value studio-mono">triplets={stats.tripletCount} · queries={stats.queryCount}</span>
           </div>
         </div>
