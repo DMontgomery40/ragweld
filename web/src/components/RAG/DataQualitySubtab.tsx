@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useConfigField } from '@/hooks';
+import { NumberField } from '@/components/ui/NumberField';
 import type {
   ChunkSummariesBuildRequest,
   ChunkSummariesLastBuild,
@@ -301,12 +302,13 @@ export function DataQualitySubtab() {
               Max chunk summaries
               <TooltipIcon name="CHUNK_SUMMARIES_MAX" />
             </label>
-            <input
-              type="number"
+            <NumberField
+              data-testid="data-quality-chunk-summaries-max"
+              configPath="enrichment.chunk_summaries_max"
               min={10}
               max={1000}
               value={chunkSummariesMax}
-              onChange={(e) => setChunkSummariesMax(parseInt(e.target.value || '100', 10))}
+              onCommit={setChunkSummariesMax}
             />
           </div>
           <div className="input-group">
@@ -398,12 +400,12 @@ export function DataQualitySubtab() {
               Max keywords per corpus
               <TooltipIcon name="KEYWORDS_MAX_PER_REPO" />
             </label>
-            <input
-              type="number"
+            <NumberField
+              configPath="keywords.keywords_max_per_repo"
               min={10}
               max={500}
               value={keywordsMaxPerCorpus}
-              onChange={(e) => setKeywordsMaxPerCorpus(parseInt(e.target.value || '50', 10))}
+              onCommit={setKeywordsMaxPerCorpus}
             />
           </div>
           <div className="input-group">
@@ -411,12 +413,12 @@ export function DataQualitySubtab() {
               Min frequency
               <TooltipIcon name="KEYWORDS_MIN_FREQ" />
             </label>
-            <input
-              type="number"
+            <NumberField
+              configPath="keywords.keywords_min_freq"
               min={1}
               max={10}
               value={keywordsMinFreq}
-              onChange={(e) => setKeywordsMinFreq(parseInt(e.target.value || '3', 10))}
+              onCommit={setKeywordsMinFreq}
             />
           </div>
           <div className="input-group">
@@ -424,13 +426,13 @@ export function DataQualitySubtab() {
               Boost
               <TooltipIcon name="KEYWORDS_BOOST" />
             </label>
-            <input
-              type="number"
+            <NumberField
+              configPath="keywords.keywords_boost"
               min={1.0}
               max={3.0}
               step={0.1}
               value={keywordsBoost}
-              onChange={(e) => setKeywordsBoost(parseFloat(e.target.value || '1.3'))}
+              onCommit={setKeywordsBoost}
             />
           </div>
         </div>
@@ -455,12 +457,12 @@ export function DataQualitySubtab() {
               Refresh hours
               <TooltipIcon name="KEYWORDS_REFRESH_HOURS" />
             </label>
-            <input
-              type="number"
+            <NumberField
+              configPath="keywords.keywords_refresh_hours"
               min={1}
               max={168}
               value={keywordsRefreshHours}
-              onChange={(e) => setKeywordsRefreshHours(parseInt(e.target.value || '24', 10))}
+              onCommit={setKeywordsRefreshHours}
             />
           </div>
           <div className="input-group" />
