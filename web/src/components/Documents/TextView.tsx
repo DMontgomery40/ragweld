@@ -7,9 +7,18 @@ type Props = {
   endLine: number;
 };
 
+/** Height of an unwrapped row; also the estimate the virtualizer starts from. */
 const ROW_HEIGHT = 22;
 
-/** Full file text with 1-based line numbers; the cited span is highlighted and scrolled into view. */
+/**
+ * Full file text with 1-based line numbers; the cited span is highlighted and scrolled into view.
+ *
+ * Lines wrap. They used to be `white-space: pre` rows in a fixed-height virtualizer, so a wide
+ * line ran off the pane edge and could only be read through a horizontal scrollbar at the
+ * bottom of the whole dock (M-110/B-08) - on the one flow this product exists for, checking
+ * that a citation says what the answer claimed. Wrapping means rows have variable height, so
+ * the virtualizer measures them instead of assuming ROW_HEIGHT.
+ */
 export function TextView({ text, startLine, endLine }: Props) {
   const lines = text.split('\n');
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -20,6 +29,7 @@ export function TextView({ text, startLine, endLine }: Props) {
     getScrollElement: () => scrollRef.current,
     estimateSize: () => ROW_HEIGHT,
     overscan: 30,
+    measureElement: (element) => element.getBoundingClientRect().height,
   });
 
   useEffect(() => {
@@ -34,32 +44,36 @@ export function TextView({ text, startLine, endLine }: Props) {
       data-testid="document-text-view"
       style={{
         height: '100%',
-        overflow: 'auto',
+        overflowY: 'auto',
+        // Never sideways: the pane is the width the operator has, and the text fits it.
+        overflowX: 'hidden',
         background: 'var(--code-bg)',
         fontFamily: 'var(--font-mono)',
-        fontSize: '12.5px',
+        fontSize: '14px',
         lineHeight: `${ROW_HEIGHT}px`,
         color: 'var(--fg)',
       }}
     >
-      <div style={{ height: `${virtualizer.getTotalSize()}px`, position: 'relative', minWidth: '100%' }}>
+      <div style={{ height: `${virtualizer.getTotalSize()}px`, position: 'relative', width: '100%' }}>
         {virtualizer.getVirtualItems().map((item) => {
           const lineNo = item.index + 1;
           const cited = lineNo >= startLine && lineNo <= endLine;
           return (
             <div
               key={item.key}
+              ref={virtualizer.measureElement}
+              data-index={item.index}
               data-testid={cited ? 'document-highlight-line' : undefined}
               data-line={lineNo}
               style={{
                 position: 'absolute',
                 top: 0,
                 left: 0,
+                width: '100%',
                 transform: `translateY(${item.start}px)`,
-                height: `${ROW_HEIGHT}px`,
+                minHeight: `${ROW_HEIGHT}px`,
                 display: 'flex',
-                whiteSpace: 'pre',
-                minWidth: '100%',
+                alignItems: 'flex-start',
                 background: cited ? 'color-mix(in srgb, var(--accent) 26%, transparent)' : 'transparent',
                 borderLeft: cited ? '3px solid var(--accent)' : '3px solid transparent',
               }}
@@ -75,7 +89,18 @@ export function TextView({ text, startLine, endLine }: Props) {
               >
                 {lineNo}
               </span>
-              <span style={{ paddingRight: '16px' }}>{lines[item.index]}</span>
+              <span
+                style={{
+                  flex: '1 1 auto',
+                  minWidth: 0,
+                  paddingRight: '16px',
+                  // Indentation and runs of spaces are evidence too, so keep them and wrap.
+                  whiteSpace: 'pre-wrap',
+                  overflowWrap: 'anywhere',
+                }}
+              >
+                {lines[item.index]}
+              </span>
             </div>
           );
         })}
