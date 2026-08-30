@@ -772,16 +772,43 @@ def _normalized_field_type(annotation: Any) -> tuple[str, list[str]]:
     return "string", []
 
 
+# A trailing unit abbreviation is a unit, not a word. `indexing.figures.timeout_s`
+# rendered as "Timeout S", and "S" is not a thing an operator can act on; the same went
+# for every `_ms`, `_mb`, `_pct` and `_usd` field in the registry (M-160/A-42). Only the
+# LAST segment is treated this way -- `ms_between_retries` is a name, not a unit.
+_UNIT_SUFFIXES = {
+    "s": "seconds",
+    "sec": "seconds",
+    "seconds": "seconds",
+    "ms": "milliseconds",
+    "hours": "hours",
+    "days": "days",
+    "mb": "MB",
+    "gb": "GB",
+    "kb": "KB",
+    "pct": "%",
+    "usd": "USD",
+}
+
+
 def _label_for_path(path: str) -> str:
     leaf = path.split(".")[-1]
     parts = [part for part in leaf.split("_") if part]
     if not parts:
         return path
+
+    unit: str | None = None
+    if len(parts) > 1:
+        unit = _UNIT_SUFFIXES.get(parts[-1].lower())
+        if unit is not None:
+            parts = parts[:-1]
+
     rendered: list[str] = []
     for part in parts:
         lower = part.lower()
         rendered.append(_ACRONYM_TOKENS.get(lower, part.replace("-", " ").title()))
-    return " ".join(rendered)
+    label = " ".join(rendered)
+    return f"{label} ({unit})" if unit else label
 
 
 def _infer_exposure_level(
