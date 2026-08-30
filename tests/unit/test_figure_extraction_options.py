@@ -149,13 +149,17 @@ def test_extract_text_for_path_runs_the_classifier_over_a_real_pdf() -> None:
     ), "min_confidence=0.0 must still deny at least one real picture -- pins the bug this floor fixes"
 
 
-def test_unreachable_vision_gateway_yields_undescribed_pictures_not_an_exception() -> None:
+def test_unreachable_vision_gateway_yields_failed_pictures_not_an_exception() -> None:
     """Pinned Docling behaviour: a dead vision endpoint does NOT fail the conversion.
 
     Docling absorbs the per-picture API failure and returns the document with its pictures
-    undescribed. That is why the run log reports ``figures_undescribed`` and why the
-    described/undescribed split is the only signal an operator gets that the vision alias
-    was unreachable -- the conversion itself still succeeds.
+    described as empty text (``figure_serializer._non_blank`` and this module's
+    ``_read_with_docling`` triage that as *failed*, not *described* -- the vision call was
+    attempted and returned nothing, distinct from a picture that never reached the vision call
+    at all, e.g. filtered by the area threshold or classification deny-list). That is why the
+    run log reports ``figures_failed`` separately from ``figures_skipped``, and why that split
+    is the only signal an operator gets that the vision alias was unreachable -- the conversion
+    itself still succeeds.
     """
     figures = IndexingFiguresConfig(
         enabled=True, describe=True, classify=True, timeout_s=5, concurrency=1
@@ -167,4 +171,8 @@ def test_unreachable_vision_gateway_yields_undescribed_pictures_not_an_exception
     assert doc is not None
     assert doc.extraction == "docling"
     assert doc.figures_described == 0
-    assert doc.figures_skipped > 0
+    assert doc.figures_failed == 2
+    assert doc.figures_skipped == 0
+    assert not any(span.figure is not None for span in doc.spans), (
+        "a failed (empty-text) reply must never become a FigureAnnotation on any span"
+    )

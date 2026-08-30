@@ -190,6 +190,32 @@ def test_classified_but_undescribed_picture_shows_class_header(converted) -> Non
     assert pic.self_ref not in picture_serializer.figures_by_ref, "no description was parsed, so no FigureAnnotation"
 
 
+def test_blank_description_text_is_treated_as_no_description(converted) -> None:
+    """A vision reply of ``""`` (empty gateway response) is not a description: it must fall
+    back to the classified-but-undescribed header-only block, exactly like no description was
+    ever attached, and must never be parsed into a ``FigureAnnotation``.
+    """
+    doc, pictures = converted
+    pic = pictures[0]
+    pic.annotations = []
+    pic.meta = PictureMeta(
+        description=DescriptionMetaField(text="", created_by="test"),
+        classification=PictureClassificationMetaField(
+            predictions=[PictureClassificationPrediction(class_name="chart", confidence=0.9)]
+        ),
+    )
+
+    serializer = make_markdown_serializer(doc)
+    full = serializer.serialize().text
+    part = serializer.serialize(item=pic).text
+
+    assert part.startswith("Figure (chart)")
+    assert full.count(part) == 1
+    picture_serializer = serializer.picture_serializer
+    assert pic.self_ref not in picture_serializer.figures_by_ref, "a blank reply must not become a FigureAnnotation"
+    assert picture_serializer.classes_by_ref[pic.self_ref] == "chart"
+
+
 def test_classified_but_undescribed_and_uncaptioned_picture_shows_class_header(converted) -> None:
     """Docling only attaches a caption when adjacent text is recognised as one — a common shape
     where a classified-but-undescribed picture has neither a description nor a caption. Without

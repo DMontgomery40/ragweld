@@ -1859,6 +1859,7 @@ async def _run_index_body(
     # one decision. ``start_index`` already refused an unroutable alias before the fence.
     figure_gateway = _resolve_figure_route(cfg, as_http=False)
     figures_described_total = 0
+    figures_failed_total = 0
     figures_undescribed_total = 0
     contextual_mode = (
         str(getattr(cfg.embedding, "contextual_chunk_embeddings", "off") or "off").strip().lower()
@@ -2164,6 +2165,7 @@ async def _run_index_body(
             # Counted per successfully extracted document: the vision calls were made
             # (and billed) even if the document is skipped further down.
             figures_described_total += extracted.figures_described
+            figures_failed_total += extracted.figures_failed
             figures_undescribed_total += extracted.figures_skipped
             content = extracted.text
             if "\x00" in content:
@@ -2372,18 +2374,35 @@ async def _run_index_body(
         )
 
     # Reported independently of GraphRAG: figures can be enabled with semantic KG off.
-    # Docling exposes no per-picture failure reason, so an eligible picture that came back
-    # without a description is reported as undescribed rather than guessed to be a failure.
+    # A picture lands in exactly one of three counts (see _read_with_docling): described (the
+    # vision call returned non-blank text), failed (the vision call was attempted -- Docling
+    # absorbs the per-picture failure and returns empty text rather than raising -- but the
+    # gateway returned nothing), or undescribed/skipped (the picture never reached the vision
+    # call at all: area threshold, classification deny-list, or describe off).
     if event_queue is not None and cfg.indexing.figures.enabled:
-        # Docling absorbs a per-picture vision failure and returns the picture undescribed,
-        # so an unreachable alias produces a completely normal-looking run. Describing
-        # nothing at all when descriptions were requested is reported as a warning, not a
-        # log line, because it is the one shape that means the vision alias never answered.
+        # Describing nothing at all when descriptions were requested is reported as a warning,
+        # not a log line, because it is the one shape that means the vision alias never
+        # actually described anything -- whether every picture failed, was skipped, or both.
         described_nothing = (
             cfg.indexing.figures.describe
             and figures_described_total == 0
-            and figures_undescribed_total > 0
+            and (figures_failed_total + figures_undescribed_total) > 0
         )
+        if described_nothing and figures_failed_total > 0:
+            # Distinct from the all-skipped case: the vision call WAS attempted (billed) and
+            # came back empty, which points at the gateway/alias/route or the completion-token
+            # budget rather than at the area threshold or classification deny-list.
+            hint = (
+                " (description was enabled but the vision alias returned empty descriptions; "
+                "check the gateway, the alias, and indexing.figures.max_completion_tokens)"
+            )
+        elif described_nothing:
+            hint = (
+                " (description was enabled but no figure was described; check the "
+                "vision alias)"
+            )
+        else:
+            hint = ""
         _emit_event(
             event_queue,
             {
@@ -2391,13 +2410,9 @@ async def _run_index_body(
                 "message": (
                     "Figure summary: "
                     f"figures_described={figures_described_total} "
+                    f"figures_failed={figures_failed_total} "
                     f"figures_undescribed={figures_undescribed_total}"
-                    + (
-                        " (description was enabled but no figure was described; check the "
-                        "vision alias)"
-                        if described_nothing
-                        else ""
-                    )
+                    + hint
                 ),
             },
             drop_oldest=True,

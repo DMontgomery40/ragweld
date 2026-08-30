@@ -53,6 +53,17 @@ from server.indexing.figure_prompts import figure_block_markdown, parse_figure_r
 from server.models.index import FigureAnnotation
 
 
+def _non_blank(text: str | None) -> str | None:
+    """``text`` if it has non-whitespace content, else ``None``.
+
+    A vision reply of ``""`` (the gateway returned nothing, or Docling's own API client
+    swallowed a failed request) is not a description: it must be treated exactly like no
+    description was ever attached, not parsed into a ``FigureAnnotation`` and not counted as
+    described anywhere downstream.
+    """
+    return text if text and text.strip() else None
+
+
 class RagweldPictureSerializer(MarkdownPictureSerializer):
     """Prose for described and/or classified pictures; Docling's default output only when
     neither a description nor a classification is present.
@@ -65,7 +76,9 @@ class RagweldPictureSerializer(MarkdownPictureSerializer):
 
     def serialize(self, *, item: PictureItem, doc_serializer: Any, doc: DoclingDocument, **kwargs: Any):  # type: ignore[override]
         meta = item.meta if isinstance(item.meta, PictureMeta) else None
-        description_text: str | None = meta.description.text if meta and meta.description else None
+        description_text: str | None = (
+            _non_blank(meta.description.text) if meta and meta.description else None
+        )
         cls: str | None = (
             meta.classification.get_main_prediction().class_name.replace("_", " ")
             if meta and meta.classification
@@ -74,7 +87,7 @@ class RagweldPictureSerializer(MarkdownPictureSerializer):
         if description_text is None or cls is None:
             for ann in item.annotations:
                 if description_text is None and isinstance(ann, DescriptionAnnotation):
-                    description_text = ann.text
+                    description_text = _non_blank(ann.text)
                 elif cls is None and isinstance(ann, PictureClassificationData) and ann.predicted_classes:
                     cls = ann.predicted_classes[0].class_name.replace("_", " ")
 

@@ -333,6 +333,15 @@ def _read_with_docling(
     that point — building ragweld's own markdown serializer, serializing, the source map, the
     figure counts — is ragweld's own code; a bug there must raise so a regression is visible
     instead of silently degrading to "unparseable".
+
+    Every picture is triaged into exactly one of three counts, in this priority order:
+    ``figures_described`` (a description object is present and its text is non-blank -- the
+    vision call was attempted and returned something), ``figures_failed`` (a description
+    object is present but its text is blank -- the vision call was attempted and the gateway
+    returned nothing, e.g. an unreachable endpoint or a truncated/empty reply; Docling itself
+    absorbs this rather than raising, so it is otherwise indistinguishable from success without
+    checking the text), and ``figures_skipped`` (no description object at all -- the picture
+    never reached the vision call: area threshold, classification deny-list, or describe off).
     """
     from docling_core.types.doc import PictureItem
     from docling_core.types.doc.document import DescriptionAnnotation, PictureMeta
@@ -352,16 +361,34 @@ def _read_with_docling(
         return None
     spans, unlocated = _build_source_map(doc, serializer, full)
     pictures = [p for p, _ in doc.iterate_items() if isinstance(p, PictureItem)]
-    # A description can live in the current ``item.meta`` shape (live enrichment, and any
-    # fixture that sets meta directly) or the deprecated ``item.annotations`` shape (fixtures
-    # built against the older API); setting meta alone does not populate annotations, so both
-    # must be checked or meta-only pictures would be miscounted as skipped.
-    described = sum(
-        1
-        for p in pictures
-        if (isinstance(p.meta, PictureMeta) and p.meta.description is not None)
-        or any(isinstance(a, DescriptionAnnotation) for a in p.get_annotations())
-    )
+
+    def _description_text(p: Any) -> str | None:
+        """The picture's raw description text from either shape, or ``None`` if the vision
+        call was never attempted for this picture (no description object of any shape).
+
+        A description can live in the current ``item.meta`` shape (live enrichment, and any
+        fixture that sets meta directly) or the deprecated ``item.annotations`` shape (fixtures
+        built against the older API); setting meta alone does not populate annotations, so both
+        must be checked or meta-only pictures would be miscounted as never-attempted.
+        """
+        if isinstance(p.meta, PictureMeta) and p.meta.description is not None:
+            return p.meta.description.text
+        for a in p.get_annotations():
+            if isinstance(a, DescriptionAnnotation):
+                return a.text
+        return None
+
+    described = 0
+    failed = 0
+    for p in pictures:
+        text = _description_text(p)
+        if text is None:
+            continue  # never attempted -> counted in figures_skipped below
+        if text.strip():
+            described += 1
+        else:
+            failed += 1  # attempted, gateway returned nothing
+    skipped = max(0, len(pictures) - described - failed)
     return ExtractedDocument(
         text=full,
         extraction="docling",
@@ -369,7 +396,8 @@ def _read_with_docling(
         spans=spans,
         unlocated_items=unlocated,
         figures_described=described,
-        figures_skipped=max(0, len(pictures) - described),
+        figures_failed=failed,
+        figures_skipped=skipped,
     )
 
 
