@@ -226,3 +226,49 @@ test('both estimate call sites funnel through the api layer', () => {
   // And the one place that may: the api layer itself.
   expect(read('web/src/api/indexing.ts')).toContain("'/index/estimate'");
 });
+
+test('the Get Started wizard opens no dialog until the estimator has measured', async ({ page }) => {
+  // The wizard is the surface the guard was missing on: it awaited the estimate and opened
+  // "Build indexes?" on a non-ready answer. Driven here through the real wizard, on an API that
+  // may still be warming, asserting the dialog appears ONLY with real numbers in it.
+  const dialogSnapshots: string[] = [];
+  await page.goto('start', { waitUntil: 'domcontentloaded' });
+
+  await page.getByTestId('onboarding-dot-2').click();
+  const picker = page.getByTestId('onboarding-existing-corpus');
+  await expect(picker).toBeVisible();
+  await picker.selectOption(corpus.corpusId);
+
+  await page.getByTestId('onboarding-dot-3').click();
+  const build = page.getByTestId('onboarding-index-start');
+  await expect(build).toBeVisible();
+
+  // Watch for a dialog appearing at any point during the wait.
+  const watcher = setInterval(() => {
+    void page
+      .locator('[data-testid="confirm-dialog-message"]')
+      .innerText()
+      .then((text) => dialogSnapshots.push(text))
+      .catch(() => undefined);
+  }, 250);
+
+  await build.click();
+  const dialog = page.getByTestId('confirm-dialog');
+  await expect(dialog).toBeVisible({ timeout: 150_000 });
+  const message = await page.getByTestId('confirm-dialog-message').innerText();
+  clearInterval(watcher);
+
+  // Cancel: this spec must never start an index run.
+  await page.getByTestId('confirm-dialog-cancel').click();
+  await expect(dialog).toHaveCount(0);
+
+  // Whatever was on screen, it was never a dialog built from an unmeasured estimate.
+  for (const snapshot of [...dialogSnapshots, message]) {
+    expect(snapshot, `a dialog showed an unmeasured estimate:\n${snapshot}`).not.toMatch(
+      /Estimated tokens: 0\b|Estimated chunks: 0\b|Files: 0\b/
+    );
+  }
+  expect(message).toContain('Index estimate for');
+  expect(message).toMatch(/Estimated tokens: [1-9][\d,]*/);
+  expect(message).toMatch(/Estimated chunks: [1-9][\d,]*/);
+});

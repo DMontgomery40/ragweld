@@ -132,14 +132,13 @@ export default function StartTab() {
       // with a measured one, so the confirmation below cannot be built from a payload that has
       // no numbers in it. Surface the wait rather than sitting silent for up to two minutes.
       estimate = await indexingApi.estimate(request, {
+        // Only reached while warming: an insufficient sample throws instead of waiting.
         onWaiting: (pending) =>
           setIndexStatusText(
-            pending.status === 'insufficient_sample'
-              ? 'Measuring more of the corpus…'
-              : `Preparing the estimator (about ${Math.max(
-                  1,
-                  Math.ceil(Number(pending.warmup_seconds_remaining ?? 0))
-                )}s)…`
+            `Preparing the estimator (about ${Math.max(
+              1,
+              Math.ceil(Number(pending.warmup_seconds_remaining ?? 0))
+            )}s)…`
           ),
       });
     } catch (error) {

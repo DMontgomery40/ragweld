@@ -378,8 +378,8 @@ def sample_corpus(
     budget_seconds: float = _SAMPLE_BUDGET_SECONDS,
     files_per_format: int = _SAMPLE_FILES_PER_FORMAT,
     parquet: ParquetBounds | None = None,
-    min_sample_fraction: float = 0.05,
     min_files_per_format: int = 1,
+    max_relative_error: float = _MAX_RELATIVE_ERROR,
 ) -> CorpusSample:
     """Estimate a corpus's chunk and token totals by measuring a sample of its files.
 
@@ -414,7 +414,6 @@ def sample_corpus(
     budget_exhausted = False
     saw_pdf = False
     saw_converted = False
-    total_bytes_all = sum(max(0, int(size)) for _path, size in files)
     starved_formats: list[str] = []
 
     for ext, items in sorted(groups.items()):
@@ -477,20 +476,25 @@ def sample_corpus(
         _MAX_RELATIVE_ERROR, _MODEL_RELATIVE_ERROR + _sampling_error(partial_densities)
     )
 
-    # Floors. Extrapolating a negligible sample produces a number with a confident-looking band
-    # and no relationship to the corpus, which on this surface is worse than no number at all:
-    # the estimate is the consent gate.
-    covered = (float(sampled_bytes) / float(total_bytes_all)) if total_bytes_all > 0 else 1.0
+    # Floors. Extrapolating a sample that says nothing produces a number with a confident-looking
+    # band and no relationship to the corpus, which on this surface is worse than no number at
+    # all: the estimate is the consent gate.
+    #
+    # Deliberately NOT a share of bytes. Sampling 1.31% of 2,000 similar files gives an accurate
+    # estimate, so a byte floor strict enough to catch a cold run measuring 8 bytes of 8.5 MB
+    # would refuse honest estimates for any large group of similar files. The two signals that
+    # do distinguish them are whether a format was measured at all, and whether the band -- which
+    # is computed from the measured spread -- has saturated.
     reason = ""
     if starved_formats:
         reason = (
             f"{len(starved_formats)} file format(s) were not measured at all "
             f"({', '.join(sorted(set(starved_formats))[:5])})"
         )
-    elif covered < min_sample_fraction:
+    elif relative_error >= max_relative_error:
         reason = (
-            f"the sample covered {covered * 100:.2f}% of the corpus's bytes, below the "
-            f"{min_sample_fraction * 100:.0f}% floor"
+            f"the measured sample leaves an error band of ±{relative_error * 100:.0f}%, at or "
+            f"past the ±{max_relative_error * 100:.0f}% ceiling"
         )
 
     tokens = int(round(total_tokens))

@@ -4539,19 +4539,26 @@ ChunkFigurePromptProfile = Literal["technical_figure", "schematic"]
 class IndexingEstimateConfig(BaseModel):
     """Floors under the pre-run estimate's sample, so it refuses to guess rather than guess wrong.
 
-    The estimate is the consent gate: an operator approves a run from the numbers in it. A sample
-    that covers a negligible share of the corpus can be extrapolated to any number at all -- one
-    cold run measured 8 bytes of 8.5 MB and reported 15,437 tokens for a 3,531,477-token corpus --
-    so below these floors the endpoint returns no point estimate at all.
+    The estimate is the consent gate: an operator approves a run from the numbers in it. One cold
+    run measured 8 bytes of 8.5 MB and reported 15,437 tokens for a 3,531,477-token corpus, so
+    below these floors the endpoint returns no point estimate at all.
+
+    Neither floor is a share of bytes. Sampling 1.31% of a corpus of 2,000 similar files gives an
+    accurate estimate, and any byte floor strict enough to catch the cold case would refuse every
+    format group of more than a few hundred files. What actually distinguishes the two is whether
+    a group was measured at all, and whether the measured spread leaves the band meaningless.
     """
 
-    min_sample_fraction: float = Field(
-        default=0.05,
-        ge=0.0,
+    max_relative_error: float = Field(
+        default=0.9,
+        gt=0.0,
         le=1.0,
         description=(
-            "Smallest share of the corpus's bytes a sample may cover and still be extrapolated "
-            "to a point estimate. Below this the estimate reports an insufficient sample."
+            "Widest error band that may still be published as a point estimate. The band is "
+            "computed from the measured spread of tokens-per-byte, so it saturates exactly when "
+            "the sample says nothing about the corpus -- which is the honest signal, unlike a "
+            "share-of-bytes floor that would refuse 2,000 similar small files whose estimate is "
+            "accurate."
         ),
     )
     min_files_per_format: int = Field(

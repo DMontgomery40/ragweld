@@ -68,6 +68,13 @@ export const indexingApi = {
     for (;;) {
       const { data } = await apiClient.post<IndexEstimate>(api('/index/estimate'), req);
       if (data.status === 'ready') return data as ReadyIndexEstimate;
+      // Only 'warming' is worth waiting on: the estimator is loading and the next call may
+      // succeed. 'insufficient_sample' is deterministic -- the sample it could take says
+      // nothing about this corpus, and asking again produces the same refusal -- so it fails
+      // now, with the reason, instead of spending two minutes to say so.
+      if (data.status === 'insufficient_sample') {
+        throw new EstimateNotReadyError(data, Date.now() - startedAt);
+      }
       const waited = Date.now() - startedAt;
       if (waited >= deadlineMs) throw new EstimateNotReadyError(data, waited);
       opts.onWaiting?.(data);

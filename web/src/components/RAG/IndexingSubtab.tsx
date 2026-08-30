@@ -1035,14 +1035,13 @@ export function IndexingSubtab() {
         // Waiting out a cold or under-sampled estimator lives in the api layer, so this
         // component cannot receive a payload with no numbers in it.
         estimate = await indexingApi.estimate(body, {
+          // Only reached while warming: an insufficient sample throws instead of waiting.
           onWaiting: (pending) =>
             setEstimateWarmup(
-              pending.status === 'insufficient_sample'
-                ? 'Measuring more of the corpus…'
-                : `Preparing the estimator (about ${Math.max(
-                    1,
-                    Math.ceil(Number(pending.warmup_seconds_remaining ?? 0))
-                  )}s)…`
+              `Preparing the estimator (about ${Math.max(
+                1,
+                Math.ceil(Number(pending.warmup_seconds_remaining ?? 0))
+              )}s)…`
             ),
         });
         setIndexEstimate(estimate);

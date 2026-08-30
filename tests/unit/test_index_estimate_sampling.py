@@ -210,27 +210,45 @@ def test_the_runtime_root_is_the_directory_that_owns_data(tmp_path: Path) -> Non
     assert _INDEX_RUNS_DIR.parent.parent == _RUNTIME_ROOT
 
 
-def test_a_sample_covering_almost_nothing_refuses_to_produce_a_number(tmp_path: Path) -> None:
-    """The G-1 shape, reproduced directly.
+def test_a_saturated_error_band_refuses_to_produce_a_number(tmp_path: Path) -> None:
+    """The G-1 shape, caught by the signal that actually distinguishes it.
 
     A cold run measured 6 files totalling 8 bytes of 8.5 MB and the byte-ratio estimator scaled
-    them to 15,437 tokens for a 3,531,477-token corpus, with a confident band. Extrapolating a
-    negligible sample is not a wide estimate, it is a fabricated one, so the sampler now refuses.
+    them to 15,437 tokens for a 3,531,477-token corpus. What made that sample worthless was not
+    its size -- 1.31% of epstein-files-public is a fine sample -- but that it said nothing: the
+    band computed from its own spread saturates.
     """
-    files = [tmp_path / "tiny.txt"]
-    files[0].write_text("x\n", encoding="utf-8")
-    for i in range(40):
-        big = tmp_path / f"big_{i:03d}.txt"
-        big.write_text("lunar module telemetry sample line.\n" * 2000, encoding="utf-8")
-        files.append(big)
+    files = []
+    for i in range(60):
+        path = tmp_path / f"mixed_{i:04d}.txt"
+        # Densities two orders of magnitude apart, so the measured spread is enormous.
+        path.write_text("\n" * 400 if i % 2 else "telemetry sample line.\n" * 400, encoding="utf-8")
+        files.append(path)
 
-    sized = _sized(files)
-    # One measured file out of 41, so the covered byte share is far under the floor.
-    sample = sample_corpus(files=sized, chunker=_chunker(), files_per_format=1, min_sample_fraction=0.5)
+    sample = sample_corpus(files=_sized(files), chunker=_chunker(), max_relative_error=0.4)
 
     assert sample.sufficient is False
-    assert "floor" in sample.insufficient_reason
+    assert "error band" in sample.insufficient_reason
     assert any(a.startswith("NO ESTIMATE") for a in sample.assumptions)
+
+
+def test_many_similar_files_are_a_good_sample_however_small_their_byte_share(
+    tmp_path: Path,
+) -> None:
+    """The case a share-of-bytes floor got wrong.
+
+    epstein-files-public is 2,000 similar documents; sampling 16 of them covers 1.31% of the
+    corpus's bytes and estimates it accurately (361,906 tokens against an actual 346,731). A 5%
+    byte floor refused exactly this, and would refuse any format group over ~320 similar files.
+    """
+    files = _write_many(tmp_path, 800, "a short note about lunar module telemetry.\n")
+
+    sample = sample_corpus(files=_sized(files), chunker=_chunker())
+
+    covered = sample.sampled_bytes / sum(size for _p, size in _sized(files))
+    assert covered < 0.05, f"precondition: this samples {covered * 100:.2f}% of the bytes"
+    assert sample.sufficient is True, sample.insufficient_reason
+    assert sample.total_chunks >= 800
 
 
 def test_a_format_that_measured_nothing_refuses_too(tmp_path: Path) -> None:

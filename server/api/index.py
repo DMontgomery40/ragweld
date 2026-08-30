@@ -3876,10 +3876,9 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
             cfg=cfg,
             status="warming",
             warmup_remaining=warmup_seconds_remaining(),
+            # Warming is transient and never shown as a result, so it carries nothing at all:
+            # the client polls through it. insufficient_sample is different -- see below.
             reason="the estimator's tokenizer is still loading; nothing was measured",
-            total_files=total_files,
-            total_bytes=total_bytes,
-            skipped_large_files=skipped_large_files,
         )
 
     # Measured, not a byte ratio: a sample of every format is extracted and run through the
@@ -3900,8 +3899,8 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
                 getattr(cfg.indexing, "parquet_extract_include_column_names", True)
             ),
         ),
-        min_sample_fraction=float(cfg.indexing.estimate.min_sample_fraction),
         min_files_per_format=int(cfg.indexing.estimate.min_files_per_format),
+        max_relative_error=float(cfg.indexing.estimate.max_relative_error),
     )
     elapsed_seconds = time.monotonic() - sampling_started
     if not sample.sufficient:
@@ -3915,6 +3914,9 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
             status="insufficient_sample",
             warmup_remaining=None,
             reason=f"no estimate: {sample.insufficient_reason}",
+            # The walk ran, so the inventory is real and worth showing beside the refusal --
+            # "we found 794 files and could not measure enough of them" is actionable where a
+            # bare refusal is not. Only the MEASURED quantities are null.
             total_files=total_files,
             total_bytes=total_bytes,
             skipped_large_files=skipped_large_files,

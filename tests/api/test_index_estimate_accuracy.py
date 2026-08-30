@@ -85,6 +85,13 @@ async def test_the_estimate_lands_within_2x_of_the_completed_index(repo_id: str)
 
     sample = sample_corpus(files=files, chunker=Chunker(cfg.chunking, cfg.tokenization))
 
+    # Read the verdict, not the numbers behind it. A refused sample carries totals that were
+    # never meant to be published, so comparing them to the actual would pass or fail for
+    # reasons that have nothing to do with accuracy.
+    assert sample.sufficient is True, (
+        f"{repo_id}: the sampler refused this corpus -- {sample.insufficient_reason}"
+    )
+
     chunk_ratio = sample.total_chunks / actual_chunks
     token_ratio = sample.total_tokens / max(1, actual_tokens)
     assert 1 / MAX_RATIO <= chunk_ratio <= MAX_RATIO, (
