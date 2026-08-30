@@ -35,7 +35,7 @@ interface RepoStore {
   addRepo: (request: CorpusCreateRequest) => Promise<Corpus>;
   updateCorpus: (corpusId: string, updates: CorpusUpdateRequest) => Promise<Corpus>;
   deleteCorpus: (corpusId: string) => Promise<void>;
-  /** Deletes all corpora with last_indexed == null (excludes recall_default). */
+  /** Deletes all corpora with last_indexed == null (excludes runtime-managed corpora). */
   deleteUnindexedCorpora: () => Promise<string[]>;
 }
 
@@ -269,7 +269,11 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
     const toDelete = (repos || []).filter((c) => {
       const id = String(c.corpus_id || '').trim();
       if (!id) return false;
-      if (id === 'recall_default') return false;
+      // Runtime-registered corpora are never the operator's to clean up, and they index
+      // through their own path so they look unindexed here. `internal` is the typed answer;
+      // the hardcoded `recall_default` this replaces missed the Codex session corpora and
+      // was exactly the duplicated contract that field was added to remove.
+      if (c.internal) return false;
       return !c.last_indexed;
     });
 
