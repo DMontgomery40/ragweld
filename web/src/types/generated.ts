@@ -72,6 +72,49 @@ export interface AgentTrainRunSummary {
   primary_goal?: "minimize" | "maximize"; // default: "minimize"
 }
 
+/** One alert as Alertmanager currently holds it (`GET /api/v2/alerts`).  Alertmanager is the authority for what is firing right now; nothing here is derived from a webhook log or from in-process state, so a restarted API still reports the truth. */
+export interface AlertmanagerAlert {
+  /** Alertmanager's stable identity for this label set */
+  fingerprint: string;
+  /** Value of the `alertname` label */
+  name: string;
+  /** Value of the `severity` label, or 'none' when the rule sets none */
+  severity: string;
+  /** Alertmanager's own state for the alert */
+  state: "active" | "suppressed" | "unprocessed";
+  /** `summary` annotation from the alerting rule */
+  summary?: string | null; // default: None
+  /** `description` annotation from the alerting rule */
+  description?: string | null; // default: None
+  /** When the alert started firing */
+  starts_at: string;
+  /** When the alert is due to resolve if it stops firing */
+  ends_at?: string | null; // default: None
+  /** Whether a silence currently suppresses this alert */
+  silenced: boolean;
+  /** Whether an inhibition rule currently suppresses this alert */
+  inhibited: boolean;
+  /** Full Alertmanager label set */
+  labels?: Record<string, string>;
+  /** Prometheus URL that generated the alert */
+  generator_url?: string | null; // default: None
+}
+
+/** Public error detail returned (HTTP 502/503) when Alertmanager cannot be read. */
+export interface AlertsUnavailableDetail {
+  code?: "alertmanager_unavailable"; // default: "alertmanager_unavailable"
+  /** Alertmanager base URL that was attempted (empty when unconfigured) */
+  source_url: string;
+  /** Which of the three failure shapes occurred */
+  reason: "not_configured" | "unreachable" | "bad_status";
+  /** Stable, non-sensitive failure summary */
+  message: string;
+  /** What the operator can do next */
+  operator_hint: string;
+  /** In-app route to the full monitoring surface */
+  monitoring_path: string;
+}
+
 /** Per-phase benchmark timing delta. */
 export interface BenchmarkBreakdownDelta {
   /** Benchmark breakdown phase. */
@@ -3203,6 +3246,29 @@ export interface AgentTrainStartResponse {
   run_id: string;
 }
 
+/** Response payload for /api/observability/alerts. */
+export interface AlertmanagerAlertsResponse {
+  /** True when Alertmanager answered */
+  ok: boolean;
+  /** When the API read Alertmanager */
+  generated_at: string;
+  /** Alertmanager base URL that was read */
+  source_url: string;
+  /** Alerts Alertmanager currently holds */
+  alerts?: AlertmanagerAlert[];
+  /** Number of alerts returned */
+  total_count: number;
+  /** Alerts that are active and neither silenced nor inhibited */
+  firing_count: number;
+  /** In-app route to the full monitoring surface */
+  monitoring_path: string;
+}
+
+/** Envelope FastAPI puts an `AlertsUnavailableDetail` in. */
+export interface AlertsUnavailableResponse {
+  detail: AlertsUnavailableDetail;
+}
+
 /** Request payload for AI answer generation. */
 export interface AnswerRequest {
   /** The question to answer */
@@ -4015,6 +4081,24 @@ export interface KeywordsGenerateResponse {
   keywords: string[];
   /** Number of keywords returned */
   count: number;
+}
+
+/** Whether a Langfuse deep link is worth offering for one trace id.  `exists` is decided by the ingestion API using this process's server keys. Whether the *operator's browser session* may open the link is a separate, unknowable-from-here question: Langfuse enforces project membership on the signed-in identity, which is why `sign_in_hint` is always carried. */
+export interface LangfuseTraceAccess {
+  /** Canonical trace id that was checked */
+  trace_id: string;
+  /** Whether Langfuse holds at least one observation for the trace */
+  exists: boolean;
+  /** Whether the check ran (false when Langfuse is off or unconfigured) */
+  checked: boolean;
+  /** Deep link to render, present only when `exists` is true */
+  url?: string | null;
+  /** Langfuse project the deep link targets */
+  project: string;
+  /** Why the answer is what it is, in operator terms */
+  detail: string;
+  /** Tooltip text naming the Langfuse identity requirement */
+  sign_in_hint: string;
 }
 
 /** Request payload for setting a bundle alias. */

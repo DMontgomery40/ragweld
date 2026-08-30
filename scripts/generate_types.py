@@ -273,6 +273,13 @@ def main(output_path: Path | None = None) -> None:
             PersistedStateCorruptDetail,
             PersistedStateCorruptResponse,
         )
+        from server.models.observability import (
+            AlertmanagerAlert,
+            AlertmanagerAlertsResponse,
+            AlertsUnavailableDetail,
+            AlertsUnavailableResponse,
+            LangfuseTraceAccess,
+        )
         from server.models.tribrid_config_model import (  # noqa: I001
             AgentTrainControlPlaneStatusResponse,
             AgentTrainDiffRequest,
@@ -494,6 +501,12 @@ def main(output_path: Path | None = None) -> None:
     all_models = [
         # Root config
         TriBridConfig,
+        # Domain models - Observability
+        AlertmanagerAlert,
+        AlertmanagerAlertsResponse,
+        AlertsUnavailableDetail,
+        AlertsUnavailableResponse,
+        LangfuseTraceAccess,
         # Domain models
         PromptfooRun,
         PromptfooRunResult,

@@ -2,11 +2,23 @@
 // Logs, alerts, traces, and performance monitoring
 
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import * as DashAPI from '@/api/dashboard';
 
+const MONITORING_PATH = '/infrastructure?subtab=monitoring';
+
+function alertTone(alert: DashAPI.AlertmanagerAlert): string {
+  if (alert.silenced || alert.inhibited) return 'var(--fg-muted)';
+  const severity = String(alert.severity || '').toLowerCase();
+  if (severity === 'critical' || severity === 'page') return 'var(--err)';
+  if (severity === 'warning') return 'var(--warn)';
+  return 'var(--link)';
+}
+
 export function MonitoringSubtab() {
-  const [alertStatus, setAlertStatus] = useState<string>('Loading...');
-  const [alerts, setAlerts] = useState<DashAPI.Alert[]>([]);
+  const navigate = useNavigate();
+  const [alertsResponse, setAlertsResponse] = useState<DashAPI.AlertmanagerAlertsResponse | null>(null);
+  const [alertsError, setAlertsError] = useState<DashAPI.AlertsViewError | null>(null);
   const [traces, setTraces] = useState<DashAPI.Trace[]>([]);
   const [lokiStatus, setLokiStatus] = useState<DashAPI.LokiStatus | null>(null);
   const [loading, setLoading] = useState(true);
@@ -17,23 +29,18 @@ export function MonitoringSubtab() {
     try {
       // Load all monitoring data in parallel
       const [alertData, traceData, lokiData] = await Promise.allSettled([
-        DashAPI.getAlertStatus(),
+        DashAPI.getAlertmanagerAlerts(),
         DashAPI.getTraces(10),
         DashAPI.getLokiStatus()
       ]);
 
-      // Alerts
+      // Alerts: Alertmanager's own answer, or its own reason for not answering.
       if (alertData.status === 'fulfilled') {
-        const a = alertData.value;
-        if (a.recent_alerts && a.recent_alerts.length > 0) {
-          setAlertStatus(`${a.recent_alerts.length} active alert(s)`);
-          setAlerts(a.recent_alerts.slice(0, 5));
-        } else {
-          setAlertStatus('No active alerts');
-          setAlerts([]);
-        }
+        setAlertsResponse(alertData.value);
+        setAlertsError(null);
       } else {
-        setAlertStatus('Failed to load');
+        setAlertsResponse(null);
+        setAlertsError(DashAPI.toAlertsViewError(alertData.reason));
       }
 
       // Traces - ensure it's always an array
@@ -78,82 +85,142 @@ export function MonitoringSubtab() {
       className="dashboard-subtab"
       style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}
     >
-      {/* Monitoring Logs Section */}
-      <div className="settings-section" style={{ background: 'var(--panel)', borderLeft: '3px solid var(--warn)' }}>
-        <h3
-          style={{
-            fontSize: '16px',
-            marginBottom: '16px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '10px'
-          }}
-        >
-          <span style={{ fontSize: '24px' }}>📜</span>
-          Monitoring Logs
-        </h3>
-        <p className="small" style={{ color: 'var(--fg-muted)', marginBottom: '16px', lineHeight: '1.6' }}>
-          Recent alerts and system notices from Alertmanager webhook log. Full controls are under Infrastructure → Monitoring.
+      {/* Alertmanager Section */}
+      <div
+        className="settings-section"
+        data-testid="dash-alerts-panel"
+        style={{ background: 'var(--panel)', borderLeft: '3px solid var(--warn)' }}
+      >
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: '12px', flexWrap: 'wrap', marginBottom: '8px' }}>
+          <h3 style={{ fontSize: '16px', margin: 0 }}>Alerts</h3>
+          {alertsResponse ? (
+            <span style={{ fontSize: '12px', color: 'var(--fg-muted)' }}>
+              {alertsResponse.firing_count} firing of {alertsResponse.total_count} held by Alertmanager
+            </span>
+          ) : null}
+        </div>
+        <p className="small" style={{ color: 'var(--fg-muted)', marginBottom: '16px', lineHeight: '1.6', fontSize: '13px' }}>
+          Read live from Alertmanager on every refresh.{' '}
+          <button
+            type="button"
+            onClick={() => navigate(MONITORING_PATH)}
+            data-testid="dash-alerts-monitoring-link"
+            style={{
+              background: 'none',
+              border: 'none',
+              padding: 0,
+              font: 'inherit',
+              color: 'var(--link)',
+              textDecoration: 'underline',
+              cursor: 'pointer'
+            }}
+          >
+            Full controls are under Infrastructure - Monitoring
+          </button>
+          .
         </p>
 
         {loading ? (
-          <div style={{ padding: '40px', textAlign: 'center', color: 'var(--fg-muted)' }}>
-            Loading monitoring data...
+          <div style={{ padding: '40px', textAlign: 'center', color: 'var(--fg-muted)', fontSize: '14px' }}>
+            Loading alerts...
+          </div>
+        ) : alertsError ? (
+          <div
+            data-testid="dash-alerts-error"
+            style={{
+              background: 'var(--card-bg)',
+              border: '1px solid var(--err)',
+              borderRadius: '6px',
+              padding: '16px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '10px'
+            }}
+          >
+            <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--err)' }}>
+              {alertsError.status ? `Alerts unavailable (HTTP ${alertsError.status})` : 'Alerts unavailable'}
+            </div>
+            <div style={{ fontSize: '13px', color: 'var(--fg)', lineHeight: 1.6 }}>{alertsError.message}</div>
+            {alertsError.operatorHint ? (
+              <div style={{ fontSize: '12.5px', color: 'var(--fg-muted)', lineHeight: 1.6 }}>
+                {alertsError.operatorHint}
+              </div>
+            ) : null}
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="btn"
+                data-testid="dash-alerts-retry"
+                onClick={() => void loadMonitoringData()}
+                style={{ fontSize: '13px' }}
+              >
+                Retry
+              </button>
+              <button
+                type="button"
+                className="btn"
+                data-testid="dash-alerts-error-monitoring-link"
+                onClick={() => navigate(alertsError.monitoringPath)}
+                style={{ fontSize: '13px' }}
+              >
+                Open Infrastructure - Monitoring
+              </button>
+            </div>
+          </div>
+        ) : (alertsResponse?.alerts?.length ?? 0) === 0 ? (
+          <div
+            data-testid="dash-alerts-empty"
+            style={{
+              padding: '24px',
+              textAlign: 'center',
+              fontSize: '14px',
+              color: 'var(--fg-muted)',
+              background: 'var(--card-bg)',
+              border: '1px solid var(--line)',
+              borderRadius: '6px'
+            }}
+          >
+            No alerts are firing. Alertmanager at <code style={{ color: 'var(--link)' }}>{alertsResponse?.source_url}</code> is holding none.
           </div>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', alignItems: 'start' }}>
-            {/* Recent Alerts */}
-            <div
-              style={{
-                background: 'var(--card-bg)',
-                border: '1px solid var(--line)',
-                borderRadius: '6px',
-                padding: '16px'
-              }}
-            >
-              <h4 style={{ margin: '0 0 12px 0', color: 'var(--accent-text)', fontSize: '14px' }}>Recent Alerts</h4>
-              <div id="alert-status-container" style={{ minHeight: '48px', fontSize: '12px', color: 'var(--fg)' }}>
-                {alertStatus}
-              </div>
-            </div>
-
-            {/* Alert History */}
-            <div
-              style={{
-                background: 'var(--card-bg)',
-                border: '1px solid var(--line)',
-                borderRadius: '6px',
-                padding: '16px'
-              }}
-            >
-              <h4 style={{ margin: '0 0 12px 0', color: 'var(--link)', fontSize: '14px' }}>Alert History</h4>
-              <div id="alert-history-container" style={{ minHeight: '48px', fontSize: '12px', color: 'var(--fg)' }}>
-                {alerts.length === 0 ? (
-                  <span style={{ color: 'var(--fg-muted)' }}>No recent alerts</span>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    {alerts.map((alert, idx) => (
-                      <div
-                        key={idx}
-                        style={{
-                          padding: '8px',
-                          background: 'var(--bg-elev1)',
-                          borderRadius: '4px',
-                          borderLeft: '3px solid var(--warn)'
-                        }}
-                      >
-                        <div style={{ fontWeight: '600', marginBottom: '4px' }}>
-                          {alert.labels?.alertname || 'Alert'}
-                        </div>
-                        <div style={{ fontSize: '10px', color: 'var(--fg-muted)' }}>
-                          {new Date(alert.startsAt).toLocaleString()}
-                        </div>
-                      </div>
-                    ))}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {(alertsResponse?.alerts ?? []).map((alert) => (
+              <div
+                key={alert.fingerprint}
+                data-testid="dash-alert-row"
+                style={{
+                  background: 'var(--card-bg)',
+                  border: '1px solid var(--line)',
+                  borderLeft: `3px solid ${alertTone(alert)}`,
+                  borderRadius: '6px',
+                  padding: '12px 14px'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--fg)' }}>{alert.name}</span>
+                  <span style={{ fontSize: '11.5px', color: alertTone(alert), textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                    {alert.severity}
+                  </span>
+                  {alert.silenced ? (
+                    <span style={{ fontSize: '11.5px', color: 'var(--fg-muted)' }}>silenced</span>
+                  ) : null}
+                  {alert.inhibited ? (
+                    <span style={{ fontSize: '11.5px', color: 'var(--fg-muted)' }}>inhibited</span>
+                  ) : null}
+                </div>
+                {alert.summary ? (
+                  <div style={{ fontSize: '13px', color: 'var(--fg)', marginTop: '6px', lineHeight: 1.55 }}>{alert.summary}</div>
+                ) : null}
+                {alert.description ? (
+                  <div style={{ fontSize: '12.5px', color: 'var(--fg-muted)', marginTop: '4px', lineHeight: 1.55 }}>
+                    {alert.description}
                   </div>
-                )}
+                ) : null}
+                <div style={{ fontSize: '11.5px', color: 'var(--fg-muted)', marginTop: '8px' }}>
+                  Firing since {new Date(alert.starts_at).toLocaleString()}
+                </div>
               </div>
-            </div>
+            ))}
           </div>
         )}
       </div>
@@ -169,7 +236,6 @@ export function MonitoringSubtab() {
             gap: '10px'
           }}
         >
-          <span style={{ fontSize: '24px' }}>🔍</span>
           Recent Query Traces
         </h3>
         <p className="small" style={{ color: 'var(--fg-muted)', marginBottom: '16px', lineHeight: '1.6' }}>
@@ -209,7 +275,7 @@ export function MonitoringSubtab() {
                     style={{
                       padding: '12px',
                       textAlign: 'left',
-                      fontSize: '11px',
+                      fontSize: '11.5px',
                       fontWeight: '600',
                       color: 'var(--fg-muted)',
                       textTransform: 'uppercase',
@@ -222,7 +288,7 @@ export function MonitoringSubtab() {
                     style={{
                       padding: '12px',
                       textAlign: 'left',
-                      fontSize: '11px',
+                      fontSize: '11.5px',
                       fontWeight: '600',
                       color: 'var(--fg-muted)',
                       textTransform: 'uppercase',
@@ -235,7 +301,7 @@ export function MonitoringSubtab() {
                     style={{
                       padding: '12px',
                       textAlign: 'left',
-                      fontSize: '11px',
+                      fontSize: '11.5px',
                       fontWeight: '600',
                       color: 'var(--fg-muted)',
                       textTransform: 'uppercase',
@@ -248,7 +314,7 @@ export function MonitoringSubtab() {
                     style={{
                       padding: '12px',
                       textAlign: 'right',
-                      fontSize: '11px',
+                      fontSize: '11.5px',
                       fontWeight: '600',
                       color: 'var(--fg-muted)',
                       textTransform: 'uppercase',
@@ -274,7 +340,7 @@ export function MonitoringSubtab() {
                       e.currentTarget.style.background = 'transparent';
                     }}
                   >
-                    <td style={{ padding: '12px', fontSize: '11px', color: 'var(--fg-muted)' }}>
+                    <td style={{ padding: '12px', fontSize: '11.5px', color: 'var(--fg-muted)' }}>
                       {new Date(trace.timestamp).toLocaleTimeString()}
                     </td>
                     <td
@@ -291,14 +357,14 @@ export function MonitoringSubtab() {
                     >
                       {trace.query}
                     </td>
-                    <td style={{ padding: '12px', fontSize: '11px', color: 'var(--link)' }}>
+                    <td style={{ padding: '12px', fontSize: '11.5px', color: 'var(--link)' }}>
                       {trace.repo || 'default'}
                     </td>
                     <td
                       style={{
                         padding: '12px',
                         textAlign: 'right',
-                        fontSize: '11px',
+                        fontSize: '11.5px',
                         fontFamily: "'SF Mono', monospace",
                         color: 'var(--ok)'
                       }}
@@ -324,7 +390,6 @@ export function MonitoringSubtab() {
             gap: '10px'
           }}
         >
-          <span style={{ fontSize: '24px' }}>📊</span>
           Loki Log Aggregation
         </h3>
 

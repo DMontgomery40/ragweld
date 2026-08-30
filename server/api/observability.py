@@ -2,14 +2,15 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
 
+from server.models.observability import AlertmanagerAlertsResponse, AlertsUnavailableResponse
 from server.models.tribrid_config_model import (
     ObservabilityAlertRulesResponse,
     ObservabilityCatalogResponse,
     ObservabilityIncidentsResponse,
     ObservabilityStatusResponse,
-    TriBridConfig,
 )
 from server.observability.alert_rules import build_alert_rules
+from server.observability.alerts import AlertmanagerUnavailableError, build_alertmanager_alerts
 from server.observability.catalog import build_observability_catalog
 from server.observability.incidents import build_observability_incidents
 from server.observability.status import build_observability_status
@@ -83,3 +84,33 @@ async def observability_incidents(
     except CorpusNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return await build_observability_incidents(cfg, repo_id=scope_id)
+
+
+@router.get(
+    "/alerts",
+    response_model=AlertmanagerAlertsResponse,
+    responses={
+        502: {"model": AlertsUnavailableResponse, "description": "Alertmanager answered, but not with alerts"},
+        503: {"model": AlertsUnavailableResponse, "description": "Alertmanager is unconfigured or unreachable"},
+    },
+)
+async def observability_alerts(
+    repo: str | None = Query(default=None, description="Optional corpus_id to scope config"),
+    corpus_id: str | None = Query(default=None, description="Alias for repo"),
+    repo_id: str | None = Query(default=None, description="Alias for corpus_id"),
+) -> AlertmanagerAlertsResponse:
+    """What Alertmanager is holding right now.
+
+    Read straight from Alertmanager's ``/api/v2/alerts`` on every request, so a
+    restarted API still reports the truth; a read failure is a typed 502/503
+    naming the target and what to do, never an empty alert list.
+    """
+    scope_id = (repo or corpus_id or repo_id or "").strip() or None
+    try:
+        cfg = await load_scoped_config(repo_id=scope_id)
+    except CorpusNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    try:
+        return await build_alertmanager_alerts(cfg)
+    except AlertmanagerUnavailableError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail.model_dump(mode="json")) from exc

@@ -1,9 +1,14 @@
 // TriBrid RAG - Dashboard API Client
 // Centralized API calls for all Dashboard operations
 
+import axios from 'axios';
+
 import { apiClient, api, withCorpusScope } from './client';
 import type {
   AgentTrainControlPlaneStatusResponse,
+  AlertmanagerAlert,
+  AlertmanagerAlertsResponse,
+  AlertsUnavailableDetail,
   BenchmarkObservabilitySummaryResponse,
   DashboardIndexStatsResponse,
   DashboardIndexStatusResponse,
@@ -26,6 +31,9 @@ import type {
 // Re-export selected generated types for convenience in consumers that import `* as DashAPI`.
 export type {
   AgentTrainControlPlaneStatusResponse,
+  AlertmanagerAlert,
+  AlertmanagerAlertsResponse,
+  AlertsUnavailableDetail,
   BenchmarkObservabilitySummaryResponse,
   DockerContainer,
   DockerStatus,
@@ -58,24 +66,46 @@ export async function getMCPStatus(): Promise<MCPStatusResponse> {
 // Monitoring & Alerts APIs
 // ============================================================================
 
-export interface Alert {
-  labels?: {
-    alertname?: string;
-    [key: string]: any;
-  };
-  startsAt: string;
-  endsAt?: string;
-  annotations?: Record<string, any>;
+export async function getAlertmanagerAlerts(): Promise<AlertmanagerAlertsResponse> {
+  const { data } = await apiClient.get<AlertmanagerAlertsResponse>(api('/observability/alerts'));
+  return data;
 }
 
-export type AlertStatus = {
-  recent_alerts?: Alert[];
-  total_count?: number;
+/** Local view model for a failed alerts read: the server's own reason, never a bare "Failed to load". */
+export type AlertsViewError = {
+  status: number;
+  message: string;
+  operatorHint: string | null;
+  monitoringPath: string;
 };
 
-export async function getAlertStatus(): Promise<AlertStatus> {
-  const { data } = await apiClient.get<AlertStatus>(api('/webhooks/alertmanager/status'));
-  return data;
+const MONITORING_FALLBACK_PATH = '/infrastructure?subtab=monitoring';
+
+export function toAlertsViewError(err: unknown): AlertsViewError {
+  if (axios.isAxiosError(err)) {
+    const status = Number(err.response?.status ?? 0);
+    const detail = (err.response?.data as { detail?: AlertsUnavailableDetail | string } | undefined)?.detail;
+    if (detail && typeof detail === 'object') {
+      return {
+        status,
+        message: String(detail.message || err.message),
+        operatorHint: detail.operator_hint ? String(detail.operator_hint) : null,
+        monitoringPath: String(detail.monitoring_path || MONITORING_FALLBACK_PATH),
+      };
+    }
+    return {
+      status,
+      message: typeof detail === 'string' && detail ? detail : err.message,
+      operatorHint: null,
+      monitoringPath: MONITORING_FALLBACK_PATH,
+    };
+  }
+  return {
+    status: 0,
+    message: err instanceof Error ? err.message : 'The alerts request failed before it reached the API.',
+    operatorHint: null,
+    monitoringPath: MONITORING_FALLBACK_PATH,
+  };
 }
 
 export interface Trace {
