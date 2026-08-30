@@ -4,6 +4,7 @@ import {
   RAGWELD_DOCKER_SERVICES,
   type RagweldDockerService,
 } from '@/api/docker';
+import { useConfigField } from '@/hooks/useConfig';
 import { useDockerStore } from '@/stores/useDockerStore';
 import type { ObservabilityStatusResponse } from '@/types/generated';
 
@@ -29,6 +30,7 @@ const SERVICE_SURFACE_COMPONENT: Partial<Record<RagweldDockerService, string>> =
 };
 
 const LOOPBACK = /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:|\/|$)/i;
+
 
 const SERVICE_GROUPS: Array<{
   title: string;
@@ -135,12 +137,18 @@ export function ServicesSubtab() {
   }, [refresh]);
 
   const [observability, setObservability] = useState<ObservabilityStatusResponse | null>(null);
+  const [lokiStatus, setLokiStatus] = useState<DashAPI.LokiStatus | null>(null);
+  const [prometheusBaseUrl] = useConfigField<string>('tracing.prometheus_base_url', '');
 
   useEffect(() => {
     let cancelled = false;
-    void DashAPI.getObservabilityStatus().then((next) => {
-      if (!cancelled) setObservability(next);
-    });
+    void Promise.all([DashAPI.getObservabilityStatus(), DashAPI.getLokiStatus()]).then(
+      ([nextObservability, nextLoki]) => {
+        if (cancelled) return;
+        setObservability(nextObservability);
+        setLokiStatus(nextLoki);
+      }
+    );
     return () => {
       cancelled = true;
     };
@@ -153,8 +161,16 @@ export function ServicesSubtab() {
       const url = byComponent.get(String(componentId)) || '';
       if (url) result.set(service as RagweldDockerService, url);
     }
+    // Prometheus and Loki have no observability *status* component, but both
+    // are named in the defect row and both hrefs already exist: Prometheus in
+    // `tracing.prometheus_base_url` (the Monitoring subtab reads the same
+    // field), Loki as the resolved base URL `/api/loki/status` returns.
+    const prometheus = String(prometheusBaseUrl || '').trim();
+    if (prometheus) result.set('prometheus', prometheus);
+    const loki = String(lokiStatus?.url || '').trim();
+    if (loki) result.set('loki', loki);
     return result;
-  }, [observability]);
+  }, [observability, prometheusBaseUrl, lokiStatus]);
 
   const frontendMode = devStackStatus?.frontend_mode;
   const frontendLabel = frontendMode === 'dev_server' ? 'Host frontend (Vite dev server)' : 'Served frontend';

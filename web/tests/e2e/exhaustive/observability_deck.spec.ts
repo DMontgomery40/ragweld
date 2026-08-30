@@ -156,4 +156,50 @@ test.describe('Observability operator deck', () => {
       await expect(withheld).toContainText('withheld');
     }
   });
+
+  test('every service the defect row names can be opened from its card', async ({ page, baseURL, request }) => {
+    // M-77 named ten surfaces. Prometheus and Loki have no observability status
+    // component, so they need their own hrefs (tracing.prometheus_base_url and
+    // the resolved URL /api/loki/status returns) rather than being left as the
+    // plain <strong> the drive found.
+    const [statusResponse, lokiResponse, configResponse] = await Promise.all([
+      request.get(`${API_BASE}/observability/status`),
+      request.get(`${API_BASE}/loki/status`),
+      request.get(`${API_BASE}/config`),
+    ]);
+    const components = new Map<string, string>(
+      (await statusResponse.json()).components.map((item: { id: string; url: string | null }) => [
+        item.id,
+        String(item.url || ''),
+      ])
+    );
+    const lokiUrl = String((await lokiResponse.json())?.url || '').trim();
+    const prometheusUrl = String((await configResponse.json())?.tracing?.prometheus_base_url || '').trim();
+
+    await page.goto(new URL('infrastructure?subtab=services', baseURL).toString());
+
+    const expected: Array<[string, string]> = [
+      ['mlflow', components.get('mlflow') || ''],
+      ['flyte', components.get('flyte') || ''],
+      ['tempo', components.get('tempo') || ''],
+      ['langfuse', components.get('langfuse') || ''],
+      ['qdrant', components.get('haystack_docling_qdrant') || ''],
+      ['alertmanager', components.get('alertmanager') || ''],
+      ['pyroscope', components.get('pyroscope') || ''],
+      ['mimir', components.get('mimir') || ''],
+      ['grafana', components.get('grafana') || ''],
+      ['prometheus', prometheusUrl],
+      ['loki', lokiUrl],
+    ];
+
+    for (const [service, url] of expected) {
+      if (!url) continue;
+      const link = page.getByTestId(`open-service-${service}`);
+      await expect(link, `${service} card title must be a link`).toHaveAttribute('href', url);
+    }
+
+    // Non-vacuous: the two the review caught must both have resolved a URL.
+    expect(prometheusUrl, 'tracing.prometheus_base_url is unset on this deployment').not.toBe('');
+    expect(lokiUrl, '/api/loki/status returned no URL').not.toBe('');
+  });
 });
