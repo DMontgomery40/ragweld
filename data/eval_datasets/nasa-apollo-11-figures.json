@@ -1,0 +1,182 @@
+{
+  "corpus_id": "nasa-apollo-11",
+  "items": [
+    {
+      "question": "Which figure shows the lunar module pitch attitude time history during powered descent?",
+      "expected_pages": [72],
+      "figure_ref": "Figure 5-5",
+      "kind": "locate",
+      "tags": ["figure", "chart", "descent"]
+    },
+    {
+      "question": "Which figure contains the expanded pitch and roll attitude time histories near landing?",
+      "expected_pages": [73],
+      "figure_ref": "Figure 5-6",
+      "kind": "locate",
+      "tags": ["figure", "chart", "descent"]
+    },
+    {
+      "question": "Which figure is the area photograph of the landing site ellipse showing the ground track flown to the landing point?",
+      "expected_pages": [76],
+      "figure_ref": "Figure 5-7",
+      "kind": "locate",
+      "tags": ["figure", "photo", "landing-site"]
+    },
+    {
+      "question": "Which figure is the basic lunar reference map used to locate the Apollo 11 landing point?",
+      "expected_pages": [82],
+      "figure_ref": "Figure 5-10",
+      "kind": "locate",
+      "tags": ["figure", "map", "landing-site"]
+    },
+    {
+      "question": "Which figure shows the ascent and rendezvous trajectory and its relationship in lunar orbit?",
+      "expected_pages": [101],
+      "figure_ref": "Figure 5-19",
+      "kind": "locate",
+      "tags": ["figure", "diagram", "rendezvous"]
+    },
+    {
+      "question": "Which figure is the photograph of the lunar surface under the descent stage engine?",
+      "expected_pages": [239],
+      "figure_ref": "Figure 11-14",
+      "kind": "locate",
+      "tags": ["figure", "photo", "lunar-surface"]
+    },
+    {
+      "question": "Which figure shows the instrument response curves from the passive seismic experiment?",
+      "expected_pages": [244],
+      "figure_ref": "Figure 11-19",
+      "kind": "locate",
+      "tags": ["figure", "chart", "seismic"]
+    },
+    {
+      "question": "Which figure shows the landing and recovery data with the positions of the recovery forces?",
+      "expected_pages": [274],
+      "figure_ref": "Figure 13-1",
+      "kind": "locate",
+      "tags": ["figure", "chart", "recovery"]
+    },
+    {
+      "question": "Which figure shows the S-band steerable antenna coverage restrictions?",
+      "expected_pages": [313],
+      "figure_ref": "Figure 16-12",
+      "kind": "locate",
+      "tags": ["figure", "chart", "communications"]
+    },
+    {
+      "question": "Which figure shows the water separator selector valve and its actuating linkage?",
+      "expected_pages": [320],
+      "figure_ref": "Figure 16-19",
+      "kind": "locate",
+      "tags": ["figure", "drawing", "environmental-control"]
+    },
+
+    {
+      "question": "In the flight plan activity chart covering the first 25 hours of the mission, which tracking stations are called out between orbital insertion and the translunar injection maneuver?",
+      "expected_pages": [20],
+      "figure_ref": "Figure 3-1",
+      "kind": "content",
+      "tags": ["figure", "chart", "flight-plan"]
+    },
+    {
+      "question": "How many seconds of data are annotated as missing on the recording of spacecraft dynamics during powered descent?",
+      "expected_pages": [85],
+      "figure_ref": "Figure 5-11",
+      "kind": "content",
+      "tags": ["figure", "chart", "descent"]
+    },
+    {
+      "question": "Over what ten-second window of ground elapsed time are the pitch, roll and yaw rate transients at lunar touchdown plotted?",
+      "expected_pages": [89],
+      "figure_ref": "Figure 5-13",
+      "kind": "content",
+      "tags": ["figure", "chart", "touchdown"]
+    },
+    {
+      "question": "Which reaction control thruster on and off traces are plotted beside the attitude rates in the record of spacecraft dynamics during ascent?",
+      "expected_pages": [94],
+      "figure_ref": "Figure 5-17",
+      "kind": "content",
+      "tags": ["figure", "chart", "ascent"]
+    },
+    {
+      "question": "Which organization is credited with preparing the lunar chart on which the lunar orbit ground track is plotted, and what edition of that chart is used?",
+      "expected_pages": [123],
+      "figure_ref": "Figure 7-2",
+      "kind": "content",
+      "tags": ["figure", "map", "trajectory"]
+    },
+    {
+      "question": "What approximate scale bar is printed beside the sketch showing the returned lunar sample and its position on the lunar surface?",
+      "expected_pages": [226],
+      "figure_ref": "Figure 11-2",
+      "kind": "content",
+      "tags": ["figure", "drawing", "lunar-samples"]
+    },
+    {
+      "question": "Over what calendar dates does the histogram of long-period seismic noise transients run, and which transient type is broken out per axis?",
+      "expected_pages": [247],
+      "figure_ref": "Figure 11-22",
+      "kind": "content",
+      "tags": ["figure", "chart", "seismic"]
+    },
+    {
+      "question": "Which terminal board number and pin gage appear in the schematic for the minus-yaw engine of command module reaction control system 1?",
+      "expected_pages": [304],
+      "figure_ref": "Figure 16-3",
+      "kind": "content",
+      "tags": ["figure", "schematic", "reaction-control"]
+    },
+    {
+      "question": "In the supercritical helium flow schematic for the descent propulsion system, what is identified as the cause of the pressure rise ahead of the bellows?",
+      "expected_pages": [311],
+      "figure_ref": "Figure 16-10",
+      "kind": "content",
+      "tags": ["figure", "schematic", "descent-propulsion"]
+    },
+    {
+      "question": "Which two crewmen are labelled in the drawing of the communications relays used during extravehicular activity on the lunar surface?",
+      "expected_pages": [317],
+      "figure_ref": "Figure 16-16",
+      "kind": "content",
+      "tags": ["figure", "drawing", "communications"]
+    },
+
+    {
+      "question": "Who were the three Apollo 11 crewmen and what crew position did each of them hold?",
+      "expected_pages": [12],
+      "figure_ref": "Section 1.0 Summary",
+      "kind": "locate",
+      "tags": ["prose", "summary"]
+    },
+    {
+      "question": "What apparent horizon altitude was determined from the star and horizon midcourse navigation sightings?",
+      "expected_pages": [137],
+      "figure_ref": "Section 8.6.5 Midcourse Navigation",
+      "kind": "locate",
+      "tags": ["prose", "guidance-navigation"]
+    },
+    {
+      "question": "What aircraft provided the air support for the primary landing area recovery force in the Pacific Ocean?",
+      "expected_pages": [271],
+      "figure_ref": "Section 13.3 Recovery Operations",
+      "kind": "locate",
+      "tags": ["prose", "recovery"]
+    },
+    {
+      "question": "At what Greenwich mean time did the flight crew arrive aboard the recovery ship and enter the Mobile Quarantine Facility?",
+      "expected_pages": [272],
+      "figure_ref": "Section 13.3 Recovery Operations",
+      "kind": "locate",
+      "tags": ["prose", "recovery"]
+    },
+    {
+      "question": "By how much did the seismometer maximum operating temperature exceed the value planned for the instrument?",
+      "expected_pages": [214],
+      "figure_ref": "Section 11.4 Passive Seismic Experiment",
+      "kind": "locate",
+      "tags": ["prose", "seismic"]
+    }
+  ]
+}

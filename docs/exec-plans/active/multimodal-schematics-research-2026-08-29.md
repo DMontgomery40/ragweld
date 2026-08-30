@@ -140,6 +140,144 @@ missing pieces are ingestion-side.
 pve1 has only an Intel Iris Xe iGPU (no NVIDIA); LXC100 is 16 vCPU / 24 GiB, CPU-only. Phase 1 needs no local model (vision calls go through the gateway). Phase 2
 is CPU-feasible only with ColSmol-class models; anything ColQwen/Nemotron-sized needs a GPU.
 
+## Phase 1 results (2026-08-30)
+
+Phase 1 shipped and was measured on the live LXC100 deployment at **`6de89ed6`**. `indexing.figures.enabled`
+was turned on for `nasa-apollo-11` only (`PATCH /api/config/indexing?corpus_id=nasa-apollo-11`); the global
+config and the `ragweld_code` corpus both still read `enabled: false`, so the feature is opt-in per corpus as
+designed.
+
+### The run
+
+| | |
+|---|---|
+| Estimate (`POST /api/index/estimate`) | `estimated_figures` **215**, `figure_description_cost_usd` **$0.153725**, `total_cost_usd` **$0.153725** |
+| Run | `20260830T015248_8d4203711a`, `force_reindex=true`, status `complete` |
+| Wall time | 01:52:48Z → 02:25:06Z = **32 min 17 s** (359 scanned pages, Docling OCR + classifier + vision at concurrency 4) |
+| Run log | `Figure summary: figures_described=125 figures_failed=9 figures_undescribed=6` |
+| Chunks | 1320 total, **333 figure chunks** across **127 distinct pages** |
+| Actual cost | **$0.0516** (319 290 tokens), from `litellm_spend_metric_total` in Prometheus |
+
+**The 0.6-figures-per-page estimate overshot by 54%**: 215 estimated vs 140 pictures actually detected
+(125 + 9 + 6). Actual spend was **a third of the estimate** ($0.0516 vs $0.1537) — fewer figures, and the
+crops Docling sends are cheaper than the 1200-input-token assumption. The estimate is conservative in the
+right direction, but the heuristic is worth revisiting against this measurement.
+
+The 9 `figures_failed` are calls the gateway *billed* and answered with unusable content, not transport
+errors: Prometheus recorded **134 successful and 0 failed** `z-ai/glm-5.3-flash` responses, which is exactly
+`125 described + 9 failed`. The 6 `undescribed` never reached the gateway (area threshold or classification
+deny-list). A 6.7% empty-reply rate is the number to watch if `max_completion_tokens` is ever lowered — a
+preflight call on a full page spent 1566 of its 2500 tokens on reasoning before emitting JSON.
+
+Figure kinds as classified by the vision alias: chart 157, photo 47, drawing 42, diagram 40, schematic 34,
+other 11, table 2.
+
+### The eval
+
+The eval lane scores by `expected_paths`, which is meaningless here: this corpus is a single PDF, so
+path-level MRR is 1.0 whatever the retriever does. Phase 1 was therefore measured with a **page-grounded**
+dataset — `data/eval_datasets/nasa-apollo-11-figures.json`, 25 real Apollo 11 Mission Report questions, each
+anchored to the PDF page(s) that actually carry its answer, scored by `scripts/eval_figure_grounding.py`
+against the live `POST /api/search` with `cache_mode: "bypass"`.
+
+Three disjoint groups: **locate** (10, answerable from the caption), **content** (10, only the plotted
+content answers), **prose** (5, non-figure control items for the non-regression check). Every page cited was
+rasterized and read before its question was written; the locate and content page sets are disjoint so one
+well-indexed figure cannot move both numbers.
+
+Alongside `page_hit@3/@5` the scorer reports **`precise_page_hit@3`**, which counts only chunks spanning
+≤ 3 pages. This was added after reading the baseline: before the re-index, the wholly-figure pages carried
+almost no extractable text, so the chunker merged across them and the top-3 for figure questions was
+dominated by chunks spanning 8–12 pages that "cover" a figure page by accident. Counting those as hits
+would have scored the text-only index as already good at exactly the questions figures are meant to fix.
+
+Both configurations were measured **three times** to separate signal from retrieval noise. Ranges below are
+across those runs; a single value means all three agreed.
+
+| group | metric | before | after |
+|---|---|---|---|
+| locate | page_hit@3 | 4/10 (3–4) | **8/10** |
+| locate | page_hit@5 | 7/10 (6–7) | **9/10 (8–9)** |
+| locate | precise_page_hit@3 | **0/10** | **8/10** |
+| locate | figure_chunk@3 | 0/10 | **8/10** |
+| content | page_hit@3 | 3/10 (3–4) | **8/10** |
+| content | page_hit@5 | 5/10 (4–5) | **8/10 (8–9)** |
+| content | precise_page_hit@3 | **0/10** | **8/10** |
+| content | figure_chunk@3 | 0/10 | **8/10** |
+| prose | page_hit@3 | 4/5 | 3/5 (3–4) |
+| prose | page_hit@5 | 4/5 | 3/5 (3–4) |
+| prose | precise_page_hit@3 | 4/5 | 3/5 (3–4) |
+| prose | figure_chunk@3 | 0/5 | 0/5 |
+| overall | page_hit@3 | 11/25 (10–12) | 19/25 (19–20) |
+| overall | page_hit@5 | 16/25 (14–16) | 20/25 (20–21) |
+| overall | precise_page_hit@3 | 4/25 | 19/25 (19–20) |
+| overall | figure_chunk@3 | 0/25 | **16/25** |
+
+### Verdict: **Phase 1 passes.**
+
+The plan's bar was "figure questions improve and prose does not regress".
+
+- **Figure questions improved decisively.** The sharpest number is `precise_page_hit@3` on the 20 figure
+  items: **0/20 → 16/20**, and it was identical across all three runs in both configurations, so this is not
+  noise. The text-only index never once precisely located a figure page while precisely locating 4 of 5 prose
+  pages; the figure-enabled index locates 16 of 20. `figure_chunk@3` went **0/20 → 16/20** on the same items.
+- **Prose is flat, with one item worth naming.** Three of the five prose items hit at ranks 1–3 in all six
+  runs, before and after. A fourth — the crew-roster question grounded on the Summary page — missed in all
+  six runs, before *and* after, so it is a hard question rather than a regression. The fifth, the Mobile
+  Quarantine Facility arrival time (p272), was a stable top-3 hit in all three before-runs but in one of the
+  three after-runs dropped out of the top 5 entirely (that run returned the Summary's recovery paragraphs on
+  pages 13–14 instead); it hit at rank ≤ 3 in the other two. So this is a one-item, one-run flip, not the
+  "no distinguishable change" a flat 4/5 would suggest. With n = 5 a genuine small prose regression cannot be
+  separated from noise — a limitation of the control group's size, stated rather than papered over.
+
+A second, unlooked-for improvement shows in the chunk store: **chunk page spans collapsed.** Before the
+re-index, chunks spanned up to 12 pages (63 of the baseline's 125 retrieved chunks spanned 1 page, 31 spanned
+2, and 31 spanned 3–12). After it, the whole corpus is 856 chunks spanning 1 page, 441 spanning 2, 22
+spanning 3 and exactly 1 spanning 6. Describing the figures gave the previously blank pages text of their
+own, so the chunker stopped merging across them. Provenance is now precise for the whole document, not only
+for the figures — which directly benefits the source-evidence viewer.
+
+### What is still missing, and why it is not an extraction problem
+
+Four figure items still miss at rank 3: Figure 5-5 (p72), 5-10 (p82), 5-13 (p89), 5-17 (p94). All 20 of the
+dataset's figure pages are covered by a figure chunk span, but coverage is not the same as *that* figure
+having been described, so the covering chunks' summaries were read back individually:
+
+- **p72, p82, p94 — described.** Page 72 carries its own `72–72` chunk describing the pitch gimbal angle
+  trace; page 82's `81–83` chunk is the 1:100 000 Mercator lunar map; page 94's `94–94` chunk is the
+  attitude strip chart bracketing ascent ignition at 124:22:00. Each matches the page as printed. These
+  three are **ranking** misses: for the Figure 5-5 question the correct chunk comes back at ranks 4–5 while
+  three chunks of the Figure 5-10 lunar map take the top three.
+- **p89 — not described.** Both chunks covering page 89 (`88–89`, `88–90`) carry the *adjacent* figure's
+  annotation, a descent-propellant-consumption chart; Figure 5-13's own touchdown-dynamics traces were never
+  described as a picture in their own right. So **19 of the 20 pages have their own figure described**, and
+  one of the four residual misses is a genuine extraction gap, not a ranking one.
+
+The three ranking misses point at dense retrieval failing to separate ~300-word summaries of visually
+similar charts (this report has several near-identical descent time-history plots), with no preferential
+weight on the caption.
+
+That is the natural input to Phase 2: the page-image leg is meant to help exactly where several textual
+descriptions read alike. It should be gated on moving `precise_page_hit@3` above 16/20 on this dataset, which
+now exists as the concrete baseline the plan asked for.
+
+### Reproducing
+
+```bash
+# on LXC100, in a ragweld-owned checkout
+python scripts/eval_figure_grounding.py \
+  --dataset data/eval_datasets/nasa-apollo-11-figures.json \
+  --base-url http://127.0.0.1:58012/api --out /tmp/eval.json
+```
+
+Cost is readable only from Prometheus on this deployment: LiteLLM runs with `store_model_in_db: false` and
+no database, so `GET /spend/logs` returns HTTP 500 (`Database not connected`) and `/health/readiness` reports
+`db: "Not connected"`. Its `prometheus` callback is configured, so `litellm_spend_metric_total` and
+`litellm_total_tokens_metric_total` carry per-model spend and are the usable source; there is no Langfuse
+callback on the gateway, so figure-description calls do not appear in Langfuse at all (Docling calls the
+gateway directly, outside ragweld's instrumented client).
+
+
 ## Sources
 
 - BLUEPRINT — Rebuilding a Legacy: Multimodal Retrieval for Complex Engineering Drawings and Documents (ORNL, Feb 2026): https://arxiv.org/abs/2602.13345
