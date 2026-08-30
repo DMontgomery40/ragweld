@@ -36,8 +36,19 @@ def _extract_block(css: str, selector: str) -> str:
     with no nested braces, so the first `}` after the selector's own `{`
     closes the block.
     """
-    start = css.index(selector) + len(selector)
-    end = css.index("}", start)
+    start_of_selector = css.find(selector)
+    assert start_of_selector != -1, (
+        f"tokens.css structure changed: selector {selector!r} was not found. "
+        f"Update DARK_SELECTOR/LIGHT_SELECTOR in this test to match the new "
+        f"theme block opener instead of letting this fail as a raw ValueError."
+    )
+    start = start_of_selector + len(selector)
+    end = css.find("}", start)
+    assert end != -1, (
+        f"tokens.css structure changed: no closing '}}' found after selector "
+        f"{selector!r}; the theme block may no longer be a flat, single-level "
+        f"rule this test's simple brace-matching can parse."
+    )
     return css[start:end]
 
 
@@ -161,11 +172,24 @@ def test_text_token_meets_contrast_floor(
 # caught it and would not catch a repeat of it either.
 
 CSS_ROOT = ROOT / "web" / "src"
-_OPACITY_RE = re.compile(r"opacity\s*:\s*([0-9.]+)\s*(?:!important)?\s*;")
+# Trailing `;` is optional (the last declaration in a rule needs none before
+# `}`), and the value may be a percentage (`opacity: 50%` == `opacity: 0.5`).
+_OPACITY_RE = re.compile(r"opacity\s*:\s*([0-9.]+)(%)?\s*(?:!important)?\s*;?")
 _COLOR_DECL_RE = re.compile(r"(?<![-\w])color\s*:")
 _FONT_SIZE_DECL_RE = re.compile(r"font-size\s*:")
 _SUSPECT_TEXT_SELECTOR_RE = re.compile(r"::placeholder|\.tagline|muted", re.IGNORECASE)
+_SUSPECT_CONTROL_SELECTOR_RE = re.compile(r":disabled|\.is-disabled|\[disabled\]|\.loading", re.IGNORECASE)
 _CSS_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
+
+
+def _parse_opacity(body: str) -> float | None:
+    """Return the rule's `opacity` value as a 0-1 float, or None if unset."""
+    match = _OPACITY_RE.search(body)
+    if not match:
+        return None
+    raw_value, is_percent = match.group(1), match.group(2)
+    value = float(raw_value)
+    return value / 100.0 if is_percent else value
 
 
 def _iter_leaf_css_blocks(css: str, selector_prefix: str = "") -> list[tuple[str, str]]:
@@ -204,11 +228,8 @@ def _find_opacity_text_violations(css_path: Path) -> list[str]:
     text = _CSS_COMMENT_RE.sub("", css_path.read_text(encoding="utf-8"))
     violations = []
     for selector, body in _iter_leaf_css_blocks(text):
-        match = _OPACITY_RE.search(body)
-        if not match:
-            continue
-        value = float(match.group(1))
-        if not (0.0 < value < 0.8):
+        value = _parse_opacity(body)
+        if value is None or not (0.0 < value < 0.8):
             continue
         looks_like_text_rule = (
             _COLOR_DECL_RE.search(body)
@@ -231,4 +252,46 @@ def test_no_css_rule_dims_text_via_opacity() -> None:
     assert not violations, (
         "opacity used to de-emphasize text (design-legibility.md bans this; "
         "use a muted color tier instead):\n" + "\n".join(violations)
+    )
+
+
+# --- Guard: visible controls stay at >= 0.8 resting opacity -----------------
+#
+# design-legibility.md: "Resting opacity on visible controls >= 0.8." This is
+# a second, narrower heuristic than the text guard above: a disabled or
+# loading control's rule rarely sets `color`/`font-size` itself (it inherits
+# them), so the text guard's "looks like a text rule" signal doesn't fire for
+# it. Instead this flags any leaf rule whose *selector* names a disabled or
+# loading state (`:disabled`, `.is-disabled`, `[disabled]`, `.loading`) and
+# sets `0 < opacity < 0.8`. Calibrated against every `web/src/**/*.css` file:
+# these four selector substrings, combined with sub-0.8 opacity, currently
+# match exactly the four sites this guard was added to catch, and nothing
+# else (no keyframe, hover-fade, or hide/reveal rule uses any of them).
+
+
+def _find_dim_control_violations(css_path: Path) -> list[str]:
+    text = _CSS_COMMENT_RE.sub("", css_path.read_text(encoding="utf-8"))
+    violations = []
+    for selector, body in _iter_leaf_css_blocks(text):
+        value = _parse_opacity(body)
+        if value is None or not (0.0 < value < 0.8):
+            continue
+        if _SUSPECT_CONTROL_SELECTOR_RE.search(selector):
+            violations.append(f"{css_path.relative_to(ROOT)}: `{selector}` sets opacity: {value}")
+    return violations
+
+
+def test_no_disabled_or_loading_control_dims_below_floor() -> None:
+    css_files = sorted(CSS_ROOT.glob("**/*.css"))
+    assert css_files, f"expected to find stylesheets under {CSS_ROOT}"
+
+    violations: list[str] = []
+    for css_path in css_files:
+        violations.extend(_find_dim_control_violations(css_path))
+
+    assert not violations, (
+        "a disabled/loading control rests below the 0.8 opacity floor "
+        "(design-legibility.md: 'Resting opacity on visible controls >= 0.8'; "
+        "keep the disabled/loading affordance via cursor/border/color, not "
+        "opacity alone):\n" + "\n".join(violations)
     )

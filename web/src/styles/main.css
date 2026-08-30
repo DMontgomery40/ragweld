@@ -712,7 +712,7 @@
         }
 
         .action-buttons button.is-disabled {
-            opacity: 0.6;
+            opacity: 0.8;
             cursor: not-allowed;
             transform: none;
         }
@@ -1786,7 +1786,7 @@
 
         .action-btn.loading {
             pointer-events: none;
-            opacity: 0.6;
+            opacity: 0.8;
         }
 
         .action-btn.loading svg {
@@ -2580,7 +2580,7 @@
         }
 
         .ob-nav-btn:disabled {
-            opacity: 0.5;
+            opacity: 0.8;
             cursor: not-allowed;
         }
 
