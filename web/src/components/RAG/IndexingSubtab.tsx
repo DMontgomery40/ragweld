@@ -54,7 +54,7 @@ const COMPONENT_CARDS: Array<{
 }> = [
   { id: 'embedding', icon: '🔢', label: 'Embedding', description: 'Provider, model, dimensions, batching' },
   { id: 'chunking', icon: '🧩', label: 'Chunking', description: 'Strategy, size, overlap, limits' },
-  { id: 'bm25', icon: '📝', label: 'Tokenization', description: 'Chunk tokenizer + Postgres FTS tokenizer + large-file mode' },
+  { id: 'bm25', icon: '📝', label: 'Tokenization', description: 'Chunk tokenizer + Qdrant/BM25 sparse stemming + large-file mode' },
   { id: 'enrichment', icon: '🧠', label: 'Graph & Options', description: 'Graph build + dense skip mode' },
   { id: 'figures', icon: '🖼️', label: 'Figures & Vision', description: 'Describe charts, diagrams, drawings via the gateway' },
 ];
@@ -631,6 +631,32 @@ export function IndexingSubtab() {
     supportedRuntimeProvider,
     tokenizationCompatibility,
   ]);
+
+  // Two real config keys govern one behaviour -- chunking.max_indexable_file_size (bytes) and
+  // indexing.index_max_file_size_mb (MB) -- and the indexer skips a file that exceeds EITHER,
+  // i.e. the smaller wins. Both fields carry this line so an operator editing one is never
+  // left guessing whether the other follows.
+  // The vision alias sat next to an embedding model that shows its catalog price while
+  // showing none of its own. Same catalog fields, same shape of line -- what the run will be
+  // charged per 1k tokens, from the row behind the alias.
+  const visionAliasPricing = useMemo(() => {
+    const alias = String(figuresVisionModel || '').trim();
+    if (!alias) return '';
+    const model = visionModels.find((m) => String(m.id || '').trim() === alias);
+    if (!model) return '';
+    const input = model.input_per_1k;
+    const output = model.output_per_1k;
+    if (input == null && output == null) return 'No catalog price for this alias.';
+    return `Cost: $${Number(input ?? 0).toFixed(5)}/1k in · $${Number(output ?? 0).toFixed(5)}/1k out`;
+  }, [figuresVisionModel, visionModels]);
+
+  const effectiveFileSizeLimit = useMemo(() => {
+    const bytesLimit = Math.max(0, Number(maxIndexableFileSize) || 0);
+    const mbLimit = Math.max(0, Number(indexMaxFileSizeMb) || 0) * 1024 * 1024;
+    const effective = Math.min(bytesLimit, mbLimit);
+    const source = bytesLimit <= mbLimit ? 'Chunking' : 'Indexing';
+    return `Files above ${formatBytes(effective)} are skipped — the smaller of the two ceilings wins (currently ${source}).`;
+  }, [indexMaxFileSizeMb, maxIndexableFileSize]);
 
   const canIndex = useMemo(() => {
     const rid = String(activeRepo || '').trim();
@@ -2232,7 +2258,7 @@ export function IndexingSubtab() {
               </div>
               <div className="input-group">
                 <label style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
-                  Max file size (bytes)
+                  Chunking file-size ceiling (bytes)
                   <TooltipIcon name="MAX_INDEXABLE_FILE_SIZE" />
                 </label>
                 <NumberField
@@ -2251,6 +2277,12 @@ export function IndexingSubtab() {
                     fontSize: '13px',
                   }}
                 />
+                <div
+                  data-testid="chunking-file-size-note"
+                  style={{ fontSize: '11.5px', color: 'var(--fg-muted)', marginTop: '6px' }}
+                >
+                  {effectiveFileSizeLimit}
+                </div>
               </div>
             </div>
 
@@ -2482,7 +2514,7 @@ export function IndexingSubtab() {
               <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px' }}>
                 <div className="input-group">
                   <label style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
-                    Max file size (MB)
+                    Indexing file-size ceiling (MB)
                     <TooltipIcon name="INDEX_MAX_FILE_SIZE_MB" />
                   </label>
                   <NumberField
@@ -2501,6 +2533,12 @@ export function IndexingSubtab() {
                       fontSize: '13px',
                     }}
                   />
+                  <div
+                    data-testid="tokenization-file-size-note"
+                    style={{ fontSize: '11.5px', color: 'var(--fg-muted)', marginTop: '6px' }}
+                  >
+                    {effectiveFileSizeLimit}
+                  </div>
                 </div>
                 <div className="input-group">
                   <label style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
@@ -3004,7 +3042,7 @@ export function IndexingSubtab() {
                       Figures — describe charts, diagrams and drawings so they become searchable, citable chunks
                     </div>
                     <div style={{ fontSize: '11.5px', color: 'var(--fg-muted)', marginTop: '2px' }}>
-                      Vision calls via the gateway; the estimate below prices them.
+                      Vision calls go through the gateway. Index Now prices them before the run starts.
                     </div>
                   </div>
                   <TooltipIcon name="FIGURES_ENABLED" />
@@ -3062,6 +3100,14 @@ export function IndexingSubtab() {
                             Only vision-capable catalog aliases are listed.
                           </div>
                         )}
+                        {visionAliasPricing ? (
+                          <div
+                            data-testid="figures-vision-model-price"
+                            style={{ marginTop: '4px', fontSize: '11.5px', color: 'var(--fg-muted)' }}
+                          >
+                            {visionAliasPricing}
+                          </div>
+                        ) : null}
                       </div>
                       <div className="input-group">
                         <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11.5px', color: 'var(--fg-muted)', marginBottom: '6px' }}>
@@ -3362,9 +3408,21 @@ export function IndexingSubtab() {
                 <span>🚀</span>
                 {estimateLoading ? 'Estimating…' : 'Index Now'}
               </button>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: 'var(--fg-muted)' }}>
-                <input type="checkbox" checked={forceReindex} onChange={(e) => setForceReindex(e.target.checked)} />
-                Force reindex
+              <label
+                data-testid="force-reindex-toggle"
+                style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', fontSize: '12px', color: 'var(--fg)', maxWidth: '340px' }}
+              >
+                <input
+                  type="checkbox"
+                  checked={forceReindex}
+                  onChange={(e) => setForceReindex(e.target.checked)}
+                  style={{ marginTop: '2px' }}
+                />
+                <span>
+                  <strong style={{ color: 'var(--err)' }}>Force reindex</strong> — clears the current index
+                  before rebuilding (destructive). Searches return nothing until the new generation commits,
+                  and it unlocks the provider/model/dimension/tokenizer fields so the contract can change.
+                </span>
               </label>
               <button
                 onClick={() => setTerminalVisible(!terminalVisible)}
@@ -3393,7 +3451,7 @@ export function IndexingSubtab() {
                   fontSize: '13px',
                   cursor: 'pointer',
                 }}
-                title="Deletes embeddings, FTS, chunks, and graph for this corpus"
+                title="Deletes the dense and sparse vectors, chunks, documents, and graph for this corpus"
               >
                 🗑 Delete index
               </button>
