@@ -92,6 +92,52 @@ flowchart LR
     Tooltip --> UI
 ```
 
+## Theme tokens and text contrast
+
+<div class="grid chunk_summaries" markdown>
+
+-   :material-palette:{ .lg .middle } **Text vs. background split**
+
+    ---
+
+    `--accent` is a button background and border color; `--accent-text` is the text-only variant.
+
+-   :material-check-decagram:{ .lg .middle } **Floors, pinned by a test**
+
+    ---
+
+    Body text >= 7:1 and support text >= 4.5:1 against every composited surface, in both themes.
+
+</div>
+
+[Get started](index.md){ .md-button .md-button--primary }
+[Configuration](configuration.md){ .md-button }
+[API](api.md){ .md-button }
+
+All GUI color choices live in `web/src/styles/tokens.css`, and the legibility rules that govern them are enforced by a real test (`tests/unit/test_web_tokens_contrast.py`), not by eyeballing. The motivation is concrete: ragweld's operator monitors are low-DPI, and muted grays that look fine on a retina screen collapse into mush there. If you add or change a styled surface, these are the constraints you inherit.
+
+### The token contract
+
+| Token | Role | Rule |
+|-------|------|------|
+| `--accent` | Button **background** (paired with `--accent-contrast`), borders, active accents | Never use as a `color:` (text) value — its dark-theme value fails the text-contrast floor on its own |
+| `--accent-text` | Standalone **text** that wants the accent hue | Lightness-adjusted to clear 4.5:1 against `--bg`, `--bg-elev1`, `--bg-elev2`, and `--panel` in both themes; on the light theme it equals `--accent`, which already passes |
+| `--fg` | Body text | >= 7:1 against every composited surface |
+| `--fg-muted`, `--link`, `--ok`, `--warn`, `--err` | Support text and status colors | >= 4.5:1 against every composited surface |
+
+### Two rules enforced beyond the tokens
+
+1. **Never dim text with `opacity`.** A muted color tier is the only allowed way to de-emphasize text — an `opacity: 0.6` rule composites a token that passes its own floor down to well below it on screen.
+2. **Resting opacity on visible controls >= 0.8.** Disabled and loading states communicate through `cursor`, border, and color, not through a sub-0.8 fade.
+
+The test parses the hex values straight out of `tokens.css` (zero mocks, no hand-copied constants) and computes WCAG 2.x relative luminance and contrast ratios directly, across both theme blocks and all four surfaces text actually paints on. When an edit breaks a floor, the failure names the theme, the token, the surface, and the measured ratio.
+
+!!! tip "Reaching for the accent color in text"
+    Reach for `var(--accent-text)` instead of `var(--accent)`. The test also scans every `web/src/**/*.{css,tsx,ts}` file for raw `var(--accent)` used as a `color` value, so the migration stays durable. Note that scan is a heuristic over source text: it cannot see through an intermediate variable or lookup table (a `const accent = ...` re-exported as a text color), so review those by hand when you introduce them.
+
+!!! note "What changed visually (operators)"
+    Muted text is slightly brighter in both themes, the light-theme status colors were darkened to clear the 4.5:1 floor, and disabled/loading buttons no longer fade below 0.8 resting opacity. Nothing functional changed — this is a legibility pass, not a feature change.
+
 ??? note "Component Inventory"
     - `DockerStatusCard.tsx`, `HealthStatusCard.tsx` show system state
     - `RepoSelector.tsx` binds UI to `corpus_id`
