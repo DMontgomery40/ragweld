@@ -53,6 +53,7 @@ from server.observability.runtime import (
     current_trace_payload_fields,
     set_provider_route,
     start_request_observation,
+    start_streaming_observation,
     update_route_summary,
 )
 from server.retrieval.errors import RequiredRetrievalLegError, RetrievalContractMismatchError
@@ -513,7 +514,12 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
     started_at_ms = int(time.time() * 1000)
     trace_store = get_trace_store()
     trace_repo_id = primary or (resolve_sources(request.sources)[0] if resolve_sources(request.sources) else "")
-    obs_cm = start_request_observation(
+    # The setup below and the streamed body run in different asyncio tasks (Starlette
+    # iterates a StreamingResponse body in its own anyio task), so each makes the request
+    # span current for its own half and the span is ended once, by whichever half ends the
+    # request. Attaching in one and detaching in the other logged `Failed to detach context`
+    # for every streamed request.
+    observation = start_streaming_observation(
         config=config,
         route_name="chat_stream",
         path="/api/chat/stream",
@@ -521,7 +527,8 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
         run_id=run_id,
         repo_id=trace_repo_id,
     )
-    obs_cm.__enter__()
+    setup_scope = observation.scope()
+    setup_scope.__enter__()
     apply_default_links(config)
     trace_enabled = await trace_store.start(
         run_id=run_id,
@@ -572,7 +579,8 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
             await trace_store.add_event(run_id, kind="chat.error", msg=str(e), data={})
             await trace_store.annotate(run_id, **current_trace_payload_fields())
             await trace_store.end(run_id)
-        obs_cm.__exit__(type(e), e, e.__traceback__)
+        setup_scope.__exit__(type(e), e, e.__traceback__)
+        observation.finish((type(e), e, e.__traceback__))
         if isinstance(e, PromptBudgetError):
             raise prompt_budget_http_exception(e, operation="Chat stream generation") from e
         if isinstance(e, RetrievalContractMismatchError):
@@ -594,6 +602,10 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
         query_log_appended = False
         assistant_persisted = False
         caught_exc: tuple[type[BaseException] | None, BaseException | None, Any] = (None, None, None)
+        # This is the task that owns the rest of the request, so it attaches and detaches
+        # the span itself rather than inheriting a token from the endpoint coroutine.
+        stream_scope = observation.scope()
+        stream_scope.__enter__()
         try:
             async for sse in primed_handler_stream():
                 if not sse.startswith("data: "):
@@ -806,9 +818,12 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
             if trace_enabled:
                 await trace_store.annotate(run_id, **current_trace_payload_fields())
                 await trace_store.end(run_id, ended_at_ms=ended_at_ms)
-            obs_cm.__exit__(*caught_exc)
+            observation.finish(caught_exc)
+            stream_scope.__exit__(*caught_exc)
 
-    return StreamingResponse(
+    # Built while the setup scope is still active: `current_header_values` reads the
+    # observation off the contextvar this task set.
+    response = StreamingResponse(
         wrapped_stream(),
         media_type="text/event-stream",
         headers={
@@ -818,6 +833,8 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
             **current_header_values(),
         },
     )
+    setup_scope.__exit__(None, None, None)
+    return response
 
 
 @router.get("/chat/models", response_model=ChatModelsResponse)

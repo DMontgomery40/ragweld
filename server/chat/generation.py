@@ -31,6 +31,7 @@ from server.observability.runtime import (
     record_langfuse_generation,
     set_cost_summary,
     stage_span,
+    stage_span_detached,
 )
 
 
@@ -429,7 +430,9 @@ async def stream_chat_text(
     captured_usage: dict[str, Any] | None = None
     captured_trace_id: str | None = None
     captured_annotations: list[Any] = []
-    with stage_span(
+    # Detached: this block stays open across the `yield content` below, so it can be entered
+    # by the endpoint coroutine priming the stream and left by the response's own task.
+    with stage_span_detached(
         "generation.gateway_stream", provider_name="LiteLLM", provider_kind="litellm", model=route.model
     ):
         async with httpx.AsyncClient(timeout=timeout_s) as client:

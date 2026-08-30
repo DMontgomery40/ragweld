@@ -21,7 +21,7 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.semconv.resource import ResourceAttributes
-from opentelemetry.trace import Span
+from opentelemetry.trace import Span, Status, StatusCode, set_span_in_context, use_span
 
 from server.models.runtime_gateway import ChatProviderInfo
 from server.models.tribrid_config_model import (
@@ -269,6 +269,176 @@ def apply_default_links(config: TriBridConfig) -> None:
         )
 
 
+def _build_observation(
+    *,
+    config: TriBridConfig,
+    route_name: str,
+    path: str,
+    method: str,
+    correlation_id: str | None,
+    run_id: str | None,
+    repo_id: str | None,
+) -> RequestObservation | None:
+    """Start the request span and describe it, or None when tracing is off.
+
+    The span is started detached, never as the current span: who makes it current, and for
+    how long, is the caller's business -- and for a streaming route that is two tasks rather
+    than one. See `StreamingObservation`.
+    """
+    if not getattr(config.tracing, "tracing_enabled", True):
+        return None
+    if normalize_tracing_mode(config.tracing.tracing_mode) == "off":
+        return None
+
+    manager = get_observability_manager(config)
+    request_correlation_id = str(correlation_id or uuid.uuid4())
+    span = manager.tracer.start_span(f"ragweld.{route_name}")
+    span.set_attribute("ragweld.route_name", route_name)
+    span.set_attribute("http.route", path)
+    span.set_attribute("http.request.method", method.upper())
+    span.set_attribute("ragweld.correlation_id", request_correlation_id)
+    if run_id:
+        span.set_attribute("ragweld.run_id", run_id)
+    if repo_id:
+        span.set_attribute("ragweld.repo_id", repo_id)
+    ctx = span.get_span_context()
+    return RequestObservation(
+        manager=manager,
+        route_name=route_name,
+        path=path,
+        method=method.upper(),
+        correlation_id=request_correlation_id,
+        span=span,
+        trace_id=f"{ctx.trace_id:032x}" if ctx.trace_id else "",
+        root_span_id=f"{ctx.span_id:016x}" if ctx.span_id else "",
+        run_id=run_id,
+        repo_id=repo_id,
+        route_summary=TraceRouteSummary(route_name=route_name, path=path, method=method.upper()),
+    )
+
+
+def _record_observation_failure(observation: RequestObservation, exc: BaseException) -> None:
+    """Mark the request span failed.
+
+    `start_as_current_span` used to do this for us; the span is now started detached (so a
+    streaming route can end it from the task that finishes the request), which means the
+    error status is ours to set.
+    """
+    observation.span.record_exception(exc)
+    observation.span.set_status(Status(StatusCode.ERROR, str(exc)))
+
+
+def _publish_observation_summaries(observation: RequestObservation) -> None:
+    """Write the summaries collected during the request onto its span, before it ends."""
+    span = observation.span
+    if observation.route_summary is not None:
+        if observation.route_summary.provider is not None:
+            span.set_attribute("ragweld.provider.kind", observation.route_summary.provider.kind)
+            span.set_attribute("ragweld.provider.name", observation.route_summary.provider.provider_name)
+            span.set_attribute("ragweld.provider.model", observation.route_summary.provider.model)
+        if observation.route_summary.final_results is not None:
+            span.set_attribute("ragweld.final_results", int(observation.route_summary.final_results))
+        if observation.route_summary.llm_used is not None:
+            span.set_attribute("ragweld.llm_used", bool(observation.route_summary.llm_used))
+    if observation.cost_summary is not None:
+        if observation.cost_summary.estimated_cost_usd is not None:
+            span.set_attribute("ragweld.cost.usd", float(observation.cost_summary.estimated_cost_usd))
+        if observation.cost_summary.total_tokens is not None:
+            span.set_attribute("ragweld.cost.total_tokens", int(observation.cost_summary.total_tokens))
+
+
+@contextmanager
+def _observation_scope(observation: RequestObservation) -> Iterator[RequestObservation]:
+    """Make `observation` current in THIS task, and restore the previous context on exit.
+
+    Both the OpenTelemetry context and `_ACTIVE_REQUEST` are `contextvars`, so their tokens
+    belong to the task that set them: this is entered and left inside one task, always.
+    """
+    with use_span(
+        observation.span,
+        end_on_exit=False,
+        record_exception=False,
+        set_status_on_exception=False,
+    ):
+        token = _ACTIVE_REQUEST.set(observation)
+        try:
+            yield observation
+        finally:
+            try:
+                _ACTIVE_REQUEST.reset(token)
+            except ValueError:
+                _ACTIVE_REQUEST.set(None)
+
+
+@dataclass
+class StreamingObservation:
+    """A request observation whose span outlives the coroutine that opened it.
+
+    A `StreamingResponse` body is iterated in its own anyio task holding a COPY of the
+    context (uvicorn advertises ASGI `spec_version` 2.3, so Starlette takes the task-group
+    branch). A context token attached while the endpoint coroutine ran therefore cannot be
+    detached from inside the generator: OpenTelemetry logged `Failed to detach context` with
+    `ValueError: <Token ...> was created in a different Context` for every streamed request,
+    an ERROR-level traceback on an entirely successful path.
+
+    So the span is never handed across the boundary as "current". Each task that runs part of
+    the request makes it current for its own duration through `scope()`, and the span is
+    ended exactly once by `finish()`, wherever the request actually ends -- which for a
+    streaming route is the generator, not the endpoint.
+    """
+
+    observation: RequestObservation | None
+    _finished: bool = False
+
+    @contextmanager
+    def scope(self) -> Iterator[RequestObservation | None]:
+        """Make the span current for the duration of this task's share of the request."""
+        if self.observation is None:
+            yield None
+            return
+        with _observation_scope(self.observation) as observation:
+            yield observation
+
+    def finish(
+        self,
+        exc_info: tuple[type[BaseException] | None, BaseException | None, Any] = (None, None, None),
+    ) -> None:
+        """Publish the summaries and end the span. Idempotent: the request ends once."""
+        observation = self.observation
+        if observation is None or self._finished:
+            return
+        self._finished = True
+        exc = exc_info[1]
+        if exc is not None:
+            _record_observation_failure(observation, exc)
+        _publish_observation_summaries(observation)
+        observation.span.end()
+
+
+def start_streaming_observation(
+    *,
+    config: TriBridConfig,
+    route_name: str,
+    path: str,
+    method: str,
+    correlation_id: str | None = None,
+    run_id: str | None = None,
+    repo_id: str | None = None,
+) -> StreamingObservation:
+    """Open an observation for a route whose setup and body run in different tasks."""
+    return StreamingObservation(
+        _build_observation(
+            config=config,
+            route_name=route_name,
+            path=path,
+            method=method,
+            correlation_id=correlation_id,
+            run_id=run_id,
+            repo_id=repo_id,
+        )
+    )
+
+
 @contextmanager
 def start_request_observation(
     *,
@@ -280,70 +450,42 @@ def start_request_observation(
     run_id: str | None = None,
     repo_id: str | None = None,
 ) -> Iterator[RequestObservation | None]:
-    if not getattr(config.tracing, "tracing_enabled", True):
-        yield None
-        return
-    if normalize_tracing_mode(config.tracing.tracing_mode) == "off":
+    """Observe a route that begins and ends inside one task.
+
+    A streaming route does not: use `start_streaming_observation` there.
+    """
+    observation = _build_observation(
+        config=config,
+        route_name=route_name,
+        path=path,
+        method=method,
+        correlation_id=correlation_id,
+        run_id=run_id,
+        repo_id=repo_id,
+    )
+    if observation is None:
         yield None
         return
 
-    manager = get_observability_manager(config)
-    request_correlation_id = str(correlation_id or uuid.uuid4())
-    span_name = f"ragweld.{route_name}"
-    with manager.tracer.start_as_current_span(span_name) as span:
-        span.set_attribute("ragweld.route_name", route_name)
-        span.set_attribute("http.route", path)
-        span.set_attribute("http.request.method", method.upper())
-        span.set_attribute("ragweld.correlation_id", request_correlation_id)
-        if run_id:
-            span.set_attribute("ragweld.run_id", run_id)
-        if repo_id:
-            span.set_attribute("ragweld.repo_id", repo_id)
-        ctx = span.get_span_context()
-        trace_id = f"{ctx.trace_id:032x}" if ctx.trace_id else ""
-        root_span_id = f"{ctx.span_id:016x}" if ctx.span_id else ""
-        observation = RequestObservation(
-            manager=manager,
-            route_name=route_name,
-            path=path,
-            method=method.upper(),
-            correlation_id=request_correlation_id,
-            span=span,
-            trace_id=trace_id,
-            root_span_id=root_span_id,
-            run_id=run_id,
-            repo_id=repo_id,
-            route_summary=TraceRouteSummary(route_name=route_name, path=path, method=method.upper()),
-        )
-        token = _ACTIVE_REQUEST.set(observation)
+    span = observation.span
+    with _observation_scope(observation):
         try:
             yield observation
         except Exception as exc:
-            span.record_exception(exc)
+            _record_observation_failure(observation, exc)
             raise
         finally:
-            if observation.route_summary is not None:
-                if observation.route_summary.provider is not None:
-                    span.set_attribute("ragweld.provider.kind", observation.route_summary.provider.kind)
-                    span.set_attribute("ragweld.provider.name", observation.route_summary.provider.provider_name)
-                    span.set_attribute("ragweld.provider.model", observation.route_summary.provider.model)
-                if observation.route_summary.final_results is not None:
-                    span.set_attribute("ragweld.final_results", int(observation.route_summary.final_results))
-                if observation.route_summary.llm_used is not None:
-                    span.set_attribute("ragweld.llm_used", bool(observation.route_summary.llm_used))
-            if observation.cost_summary is not None:
-                if observation.cost_summary.estimated_cost_usd is not None:
-                    span.set_attribute("ragweld.cost.usd", float(observation.cost_summary.estimated_cost_usd))
-                if observation.cost_summary.total_tokens is not None:
-                    span.set_attribute("ragweld.cost.total_tokens", int(observation.cost_summary.total_tokens))
-            try:
-                _ACTIVE_REQUEST.reset(token)
-            except ValueError:
-                _ACTIVE_REQUEST.set(None)
+            _publish_observation_summaries(observation)
+            span.end()
 
 
 @contextmanager
 def stage_span(name: str, **attrs: Any) -> Iterator[Span | None]:
+    """A child span of the current request, current for the duration of the block.
+
+    Never hold this open across a `yield` in an async generator: the block would be entered
+    and left in different tasks. Use `stage_span_detached` there.
+    """
     obs = current_observation()
     if obs is None:
         yield None
@@ -354,6 +496,39 @@ def stage_span(name: str, **attrs: Any) -> Iterator[Span | None]:
                 continue
             span.set_attribute(str(key), value)
         yield span
+
+
+@contextmanager
+def stage_span_detached(name: str, **attrs: Any) -> Iterator[Span | None]:
+    """A stage span for a block that stays open across a `yield` in an async generator.
+
+    Such a block can be entered in one task and left in another: a StreamingResponse body is
+    driven first by the endpoint coroutine (its priming `anext`) and then by the response's
+    own anyio task, which holds a COPY of the context. Making a span current across that
+    boundary attaches a context token in one task and detaches it in the other, which is the
+    `Failed to detach context` case `StreamingObservation` exists to avoid.
+
+    This span is timed, attributed and parented under the request span, but never made
+    current -- so there is no token to strand. Use it only for a block that creates no child
+    spans of its own; anything nested inside would parent under the request instead.
+    """
+    obs = current_observation()
+    if obs is None:
+        yield None
+        return
+    span = obs.manager.tracer.start_span(name, context=set_span_in_context(obs.span))
+    try:
+        for key, value in attrs.items():
+            if value is None:
+                continue
+            span.set_attribute(str(key), value)
+        yield span
+    except Exception as exc:
+        span.record_exception(exc)
+        span.set_status(Status(StatusCode.ERROR, str(exc)))
+        raise
+    finally:
+        span.end()
 
 
 def update_route_summary(**updates: Any) -> None:

@@ -27,6 +27,7 @@ from server.observability.runtime import (
     current_trace_payload_fields,
     set_provider_route,
     start_request_observation,
+    start_streaming_observation,
     update_route_summary,
 )
 from server.retrieval.cache import CacheMode
@@ -341,7 +342,12 @@ async def answer_stream(request: AnswerRequest) -> StreamingResponse:
     started_at_ms = int(time.time() * 1000)
     trace_store = get_trace_store()
 
-    obs_cm = start_request_observation(
+    # The retrieval below and the streamed body run in different asyncio tasks (Starlette
+    # iterates a StreamingResponse body in its own anyio task), so each makes the request
+    # span current for its own half and the span is ended once, by whichever half ends the
+    # request. Attaching in one and detaching in the other logged `Failed to detach context`
+    # for every streamed request.
+    observation = start_streaming_observation(
         config=cfg,
         route_name="answer_stream",
         path="/api/answer/stream",
@@ -349,7 +355,8 @@ async def answer_stream(request: AnswerRequest) -> StreamingResponse:
         run_id=run_id,
         repo_id=request.repo_id,
     )
-    obs_cm.__enter__()
+    setup_scope = observation.scope()
+    setup_scope.__enter__()
     apply_default_links(cfg)
     trace_enabled = await trace_store.start(
         run_id=run_id,
@@ -392,7 +399,8 @@ async def answer_stream(request: AnswerRequest) -> StreamingResponse:
             await trace_store.add_event(run_id, kind="answer.error", msg=str(e), data={"code": e.code})
             await trace_store.annotate(run_id, **current_trace_payload_fields())
             await trace_store.end(run_id)
-        obs_cm.__exit__(type(e), e, e.__traceback__)
+        setup_scope.__exit__(type(e), e, e.__traceback__)
+        observation.finish((type(e), e, e.__traceback__))
         raise retrieval_contract_mismatch_http_exception(e) from e
     except RequiredRetrievalLegError as e:
         raise required_retrieval_leg_http_exception(e) from e
@@ -401,13 +409,18 @@ async def answer_stream(request: AnswerRequest) -> StreamingResponse:
             await trace_store.add_event(run_id, kind="answer.error", msg=str(e), data={})
             await trace_store.annotate(run_id, **current_trace_payload_fields())
             await trace_store.end(run_id)
-        obs_cm.__exit__(type(e), e, e.__traceback__)
+        setup_scope.__exit__(type(e), e, e.__traceback__)
+        observation.finish((type(e), e, e.__traceback__))
         raise_required_dependency_unavailable_if_applicable(e, boundary="Streaming answer retrieval")
         raise HTTPException(status_code=500, detail="Streaming answer generation failed") from e
 
     async def wrapped_stream() -> object:
         ended_at_ms: int | None = None
         caught_exc: tuple[type[BaseException] | None, BaseException | None, object | None] = (None, None, None)
+        # This is the task that owns the rest of the request, so it attaches and detaches
+        # the span itself rather than inheriting a token from the endpoint coroutine.
+        stream_scope = observation.scope()
+        stream_scope.__enter__()
         try:
             async for sse in stream_answer_best_effort(
                 query=request.query,
@@ -492,9 +505,12 @@ async def answer_stream(request: AnswerRequest) -> StreamingResponse:
             if trace_enabled:
                 await trace_store.annotate(run_id, **current_trace_payload_fields())
                 await trace_store.end(run_id, ended_at_ms=ended_at_ms)
-            obs_cm.__exit__(*caught_exc)
+            observation.finish(caught_exc)
+            stream_scope.__exit__(*caught_exc)
 
-    return StreamingResponse(
+    # Built while the setup scope is still active: `current_header_values` reads the
+    # observation off the contextvar this task set.
+    response = StreamingResponse(
         wrapped_stream(),
         media_type="text/event-stream",
         headers={
@@ -504,3 +520,5 @@ async def answer_stream(request: AnswerRequest) -> StreamingResponse:
             **current_header_values(),
         },
     )
+    setup_scope.__exit__(None, None, None)
+    return response
