@@ -42,7 +42,16 @@ function App() {
 
   // Initialize hooks
   const { isInitialized, initError } = useAppInit();
-  const { handleApply: handleSaveAllChanges, isDirty, isSaving, saveError } = useApplyButton();
+  const {
+    handleApply: handleSaveAllChanges,
+    reloadLatest,
+    isDirty,
+    dirtyCount,
+    justSaved,
+    saveConflict,
+    isSaving,
+    saveError,
+  } = useApplyButton();
 
   // Initialize theme
   const { theme, applyTheme } = useTheme();
@@ -294,19 +303,63 @@ function App() {
             <div className="action-buttons app-footer-actions">
               <button
                 id="save-btn"
+                data-testid="apply-changes"
+                data-dirty-count={dirtyCount}
                 onClick={handleSaveAllChanges}
                 disabled={!isDirty || isSaving}
                 className={!isDirty || isSaving ? 'is-disabled' : ''}
+                title={
+                  isDirty
+                    ? `Apply ${dirtyCount} staged change${dirtyCount === 1 ? '' : 's'} to the server`
+                    : 'No staged changes to apply'
+                }
+                // Disabled paint must read as clearly OFF, not a near-identical dim of the
+                // enabled accent (X-04). Inline styles win over the shared stylesheet so the
+                // muted surface applies without touching main.css. Text stays full-opacity for
+                // legibility (no opacity dimming on control text).
+                style={
+                  !isDirty || isSaving
+                    ? {
+                        background: 'var(--surface-2, #2a2d31)',
+                        color: 'var(--fg-muted, #9aa0a6)',
+                        boxShadow: 'none',
+                        opacity: 1,
+                        cursor: isSaving ? 'progress' : 'not-allowed',
+                      }
+                    : undefined
+                }
               >
-                {isSaving ? 'Saving...' : 'Apply All Changes'}
-                {isDirty && !isSaving && ' *'}
+                {isSaving
+                  ? 'Saving…'
+                  : isDirty
+                    ? `Apply ${dirtyCount} change${dirtyCount === 1 ? '' : 's'}`
+                    : justSaved
+                      ? 'Saved'
+                      : 'No changes to apply'}
               </button>
               {saveError && (
-                <span className="save-error-text">
-                  Error: {saveError}
+                <span className="save-error-text" data-testid="apply-error" role="alert">
+                  {saveError}
                 </span>
               )}
-              {/* Global embedding mismatch warning - appears next to Apply button */}
+              {saveConflict && (
+                <button
+                  type="button"
+                  data-testid="apply-reload-latest"
+                  onClick={reloadLatest}
+                  title="Discard staged edits and reload the current server config"
+                  style={{
+                    background: 'transparent',
+                    color: 'var(--accent)',
+                    border: '1px solid var(--accent)',
+                    boxShadow: 'none',
+                    fontWeight: 600,
+                  }}
+                >
+                  Reload latest
+                </button>
+              )}
+              {/* Config-vs-index drift badge - appears next to Apply button */}
               <EmbeddingMismatchWarning variant="compact" />
             </div>
           </div>

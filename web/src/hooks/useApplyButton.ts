@@ -1,21 +1,32 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useConfigStore } from '@/stores';
+import { confirmDialog } from '@/components/ui/confirmDialog';
+import { changedConfigPaths, indexInvalidatingChanges } from '@/utils/configDiff';
+import type { IndexContractConflict } from '@/utils/saveErrorMessage';
 
 /**
- * Manages the global "Apply All Changes" button.
+ * Manages the global "Apply N changes" button.
  *
- * Dirty truth comes from the config store: `config` is the working copy
- * (including optimistic debounced edits), `persisted` is the last
- * server-acknowledged snapshot. Loads and corpus switches replace both, so
- * navigation never reads as an operator edit.
+ * Dirty truth comes from the config store: `config` is the working copy (staged edits),
+ * `persisted` is the last server-acknowledged snapshot. Loads and corpus switches replace
+ * both, so navigation never reads as an operator edit. Nothing is written to the server until
+ * Apply, which PUTs the whole config through the one path that enforces the index-contract
+ * lock and restores redacted secrets (server/api/config.py `update_config`).
  */
 export function useApplyButton() {
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [justSaved, setJustSaved] = useState(false);
 
   const [storeState, setStoreState] = useState(() => {
     const s = useConfigStore.getState();
-    return { config: s.config, persisted: s.persisted, saving: s.saving, error: s.error };
+    return {
+      config: s.config,
+      persisted: s.persisted,
+      saving: s.saving,
+      error: s.error,
+      saveConflict: s.saveConflict,
+    };
   });
 
   useEffect(() => {
@@ -25,6 +36,7 @@ export function useApplyButton() {
         persisted: state.persisted,
         saving: state.saving,
         error: state.error,
+        saveConflict: state.saveConflict,
       });
     });
     return () => {
@@ -32,18 +44,51 @@ export function useApplyButton() {
     };
   }, []);
 
-  const isDirty =
-    !!storeState.config &&
-    !!storeState.persisted &&
-    JSON.stringify(storeState.config) !== JSON.stringify(storeState.persisted);
+  const changedPaths = useMemo(
+    () => changedConfigPaths(storeState.persisted, storeState.config),
+    [storeState.persisted, storeState.config]
+  );
+  const dirtyCount = changedPaths.length;
+  const isDirty = dirtyCount > 0;
 
-  // No load here. `useAppInit` owns initialization and deliberately awaits `loadRepos()`
-  // first so the corpus scope is canonical before config is fetched; this hook mounts
-  // from the same component, so its own eager load raced ahead of that ordering and
-  // fetched `/api/config` a second time under whatever corpus id localStorage happened
-  // to hold (M-129). The button only observes the store.
+  const invalidatingSections = useMemo(
+    () => indexInvalidatingChanges(storeState.persisted, storeState.config),
+    [storeState.persisted, storeState.config]
+  );
+
+  // A staged edit clears the "Saved" acknowledgement: it is only true immediately after a
+  // successful Apply, so the footer confirms the write happened (C-12) and then goes quiet.
+  useEffect(() => {
+    if (isDirty && justSaved) setJustSaved(false);
+  }, [isDirty, justSaved]);
 
   const handleApply = useCallback(async () => {
+    // When staged edits touch chunking/embedding/tokenization, applying them makes the stored
+    // index no longer match the config. Warn with the exact sections and count before the write
+    // (M-08); the server still enforces its own 409 contract lock over a populated index.
+    const sectionsNow = indexInvalidatingChanges(
+      useConfigStore.getState().persisted,
+      useConfigStore.getState().config
+    );
+    const countNow = changedConfigPaths(
+      useConfigStore.getState().persisted,
+      useConfigStore.getState().config
+    ).length;
+    if (sectionsNow.length > 0) {
+      const list = sectionsNow.join(', ');
+      const proceed = await confirmDialog({
+        title: 'Apply changes that affect the index',
+        message:
+          `${countNow} change${countNow === 1 ? '' : 's'} staged. ` +
+          `${sectionsNow.length === 1 ? 'One section' : 'Some sections'} you changed (${list}) ` +
+          `determine how the current index was built, so applying will make the stored index no ` +
+          `longer match the config — you may need to re-index this corpus. Apply anyway?`,
+        confirmLabel: `Apply ${countNow} change${countNow === 1 ? '' : 's'}`,
+        cancelLabel: 'Keep editing',
+      });
+      if (!proceed) return undefined;
+    }
+
     setIsSaving(true);
     setSaveError(null);
 
@@ -67,7 +112,7 @@ export function useApplyButton() {
       }
 
       const savedConfig = useConfigStore.getState().config || currentConfig;
-      console.log('[useApplyButton] Configuration saved successfully');
+      setJustSaved(true);
 
       if (w.showStatus) {
         w.showStatus('Settings saved successfully', 'success');
@@ -75,8 +120,10 @@ export function useApplyButton() {
 
       return savedConfig;
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown error';
-      console.error('[useApplyButton] Failed to save configuration:', err);
+      // The store already shaped a server-authored message (never the raw axios string); prefer
+      // it over the thrown Error so the footer and the toast read identically (M-20).
+      const storeError = useConfigStore.getState().error;
+      const message = storeError || (err instanceof Error ? err.message : 'Unknown error');
       setSaveError(message);
 
       const w = window as any;
@@ -90,9 +137,24 @@ export function useApplyButton() {
     }
   }, []);
 
+  // 409 index-contract conflict: discard the local edits and pull the server's current config so
+  // the operator can re-decide against the truth, rather than staring at a write the server keeps
+  // refusing (M-20).
+  const reloadLatest = useCallback(async () => {
+    setSaveError(null);
+    await useConfigStore.getState().loadConfig();
+  }, []);
+
+  const saveConflict: IndexContractConflict | null = storeState.saveConflict;
+
   return {
     handleApply,
+    reloadLatest,
     isDirty,
+    dirtyCount,
+    invalidatingSections,
+    justSaved,
+    saveConflict,
     isSaving: isSaving || storeState.saving,
     saveError: saveError || (storeState.error ? String(storeState.error) : null),
   };

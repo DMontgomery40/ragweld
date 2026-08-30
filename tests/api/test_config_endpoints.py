@@ -190,6 +190,26 @@ async def test_invalid_config_section(client: AsyncClient) -> None:
     assert response.status_code in [400, 404, 422]
 
 
+@pytest.mark.asyncio
+async def test_patch_validation_error_detail_is_field_parseable(client: AsyncClient) -> None:
+    """A rejected value PATCH returns a 422 whose ``detail`` is the string dump the GUI's shared
+    error formatter parses into per-field messages (GUI-drive M-20).
+
+    ``web/src/utils/configPatchErrors.ts`` keys on an unindented dotted-path line followed by an
+    indented message line ending in ``[type=...]``. If the server ever stopped emitting
+    ``detail=str(ValidationError)`` for a bad value, the operator would fall back to axios's
+    opaque ``Request failed with status code 422`` -- exactly the regression M-20 fixed. This
+    pins the contract the client depends on.
+    """
+    response = await client.patch("/api/config/vector_search", json={"top_k": "not-a-number"})
+    assert response.status_code == 422
+    detail = response.json().get("detail")
+    assert isinstance(detail, str), f"422 detail must be a string dump, got {type(detail)}"
+    # The offending field name and the Pydantic type marker the parser anchors on.
+    assert "top_k" in detail
+    assert "[type=" in detail
+
+
 @pytest.mark.requires_postgres
 @pytest.mark.asyncio
 async def test_get_config_unknown_corpus_does_not_autocreate(client: AsyncClient) -> None:

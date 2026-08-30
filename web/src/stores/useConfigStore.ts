@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { configApi } from '@/api/config';
 import type { TriBridConfig } from '@/types/generated';
 import { extractPatchErrorDetail, parseConfigPatchErrors } from '@/utils/configPatchErrors';
+import { formatSaveError, type IndexContractConflict } from '@/utils/saveErrorMessage';
 
 interface ConfigStore {
   config: TriBridConfig | null;
@@ -16,11 +17,27 @@ interface ConfigStore {
    * successful or not (a fresh attempt replaces stale errors rather than accumulating them).
    */
   fieldErrors: Record<string, string>;
+  /**
+   * Set when a save was refused (HTTP 409) because the change would invalidate the stored
+   * index contract (`_enforce_index_contract_lock`, server/api/config.py). The footer reads
+   * this to offer a reload-and-re-index affordance instead of a bare error string (M-20).
+   * Cleared on any successful load or save.
+   */
+  saveConflict: IndexContractConflict | null;
   saving: boolean;
   // Actions
   loadConfig: () => Promise<void>;
   saveConfig: (config: TriBridConfig) => Promise<void>;
   patchSection: (section: keyof TriBridConfig, updates: Record<string, unknown>) => Promise<void>;
+  /**
+   * Stage a field edit LOCALLY, with no network write. The working `config` diverges from
+   * `persisted` (the footer shows the dirty count) and nothing reaches the server until "Apply"
+   * PUTs the whole document. This is the single commit model for `useConfigField`: selecting a
+   * chunking strategy, toggling a boolean, dragging a slider all stage, so an edit is never a
+   * silent immediate PATCH the operator cannot see, undo, or gate (M-08). The merge mirrors the
+   * server's `_deep_merge_dicts` so a nested edit keeps its siblings.
+   */
+  stageSection: (section: keyof TriBridConfig, updates: Record<string, unknown>) => void;
   /**
    * Debounced patch for high-frequency UI changes (typing, sliders).
    * Applies an optimistic local update immediately, then persists via PATCH after ~300ms.
@@ -208,6 +225,7 @@ export const useConfigStore = create<ConfigStore>((set) => {
             saving: false,
             error: null,
             fieldErrors: withoutSectionFieldErrors(state.fieldErrors, sectionKey),
+            saveConflict: null,
           };
         });
       } else {
@@ -215,10 +233,12 @@ export const useConfigStore = create<ConfigStore>((set) => {
           saving: false,
           error: null,
           fieldErrors: withoutSectionFieldErrors(state.fieldErrors, sectionKey),
+          saveConflict: null,
         }));
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to save configuration';
+      const presentation = formatSaveError(error);
+      const message = presentation.message;
       const detail = extractPatchErrorDetail(error);
       set((state) => {
         const cur = state.config as any;
@@ -240,6 +260,7 @@ export const useConfigStore = create<ConfigStore>((set) => {
           saving: false,
           error: message,
           fieldErrors: withParsedFieldErrors(state.fieldErrors, sectionKey, detail),
+          saveConflict: presentation.conflict ? presentation.contractConflict ?? null : null,
         };
       });
       throw new Error(message);
@@ -265,6 +286,24 @@ export const useConfigStore = create<ConfigStore>((set) => {
     if (failures.length > 0) {
       throw new Error(Array.from(new Set(failures)).join(' | '));
     }
+  };
+
+  const stageSection = (section: keyof TriBridConfig, updates: Record<string, unknown>) => {
+    const sectionKey = String(section);
+    // Local stage only: mutate the working `config` and leave `persisted` alone, so the edit
+    // shows as dirty and nothing is written until Apply. No pending patch, no timer, no request.
+    set((state) => {
+      const cur = state.config as any;
+      if (!cur) return {};
+      const curSection = (cur as any)[sectionKey] || {};
+      const nextSection = deepMergePatch(curSection as PatchObject, updates);
+      return {
+        config: { ...cur, [sectionKey]: nextSection } as TriBridConfig,
+        // Editing again clears a stale save error / conflict banner.
+        error: null,
+        saveConflict: null,
+      };
+    });
   };
 
   const patchSectionDebounced = (section: keyof TriBridConfig, updates: Record<string, unknown>) => {
@@ -311,7 +350,7 @@ export const useConfigStore = create<ConfigStore>((set) => {
     try {
       await flushAllPendingPatches(corpusKey);
     } catch (error) {
-      flushError = error instanceof Error ? error.message : 'Failed to save configuration';
+      flushError = formatSaveError(error).message;
     }
 
     set({ loading: true, error: flushError });
@@ -332,7 +371,7 @@ export const useConfigStore = create<ConfigStore>((set) => {
 
       set({ config: mergedConfig as TriBridConfig, persisted: config, loading: false, error: flushError });
     } catch (error) {
-      const loadError = error instanceof Error ? error.message : 'Failed to load configuration';
+      const loadError = formatSaveError(error).message;
       set({
         loading: false,
         error: flushError ? `${flushError} | ${loadError}` : loadError,
@@ -346,6 +385,7 @@ export const useConfigStore = create<ConfigStore>((set) => {
   loading: false,
   error: null,
   fieldErrors: {},
+  saveConflict: null,
   saving: false,
 
   loadConfig: async () => {
@@ -368,12 +408,18 @@ export const useConfigStore = create<ConfigStore>((set) => {
     try {
       const saved = await configApi.save(config);
       cancelPendingPatches(String(getActiveCorpusId() || ''));
-      set({ config: saved, persisted: saved, saving: false, error: null });
+      set({ config: saved, persisted: saved, saving: false, error: null, fieldErrors: {}, saveConflict: null });
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to save configuration';
+      // A whole-config PUT validates every section atomically, so a 422 attributes to fields
+      // anywhere: replace the field-error map with what this failure named (M-20). A 409/network
+      // failure carries no per-field detail, so the map clears.
+      const presentation = formatSaveError(error);
+      const message = presentation.message;
       set({
         saving: false,
         error: message,
+        fieldErrors: Object.fromEntries(presentation.fieldErrors.map((fe) => [fe.path, fe.message])),
+        saveConflict: presentation.conflict ? presentation.contractConflict ?? null : null,
       });
       throw new Error(message);
     }
@@ -400,6 +446,7 @@ export const useConfigStore = create<ConfigStore>((set) => {
             saving: false,
             error: null,
             fieldErrors: withoutSectionFieldErrors(state.fieldErrors, sectionKey),
+            saveConflict: null,
           };
         });
       } else {
@@ -407,24 +454,39 @@ export const useConfigStore = create<ConfigStore>((set) => {
           saving: false,
           error: null,
           fieldErrors: withoutSectionFieldErrors(state.fieldErrors, sectionKey),
+          saveConflict: null,
         }));
       }
     } catch (error) {
       // No optimistic update precedes this call (unlike `patchSectionDebounced`), so there is
       // nothing in `config` to revert -- only the field-attributed detail is worth recording.
       const detail = extractPatchErrorDetail(error);
+      const presentation = formatSaveError(error);
       set((state) => ({
         saving: false,
-        error: error instanceof Error ? error.message : 'Failed to save configuration',
+        error: presentation.message,
         fieldErrors: withParsedFieldErrors(state.fieldErrors, sectionKey, detail),
+        saveConflict: presentation.conflict ? presentation.contractConflict ?? null : null,
       }));
     }
   },
 
+  stageSection,
   patchSectionDebounced,
   cancelPendingPatches,
   flushPendingPatches: async () => {
-    await flushAllPendingPatches(String(getActiveCorpusId() || ''));
+    // A server-side action about to read scoped config (starting an index run, saving paths)
+    // must see the operator's edits. Two edit shapes can be outstanding: the legacy debounced
+    // patches still used by a couple of direct callers, and — since the commit model became
+    // staged — local staged edits that only live in `config`. Flush the debounced ones, then
+    // persist any remaining staged divergence through the safe PUT path (contract lock + secret
+    // restore). Without this second step, an index run would read stale server config.
+    const corpusKey = String(getActiveCorpusId() || '');
+    await flushAllPendingPatches(corpusKey);
+    const { config, persisted } = useConfigStore.getState();
+    if (config && JSON.stringify(config) !== JSON.stringify(persisted)) {
+      await useConfigStore.getState().saveConfig(config);
+    }
   },
 
   resetConfig: async () => {
@@ -432,11 +494,11 @@ export const useConfigStore = create<ConfigStore>((set) => {
     try {
       const saved = await configApi.reset();
       cancelPendingPatches(String(getActiveCorpusId() || ''));
-      set({ config: saved, persisted: saved, saving: false, error: null });
+      set({ config: saved, persisted: saved, saving: false, error: null, fieldErrors: {}, saveConflict: null });
     } catch (error) {
       set({
         saving: false,
-        error: error instanceof Error ? error.message : 'Failed to reset configuration',
+        error: formatSaveError(error).message,
       });
     }
   },
@@ -450,6 +512,7 @@ export const useConfigStore = create<ConfigStore>((set) => {
       loading: false,
       error: null,
       fieldErrors: {},
+      saveConflict: null,
       saving: false,
       })
     })(),

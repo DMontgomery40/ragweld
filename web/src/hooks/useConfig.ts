@@ -12,6 +12,7 @@ export function useConfig() {
   const saveConfig = useConfigStore((s) => s.saveConfig);
   const patchSection = useConfigStore((s) => s.patchSection);
   const patchSectionDebounced = useConfigStore((s) => s.patchSectionDebounced);
+  const stageSection = useConfigStore((s) => s.stageSection);
   const cancelPendingPatches = useConfigStore((s) => s.cancelPendingPatches);
   const flushPendingPatches = useConfigStore((s) => s.flushPendingPatches);
   const resetConfig = useConfigStore((s) => s.resetConfig);
@@ -62,6 +63,7 @@ export function useConfig() {
     saveConfig,
     patchSection,
     patchSectionDebounced,
+    stageSection,
     flushPendingPatches,
     resetConfig,
     reload,
@@ -79,7 +81,7 @@ export function useConfigField<T>(
   path: string,
   defaultValue: T
 ): [T, (value: T) => void, { loading: boolean; error: string | null }] {
-  const { config, loading, error, patchSectionDebounced, patchSection } = useConfig();
+  const { config, loading, error, stageSection } = useConfig();
 
   const value = useMemo(() => {
     if (!config) return defaultValue;
@@ -97,9 +99,9 @@ export function useConfigField<T>(
       const [section, ...rest] = path.split('.').filter(Boolean);
       if (!section) return;
       if (rest.length === 0) {
-        // Replace entire section
-        // This is rare; keep it immediate.
-        void patchSection(section as keyof TriBridConfig, newValue as any);
+        // Whole-section replacement: stage the object; the deep merge mirrors the server so a
+        // partial object keeps its siblings, matching the prior PATCH semantics.
+        stageSection(section as keyof TriBridConfig, newValue as any);
         return;
       }
       // Build nested patch object (shallow at top-level section)
@@ -107,10 +109,12 @@ export function useConfigField<T>(
       for (let i = rest.length - 1; i >= 0; i -= 1) {
         patch = { [rest[i]]: patch };
       }
-      // Debounced persistence for high-frequency inputs.
-      patchSectionDebounced(section as keyof TriBridConfig, patch);
+      // Stage the edit locally. Nothing is written until the operator clicks "Apply"; the field
+      // shows as dirty in the meantime (M-08: no more silent immediate PATCH on every keystroke,
+      // toggle, or strategy-card click).
+      stageSection(section as keyof TriBridConfig, patch);
     },
-    [patchSection, patchSectionDebounced, path]
+    [stageSection, path]
   );
 
   return [value, setValue, { loading, error }];
