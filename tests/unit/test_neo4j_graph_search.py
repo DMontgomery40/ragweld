@@ -36,14 +36,17 @@ class _FakeSession:
         return None
 
     async def run(self, query: str, **params):
-        self.last_query = query
-        self.last_params = params
-        # `get_entity_neighbors` also asks for the pre-limit neighbour count, which is a
-        # different query against the same stand-in driver; answer it as Neo4j would.
+        # `get_entity_neighbors` issues TWO queries - the neighbours query and then the
+        # pre-limit count - so the count must be captured in its own slot. Recording both
+        # into `last_query` let the later count query overwrite it, which silently
+        # repointed every `last_query` assertion at a different Cypher statement that
+        # happened to satisfy them all (review N-01).
         if "AS neighbours" in query:
             self.count_query = query
             self.count_params = params
             return _FakeResult([{"neighbours": self._neighbour_count}])
+        self.last_query = query
+        self.last_params = params
         return _FakeResult(self._records)
 
 
@@ -219,6 +222,18 @@ async def test_get_entity_neighbors_inlines_hops_and_parses_response() -> None:
     assert out.relationships[0].target_id == "e2"
     # The centre sorts first, so a cap never drops the entity that was asked for.
     assert out.entities[0].entity_id == "e1"
+
+    # Each query is pinned separately: `last_query` is the neighbours query the test is
+    # named for, `count_query` the pre-limit count (review N-01).
+    session = client._driver.session_obj  # type: ignore[union-attr]
+    assert "AS neighbours" not in session.last_query
+    assert "AS entities" in session.last_query or "entity_id: n.entity_id" in session.last_query
+    assert session.count_query is not None and "AS neighbours" in session.count_query
+    assert session.count_params is not None
+    assert session.count_params.get("repo_id") == "test-corpus"
+    assert session.count_params.get("entity_id") == "e1"
+    # The count must exclude the centre; the `+ 1` for it is added in Python.
+    assert "n <> center" in session.count_query
     # `total_matched` is the PRE-limit count (5 neighbours + the centre), not len(entities),
     # which would have equalled the cap for any truncated neighbourhood (review F-03).
     assert out.total_matched == 6
