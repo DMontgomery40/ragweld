@@ -980,6 +980,8 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
   const activeRequestTokenRef = useRef(0);
   const sessionsLoadedRef = useRef(false);
   const sendingRef = useRef(false);
+  /** A mirror event that arrived while this instance was streaming, replayed when it ends. */
+  const pendingReloadRef = useRef(false);
   /** Distinguishes this instance's own writes from the other instance's (tab vs dock). */
   const instanceIdRef = useRef(`chat-${Math.random().toString(36).slice(2)}`);
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
@@ -1150,12 +1152,26 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
     const onThreadsChanged = (event: Event) => {
       const writerId = (event as CustomEvent<{ writerId?: string }>).detail?.writerId;
       if (writerId && writerId === instanceIdRef.current) return;
-      if (sendingRef.current) return;
+      if (sendingRef.current) {
+        // Deferred, not dropped. Discarding it left this instance stale for good, and its
+        // post-send saveChatHistory would then persist that stale state over whatever the
+        // other instance wrote.
+        pendingReloadRef.current = true;
+        return;
+      }
       loadChatHistory();
     };
     window.addEventListener(CHAT_SESSIONS_CHANGED_EVENT, onThreadsChanged);
     return () => window.removeEventListener(CHAT_SESSIONS_CHANGED_EVENT, onThreadsChanged);
   }, [loadChatHistory]);
+
+  // Drain a mirror event that arrived mid-stream once the answer has landed.
+  useEffect(() => {
+    if (sending) return;
+    if (!pendingReloadRef.current) return;
+    pendingReloadRef.current = false;
+    loadChatHistory();
+  }, [loadChatHistory, sending]);
 
   useEffect(() => {
     loadChatHistory();
