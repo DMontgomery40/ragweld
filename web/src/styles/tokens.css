@@ -13,7 +13,7 @@ html, :root, [data-theme="dark"] {
   --line: #27272a;
 
   --fg: #e4e4e7;
-  --fg-muted: #71717a;
+  --fg-muted: #8b8b95;
 
   /* SURGICAL: Desaturated slate, NOT neon */
   --accent: #64748b;           /* slate-500 - matte steel */
@@ -73,7 +73,7 @@ html, :root, [data-theme="dark"] {
   --line: #e4e4e7;
 
   --fg: #18181b;
-  --fg-muted: #71717a;
+  --fg-muted: #6b6b74;
 
   /* SURGICAL: Desaturated slate on light */
   --accent: #475569;           /* slate-600 - matte steel */
