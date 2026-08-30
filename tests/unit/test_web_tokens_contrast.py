@@ -450,14 +450,15 @@ _TSX_FONT_SIZE_RE = re.compile(r"fontSize\s*:\s*['\"]([0-9]*\.?[0-9]+)px['\"]")
 # Files this lane owns and must keep at/above the floor.
 _OWNED_PREFIXES = ("web/src/styles/", "web/src/components/Dock/")
 
-# Frozen count of sub-floor inline/CSS font sizes in files this lane does NOT
-# own (component logic + component-scoped CSS in other lanes' trees). This is a
-# CEILING, not an equality: a lane that fixes its own tiers only lowers the
-# number, which still passes; adding a new sub-floor tier anywhere raises it and
-# fails. When the tree is fully migrated this reaches 0 and the ratchet can
-# become a hard zero. Measured on origin/main c4a55fd5: 182 inline `fontSize`
-# in `.tsx` + 6 in non-owned component `.css` = 188.
-UNOWNED_SUBFLOOR_FONT_BASELINE = 188
+# Frozen count of sub-floor inline font sizes in `.tsx` files this lane does NOT
+# own (component logic in other lanes' trees). This is a CEILING, not an
+# equality: a lane that fixes its own tiers only lowers the number, which still
+# passes; adding a new sub-floor tier anywhere raises it and fails. When the
+# tree is fully migrated this reaches 0 and the ratchet becomes a hard zero.
+# Measured with this file's own comment-stripped scan: 174 inline `fontSize` in
+# `.tsx`. The six component-CSS tiers a stylesheet CAN fix (HelpGlossary.css,
+# LiveTerminal.css) were raised to the 11.5px floor in this lane and are gone.
+UNOWNED_SUBFLOOR_FONT_BASELINE = 174
 
 
 def _rel(path: Path) -> str:

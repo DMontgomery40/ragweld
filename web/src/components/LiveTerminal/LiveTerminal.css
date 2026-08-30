@@ -93,7 +93,7 @@
   padding: 4px 10px;
   border-radius: 4px;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 11.5px;
   font-family: 'SF Mono', monospace;
   transition: all 0.2s ease;
 }
@@ -139,13 +139,13 @@
 
 .progress-label {
   font-family: 'SF Mono', monospace;
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--accent-text);
 }
 
 .progress-percent {
   font-family: 'SF Mono', monospace;
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--fg-muted);
 }
 
