@@ -55,7 +55,7 @@ const COMPONENT_CARDS: Array<{
   { id: 'embedding', icon: '🔢', label: 'Embedding', description: 'Provider, model, dimensions, batching' },
   { id: 'chunking', icon: '🧩', label: 'Chunking', description: 'Strategy, size, overlap, limits' },
   { id: 'bm25', icon: '📝', label: 'Tokenization', description: 'Chunk tokenizer + Qdrant/BM25 sparse stemming + large-file mode' },
-  { id: 'enrichment', icon: '🧠', label: 'Graph & Options', description: 'Graph build + dense skip mode' },
+  { id: 'enrichment', icon: '🧠', label: 'Graph & Enrichment', description: 'Graph build, dense-vector skip, enrichment prompts' },
   { id: 'figures', icon: '🖼️', label: 'Figures & Vision', description: 'Describe charts, diagrams, drawings via the gateway' },
 ];
 
@@ -2316,6 +2316,39 @@ export function IndexingSubtab() {
                 Keeps import statements near the top of each chunk for better code understanding.
               </div>
             </div>
+
+            <details style={{ marginTop: '18px' }}>
+              <summary style={{ cursor: 'pointer', fontSize: '13px', fontWeight: 600, color: 'var(--fg)' }}>
+                Advanced chunking controls
+              </summary>
+              <div style={{ marginTop: '12px' }}>
+                <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px' }}>
+                  <div className="input-group">
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
+                      Greedy fallback target
+                      <TooltipIcon name="GREEDY_FALLBACK_TARGET" />
+                    </label>
+                    <NumberField
+                      data-testid="greedy-fallback-target"
+                      value={greedyFallbackTarget}
+                      onCommit={setGreedyFallbackTarget}
+                      min={200}
+                      max={2000}
+                      step={1}
+                      style={{
+                        width: '100%',
+                        padding: '10px 12px',
+                        background: 'var(--input-bg)',
+                        border: '1px solid var(--line)',
+                        borderRadius: '6px',
+                        color: 'var(--fg)',
+                        fontSize: '13px',
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+            </details>
           </div>
         )}
 
@@ -2652,10 +2685,94 @@ export function IndexingSubtab() {
               vectors. Stemming, language, k1, and b are part of the sparse index contract: changing them requires a re-index.
             </div>
 
+            <div style={{ marginTop: '16px' }}>
+              <div
+                style={{
+                  padding: '16px',
+                  background: 'var(--bg-elev2)',
+                  borderRadius: '8px',
+                  border: '1px solid var(--line)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+                  <div>
+                    <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--fg)' }}>Parquet ingestion (bounded)</div>
+                    <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginTop: '2px' }}>
+                      Prevents huge Parquet files from dominating memory/time during indexing.
+                    </div>
+                  </div>
+                  <TooltipIcon name="PARQUET_EXTRACT_MAX_ROWS" />
+                </div>
+
+                <div style={{ marginTop: '12px', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '14px' }}>
+                  <div className="input-group">
+                    <label style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '6px' }}>
+                      Max rows
+                    </label>
+                    <NumberField
+                      min={1}
+                      max={200000}
+                      step={1}
+                      value={parquetExtractMaxRows}
+                      onCommit={setParquetExtractMaxRows}
+                      style={{ width: '100%' }}
+                    />
+                  </div>
+                  <div className="input-group">
+                    <label style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '6px' }}>
+                      Max chars
+                    </label>
+                    <NumberField
+                      min={10_000}
+                      max={50_000_000}
+                      step={1}
+                      value={parquetExtractMaxChars}
+                      onCommit={setParquetExtractMaxChars}
+                      style={{ width: '100%' }}
+                    />
+                  </div>
+                  <div className="input-group">
+                    <label style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '6px' }}>
+                      Max cell chars
+                    </label>
+                    <NumberField
+                      min={100}
+                      max={200_000}
+                      step={1}
+                      value={parquetExtractMaxCellChars}
+                      onCommit={setParquetExtractMaxCellChars}
+                      style={{ width: '100%' }}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ marginTop: '12px', display: 'flex', gap: '18px', flexWrap: 'wrap' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={parquetExtractTextColumnsOnly}
+                      onChange={(e) => setParquetExtractTextColumnsOnly(e.target.checked)}
+                    />
+                    <span style={{ fontSize: '12px', color: 'var(--fg)' }}>Text columns only</span>
+                    <TooltipIcon name="PARQUET_EXTRACT_TEXT_COLUMNS_ONLY" />
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={parquetExtractIncludeColumnNames}
+                      onChange={(e) => setParquetExtractIncludeColumnNames(e.target.checked)}
+                    />
+                    <span style={{ fontSize: '12px', color: 'var(--fg)' }}>Include column names</span>
+                    <TooltipIcon name="PARQUET_EXTRACT_INCLUDE_COLUMN_NAMES" />
+                  </label>
+                </div>
+              </div>
+            </div>
+
           </div>
         )}
 
-        {/* GRAPH + OPTIONS */}
+        {/* GRAPH + ENRICHMENT */}
         {selectedComponent === 'enrichment' && (
           <div>
             <h4
@@ -2868,87 +2985,6 @@ export function IndexingSubtab() {
                 )}
               </div>
 
-              <div
-                style={{
-                  padding: '16px',
-                  background: 'var(--bg-elev2)',
-                  borderRadius: '8px',
-                  border: '1px solid var(--line)',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
-                  <div>
-                    <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--fg)' }}>Parquet ingestion (bounded)</div>
-                    <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginTop: '2px' }}>
-                      Prevents huge Parquet files from dominating memory/time during indexing.
-                    </div>
-                  </div>
-                  <TooltipIcon name="PARQUET_EXTRACT_MAX_ROWS" />
-                </div>
-
-                <div style={{ marginTop: '12px', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '14px' }}>
-                  <div className="input-group">
-                    <label style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '6px' }}>
-                      Max rows
-                    </label>
-                    <NumberField
-                      min={1}
-                      max={200000}
-                      step={1}
-                      value={parquetExtractMaxRows}
-                      onCommit={setParquetExtractMaxRows}
-                      style={{ width: '100%' }}
-                    />
-                  </div>
-                  <div className="input-group">
-                    <label style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '6px' }}>
-                      Max chars
-                    </label>
-                    <NumberField
-                      min={10_000}
-                      max={50_000_000}
-                      step={1}
-                      value={parquetExtractMaxChars}
-                      onCommit={setParquetExtractMaxChars}
-                      style={{ width: '100%' }}
-                    />
-                  </div>
-                  <div className="input-group">
-                    <label style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '6px' }}>
-                      Max cell chars
-                    </label>
-                    <NumberField
-                      min={100}
-                      max={200_000}
-                      step={1}
-                      value={parquetExtractMaxCellChars}
-                      onCommit={setParquetExtractMaxCellChars}
-                      style={{ width: '100%' }}
-                    />
-                  </div>
-                </div>
-
-                <div style={{ marginTop: '12px', display: 'flex', gap: '18px', flexWrap: 'wrap' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-                    <input
-                      type="checkbox"
-                      checked={parquetExtractTextColumnsOnly}
-                      onChange={(e) => setParquetExtractTextColumnsOnly(e.target.checked)}
-                    />
-                    <span style={{ fontSize: '12px', color: 'var(--fg)' }}>Text columns only</span>
-                    <TooltipIcon name="PARQUET_EXTRACT_TEXT_COLUMNS_ONLY" />
-                  </label>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-                    <input
-                      type="checkbox"
-                      checked={parquetExtractIncludeColumnNames}
-                      onChange={(e) => setParquetExtractIncludeColumnNames(e.target.checked)}
-                    />
-                    <span style={{ fontSize: '12px', color: 'var(--fg)' }}>Include column names</span>
-                    <TooltipIcon name="PARQUET_EXTRACT_INCLUDE_COLUMN_NAMES" />
-                  </label>
-                </div>
-              </div>
 
               <div
                 style={{
@@ -2967,37 +3003,6 @@ export function IndexingSubtab() {
               </div>
             </div>
 
-            <details style={{ marginTop: '18px' }}>
-              <summary style={{ cursor: 'pointer', fontSize: '13px', fontWeight: 600, color: 'var(--fg)' }}>
-                Advanced chunking controls
-              </summary>
-              <div style={{ marginTop: '12px' }}>
-                <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px' }}>
-                  <div className="input-group">
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
-                      Greedy fallback target
-                      <TooltipIcon name="GREEDY_FALLBACK_TARGET" />
-                    </label>
-                    <NumberField
-                      value={greedyFallbackTarget}
-                      onCommit={setGreedyFallbackTarget}
-                      min={200}
-                      max={2000}
-                      step={1}
-                      style={{
-                        width: '100%',
-                        padding: '10px 12px',
-                        background: 'var(--input-bg)',
-                        border: '1px solid var(--line)',
-                        borderRadius: '6px',
-                        color: 'var(--fg)',
-                        fontSize: '13px',
-                      }}
-                    />
-                  </div>
-                </div>
-              </div>
-            </details>
           </div>
         )}
 

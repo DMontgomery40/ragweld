@@ -20,7 +20,7 @@ async function openTab(page: Page): Promise<void> {
   await expect(page.getByTestId('index-now-button')).toBeVisible();
 }
 
-async function openCard(page: Page, card: 'chunking' | 'bm25' | 'figures'): Promise<void> {
+async function openCard(page: Page, card: 'chunking' | 'bm25' | 'figures' | 'enrichment'): Promise<void> {
   await page.getByTestId(`indexing-component-card-${card}`).click();
 }
 
@@ -83,4 +83,36 @@ test('the Figures header points at where the estimate really is', async ({ page 
   const text = await card.innerText();
   expect(text).not.toMatch(/estimate below/i);
   expect(text).toMatch(/Index Now prices them/i);
+});
+
+test('chunking controls live in the Chunking card, not inside Graph', async ({ page }) => {
+  await openTab(page);
+  await openCard(page, 'chunking');
+  const chunking = page.getByText('Advanced chunking controls');
+  await expect(chunking).toBeVisible();
+  await chunking.click();
+  await expect(page.getByTestId('greedy-fallback-target')).toBeVisible();
+
+  await openCard(page, 'enrichment');
+  await expect(page.getByText('Advanced chunking controls')).toHaveCount(0);
+  await expect(page.getByTestId('greedy-fallback-target')).toHaveCount(0);
+});
+
+test('bounded Parquet extraction sits with the other large-file limits', async ({ page }) => {
+  await openTab(page);
+  await openCard(page, 'bm25');
+  await expect(page.getByText('Parquet ingestion (bounded)')).toBeVisible();
+
+  await openCard(page, 'enrichment');
+  await expect(page.getByText('Parquet ingestion (bounded)')).toHaveCount(0);
+});
+
+test('the Graph card is named for everything it still holds', async ({ page }) => {
+  await openTab(page);
+  const card = page.getByTestId('indexing-component-card-enrichment');
+  await expect(card).toContainText('Graph & Enrichment');
+  await expect(card).toContainText('enrichment prompts');
+
+  await openCard(page, 'enrichment');
+  await expect(page.getByText('Prompt Templates')).toBeVisible();
 });
