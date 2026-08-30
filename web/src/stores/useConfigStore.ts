@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { configApi } from '@/api/config';
 import type { TriBridConfig } from '@/types/generated';
+import { extractPatchErrorDetail, parseConfigPatchErrors } from '@/utils/configPatchErrors';
 
 interface ConfigStore {
   config: TriBridConfig | null;
@@ -8,6 +9,13 @@ interface ConfigStore {
   persisted: TriBridConfig | null;
   loading: boolean;
   error: string | null;
+  /**
+   * Field-level detail from the last rejected config PATCH, keyed by full dotted TriBridConfig
+   * path (e.g. "enrichment.max_chunk_summaries") -- `NumberField`'s `configPath` prop reads
+   * this directly. Cleared for a section's paths as soon as that section's next PATCH lands,
+   * successful or not (a fresh attempt replaces stale errors rather than accumulating them).
+   */
+  fieldErrors: Record<string, string>;
   saving: boolean;
   // Actions
   loadConfig: () => Promise<void>;
@@ -53,6 +61,73 @@ const deepMergePatch = (base: PatchObject, updates: PatchObject): PatchObject =>
     merged[key] = isPatchObject(current) && isPatchObject(next) ? deepMergePatch(current, next) : next;
   }
   return merged;
+};
+
+/**
+ * Undo the optimistic edits a rejected PATCH applied, restoring only the leaf paths it
+ * actually set -- never the whole section.
+ *
+ * The server validates a section's merged body atomically (`TriBridConfig.model_validate`),
+ * so a 422 means nothing in this PATCH was saved (C-01/X-11: the field must not keep a value
+ * the server refused, or "Apply" re-sends it forever). But `flushSection` clears the pending
+ * entry before the `await`: a fresh `patchSectionDebounced` call for the same path during that
+ * in-flight window applies its own optimistic update AND queues its own pending patch. Blindly
+ * restoring the whole section here would erase that newer edit's on-screen value while its
+ * patch still lands later, and the field would snap back only for the wrong value to arrive
+ * moments after. A leaf is reverted only if the live config still holds exactly what this
+ * rejected patch wrote to it -- evidence nothing newer has touched it since.
+ */
+const revertPaths = (curNode: PatchObject, persistedNode: PatchObject, updateNode: PatchObject): PatchObject => {
+  let changed = false;
+  const next: PatchObject = { ...curNode };
+  for (const key of Object.keys(updateNode)) {
+    const updateValue = updateNode[key];
+    const curValue = curNode[key];
+    if (isPatchObject(updateValue) && isPatchObject(curValue)) {
+      const persistedChild = isPatchObject(persistedNode[key]) ? (persistedNode[key] as PatchObject) : {};
+      const revertedChild = revertPaths(curValue, persistedChild, updateValue);
+      if (revertedChild !== curValue) {
+        next[key] = revertedChild;
+        changed = true;
+      }
+      continue;
+    }
+    if (Object.is(curValue, updateValue)) {
+      next[key] = persistedNode[key];
+      changed = true;
+    }
+  }
+  return changed ? next : curNode;
+};
+
+/** Field errors under `sectionKey` (top-level equal, or dotted-prefixed) removed. */
+const withoutSectionFieldErrors = (
+  fieldErrors: Record<string, string>,
+  sectionKey: string
+): Record<string, string> => {
+  const next = { ...fieldErrors };
+  let changed = false;
+  for (const key of Object.keys(next)) {
+    if (key === sectionKey || key.startsWith(`${sectionKey}.`)) {
+      delete next[key];
+      changed = true;
+    }
+  }
+  return changed ? next : fieldErrors;
+};
+
+/** Field errors under `sectionKey`, replaced with what this PATCH failure parsed out of `detail`. */
+const withParsedFieldErrors = (
+  fieldErrors: Record<string, string>,
+  sectionKey: string,
+  detail: unknown
+): Record<string, string> => {
+  const cleared = withoutSectionFieldErrors(fieldErrors, sectionKey);
+  const parsed = parseConfigPatchErrors(detail);
+  if (parsed.length === 0) return cleared;
+  const next = { ...cleared };
+  for (const { path, message } of parsed) next[path] = message;
+  return next;
 };
 
 export const useConfigStore = create<ConfigStore>((set) => {
@@ -127,16 +202,45 @@ export const useConfigStore = create<ConfigStore>((set) => {
           const nextPersisted = curPersisted
             ? ({ ...curPersisted, [sectionKey]: nextSection } as TriBridConfig)
             : saved;
-          return { config: nextConfig, persisted: nextPersisted, saving: false, error: null };
+          return {
+            config: nextConfig,
+            persisted: nextPersisted,
+            saving: false,
+            error: null,
+            fieldErrors: withoutSectionFieldErrors(state.fieldErrors, sectionKey),
+          };
         });
       } else {
-        set({ saving: false, error: null });
+        set((state) => ({
+          saving: false,
+          error: null,
+          fieldErrors: withoutSectionFieldErrors(state.fieldErrors, sectionKey),
+        }));
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to save configuration';
-      set({
-        saving: false,
-        error: message,
+      const detail = extractPatchErrorDetail(error);
+      set((state) => {
+        const cur = state.config as any;
+        const persisted = state.persisted as any;
+        // The server validated the whole merged section atomically, so nothing in this PATCH
+        // was saved: the optimistic local copy must not keep the value it refused (see
+        // `revertPaths`), or the next "Apply" silently re-sends the same rejected value.
+        const nextConfig =
+          cur && persisted && String(getActiveCorpusId() || '') === String(corpusKey || '')
+            ? (() => {
+                const curSection = (cur[sectionKey] as PatchObject) || {};
+                const persistedSection = (persisted[sectionKey] as PatchObject) || {};
+                const revertedSection = revertPaths(curSection, persistedSection, updates);
+                return revertedSection === curSection ? cur : { ...cur, [sectionKey]: revertedSection };
+              })()
+            : cur;
+        return {
+          config: nextConfig as TriBridConfig,
+          saving: false,
+          error: message,
+          fieldErrors: withParsedFieldErrors(state.fieldErrors, sectionKey, detail),
+        };
       });
       throw new Error(message);
     }
@@ -241,6 +345,7 @@ export const useConfigStore = create<ConfigStore>((set) => {
   persisted: null,
   loading: false,
   error: null,
+  fieldErrors: {},
   saving: false,
 
   loadConfig: async () => {
@@ -276,12 +381,12 @@ export const useConfigStore = create<ConfigStore>((set) => {
 
   patchSection: async (section: keyof TriBridConfig, updates: Record<string, unknown>) => {
     const corpusKey = String(getActiveCorpusId() || '');
+    const sectionKey = String(section);
     set({ saving: true, error: null });
     try {
-      const saved = await configApi.patchSection(String(section), updates, corpusKey || undefined);
+      const saved = await configApi.patchSection(sectionKey, updates, corpusKey || undefined);
       if (String(getActiveCorpusId() || '') === String(corpusKey || '')) {
         set((state) => {
-          const sectionKey = String(section);
           const cur = state.config as any;
           const nextSection = (saved as any)?.[sectionKey];
           const nextConfig = cur ? ({ ...cur, [sectionKey]: nextSection } as TriBridConfig) : saved;
@@ -289,16 +394,30 @@ export const useConfigStore = create<ConfigStore>((set) => {
           const nextPersisted = curPersisted
             ? ({ ...curPersisted, [sectionKey]: nextSection } as TriBridConfig)
             : saved;
-          return { config: nextConfig, persisted: nextPersisted, saving: false, error: null };
+          return {
+            config: nextConfig,
+            persisted: nextPersisted,
+            saving: false,
+            error: null,
+            fieldErrors: withoutSectionFieldErrors(state.fieldErrors, sectionKey),
+          };
         });
       } else {
-        set({ saving: false, error: null });
+        set((state) => ({
+          saving: false,
+          error: null,
+          fieldErrors: withoutSectionFieldErrors(state.fieldErrors, sectionKey),
+        }));
       }
     } catch (error) {
-      set({
+      // No optimistic update precedes this call (unlike `patchSectionDebounced`), so there is
+      // nothing in `config` to revert -- only the field-attributed detail is worth recording.
+      const detail = extractPatchErrorDetail(error);
+      set((state) => ({
         saving: false,
         error: error instanceof Error ? error.message : 'Failed to save configuration',
-      });
+        fieldErrors: withParsedFieldErrors(state.fieldErrors, sectionKey, detail),
+      }));
     }
   },
 
@@ -330,6 +449,7 @@ export const useConfigStore = create<ConfigStore>((set) => {
       persisted: null,
       loading: false,
       error: null,
+      fieldErrors: {},
       saving: false,
       })
     })(),
