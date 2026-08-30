@@ -185,8 +185,9 @@ export function MonitoringSubtab() {
       >
         <h3 style={{ marginTop: 0 }}>Metrics Backends</h3>
         <p className="small" style={{ marginBottom: '16px' }}>
-          Links resolve from the configured base URLs (Grafana Config → Observability endpoints). A greyed link means that URL is
-          not configured.
+          Links resolve from the configured base URLs (Grafana Config → Observability endpoints) and open in a new tab. A greyed
+          link means that URL is not configured. Grafana is provisioned with anonymous access, so it opens read-only: anything
+          that needs an identity (saving a panel, an annotation, silencing an alert) will fail at the point of use.
         </p>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
           <a
@@ -196,8 +197,13 @@ export function MonitoringSubtab() {
             aria-disabled={!grafanaHref}
             style={linkStyle(Boolean(grafanaHref), 'var(--link)')}
             data-testid="open-grafana"
+            title={
+              grafanaHref
+                ? `Opens ${grafanaHref} in a new tab. Grafana is provisioned with anonymous access, so it opens read-only: saving a panel, adding an annotation or silencing an alert needs a Grafana sign-in.`
+                : undefined
+            }
           >
-            {grafanaHref ? 'Open Grafana' : 'Grafana URL not configured'}
+            {grafanaHref ? 'Open Grafana (read-only, anonymous)' : 'Grafana URL not configured'}
           </a>
           <a
             href={prometheusHref || undefined}
@@ -206,6 +212,11 @@ export function MonitoringSubtab() {
             aria-disabled={!prometheusHref}
             style={linkStyle(Boolean(prometheusHref), 'var(--warn)')}
             data-testid="open-prometheus"
+            title={
+              prometheusHref
+                ? `Opens ${prometheusHref} in a new tab. Loopback addresses resolve only on the Ragweld host.`
+                : undefined
+            }
           >
             {prometheusHref ? 'Open Prometheus' : 'Prometheus URL not configured'}
           </a>
@@ -216,6 +227,11 @@ export function MonitoringSubtab() {
             aria-disabled={!alertmanagerHref}
             style={linkStyle(Boolean(alertmanagerHref), 'var(--accent)')}
             data-testid="open-alertmanager"
+            title={
+              alertmanagerHref
+                ? `Opens ${alertmanagerHref} in a new tab. Loopback addresses resolve only on the Ragweld host.`
+                : undefined
+            }
           >
             {alertmanagerHref ? 'Open Alertmanager' : 'Alertmanager URL not configured'}
           </a>

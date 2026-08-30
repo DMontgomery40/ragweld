@@ -232,11 +232,22 @@ def apply_default_links(config: TriBridConfig) -> None:
         uid = str(config.ui.grafana_dashboard_uid or "").strip()
         slug = str(config.ui.grafana_dashboard_slug or uid).strip() or uid
         if uid:
+            # The provisioned overview dashboard has no corpus/run template
+            # variables, so the link cannot be scoped to the run it was opened
+            # from. Say so, and at least bound the time range to the recent
+            # window instead of inheriting whatever the viewer last selected.
+            params = {"from": "now-15m", "to": "now"}
+            if obs.repo_id:
+                params["var-corpus_id"] = obs.repo_id
+            query = urllib.parse.urlencode(params)
             add_external_link(
                 label="Grafana dashboard",
                 kind="grafana",
-                url=f"{base}/d/{uid}/{slug}",
-                detail="Provisioned dashboard for request metrics and logs.",
+                url=f"{base}/d/{uid}/{slug}?{query}",
+                detail=(
+                    "Cluster-wide dashboard for request metrics and logs, opened on the last 15 minutes. "
+                    "It is not scoped to this run: its panels cover every corpus on this deployment."
+                ),
             )
     # Tempo has no UI of its own; traces are viewed through Grafana Explore
     # against the in-repo provisioned Tempo datasource (uid "tempo").

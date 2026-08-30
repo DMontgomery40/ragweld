@@ -1,9 +1,34 @@
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import * as DashAPI from '@/api/dashboard';
 import {
   RAGWELD_DOCKER_SERVICES,
   type RagweldDockerService,
 } from '@/api/docker';
 import { useDockerStore } from '@/stores/useDockerStore';
+import type { ObservabilityStatusResponse } from '@/types/generated';
+
+/**
+ * Which observability component owns each service's operator surface.
+ *
+ * The Monitoring subtab already resolves these URLs from config; the cards here
+ * reuse them so an operator who lands on Services to check MLflow can open it
+ * without knowing to go somewhere else.
+ */
+const SERVICE_SURFACE_COMPONENT: Partial<Record<RagweldDockerService, string>> = {
+  grafana: 'grafana',
+  tempo: 'tempo',
+  alloy: 'alloy',
+  mimir: 'mimir',
+  pyroscope: 'pyroscope',
+  alertmanager: 'alertmanager',
+  langfuse: 'langfuse',
+  qdrant: 'haystack_docling_qdrant',
+  litellm: 'litellm',
+  mlflow: 'mlflow',
+  flyte: 'flyte',
+};
+
+const LOOPBACK = /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:|\/|$)/i;
 
 const SERVICE_GROUPS: Array<{
   title: string;
@@ -108,6 +133,49 @@ export function ServicesSubtab() {
     return () => window.clearInterval(timer);
   }, [refresh]);
 
+  const [observability, setObservability] = useState<ObservabilityStatusResponse | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void DashAPI.getObservabilityStatus().then((next) => {
+      if (!cancelled) setObservability(next);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const surfaceUrlByService = useMemo(() => {
+    const byComponent = new Map((observability?.components || []).map((item) => [item.id, item.url || '']));
+    const result = new Map<RagweldDockerService, string>();
+    for (const [service, componentId] of Object.entries(SERVICE_SURFACE_COMPONENT)) {
+      const url = byComponent.get(String(componentId)) || '';
+      if (url) result.set(service as RagweldDockerService, url);
+    }
+    return result;
+  }, [observability]);
+
+  const frontendMode = devStackStatus?.frontend_mode;
+  const frontendLabel = frontendMode === 'dev_server' ? 'Host frontend (Vite dev server)' : 'Served frontend';
+  const frontendStatusWord =
+    frontendMode === 'dev_server'
+      ? '● Dev server running'
+      : frontendMode === 'built_bundle'
+        ? '● Served from build'
+        : frontendMode === 'absent'
+          ? '○ Not built and no dev server'
+          : undefined;
+  const frontendDetail =
+    frontendMode === 'dev_server'
+      ? devStackStatus?.frontend_url || `port ${devStackStatus?.frontend_port ?? '55173'}`
+      : frontendMode === 'built_bundle'
+        ? `Built bundle at ${devStackStatus?.frontend_bundle_path ?? 'web/dist'}${
+            devStackStatus?.frontend_bundle_built_at
+              ? `, built ${new Date(devStackStatus.frontend_bundle_built_at).toLocaleString()}`
+              : ''
+          }; the reverse proxy serves it. No Vite dev server on this host, which is expected here.`
+        : 'No built bundle and no dev server: run npm run build in web/, or start the dev server.';
+
   const containersByService = useMemo(() => {
     const result = new Map<RagweldDockerService, (typeof containers)[number]>();
     for (const container of containers) {
@@ -147,8 +215,10 @@ export function ServicesSubtab() {
       <section className="settings-section" aria-labelledby="host-processes-heading">
         <h3 id="host-processes-heading" style={{ marginBottom: '4px' }}>Host processes</h3>
         <p className="small" style={{ color: 'var(--fg-muted)', marginTop: 0 }}>
-          The FastAPI backend and Vite frontend run directly on the host in normal development. Status
-          comes from live process probes, not container state.
+          The FastAPI backend runs directly on the host. The frontend is either a Vite dev server or, on a
+          deployed host, the built bundle the reverse proxy serves. Status comes from live probes and the
+          bundle on disk, not from container state, and it reports whether a process is up - not whether it
+          is fully configured (Admin - Dependencies reports that).
         </p>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '12px' }}>
           {[
@@ -156,20 +226,25 @@ export function ServicesSubtab() {
               key: 'backend',
               label: 'Host API (FastAPI)',
               running: devStackStatus?.backend_running === true,
+              status: undefined as string | undefined,
               detail: devStackStatus?.backend_url || `port ${devStackStatus?.backend_port ?? '58012'}`,
             },
             {
               key: 'frontend',
-              label: 'Host frontend (Vite)',
-              running: devStackStatus?.frontend_running === true,
-              detail: devStackStatus?.frontend_url || `port ${devStackStatus?.frontend_port ?? '55173'}`,
+              label: frontendLabel,
+              running: devStackStatus?.frontend_mode !== 'absent',
+              status: frontendStatusWord,
+              detail: frontendDetail,
             },
           ].map((proc) => (
             <article key={proc.key} style={{ padding: '14px', border: '1px solid var(--line)', borderRadius: '6px', background: 'var(--bg-elev1)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
                 <strong>{proc.label}</strong>
-                <span style={{ color: proc.running ? 'var(--ok)' : 'var(--err)' }}>
-                  {proc.running ? '● Running' : '○ Not running'}
+                <span
+                  style={{ color: proc.running ? 'var(--ok)' : 'var(--err)' }}
+                  data-testid={`host-process-${proc.key}-status`}
+                >
+                  {proc.status ?? (proc.running ? '● Running' : '○ Not running')}
                 </span>
               </div>
               <div className="small" style={{ color: 'var(--fg-muted)', marginTop: '8px' }}>
@@ -192,10 +267,30 @@ export function ServicesSubtab() {
               const running = container?.state === 'running';
               const deploymentOnly = DEPLOYMENT_ONLY_SERVICES.has(service);
               const optional = OPTIONAL_SERVICES.has(service);
+              const surfaceUrl = surfaceUrlByService.get(service) || '';
+              const hostInternal = Boolean(surfaceUrl) && LOOPBACK.test(surfaceUrl);
               return (
                 <article key={service} style={{ padding: '14px', border: '1px solid var(--line)', borderRadius: '6px', background: 'var(--bg-elev1)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
-                    <strong>{SERVICE_LABELS[service]}</strong>
+                    {surfaceUrl ? (
+                      <a
+                        href={surfaceUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        data-testid={`open-service-${service}`}
+                        title={
+                          hostInternal
+                            ? `Opens ${surfaceUrl} in a new tab. This address is host-internal: it resolves only on the Ragweld host.`
+                            : `Opens ${surfaceUrl} in a new tab.`
+                        }
+                        style={{ color: 'var(--link)', fontWeight: 700, textDecoration: 'underline' }}
+                      >
+                        {SERVICE_LABELS[service]}
+                        {hostInternal ? ' (host-internal)' : ''}
+                      </a>
+                    ) : (
+                      <strong>{SERVICE_LABELS[service]}</strong>
+                    )}
                     <span style={{ color: running ? 'var(--ok)' : container ? 'var(--warn)' : 'var(--fg-muted)' }}>
                       {running
                         ? '● Running'
@@ -204,7 +299,7 @@ export function ServicesSubtab() {
                           : deploymentOnly
                             ? '— Deployment-only'
                             : optional
-                              ? '— Not deployed (optional)'
+                              ? '— Optional, not deployed'
                               : '— Missing'}
                     </span>
                   </div>

@@ -215,6 +215,21 @@ class DevStackStatusResponse(BaseModel):
         default_factory=list,
         description="Human-readable diagnostic details (best-effort).",
     )
+    frontend_mode: Literal["dev_server", "built_bundle", "absent"] = Field(
+        default="absent",
+        description=(
+            "How the frontend is served: a reachable Vite dev server, a built bundle on disk "
+            "(the deployed topology, where a reverse proxy serves it), or neither."
+        ),
+    )
+    frontend_bundle_path: str | None = Field(
+        default=None,
+        description="Repo-relative path of the built frontend bundle when one exists.",
+    )
+    frontend_bundle_built_at: datetime | None = Field(
+        default=None,
+        description="When the built frontend bundle was last written.",
+    )
 
 
 # =============================================================================

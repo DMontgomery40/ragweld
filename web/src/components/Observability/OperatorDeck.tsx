@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import * as DashAPI from '@/api/dashboard';
 import { useActiveRepo } from '@/stores/useRepoStore';
 import type {
@@ -237,6 +238,13 @@ export function ObservabilityOperatorDeck({
     trace?.external_links,
     controlPlane?.links
   ).filter((link) => !isLangfuseTraceLink(link) || langfuseAccess?.exists === true);
+  // Which external surfaces the matrix reports as off, so a chip that opens
+  // nothing is marked rather than looking identical to a live one.
+  const offSurfaceUrls = new Set(
+    (observability?.components || [])
+      .filter((component) => !component.enabled && String(component.url || '').trim())
+      .map((component) => String(component.url))
+  );
   const langfuseTraceNotice =
     trace?.trace_id && langfuseAccess && !langfuseAccess.exists ? langfuseAccess.detail : null;
   const workbenchLinks = dedupeWorkbenchLinks(catalog?.workbench_links);
@@ -289,7 +297,9 @@ export function ObservabilityOperatorDeck({
         ) : null}
 
         {deckLinks.length ? (
-          <div className="obs-link-row">
+          <div className="obs-link-group">
+            <span className="obs-link-group-label">External surfaces, open in a new tab</span>
+            <div className="obs-link-row">
             {deckLinks.map((link) => (
               <a
                 key={`${link.label}-${link.url}`}
@@ -301,22 +311,36 @@ export function ObservabilityOperatorDeck({
                 title={
                   link.kind === 'langfuse' && langfuseAccess
                     ? langfuseAccess.sign_in_hint
-                    : `${link.detail ? `${link.detail} ` : ''}Opens ${link.url} in a new tab.`
+                    : `${link.detail ? `${link.detail} ` : ''}${
+                        offSurfaceUrls.has(link.url)
+                          ? 'This surface is reported off in the Integration Matrix below. '
+                          : ''
+                      }Opens ${link.url} in a new tab.`
                 }
               >
                 {link.label}
+                {offSurfaceUrls.has(link.url) ? ' (off)' : ''}
               </a>
             ))}
+            </div>
           </div>
         ) : null}
 
         {workbenchLinks.length ? (
-          <div className="obs-link-row">
-            {workbenchLinks.map((link) => (
-              <a key={`${link.label}-${link.path}`} href={link.path} className="obs-link-pill">
-                {link.label}
-              </a>
-            ))}
+          <div className="obs-link-group">
+            <span className="obs-link-group-label">In this app</span>
+            <div className="obs-link-row">
+              {workbenchLinks.map((link) => (
+                <Link
+                  key={`${link.label}-${link.path}`}
+                  to={link.path}
+                  className="obs-link-pill obs-link-pill-internal"
+                  title={link.description || `Opens ${link.label} in this app.`}
+                >
+                  {link.label}
+                </Link>
+              ))}
+            </div>
           </div>
         ) : null}
 
@@ -905,6 +929,24 @@ export function ObservabilityOperatorDeck({
           justify-content: space-between;
           gap: 8px;
           flex-wrap: wrap;
+        }
+
+        .obs-link-group {
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+        }
+
+        .obs-link-group-label {
+          font-size: 11.5px;
+          font-family: "IBM Plex Mono", monospace;
+          letter-spacing: 0.04em;
+          text-transform: uppercase;
+          color: rgba(214, 224, 236, 0.86);
+        }
+
+        .obs-link-pill-internal {
+          border-style: dashed;
         }
 
         .obs-probe-history {

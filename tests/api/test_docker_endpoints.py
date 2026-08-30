@@ -706,3 +706,35 @@ async def test_the_tail_gives_up_after_the_retry_budget() -> None:
     assert messages.count("Loki not reachable (retrying)") >= 2, payloads
     assert messages[-1] == "Loki not reachable", payloads
     assert payloads[-1] == {"type": "complete"}, payloads
+
+
+@pytest.mark.asyncio
+async def test_dev_status_reports_the_built_bundle_instead_of_a_red_missing_dev_server(
+    client: AsyncClient,
+) -> None:
+    """A dev-only Vite probe must not read as an outage on a deployed host.
+
+    The drive found "Frontend - stopped" in red, and "Host frontend (Vite) -
+    Not running", while that very frontend was serving the page through Caddy:
+    the probe checks a local dev server that is legitimately absent here, so the
+    row was red permanently and by design.
+    """
+
+    bundle = Path(docker_api.__file__).resolve().parents[2] / "web" / "dist" / "index.html"
+    if not bundle.is_file():
+        pytest.skip("this checkout has no built frontend bundle to report")
+
+    response = await client.get("/api/dev/status")
+    assert response.status_code == 200, response.text
+    data = response.json()
+
+    if data["frontend_running"]:
+        # A dev server really is up on this host; then that is what must be reported.
+        assert data["frontend_mode"] == "dev_server"
+        return
+
+    assert data["frontend_mode"] == "built_bundle"
+    assert data["frontend_bundle_path"] == "web/dist"
+    assert data["frontend_bundle_built_at"]
+    assert any("built bundle at web/dist" in line for line in data["details"])
+    assert not any(line.startswith("No Vite dev server and no built bundle") for line in data["details"])

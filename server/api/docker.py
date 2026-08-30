@@ -7,6 +7,7 @@ import re
 import subprocess
 import time
 from collections import deque
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -560,6 +561,31 @@ async def get_dev_stack_status() -> DevStackStatusResponse:
     )
     details.extend(backend_details)
 
+    # A missing dev server is not a fault on a deployed host: there the frontend
+    # is a built bundle served by the reverse proxy, and the operator is reading
+    # this page through it. Report which of the two is true rather than painting
+    # the absent dev server red on every deployment.
+    bundle_path = Path(__file__).resolve().parents[2] / "web" / "dist" / "index.html"
+    bundle_exists = bundle_path.is_file()
+    if frontend_running:
+        frontend_mode = "dev_server"
+    elif bundle_exists:
+        frontend_mode = "built_bundle"
+    else:
+        frontend_mode = "absent"
+    bundle_built_at = (
+        datetime.fromtimestamp(bundle_path.stat().st_mtime, tz=UTC) if bundle_exists else None
+    )
+    if frontend_mode == "built_bundle":
+        details.append(
+            "No Vite dev server on this host, which is expected on a deployed one: the frontend is "
+            f"served from the built bundle at web/dist (built {bundle_built_at.isoformat()})."
+        )
+    elif frontend_mode == "absent":
+        details.append(
+            "No Vite dev server and no built bundle at web/dist; run `npm run build` in web/ or start the dev server."
+        )
+
     # Surface URLs that match the chosen reachable host (best-effort).
     frontend_url = resolved_frontend_url or frontend_probe_urls[0]
     backend_url = (
@@ -576,6 +602,9 @@ async def get_dev_stack_status() -> DevStackStatusResponse:
         frontend_url=frontend_url,
         backend_url=backend_url,
         details=details,
+        frontend_mode=frontend_mode,  # type: ignore[arg-type]
+        frontend_bundle_path="web/dist" if bundle_exists else None,
+        frontend_bundle_built_at=bundle_built_at,
     )
 
 

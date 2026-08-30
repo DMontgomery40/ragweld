@@ -3641,6 +3641,12 @@ export interface DevStackStatusResponse {
   backend_url?: string | null;
   /** Human-readable diagnostic details (best-effort). */
   details?: string[];
+  /** How the frontend is served: a reachable Vite dev server, a built bundle on disk (the deployed topology, where a reverse proxy serves it), or neither. */
+  frontend_mode?: "dev_server" | "built_bundle" | "absent";
+  /** Repo-relative path of the built frontend bundle when one exists. */
+  frontend_bundle_path?: string | null;
+  /** When the built frontend bundle was last written. */
+  frontend_bundle_built_at?: string | null;
 }
 
 /** Response payload for the project-scoped /api/docker/services endpoint. */

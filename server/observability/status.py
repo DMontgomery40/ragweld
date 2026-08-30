@@ -572,7 +572,15 @@ async def build_observability_status(config: TriBridConfig, *, repo_id: str | No
             probeable=grafana_probe.probeable,
             detail=grafana_probe.detail,
             url=grafana_url or None,
-            links=_make_links("Grafana", grafana_url, "Grafana command center base URL.", kind="grafana"),
+            links=_make_links(
+                "Grafana",
+                grafana_url,
+                (
+                    "Grafana command center. Anonymous access is provisioned, so it opens read-only: "
+                    "saving a panel, adding an annotation or silencing an alert needs a Grafana sign-in."
+                ),
+                kind="grafana",
+            ),
         ),
         _decorate_component(
             failure_threshold=failure_threshold,

@@ -37,6 +37,10 @@ const SERVICE_LABELS: Record<RagweldDockerService, string> = {
 
 const DEPLOYMENT_ONLY_SERVICES: ReadonlySet<RagweldDockerService> = new Set(['caddy', 'authelia', 'cloudflared']);
 
+// Kept in step with ServicesSubtab: one absent container must not be "Missing"
+// on one page and "expected" on the other.
+const OPTIONAL_SERVICES: ReadonlySet<RagweldDockerService> = new Set(['api', 'postgres-exporter']);
+
 function isRagweldService(value: string | null | undefined): value is RagweldDockerService {
   return RAGWELD_DOCKER_SERVICES.includes(value as RagweldDockerService);
 }
@@ -172,6 +176,7 @@ export function DockerSubtab() {
             const container = containersByService.get(service);
             const running = container?.state === 'running';
             const deploymentOnly = DEPLOYMENT_ONLY_SERVICES.has(service);
+            const optional = OPTIONAL_SERVICES.has(service);
             const busy = action !== null;
             return (
               <article key={service} style={{ padding: '14px', border: '1px solid var(--line)', borderRadius: '6px', background: 'var(--bg-elev1)' }}>
@@ -182,16 +187,26 @@ export function DockerSubtab() {
                       {container?.status ||
                         (deploymentOnly
                           ? 'Created by the Proxmox deployment overlay; not expected in the default local topology.'
-                          : 'Not created in the Ragweld project')}
+                          : optional
+                            ? 'Optional container; the Ragweld API normally runs as a host process, so its absence is expected.'
+                            : 'Not created in the Ragweld project')}
                     </div>
                   </div>
                   <span style={{ color: running ? 'var(--ok)' : container ? 'var(--warn)' : 'var(--fg-muted)' }}>
-                    {running ? '● Running' : container ? '○ Stopped' : deploymentOnly ? '— Deployment-only' : '— Missing'}
+                    {running
+                      ? '● Running'
+                      : container
+                        ? '○ Stopped'
+                        : deploymentOnly
+                          ? '— Deployment-only'
+                          : optional
+                            ? '— Optional, not deployed'
+                            : '— Missing'}
                   </span>
                 </div>
 
                 <div style={{ display: 'flex', gap: '8px', marginTop: '14px', flexWrap: 'wrap' }}>
-                  {!container && !deploymentOnly && (
+                  {!container && !deploymentOnly && !optional && (
                     <span className="small">
                       Run <code>{service === 'api' ? './start.sh --docker-backend' : ['postgres', 'neo4j'].includes(service) ? './start.sh' : './start.sh --with-observability'}</code> to create it.
                     </span>
