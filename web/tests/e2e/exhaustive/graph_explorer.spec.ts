@@ -59,6 +59,28 @@ async function settledZoom(page: Page, testId: string): Promise<number> {
   return zoomLevel(page, testId);
 }
 
+const EXPORT_BUTTONS = [
+  'graph-export-entities',
+  'graph-export-relationships',
+  'graph-export-json',
+] as const;
+
+/** How an export control actually renders, as the operator sees it. */
+async function exportButtonState(
+  page: Page,
+  testId: string
+): Promise<{ disabled: boolean; color: string; cursor: string; borderStyle: string }> {
+  return page.getByTestId(testId).evaluate((el) => {
+    const cs = getComputedStyle(el);
+    return {
+      disabled: (el as HTMLButtonElement).disabled,
+      color: cs.color,
+      cursor: cs.cursor,
+      borderStyle: cs.borderTopStyle,
+    };
+  });
+}
+
 async function searchEntities(page: Page, term: string): Promise<void> {
   await page.getByTestId('graph-entity-search').fill(term);
   await page.getByTestId('graph-search-btn').click();
@@ -277,23 +299,6 @@ test.describe('Graph Explorer on the ragweld_code code graph', () => {
     await expect(page.getByTestId('graph-export-entities')).toBeVisible();
     await expect(page.getByTestId('graph-export-relationships')).toBeVisible();
     await expect(page.getByTestId('graph-export-png')).toHaveCount(0);
-    // N-03: a disabled export must LOOK disabled. `controlButtonStyle` sets an explicit
-    // color and background, which override the UA stylesheet's greying.
-    const relStyle = await page.getByTestId('graph-export-relationships').evaluate((el) => {
-      const cs = getComputedStyle(el);
-      return { disabled: (el as HTMLButtonElement).disabled, color: cs.color, cursor: cs.cursor };
-    });
-    const enabledStyle = await page.getByTestId('graph-export-entities').evaluate((el) => {
-      const cs = getComputedStyle(el);
-      return { disabled: (el as HTMLButtonElement).disabled, color: cs.color, cursor: cs.cursor };
-    });
-    expect(enabledStyle.disabled).toBe(false);
-    if (relStyle.disabled) {
-      expect(relStyle.color, 'a disabled export must not look identical to a live one').not.toBe(
-        enabledStyle.color
-      );
-      expect(relStyle.cursor).toBe('not-allowed');
-    }
     const tableCsv = page.waitForEvent('download');
     await page.getByTestId('graph-export-relationships').click();
     expect((await tableCsv).suggestedFilename()).toMatch(/-relationships\.csv$/);
@@ -353,8 +358,30 @@ test.describe('Graph Explorer on a corpus with no entity graph', () => {
     expect(stats.total_entities).toBe(0);
     expect(stats.total_chunks).toBeGreaterThan(0);
 
+    // N-03/N-04: capture how a LIVE export control renders before visiting the corpus
+    // where every one of them is disabled, so the two states can be compared directly.
+    await gotoGraph(page, baseURL, CODE_CORPUS);
+    await expect(page.getByTestId('graph-export-entities')).toBeEnabled({ timeout: 60_000 });
+    const live = await exportButtonState(page, 'graph-export-entities');
+    expect(live.disabled).toBe(false);
+
     await gotoGraph(page, baseURL, NO_ENTITY_CORPUS);
     await expect(page.getByTestId('graph-entity-empty-hint')).toBeVisible({ timeout: 60_000 });
+
+    // This corpus has no entities and no relationships, so every export is disabled. The
+    // previous version of this assertion sat behind `if (button.disabled)` on a button that
+    // was enabled at that point, so it never ran (review N-04). `controlButtonStyle` sets an
+    // explicit color and background that override the UA stylesheet's greying, so without
+    // the muted tier a disabled export is pixel-identical to a live one.
+    for (const testId of EXPORT_BUTTONS) {
+      const state = await exportButtonState(page, testId);
+      expect(state.disabled, `${testId} must be disabled on a corpus with no entity graph`).toBe(true);
+      expect(state.color, `${testId} disabled must not render identically to a live control`).not.toBe(
+        live.color
+      );
+      expect(state.cursor, `${testId} must show a not-allowed cursor`).toBe('not-allowed');
+      expect(state.borderStyle, `${testId} must be visibly dashed when disabled`).toBe('dashed');
+    }
     const empty = page.getByTestId('graph-communities-empty');
     await expect(empty).toContainText('no entity graph');
     await expect(empty).not.toContainText('Force re-index');
