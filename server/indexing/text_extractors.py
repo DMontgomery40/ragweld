@@ -120,6 +120,16 @@ def build_figure_pipeline_options(figures: Any, gateway: FigureGateway | None) -
             concurrency=int(figures.concurrency),
             picture_area_threshold=float(figures.min_area_fraction),
             classification_deny=list(figures.skip_classes),
+            # Docling's ``_passes_classification`` denies a picture if ANY of the classifier's
+            # predictions (not just its top/majority one) names a denied class at or above this
+            # confidence floor. The classifier returns a full softmax over ~25 classes, so at
+            # the library default of 0.0 every prediction "meets" the floor and the long tail
+            # (e.g. a real chart scoring 1e-7 on "logo") denies every picture, unconditionally,
+            # whenever ``skip_classes`` is non-empty. ``skip_classes`` is documented as "never
+            # sent for description" for the figure's own class, i.e. its majority prediction, so
+            # 0.5 is the protocol invariant that makes the deny check mean that: a denied class
+            # must be the majority prediction, not merely present somewhere in the tail.
+            classification_min_confidence=0.5,
             # The pipeline raster scale governs the stored picture; this one governs the
             # crop actually sent to the vision alias. Both follow the operator's setting.
             scale=float(figures.images_scale),

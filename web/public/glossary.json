@@ -12667,7 +12667,7 @@
     {
       "term": "Figures Skip Classes",
       "key": "FIGURES_SKIP_CLASSES",
-      "definition": "Classifier classes that are never described, e.g. logo, signature, icon.",
+      "definition": "Classifier classes that are never described. The skip applies when the classifier's majority (highest-confidence) prediction is one of these classes -- e.g. logo, signature, icon -- not when a listed class merely appears somewhere in the classifier's full prediction list.",
       "category": "indexing",
       "related": [
         "FIGURES_ENABLED"

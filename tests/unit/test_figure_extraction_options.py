@@ -54,6 +54,7 @@ def test_enabled_config_maps_every_field_onto_pipeline_options() -> None:
     assert api.timeout == 45 and api.concurrency == 2
     assert api.picture_area_threshold == 0.05
     assert api.classification_deny == ["logo"]
+    assert api.classification_min_confidence == 0.5
     # The crop actually sent to the vision alias is governed by the API options' own
     # scale, not only by the pipeline raster scale; both must follow images_scale.
     assert api.scale == 3.0
@@ -118,6 +119,34 @@ def test_extract_text_for_path_runs_the_classifier_over_a_real_pdf() -> None:
     # Enrichment must not cost us provenance: the same file locates the same way.
     assert doc.unlocated_items == plain.unlocated_items
     assert any(span.figure_class for span in doc.spans), "the figure classifier did not run"
+
+    # Pin the classification_min_confidence=0.5 protocol invariant (set in
+    # build_figure_pipeline_options) against Docling's own gate. ``extract_text_for_path``
+    # does not expose the raw Docling document/PictureMeta, so convert directly.
+    from docling.models.picture_description_base_model import _passes_classification
+    from docling_core.types.doc import PictureItem
+
+    docling_doc = docling_converter_for(figures, None).convert(str(pdf)).document
+    classified_pics = [
+        p
+        for p, _ in docling_doc.iterate_items()
+        if isinstance(p, PictureItem) and p.meta and p.meta.classification
+    ]
+    assert classified_pics, "fixture must have at least one classified picture to pin the gate"
+    skip_classes = list(IndexingFiguresConfig().skip_classes)
+    for pic in classified_pics:
+        # At the protocol's floor, a picture whose majority prediction is not in skip_classes
+        # must pass: skip_classes means "never sent for description" for the figure's own
+        # (majority) class, not for anything appearing anywhere in the classifier's long tail.
+        assert _passes_classification(pic.meta, None, skip_classes, 0.5) is True
+    # At Docling's library default (0.0), the classifier's full softmax always assigns some
+    # nonzero long-tail probability to every denied class, so the deny check matches on every
+    # real picture and denies it -- this is the exact bug classification_min_confidence=0.5
+    # fixes. Pinning it here means the bug cannot silently come back if the floor is ever
+    # dropped or removed.
+    assert any(
+        _passes_classification(pic.meta, None, skip_classes, 0.0) is False for pic in classified_pics
+    ), "min_confidence=0.0 must still deny at least one real picture -- pins the bug this floor fixes"
 
 
 def test_unreachable_vision_gateway_yields_undescribed_pictures_not_an_exception() -> None:
