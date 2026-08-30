@@ -270,36 +270,6 @@ def _jsx_elements(source: str, tag: str) -> list[str]:
     return found
 
 
-# Config paths whose numeric control already advertises bounds its model does not have. Every
-# one is in RetrievalSubtab.tsx and predates this test: they came in with the first NumberField
-# conversion, which carried the old raw inputs' hand-written min/max across unchanged. They are
-# real defects -- a UI bound narrower than the model refuses a legal value, a wider one sends a
-# value the PATCH rejects as an unattributed 422 -- but fixing each needs a decision about which
-# side is right, so they are recorded rather than silently skipped.
-#
-# This list is a ratchet: the test fails if a new path joins it AND if a listed path is fixed
-# without being removed. Shrink it; never grow it.
-KNOWN_NUMBER_FIELD_BOUND_GAPS = frozenset(
-    {
-        "generation.gen_max_tokens",
-        "graph_search.top_k",
-        "hydration.hydration_max_chars",
-        "retrieval.eval_final_k",
-        "retrieval.final_k",
-        "retrieval.langgraph_max_query_rewrites",
-        "retrieval.multi_query_m",
-        "retrieval.topk_dense",
-        "retrieval.topk_sparse",
-        "scoring.filename_boost_exact",
-        "scoring.filename_boost_partial",
-        "sparse_search.top_k",
-        "tracing.alert_webhook_timeout",
-        "tracing.trace_retention",
-        "vector_search.top_k",
-    }
-)
-
-
 def test_every_number_field_advertises_its_pydantic_bounds() -> None:
     """A NumberField's min/max ARE its clamp, so they may not disagree with the model.
 
@@ -311,6 +281,12 @@ def test_every_number_field_advertises_its_pydantic_bounds() -> None:
 
     This is the general form of the per-field literal assertions above: every numeric config
     control in the app, checked against the field it writes.
+
+    This began as a ratchet over 15 known-bad paths, all in RetrievalSubtab.tsx, all carried
+    across unchanged from the raw numeric inputs the NumberField conversion replaced. They
+    are fixed, so the list is gone and the invariant is absolute: no numeric control may
+    advertise a bound its model does not have. Both sides are read from the model itself, so
+    a later `ge`/`le` change fails here rather than drifting.
     """
     sources = sorted((ROOT / "web/src").rglob("*.tsx"))
     assert sources, "no frontend sources found"
@@ -359,15 +335,8 @@ def test_every_number_field_advertises_its_pydantic_bounds() -> None:
 
     assert checked >= 45, f"expected to check every numeric config control, checked {checked}"
 
-    unexpected = sorted(set(problems) - KNOWN_NUMBER_FIELD_BOUND_GAPS)
-    assert not unexpected, "new NumberField bounds disagree with the config model:\n  " + "\n  ".join(
-        detail for path in unexpected for detail in problems[path]
-    )
-
-    fixed = sorted(KNOWN_NUMBER_FIELD_BOUND_GAPS - set(problems))
-    assert not fixed, (
-        "these bounds now match the model -- remove them from KNOWN_NUMBER_FIELD_BOUND_GAPS: "
-        + ", ".join(fixed)
+    assert not problems, "NumberField bounds disagree with the config model:\n  " + "\n  ".join(
+        detail for path in sorted(problems) for detail in problems[path]
     )
 
 

@@ -473,7 +473,7 @@ export function RetrievalSubtab() {
             </label>
             <NumberField
               min={1}
-              max={200}
+              max={100}
               value={finalK}
               onCommit={setFinalK}
             />
@@ -635,7 +635,7 @@ export function RetrievalSubtab() {
                       Vector Top-K <TooltipIcon name="VECTOR_SEARCH_TOP_K" />
                     </label>
                     <NumberField
-                      min={1}
+                      min={10}
                       max={200}
                       value={vectorSearchTopK}
                       onCommit={setVectorSearchTopK}
@@ -664,7 +664,7 @@ export function RetrievalSubtab() {
                       Sparse Top-K <TooltipIcon name="SPARSE_SEARCH_TOP_K" />
                     </label>
                     <NumberField
-                      min={1}
+                      min={10}
                       max={200}
                       value={sparseSearchTopK}
                       onCommit={setSparseSearchTopK}
@@ -706,8 +706,8 @@ export function RetrievalSubtab() {
                       Graph Top-K <TooltipIcon name="GRAPH_SEARCH_TOP_K" />
                     </label>
                     <NumberField
-                      min={1}
-                      max={200}
+                      min={5}
+                      max={100}
                       value={graphSearchTopK}
                       onCommit={setGraphSearchTopK}
                       disabled={!graphSearchEnabled}
@@ -1034,7 +1034,7 @@ export function RetrievalSubtab() {
                     Filename Boost (Exact) <TooltipIcon name="FILENAME_BOOST_EXACT" />
                   </label>
                   <NumberField
-                    min={0}
+                    min={1}
                     max={5}
                     step={0.1}
                     value={filenameBoostExact}
@@ -1046,8 +1046,8 @@ export function RetrievalSubtab() {
                     Filename Boost (Partial) <TooltipIcon name="FILENAME_BOOST_PARTIAL" />
                   </label>
                   <NumberField
-                    min={0}
-                    max={5}
+                    min={1}
+                    max={3}
                     step={0.1}
                     value={filenameBoostPartial}
                     onCommit={setFilenameBoostPartial}
@@ -1323,7 +1323,7 @@ export function RetrievalSubtab() {
                   </label>
                   <NumberField
                     min={100}
-                    max={8192}
+                    max={16000}
                     step={1}
                     value={genMaxTokens}
                     onCommit={setGenMaxTokens}
@@ -1450,8 +1450,8 @@ export function RetrievalSubtab() {
                         Hydration Max Chars <TooltipIcon name="HYDRATION_MAX_CHARS" />
                       </label>
                       <NumberField
-                        min={200}
-                        max={20000}
+                        min={500}
+                        max={10000}
                         value={hydrationMaxChars || retrievalHydrationMaxChars}
                         onCommit={setUnifiedHydrationMaxChars}
                       />
@@ -1472,7 +1472,7 @@ export function RetrievalSubtab() {
                       </label>
                       <NumberField
                         min={1}
-                        max={100}
+                        max={50}
                         value={evalFinalK}
                         onCommit={setEvalFinalK}
                       />
@@ -1567,7 +1567,7 @@ export function RetrievalSubtab() {
                       </label>
                       <NumberField
                         min={1}
-                        max={20}
+                        max={10}
                         value={multiQueryM}
                         onCommit={setMultiQueryM}
                       />
@@ -1591,7 +1591,7 @@ export function RetrievalSubtab() {
                         LangGraph Max Rewrites <TooltipIcon name="LANGGRAPH_MAX_QUERY_REWRITES" />
                       </label>
                       <NumberField
-                        min={0}
+                        min={1}
                         max={10}
                         value={langgraphMaxQueryRewrites}
                         onCommit={setLanggraphMaxQueryRewrites}
@@ -1659,7 +1659,7 @@ export function RetrievalSubtab() {
                         TopK Dense <TooltipIcon name="TOPK_DENSE" />
                       </label>
                       <NumberField
-                        min={1}
+                        min={10}
                         max={200}
                         value={topkDense}
                         onCommit={setTopkDense}
@@ -1670,7 +1670,7 @@ export function RetrievalSubtab() {
                         TopK Sparse <TooltipIcon name="TOPK_SPARSE" />
                       </label>
                       <NumberField
-                        min={1}
+                        min={10}
                         max={200}
                         value={topkSparse}
                         onCommit={setTopkSparse}
@@ -1940,8 +1940,8 @@ export function RetrievalSubtab() {
                         Trace Retention <TooltipIcon name="TRACE_RETENTION" />
                       </label>
                       <NumberField
-                        min={1}
-                        max={1000}
+                        min={10}
+                        max={500}
                         value={traceRetention}
                         onCommit={setTraceRetention}
                       />
@@ -2021,7 +2021,7 @@ export function RetrievalSubtab() {
                       </label>
                       <NumberField
                         min={1}
-                        max={60}
+                        max={30}
                         value={alertWebhookTimeout}
                         onCommit={setAlertWebhookTimeout}
                       />
