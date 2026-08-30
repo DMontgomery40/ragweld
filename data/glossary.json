@@ -12678,7 +12678,7 @@
     {
       "term": "Figures Max Completion Tokens",
       "key": "FIGURES_MAX_COMPLETION_TOKENS",
-      "definition": "Output token budget for one figure description.",
+      "definition": "Output token budget for one figure description, including any reasoning tokens a reasoning model spends before its JSON reply. A reasoning-heavy vision alias can exhaust this budget on its internal reasoning trace before writing any JSON; when that happens the gateway returns content: null and the figure is counted as undescribed (figures_skipped), not described. Defaults to 2500 to leave headroom for the reasoning trace of the default vision alias on real technical figures.",
       "category": "indexing",
       "related": [
         "FIGURES_ENABLED"

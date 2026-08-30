@@ -4439,10 +4439,10 @@ class IndexingFiguresConfig(BaseModel):
         description="Classifier classes that are never sent for description",
     )
     max_completion_tokens: int = Field(
-        default=600,
+        default=2500,
         ge=64,
-        le=4000,
-        description="Output token budget per figure description",
+        le=8000,
+        description="Output token budget per figure description; includes any reasoning tokens a reasoning model spends before the JSON reply",
     )
     concurrency: int = Field(
         default=4,

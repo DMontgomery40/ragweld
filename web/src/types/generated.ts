@@ -1375,8 +1375,8 @@ export interface IndexingFiguresConfig {
   min_area_fraction?: number; // default: 0.02
   /** Classifier classes that are never sent for description */
   skip_classes?: string[];
-  /** Output token budget per figure description */
-  max_completion_tokens?: number; // default: 600
+  /** Output token budget per figure description; includes any reasoning tokens a reasoning model spends before the JSON reply */
+  max_completion_tokens?: number; // default: 2500
   /** Parallel vision calls while converting one document */
   concurrency?: number; // default: 4
   /** Per-figure vision call timeout in seconds */

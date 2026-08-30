@@ -22,7 +22,7 @@ def test_defaults_match_the_spec() -> None:
     assert f.images_scale == 2.0
     assert f.min_area_fraction == 0.02
     assert f.skip_classes == ["logo", "signature", "icon"]
-    assert f.max_completion_tokens == 600
+    assert f.max_completion_tokens == 2500
     assert f.concurrency == 4
     assert f.timeout_s == 90
 
@@ -32,7 +32,7 @@ def test_defaults_match_the_spec() -> None:
     [
         ("images_scale", 0.5), ("images_scale", 4.5),
         ("min_area_fraction", -0.1), ("min_area_fraction", 1.5),
-        ("max_completion_tokens", 10), ("max_completion_tokens", 5000),
+        ("max_completion_tokens", 10), ("max_completion_tokens", 9000),
         ("concurrency", 0), ("concurrency", 17),
         ("timeout_s", 1), ("timeout_s", 601),
         ("prompt_profile", "poetry"),
