@@ -1,10 +1,62 @@
+import { useEffect, useState } from 'react';
+
+import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { secretStatusesForSurface, stateChipStyle, useConfigControlPlaneData } from './configControlPlane';
+
+/**
+ * The readiness probe can take ~25s on a cold cache; the old bare sentence was
+ * indistinguishable from a hung page (E-41). Show the section header, a spinner with an
+ * elapsed counter, skeleton placeholders for the cards that are coming, and — once it runs
+ * long — a message explaining why so the operator knows it is working, not stuck.
+ */
+function DependenciesLoading() {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    const timer = window.setInterval(() => setElapsed((value) => value + 1), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const slow = elapsed >= 8;
+
+  return (
+    <div className="settings-section">
+      <h2 style={{ marginBottom: 8 }}>Dependencies &amp; Secrets</h2>
+      <div
+        role="status"
+        aria-live="polite"
+        aria-busy="true"
+        style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}
+      >
+        <LoadingSpinner size="sm" />
+        <span data-testid="dependencies-loading" style={{ color: 'var(--fg-muted)', fontSize: 13 }}>
+          Loading dependency and secret readiness…{elapsed >= 3 ? ` (${elapsed}s)` : ''}
+        </span>
+      </div>
+      {slow ? (
+        <div data-testid="dependencies-slow" style={{ marginBottom: 16, fontSize: 12, color: 'var(--warn)' }}>
+          This is taking longer than usual. The readiness probe inspects every integration and
+          secret and can take up to ~30 seconds on a cold cache. Still working…
+        </div>
+      ) : null}
+      <div style={{ display: 'grid', gap: 12 }} aria-hidden="true">
+        {[0, 1, 2, 3].map((i) => (
+          <div
+            key={i}
+            style={{ padding: 14, borderRadius: 12, border: '1px solid var(--line)', background: 'var(--bg-elev1)' }}
+          >
+            <div className="skeleton" style={{ height: 16, width: '38%', marginBottom: 10 }} />
+            <div className="skeleton" style={{ height: 12, width: '62%' }} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export function DependenciesSubtab() {
   const { readiness, loading, error, reload } = useConfigControlPlaneData();
 
   if (loading) {
-    return <div className="settings-section">Loading dependency and secret readiness…</div>;
+    return <DependenciesLoading />;
   }
 
   if (error) {
