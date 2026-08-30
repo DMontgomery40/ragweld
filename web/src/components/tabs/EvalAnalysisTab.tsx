@@ -13,6 +13,7 @@ import { LiveTerminal, LiveTerminalHandle } from '@/components/LiveTerminal/Live
 import { TerminalService } from '@/services/TerminalService';
 import { evalApi } from '@/api';
 import { CollapsibleSection } from '@/components/ui/CollapsibleSection';
+import { NumberField } from '@/components/ui/NumberField';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useActiveRepo, useRepoStore, useRepoInitialized, useRepoLoading, useRepos } from '@/stores';
 import type { EvalRunMeta } from '@/types/generated';
@@ -329,8 +330,6 @@ export const EvalAnalysisTab: React.FC = () => {
   const showAnalysisHeader = activeSubtab === 'analysis';
   const showRunSelectors = activeSubtab === 'analysis' && !loading && !error && runs.length > 0;
 
-  const clamp = (n: number, min: number, max: number): number => Math.min(max, Math.max(min, n));
-
   const renderRunSettings = () => (
     <CollapsibleSection
       title="Run Settings"
@@ -409,18 +408,15 @@ export const EvalAnalysisTab: React.FC = () => {
           >
             Final K (eval)
           </label>
-          <input
+          <NumberField
             id="eval-run-settings-final-k"
-            type="number"
+            configPath="retrieval.eval_final_k"
             min={1}
             max={50}
             step={1}
             value={Number(evalFinalK)}
             disabled={evalRunning}
-            onChange={(e) => {
-              const next = clamp(parseInt(e.target.value || '0', 10) || 1, 1, 50);
-              patchSectionDebounced('retrieval', { eval_final_k: next });
-            }}
+            onCommit={(next) => patchSectionDebounced('retrieval', { eval_final_k: next })}
             style={{
               width: '100%',
               background: 'var(--input-bg)',
@@ -462,18 +458,15 @@ export const EvalAnalysisTab: React.FC = () => {
           >
             Multi Q M (variants)
           </label>
-          <input
+          <NumberField
             id="eval-run-settings-eval-multi-m"
-            type="number"
+            configPath="evaluation.eval_multi_m"
             min={1}
             max={20}
             step={1}
             value={Number(evalMultiM)}
             disabled={evalRunning}
-            onChange={(e) => {
-              const next = clamp(parseInt(e.target.value || '0', 10) || 1, 1, 20);
-              patchSectionDebounced('evaluation', { eval_multi_m: next });
-            }}
+            onCommit={(next) => patchSectionDebounced('evaluation', { eval_multi_m: next })}
             style={{
               width: '100%',
               background: 'var(--input-bg)',
@@ -526,18 +519,15 @@ export const EvalAnalysisTab: React.FC = () => {
               >
                 RRF k
               </label>
-              <input
+              <NumberField
                 id="eval-run-settings-fusion-rrf-k"
-                type="number"
+                configPath="fusion.rrf_k"
                 min={1}
                 max={200}
                 step={1}
                 value={Number(config?.fusion?.rrf_k ?? 60)}
                 disabled={evalRunning}
-                onChange={(e) => {
-                  const next = clamp(parseInt(e.target.value || '0', 10) || 1, 1, 200);
-                  patchSectionDebounced('fusion', { rrf_k: next });
-                }}
+                onCommit={(next) => patchSectionDebounced('fusion', { rrf_k: next })}
                 style={{
                   width: '100%',
                   background: 'var(--input-bg)',
@@ -563,18 +553,15 @@ export const EvalAnalysisTab: React.FC = () => {
               >
                 Vector
               </label>
-              <input
+              <NumberField
                 id="eval-run-settings-fusion-vector-weight"
-                type="number"
+                configPath="fusion.vector_weight"
                 min={0}
                 max={1}
                 step={0.05}
                 value={Number(config?.fusion?.vector_weight ?? 0.4)}
                 disabled={evalRunning}
-                onChange={(e) => {
-                  const next = clamp(parseFloat(e.target.value || '0') || 0, 0, 1);
-                  patchSectionDebounced('fusion', { vector_weight: next });
-                }}
+                onCommit={(next) => patchSectionDebounced('fusion', { vector_weight: next })}
                 style={{
                   width: '100%',
                   background: 'var(--input-bg)',
@@ -594,18 +581,15 @@ export const EvalAnalysisTab: React.FC = () => {
               >
                 Sparse
               </label>
-              <input
+              <NumberField
                 id="eval-run-settings-fusion-sparse-weight"
-                type="number"
+                configPath="fusion.sparse_weight"
                 min={0}
                 max={1}
                 step={0.05}
                 value={Number(config?.fusion?.sparse_weight ?? 0.3)}
                 disabled={evalRunning}
-                onChange={(e) => {
-                  const next = clamp(parseFloat(e.target.value || '0') || 0, 0, 1);
-                  patchSectionDebounced('fusion', { sparse_weight: next });
-                }}
+                onCommit={(next) => patchSectionDebounced('fusion', { sparse_weight: next })}
                 style={{
                   width: '100%',
                   background: 'var(--input-bg)',
@@ -625,18 +609,15 @@ export const EvalAnalysisTab: React.FC = () => {
               >
                 Graph
               </label>
-              <input
+              <NumberField
                 id="eval-run-settings-fusion-graph-weight"
-                type="number"
+                configPath="fusion.graph_weight"
                 min={0}
                 max={1}
                 step={0.05}
                 value={Number(config?.fusion?.graph_weight ?? 0.3)}
                 disabled={evalRunning}
-                onChange={(e) => {
-                  const next = clamp(parseFloat(e.target.value || '0') || 0, 0, 1);
-                  patchSectionDebounced('fusion', { graph_weight: next });
-                }}
+                onCommit={(next) => patchSectionDebounced('fusion', { graph_weight: next })}
                 style={{
                   width: '100%',
                   background: 'var(--input-bg)',
@@ -665,18 +646,15 @@ export const EvalAnalysisTab: React.FC = () => {
                 />
                 Vector
               </label>
-              <input
+              <NumberField
                 id="eval-run-settings-vector-topk"
-                type="number"
+                configPath="vector_search.top_k"
                 min={10}
                 max={200}
                 step={1}
                 value={Number(config?.vector_search?.top_k ?? 50)}
                 disabled={evalRunning || !(config?.vector_search?.enabled ?? true)}
-                onChange={(e) => {
-                  const next = clamp(parseInt(e.target.value || '0', 10) || 10, 10, 200);
-                  patchSectionDebounced('vector_search', { top_k: next });
-                }}
+                onCommit={(next) => patchSectionDebounced('vector_search', { top_k: next })}
                 style={{
                   width: '120px',
                   background: 'var(--input-bg)',
@@ -699,18 +677,15 @@ export const EvalAnalysisTab: React.FC = () => {
                 />
                 Sparse
               </label>
-              <input
+              <NumberField
                 id="eval-run-settings-sparse-topk"
-                type="number"
+                configPath="sparse_search.top_k"
                 min={10}
                 max={200}
                 step={1}
                 value={Number(config?.sparse_search?.top_k ?? 50)}
                 disabled={evalRunning || !(config?.sparse_search?.enabled ?? true)}
-                onChange={(e) => {
-                  const next = clamp(parseInt(e.target.value || '0', 10) || 10, 10, 200);
-                  patchSectionDebounced('sparse_search', { top_k: next });
-                }}
+                onCommit={(next) => patchSectionDebounced('sparse_search', { top_k: next })}
                 style={{
                   width: '120px',
                   background: 'var(--input-bg)',
@@ -733,18 +708,15 @@ export const EvalAnalysisTab: React.FC = () => {
                 />
                 Graph
               </label>
-              <input
+              <NumberField
                 id="eval-run-settings-graph-topk"
-                type="number"
+                configPath="graph_search.top_k"
                 min={5}
                 max={100}
                 step={1}
                 value={Number(config?.graph_search?.top_k ?? 30)}
                 disabled={evalRunning || !(config?.graph_search?.enabled ?? true)}
-                onChange={(e) => {
-                  const next = clamp(parseInt(e.target.value || '0', 10) || 5, 5, 100);
-                  patchSectionDebounced('graph_search', { top_k: next });
-                }}
+                onCommit={(next) => patchSectionDebounced('graph_search', { top_k: next })}
                 style={{
                   width: '120px',
                   background: 'var(--input-bg)',
