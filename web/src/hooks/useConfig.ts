@@ -10,10 +10,8 @@ export function useConfig() {
   const saving = useConfigStore((s) => s.saving);
   const loadConfig = useConfigStore((s) => s.loadConfig);
   const saveConfig = useConfigStore((s) => s.saveConfig);
-  const patchSection = useConfigStore((s) => s.patchSection);
-  const patchSectionDebounced = useConfigStore((s) => s.patchSectionDebounced);
   const stageSection = useConfigStore((s) => s.stageSection);
-  const cancelPendingPatches = useConfigStore((s) => s.cancelPendingPatches);
+  const stageSectionReplace = useConfigStore((s) => s.stageSectionReplace);
   const flushPendingPatches = useConfigStore((s) => s.flushPendingPatches);
   const resetConfig = useConfigStore((s) => s.resetConfig);
 
@@ -25,22 +23,18 @@ export function useConfig() {
     }
   }, [config, error, loading, loadConfig]);
 
-  // Reload config when active corpus changes
+  // Reload config when active corpus changes. loadConfig replaces both config and persisted with
+  // the new corpus's server state, so any unapplied staged edits for the previous corpus are
+  // dropped (the staged-form contract: apply before you switch corpus).
   useEffect(() => {
-    const handler = (ev: Event) => {
-      const detail = (ev as CustomEvent<any>)?.detail || {};
-      const previous = String(detail?.previous || '').trim();
-      // When corpus changes, cancel patches (they're for the old corpus) and load new config.
-      // Note: loadConfig() will flush patches, but we cancel here because patches are corpus-scoped.
-      cancelPendingPatches(previous);
+    const handler = () => {
       loadConfig();
     };
-    // New event name (preferred).
     window.addEventListener('tribrid-corpus-changed', handler as EventListener);
     return () => {
       window.removeEventListener('tribrid-corpus-changed', handler as EventListener);
     };
-  }, [cancelPendingPatches, loadConfig]);
+  }, [loadConfig]);
 
   const reload = useCallback(async () => {
     await loadConfig();
@@ -61,9 +55,8 @@ export function useConfig() {
     // Actions
     loadConfig,
     saveConfig,
-    patchSection,
-    patchSectionDebounced,
     stageSection,
+    stageSectionReplace,
     flushPendingPatches,
     resetConfig,
     reload,

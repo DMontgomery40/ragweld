@@ -38,7 +38,11 @@ export const EvalAnalysisTab: React.FC = () => {
   // Eval settings from Pydantic config (Zustandic - syncs with backend)
   const config = useConfigStore((s) => s.config);
   const loadConfig = useConfigStore((s) => s.loadConfig);
-  const patchSectionDebounced = useConfigStore((s) => s.patchSectionDebounced);
+  // Uniform commit model: eval-analysis run settings STAGE like every other config surface; the
+  // global "Apply changes" footer is the one write. (Previously these debounce-PATCHed the same
+  // retrieval/fusion/vector/sparse/graph sections the RAG Retrieval tab stages, so a write here
+  // could wholesale-replace a section holding another tab's staged edit.)
+  const stageSection = useConfigStore((s) => s.stageSection);
   const activeRepo = useActiveRepo();
   const repos = useRepos();
   const reposInitialized = useRepoInitialized();
@@ -416,7 +420,7 @@ export const EvalAnalysisTab: React.FC = () => {
             step={1}
             value={Number(evalFinalK)}
             disabled={evalRunning}
-            onCommit={(next) => patchSectionDebounced('retrieval', { eval_final_k: next })}
+            onCommit={(next) => stageSection('retrieval', { eval_final_k: next })}
             style={{
               width: '100%',
               background: 'var(--input-bg)',
@@ -441,7 +445,7 @@ export const EvalAnalysisTab: React.FC = () => {
               checked={evalUseMulti}
               disabled={evalRunning}
               onChange={(e) => {
-                patchSectionDebounced('retrieval', { eval_multi: e.target.checked });
+                stageSection('retrieval', { eval_multi: e.target.checked });
               }}
             />
             <span className="toggle-track" aria-hidden="true">
@@ -466,7 +470,7 @@ export const EvalAnalysisTab: React.FC = () => {
             step={1}
             value={Number(evalMultiM)}
             disabled={evalRunning}
-            onCommit={(next) => patchSectionDebounced('evaluation', { eval_multi_m: next })}
+            onCommit={(next) => stageSection('evaluation', { eval_multi_m: next })}
             style={{
               width: '100%',
               background: 'var(--input-bg)',
@@ -496,7 +500,7 @@ export const EvalAnalysisTab: React.FC = () => {
                 id="eval-run-settings-fusion-method"
                 value={String(config?.fusion?.method ?? 'rrf')}
                 disabled={evalRunning}
-                onChange={(e) => patchSectionDebounced('fusion', { method: e.target.value })}
+                onChange={(e) => stageSection('fusion', { method: e.target.value })}
                 style={{
                   width: '100%',
                   background: 'var(--input-bg)',
@@ -527,7 +531,7 @@ export const EvalAnalysisTab: React.FC = () => {
                 step={1}
                 value={Number(config?.fusion?.rrf_k ?? 60)}
                 disabled={evalRunning}
-                onCommit={(next) => patchSectionDebounced('fusion', { rrf_k: next })}
+                onCommit={(next) => stageSection('fusion', { rrf_k: next })}
                 style={{
                   width: '100%',
                   background: 'var(--input-bg)',
@@ -561,7 +565,7 @@ export const EvalAnalysisTab: React.FC = () => {
                 step={0.05}
                 value={Number(config?.fusion?.vector_weight ?? 0.4)}
                 disabled={evalRunning}
-                onCommit={(next) => patchSectionDebounced('fusion', { vector_weight: next })}
+                onCommit={(next) => stageSection('fusion', { vector_weight: next })}
                 style={{
                   width: '100%',
                   background: 'var(--input-bg)',
@@ -589,7 +593,7 @@ export const EvalAnalysisTab: React.FC = () => {
                 step={0.05}
                 value={Number(config?.fusion?.sparse_weight ?? 0.3)}
                 disabled={evalRunning}
-                onCommit={(next) => patchSectionDebounced('fusion', { sparse_weight: next })}
+                onCommit={(next) => stageSection('fusion', { sparse_weight: next })}
                 style={{
                   width: '100%',
                   background: 'var(--input-bg)',
@@ -617,7 +621,7 @@ export const EvalAnalysisTab: React.FC = () => {
                 step={0.05}
                 value={Number(config?.fusion?.graph_weight ?? 0.3)}
                 disabled={evalRunning}
-                onCommit={(next) => patchSectionDebounced('fusion', { graph_weight: next })}
+                onCommit={(next) => stageSection('fusion', { graph_weight: next })}
                 style={{
                   width: '100%',
                   background: 'var(--input-bg)',
@@ -642,7 +646,7 @@ export const EvalAnalysisTab: React.FC = () => {
                   type="checkbox"
                   checked={Boolean(config?.vector_search?.enabled ?? true)}
                   disabled={evalRunning}
-                  onChange={(e) => patchSectionDebounced('vector_search', { enabled: e.target.checked })}
+                  onChange={(e) => stageSection('vector_search', { enabled: e.target.checked })}
                 />
                 Vector
               </label>
@@ -654,7 +658,7 @@ export const EvalAnalysisTab: React.FC = () => {
                 step={1}
                 value={Number(config?.vector_search?.top_k ?? 50)}
                 disabled={evalRunning || !(config?.vector_search?.enabled ?? true)}
-                onCommit={(next) => patchSectionDebounced('vector_search', { top_k: next })}
+                onCommit={(next) => stageSection('vector_search', { top_k: next })}
                 style={{
                   width: '120px',
                   background: 'var(--input-bg)',
@@ -673,7 +677,7 @@ export const EvalAnalysisTab: React.FC = () => {
                   type="checkbox"
                   checked={Boolean(config?.sparse_search?.enabled ?? true)}
                   disabled={evalRunning}
-                  onChange={(e) => patchSectionDebounced('sparse_search', { enabled: e.target.checked })}
+                  onChange={(e) => stageSection('sparse_search', { enabled: e.target.checked })}
                 />
                 Sparse
               </label>
@@ -685,7 +689,7 @@ export const EvalAnalysisTab: React.FC = () => {
                 step={1}
                 value={Number(config?.sparse_search?.top_k ?? 50)}
                 disabled={evalRunning || !(config?.sparse_search?.enabled ?? true)}
-                onCommit={(next) => patchSectionDebounced('sparse_search', { top_k: next })}
+                onCommit={(next) => stageSection('sparse_search', { top_k: next })}
                 style={{
                   width: '120px',
                   background: 'var(--input-bg)',
@@ -704,7 +708,7 @@ export const EvalAnalysisTab: React.FC = () => {
                   type="checkbox"
                   checked={Boolean(config?.graph_search?.enabled ?? true)}
                   disabled={evalRunning}
-                  onChange={(e) => patchSectionDebounced('graph_search', { enabled: e.target.checked })}
+                  onChange={(e) => stageSection('graph_search', { enabled: e.target.checked })}
                 />
                 Graph
               </label>
@@ -716,7 +720,7 @@ export const EvalAnalysisTab: React.FC = () => {
                 step={1}
                 value={Number(config?.graph_search?.top_k ?? 30)}
                 disabled={evalRunning || !(config?.graph_search?.enabled ?? true)}
-                onCommit={(next) => patchSectionDebounced('graph_search', { top_k: next })}
+                onCommit={(next) => stageSection('graph_search', { top_k: next })}
                 style={{
                   width: '120px',
                   background: 'var(--input-bg)',

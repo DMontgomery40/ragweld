@@ -9,7 +9,7 @@ type ConfigRawSubtabProps = {
 };
 
 export function ConfigRawSubtab({ selectedSection }: ConfigRawSubtabProps) {
-  const { registry, loading, error, reload } = useConfigControlPlaneData();
+  const { registry, loading, error } = useConfigControlPlaneData();
   const { config, replaceSection, saving } = useConfigFieldSave();
   const sections = useMemo(() => {
     const values = new Set((registry?.fields || []).map((field) => field.section));
@@ -95,28 +95,31 @@ export function ConfigRawSubtab({ selectedSection }: ConfigRawSubtabProps) {
       return;
     }
     // A raw overwrite replaces the ENTIRE section exactly as parsed; confirm that consequence
-    // before the write (T7: raw config overwrite is a deliberate, named action, not a keystroke).
+    // before staging it (T7: raw config overwrite is a deliberate, named action, not a keystroke).
+    // Like every config surface it STAGES — the global "Apply changes" footer is the one write.
     const proceed = await confirmDialog({
-      title: `Replace the "${section}" section`,
+      title: `Stage a replacement of the "${section}" section`,
       message:
-        `Overwrite the entire "${section}" config section with the edited JSON exactly as parsed. ` +
-        `Any field you removed from the JSON reverts to nothing for this section. This is a raw ` +
-        `write with no per-field validation beyond the schema. Replace the section?`,
-      confirmLabel: 'Replace section',
+        `Stage the entire "${section}" config section as the edited JSON, exactly as parsed. ` +
+        `Any field you removed from the JSON is dropped from this section. This is a raw replace ` +
+        `with no per-field validation beyond the schema, and it is written when you click ` +
+        `"Apply changes". Stage this section?`,
+      confirmLabel: 'Stage section',
       cancelLabel: 'Keep editing',
       danger: true,
     });
     if (!proceed) return;
     try {
       const parsed = draft.trim() ? JSON.parse(draft) : {};
+      // Stage the replacement into the working config; do NOT reload (that would discard it).
       await replaceSection(section, parsed);
-      await reload();
+      setOriginal(draft);
       setRawError(null);
       setEditing(false);
-      setStatus('Section saved');
-      window.setTimeout(() => setStatus(null), 1600);
+      setStatus('Section staged — click Apply to save');
+      window.setTimeout(() => setStatus(null), 2200);
     } catch (err) {
-      setRawError(err instanceof Error ? err.message : 'Unable to save this section.');
+      setRawError(err instanceof Error ? err.message : 'Unable to stage this section.');
     }
   };
 

@@ -452,22 +452,22 @@ export function ConfigFieldEditor({
 }
 
 export function useConfigFieldSave() {
-  const { patchSection, saveConfig, config, saving } = useConfig();
+  const { stageSection, stageSectionReplace, config, saving } = useConfig();
 
+  // Uniform commit model: a per-field "save" and a raw section overwrite both STAGE locally, like
+  // every other config surface; the global "Apply changes" footer is the one write. This closes
+  // the mixed-model drop where an immediate PATCH here would wholesale-replace a section holding
+  // another surface's staged edit.
   const saveField = async (path: string, value: unknown) => {
     const { section, patch } = buildPatchForPath(path, value);
-    await patchSection(section, patch as Record<string, unknown>);
+    stageSection(section as keyof TriBridConfig, patch as Record<string, unknown>);
   };
 
   const replaceSection = async (section: string, value: unknown) => {
     if (!config) {
       throw new Error('Configuration has not loaded yet.');
     }
-    const nextConfig = {
-      ...(config as unknown as Record<string, unknown>),
-      [section]: value,
-    } as TriBridConfig;
-    await saveConfig(nextConfig);
+    stageSectionReplace(section as keyof TriBridConfig, value);
   };
 
   return {
