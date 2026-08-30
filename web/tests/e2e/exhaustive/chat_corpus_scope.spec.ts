@@ -244,18 +244,30 @@ test('the docked chat mirrors the live conversation instead of drifting into its
   const pickers = page.getByTestId('source-dropdown');
   await expect.poll(async () => pickers.count(), { timeout: 60_000 }).toBe(2);
 
+  // One picker at a time: since M-161 a pointer press outside a popover dismisses it, so
+  // opening the docked copy closes the tab's. Read them in turn instead.
+  const openPicker = async (index: number) => {
+    const picker = pickers.nth(index);
+    if (!(await picker.evaluate((el: HTMLDetailsElement) => el.open))) {
+      await picker.locator('summary').click();
+    }
+    await expect(picker).toHaveJSProperty('open', true);
+    return picker;
+  };
+
   // Both instances start on the same conversation: the docked copy is not a third state.
   for (let i = 0; i < 2; i += 1) {
-    const picker = pickers.nth(i);
-    if (!(await picker.evaluate((el: HTMLDetailsElement) => el.open))) await picker.locator('summary').click();
+    const picker = await openPicker(i);
     await expect(picker.getByTestId(`source-corpus-${corpus.corpusId}`)).toBeChecked();
     await expect(picker.getByTestId(`source-corpus-${otherCorpusId}`)).not.toBeChecked();
   }
 
   // A change made in one instance reaches the other.
-  await pickers.first().getByTestId(`source-corpus-${otherCorpusId}`).check();
-  await expect(pickers.nth(1).getByTestId(`source-corpus-${otherCorpusId}`)).toBeChecked({ timeout: 30_000 });
-  await expect(pickers.nth(1).getByTestId(`source-corpus-${corpus.corpusId}`)).toBeChecked();
+  const first = await openPicker(0);
+  await first.getByTestId(`source-corpus-${otherCorpusId}`).check();
+  const second = await openPicker(1);
+  await expect(second.getByTestId(`source-corpus-${otherCorpusId}`)).toBeChecked({ timeout: 30_000 });
+  await expect(second.getByTestId(`source-corpus-${corpus.corpusId}`)).toBeChecked();
 });
 
 test('mirroring the same conversation does not drop the operator per-conversation Top-K', async ({
@@ -297,6 +309,7 @@ test('mirroring the same conversation does not drop the operator per-conversatio
   if (!(await otherPicker.evaluate((el: HTMLDetailsElement) => el.open))) {
     await otherPicker.locator('summary').click();
   }
+  await expect(otherPicker).toHaveJSProperty('open', true);
   await otherPicker.getByTestId(`source-corpus-${otherCorpusId}`).check();
   await expect(pickers.first().getByTestId(`source-corpus-${otherCorpusId}`)).toBeChecked({
     timeout: 30_000,
@@ -322,4 +335,22 @@ test('Escape closes the Sources popover and puts focus back on its trigger', asy
   await expect(dropdown).toHaveJSProperty('open', false);
   // A keyboard operator must land back on the control they opened, not in the void.
   await expect(trigger).toBeFocused();
+});
+
+test('opening another chat control dismisses the Sources popover', async ({ page }) => {
+  // B-28's actual evidence is the stacking: Sources "survives Escape AND clicking History
+  // and New chat - three popovers stacked at once".
+  await page.goto('chat?subtab=ui', { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('#chat-input', { timeout: 90_000 });
+
+  const dropdown = page.getByTestId('source-dropdown');
+  await expect(dropdown).toBeVisible({ timeout: 30_000 });
+
+  for (const other of ['chat-quick-settings', 'chat-history-toggle']) {
+    await page.getByTestId('source-dropdown-trigger').click();
+    await expect(dropdown).toHaveJSProperty('open', true);
+
+    await page.getByTestId(other).click();
+    await expect(dropdown, `Sources stayed open behind ${other}`).toHaveJSProperty('open', false);
+  }
 });

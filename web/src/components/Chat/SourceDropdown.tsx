@@ -62,20 +62,42 @@ export function SourceDropdown(props: SourceDropdownProps) {
   ].filter(Boolean);
   const summaryLabel = summaryParts.length > 0 ? summaryParts.join(' + ') : 'None';
 
-  // A native <details> ignores Escape, so this popover survived it - and survived clicking
-  // History and New chat too, which is how the drive ended up with three popovers stacked
-  // open at once (M-161/B-28). Escape closes it and puts focus back on the control that
-  // opened it, so a keyboard operator is never left inside a widget they just dismissed.
+  // A native <details> dismisses on neither Escape nor an outside click, so this popover
+  // survived both - and survived opening History and New chat, which is how the drive ended
+  // up with three popovers stacked open at once (M-161/B-28).
+  //
+  // Escape returns focus to the control that opened it, so a keyboard operator is never
+  // left inside a widget they just dismissed. A pointer dismissal does not steal focus:
+  // the operator is already on their way somewhere else, and moving focus back would fight
+  // the control they just pressed.
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
+    const closeIfOpen = (restoreFocus: boolean): void => {
       const details = detailsRef.current;
       if (!details || !details.open) return;
       details.open = false;
-      summaryRef.current?.focus();
+      if (restoreFocus) summaryRef.current?.focus();
     };
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      closeIfOpen(true);
+    };
+    // pointerdown, not click: History and New chat open on their own press, so waiting for
+    // the click would leave both popovers on screen for the length of the gesture.
+    const onPointerDown = (event: PointerEvent) => {
+      const details = detailsRef.current;
+      if (!details || !details.open) return;
+      const target = event.target as Node | null;
+      if (target && details.contains(target)) return;
+      closeIfOpen(false);
+    };
+
     document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
+    document.addEventListener('pointerdown', onPointerDown, true);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('pointerdown', onPointerDown, true);
+    };
   }, []);
 
   useEffect(() => {

@@ -1894,6 +1894,8 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
 
           <button
             type="button"
+            data-testid="chat-history-toggle"
+            aria-expanded={showHistory}
             onClick={() => setShowHistory((current) => !current)}
             style={{
               background: 'var(--bg-elev2)',
