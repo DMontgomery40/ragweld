@@ -10,6 +10,7 @@ import { useDockerStore } from '@/stores/useDockerStore';
 import { StatusIndicator } from '@/components/ui/StatusIndicator';
 import { useRepoStore } from '@/stores/useRepoStore';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
+import type { IndexRunSummary } from '@/types/generated';
 
 export function SystemStatusSubtab() {
   const navigate = useNavigate();
@@ -19,9 +20,12 @@ export function SystemStatusSubtab() {
   const [containers, setContainers] = useState<string>('—');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [topFolders, setTopFolders] = useState<
-    Array<{ name: string; profile?: string; chunkCount: number; storageBytes: number }>
+  // One row per corpus: its latest persisted run, "never indexed" (404), or why it could not
+  // be read. `run: null` and `error` are different answers and the panel says which.
+  const [recentRuns, setRecentRuns] = useState<
+    Array<{ corpusId: string; name: string; run: IndexRunSummary | null; error: string | null }>
   >([]);
+  const [recentRunsLoading, setRecentRunsLoading] = useState(false);
 
   // Corpus-first state (Zustand store backed by Pydantic `Corpus`)
   const repos = useRepoStore((s) => s.repos);
@@ -50,14 +54,6 @@ export function SystemStatusSubtab() {
     fetchDevStackStatus,
   } = useDockerStore();
 
-  const formatBytes = (bytes: number) => {
-    if (!bytes || bytes <= 0) return '0 B';
-    const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
-    const idx = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
-    const value = bytes / Math.pow(1024, idx);
-    return `${value.toFixed(idx === 0 ? 0 : 1)} ${units[idx]}`;
-  };
-
   const refreshStatus = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -68,26 +64,18 @@ export function SystemStatusSubtab() {
         healthData,
         mcpData,
         // autotuneData, // HIDDEN - Pro feature
-        dockerData,
-        indexData
+        dockerData
       ] = await Promise.allSettled([
         DashAPI.getHealth(),
         DashAPI.getMCPStatus(),
         // DashAPI.getAutotuneStatus(), // HIDDEN - Pro feature
-        DashAPI.getDockerStatus(),
-        activeRepo ? DashAPI.getIndexStatus(activeRepo) : Promise.resolve(null)
+        DashAPI.getDockerStatus()
       ]);
 
       // Health
       if (healthData.status === 'fulfilled') {
         const h = healthData.value;
         setHealth(`${h.status}`);
-      }
-
-      if (indexData.status === 'fulfilled' && indexData.value?.metadata) {
-        // DashboardIndexStatusMetadata does not expose a per-corpus repo breakdown.
-        // Keep this empty until the backend provides a deterministic schema.
-        setTopFolders([]);
       }
 
       // MCP
@@ -139,7 +127,54 @@ export function SystemStatusSubtab() {
       setError(err instanceof Error ? err.message : String(err));
       setLoading(false);
     }
-  }, [activeRepo]);
+  }, []);
+
+  /**
+   * The latest run of every corpus, one request each, in parallel.
+   *
+   * Deliberately NOT on the 30s status poll: nothing here changes without an indexing run,
+   * and N corpora x every 30 seconds is real load against an endpoint that flushes the run
+   * event queue. Mount and the explicit refresh action are enough.
+   */
+  const refreshRecentRuns = useCallback(async () => {
+    const corpora = Array.isArray(repos) ? repos : [];
+    if (corpora.length === 0) {
+      setRecentRuns([]);
+      return;
+    }
+    setRecentRunsLoading(true);
+    const settled = await Promise.allSettled(
+      corpora.map((corpus) => DashAPI.getLatestIndexRun(corpus.corpus_id))
+    );
+    setRecentRuns(
+      corpora.map((corpus, i) => {
+        const outcome = settled[i];
+        return {
+          corpusId: corpus.corpus_id,
+          name: String(corpus.name || corpus.corpus_id),
+          run: outcome.status === 'fulfilled' ? outcome.value : null,
+          error:
+            outcome.status === 'rejected'
+              ? outcome.reason instanceof Error
+                ? outcome.reason.message
+                : String(outcome.reason)
+              : null,
+        };
+      })
+    );
+    setRecentRunsLoading(false);
+  }, [repos]);
+
+  useEffect(() => {
+    refreshRecentRuns();
+    const handleRefresh = () => {
+      refreshRecentRuns();
+    };
+    window.addEventListener('dashboard-refresh', handleRefresh);
+    return () => {
+      window.removeEventListener('dashboard-refresh', handleRefresh);
+    };
+  }, [refreshRecentRuns]);
 
   useEffect(() => {
     refreshStatus();
@@ -520,7 +555,7 @@ export function SystemStatusSubtab() {
         </div>
       </div>
 
-      {/* Top Accessed Folders Section */}
+      {/* Recent index runs: the latest persisted run of every corpus */}
       <div className="settings-section" style={{ background: 'var(--panel)', borderLeft: '3px solid var(--warn)' }}>
         <h3
           style={{
@@ -533,13 +568,14 @@ export function SystemStatusSubtab() {
           }}
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 7v5l3 2" />
           </svg>
-          Top Folders (Last 5 Days)
+          Recent Index Runs
         </h3>
-        <div id="dash-top-folders-metrics" style={{ color: 'var(--fg-muted)', fontSize: '12px' }}>
-          {topFolders.length === 0 ? (
-            <span>No recent indexing metrics available.</span>
+        <div data-testid="dash-recent-runs" style={{ color: 'var(--fg-muted)', fontSize: '12px' }}>
+          {recentRuns.length === 0 ? (
+            <span>{recentRunsLoading ? 'Loading index runs…' : 'No corpora yet.'}</span>
           ) : (
             <table
               style={{
@@ -550,27 +586,36 @@ export function SystemStatusSubtab() {
               }}
             >
               <thead>
-                <tr style={{ textTransform: 'uppercase', fontSize: '10px', color: 'var(--fg-muted)' }}>
-                  <th style={{ textAlign: 'left', padding: '6px 0' }}>Folder</th>
-                  <th style={{ textAlign: 'left', padding: '6px 0' }}>Profile</th>
+                {/* 11.5px, not the 10px the deleted panel used: the operator's displays are
+                    dpr-1 at ~93 PPI, where 10px uppercase muted text is the exact combination
+                    that turns into grey mush. The legibility floor outranks style parity. */}
+                <tr style={{ textTransform: 'uppercase', fontSize: '11.5px', color: 'var(--fg-muted)' }}>
+                  <th style={{ textAlign: 'left', padding: '6px 0' }}>Corpus</th>
+                  <th style={{ textAlign: 'left', padding: '6px 0' }}>Status</th>
+                  <th style={{ textAlign: 'left', padding: '6px 0' }}>Completed</th>
                   <th style={{ textAlign: 'right', padding: '6px 0' }}>Chunks</th>
-                  <th style={{ textAlign: 'right', padding: '6px 0' }}>Storage</th>
+                  <th style={{ textAlign: 'right', padding: '6px 0' }}>Figures</th>
+                  <th style={{ textAlign: 'right', padding: '6px 0' }}>Cost</th>
                 </tr>
               </thead>
               <tbody>
-                {topFolders.map(folder => (
-                  <tr key={`${folder.profile || 'default'}-${folder.name}`}>
-                    <td style={{ padding: '4px 0', fontWeight: 600, color: 'var(--accent-text)' }}>
-                      {folder.name}
-                    </td>
+                {recentRuns.map((row) => (
+                  <tr key={row.corpusId} data-testid={`dash-recent-run-${row.corpusId}`}>
+                    <td style={{ padding: '4px 0', fontWeight: 600, color: 'var(--accent-text)' }}>{row.name}</td>
+                    <td style={{ padding: '4px 0', color: runStatusColor(row) }}>{runStatusLabel(row)}</td>
                     <td style={{ padding: '4px 0', color: 'var(--fg-muted)' }}>
-                      {folder.profile || 'default'}
+                      {row.run?.completed_at ? new Date(row.run.completed_at).toLocaleString() : '—'}
                     </td>
                     <td style={{ padding: '4px 0', textAlign: 'right', fontFamily: "'SF Mono', monospace" }}>
-                      {folder.chunkCount.toLocaleString()}
+                      {row.run ? Number(row.run.total_chunks || 0).toLocaleString() : '—'}
                     </td>
                     <td style={{ padding: '4px 0', textAlign: 'right', fontFamily: "'SF Mono', monospace" }}>
-                      {formatBytes(folder.storageBytes)}
+                      {formatRunFigures(row.run)}
+                    </td>
+                    <td style={{ padding: '4px 0', textAlign: 'right', fontFamily: "'SF Mono', monospace" }}>
+                      {row.run?.figure_description_cost_usd != null
+                        ? `\u2264 $${Number(row.run.figure_description_cost_usd).toFixed(4)}`
+                        : '\u2014'}
                     </td>
                   </tr>
                 ))}
@@ -581,6 +626,36 @@ export function SystemStatusSubtab() {
       </div>
     </div>
   );
+}
+
+type RecentRunRow = { corpusId: string; name: string; run: IndexRunSummary | null; error: string | null };
+
+/** "never indexed" (no run) and "could not be read" (request failed) are different answers. */
+function runStatusLabel(row: RecentRunRow): string {
+  if (row.error) return 'unavailable';
+  if (!row.run) return 'never indexed';
+  return String(row.run.status || 'unknown');
+}
+
+function runStatusColor(row: RecentRunRow): string {
+  if (row.error) return 'var(--err)';
+  if (!row.run) return 'var(--fg-muted)';
+  if (row.run.status === 'complete') return 'var(--ok)';
+  if (row.run.status === 'error') return 'var(--err)';
+  return 'var(--warn)';
+}
+
+/**
+ * Figures are shown only when the run actually had a figure phase: every corpus indexed
+ * before figures existed reports zeroes, and a column of "0/0" would be noise on the one
+ * panel meant to show what each run did.
+ */
+function formatRunFigures(run: IndexRunSummary | null): string {
+  if (!run) return '\u2014';
+  const described = Number(run.figures_described || 0);
+  const failed = Number(run.figures_failed || 0);
+  if (described <= 0 && failed <= 0) return '\u2014';
+  return failed > 0 ? `${described.toLocaleString()} (${failed.toLocaleString()} failed)` : described.toLocaleString();
 }
 
 type StatusItemProps = {

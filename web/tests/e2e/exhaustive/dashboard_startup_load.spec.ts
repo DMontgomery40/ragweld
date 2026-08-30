@@ -1,5 +1,11 @@
 import { expect, test } from '@playwright/test';
 
+import {
+  activateCorpusInBrowser,
+  provisionExhaustiveCorpus,
+  type ExhaustiveCorpus,
+} from './corpus_fixture';
+
 test('Dashboard default subtab does not trigger storage startup requests', async ({ page, baseURL }) => {
   const observedApiPaths = new Set<string>();
 
@@ -42,4 +48,50 @@ test('Dashboard monitoring deep-link does not trigger system status startup requ
     ['/api/mcp/status', '/api/docker/status'].includes(path),
   );
   expect(systemStatusRequests).toEqual([]);
+});
+
+// The dashboard's "Recent Index Runs" panel replaced a dead "Top Folders (Last 5 Days)" table
+// whose only setter was setTopFolders([]). Its own describe block with its own fixture: the two
+// request-observation tests above run in under a second and must not inherit an indexing wait.
+test.describe('Recent index runs panel', () => {
+  test.describe.configure({ mode: 'serial' });
+
+  let corpus: ExhaustiveCorpus | null = null;
+
+  test.beforeAll(async ({ request }) => {
+    corpus = await provisionExhaustiveCorpus(request, { index: true });
+  });
+
+  test.afterAll(async ({ request }) => {
+    if (corpus) await corpus.dispose(request);
+    corpus = null;
+  });
+
+  test('lists the freshly indexed corpus with its real chunk count', async ({ page, baseURL }) => {
+    const provisioned = corpus;
+    expect(provisioned, 'the corpus fixture must have provisioned').not.toBeNull();
+    const corpusId = provisioned!.corpusId;
+
+    await activateCorpusInBrowser(page, corpusId);
+    await page.goto(new URL('dashboard', baseURL).toString());
+    await page.waitForURL(/\/dashboard(?:\?|$)/);
+
+    const panel = page.getByTestId('dash-recent-runs');
+    await expect(panel).toBeVisible();
+
+    const row = page.getByTestId(`dash-recent-run-${corpusId}`);
+    await expect(row).toBeVisible({ timeout: 30_000 });
+    await expect(row).toContainText('complete');
+
+    // Chunks come from the run record the indexer persisted, not from a placeholder: the panel
+    // this replaced could only ever say "No recent indexing metrics available."
+    const chunkText = (await row.locator('td').nth(3).innerText()).trim();
+    const chunks = Number(chunkText.replace(/[^0-9]/g, ''));
+    expect(Number.isFinite(chunks)).toBe(true);
+    expect(chunks).toBeGreaterThan(0);
+
+    // The acceptance fixture has no PDFs, so this run described no figures: the column stays
+    // empty rather than printing a zero for every corpus indexed before figures existed.
+    await expect(row.locator('td').nth(4)).toHaveText('—');
+  });
 });

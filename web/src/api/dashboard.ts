@@ -12,6 +12,7 @@ import type {
   DockerStatus,
   EvalObservabilitySummaryResponse,
   HealthStatus,
+  IndexRunSummary,
   LokiStatus,
   MCPStatusResponse,
   ObservabilityCatalogResponse,
@@ -30,6 +31,7 @@ export type {
   DockerStatus,
   EvalObservabilitySummaryResponse,
   HealthStatus,
+  IndexRunSummary,
   LokiStatus,
   ObservabilityCatalogResponse,
   ObservabilityIncidentsResponse,
@@ -260,6 +262,23 @@ export async function getIndexStatus(corpusId: string): Promise<DashboardIndexSt
     withCorpusScope(api('/index/status'), corpusId),
   );
   return data;
+}
+
+/**
+ * The latest persisted run for one corpus, or null when it has never been indexed.
+ *
+ * A never-indexed corpus is an expected answer here, not a failure, so the 404 is accepted
+ * as a status rather than thrown: the shared response interceptor console.errors every
+ * rejection, and a dashboard listing every corpus would log one per unindexed corpus on
+ * every load. Real failures (503 while a corpus is being de-indexed, 409 on a malformed
+ * fence) still reject, so the caller can tell "never indexed" from "could not be read".
+ */
+export async function getLatestIndexRun(corpusId: string): Promise<IndexRunSummary | null> {
+  const { status, data } = await apiClient.get<IndexRunSummary>(
+    api(`/index/${encodeURIComponent(corpusId)}/runs/latest`),
+    { validateStatus: (s) => s === 200 || s === 404 },
+  );
+  return status === 404 ? null : data;
 }
 
 // ============================================================================
