@@ -1,5 +1,5 @@
 import type { ActiveSources, Corpus, RecallIntensity } from '@/types/generated';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
 
 type SourceDropdownProps = {
@@ -41,6 +41,8 @@ function toggleInOrderedSet(items: string[], id: string): string[] {
 export function SourceDropdown(props: SourceDropdownProps) {
   const corpusIds = props.value.corpus_ids ?? [];
   const [confirmCleanup, setConfirmCleanup] = useState(false);
+  const detailsRef = useRef<HTMLDetailsElement | null>(null);
+  const summaryRef = useRef<HTMLElement | null>(null);
   const [cleanupRunning, setCleanupRunning] = useState(false);
 
   const isChecked = (id: string) => corpusIds.includes(id);
@@ -59,6 +61,22 @@ export function SourceDropdown(props: SourceDropdownProps) {
     props.webEnabled ? 'Web' : null,
   ].filter(Boolean);
   const summaryLabel = summaryParts.length > 0 ? summaryParts.join(' + ') : 'None';
+
+  // A native <details> ignores Escape, so this popover survived it - and survived clicking
+  // History and New chat too, which is how the drive ended up with three popovers stacked
+  // open at once (M-161/B-28). Escape closes it and puts focus back on the control that
+  // opened it, so a keyboard operator is never left inside a widget they just dismissed.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      const details = detailsRef.current;
+      if (!details || !details.open) return;
+      details.open = false;
+      summaryRef.current?.focus();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   useEffect(() => {
     if (!confirmCleanup) return;
@@ -84,6 +102,7 @@ export function SourceDropdown(props: SourceDropdownProps) {
 
   return (
     <details
+      ref={detailsRef}
       data-testid="source-dropdown"
       style={{
         position: 'relative',
@@ -91,6 +110,8 @@ export function SourceDropdown(props: SourceDropdownProps) {
       }}
     >
       <summary
+        ref={summaryRef}
+        data-testid="source-dropdown-trigger"
         style={{
           listStyle: 'none',
           cursor: 'pointer',

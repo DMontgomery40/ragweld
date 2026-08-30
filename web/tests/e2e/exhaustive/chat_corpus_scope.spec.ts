@@ -305,3 +305,21 @@ test('mirroring the same conversation does not drop the operator per-conversatio
   // Mirroring one conversation into itself is not a session change: the setting survives.
   await expect(topK).toHaveValue('3');
 });
+
+test('Escape closes the Sources popover and puts focus back on its trigger', async ({ page }) => {
+  // M-161/B-28: a native <details> ignores Escape, so this popover stayed open through
+  // Escape and through opening other popovers - the drive ended with three stacked.
+  await page.goto('chat?subtab=ui', { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('#chat-input', { timeout: 90_000 });
+
+  const dropdown = page.getByTestId('source-dropdown');
+  const trigger = page.getByTestId('source-dropdown-trigger');
+  await expect(dropdown).toBeVisible({ timeout: 30_000 });
+  await trigger.click();
+  await expect(dropdown).toHaveJSProperty('open', true);
+
+  await page.keyboard.press('Escape');
+  await expect(dropdown).toHaveJSProperty('open', false);
+  // A keyboard operator must land back on the control they opened, not in the void.
+  await expect(trigger).toBeFocused();
+});
