@@ -14,6 +14,7 @@ from __future__ import annotations
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
+from pathlib import Path
 
 from prometheus_client import (
     CONTENT_TYPE_LATEST,
@@ -401,13 +402,32 @@ class LatestMLQualityCollector:
     A plain gauge cannot express it: it can only say zero.
     """
 
+    def __init__(
+        self,
+        *,
+        eval_dir: Path | None = None,
+        promptfoo_dir: Path | None = None,
+        benchmark_dir: Path | None = None,
+    ) -> None:
+        # Overridable so a test can register a collector over its own empty
+        # tree in its own CollectorRegistry, rather than moving the operator's
+        # real run directories aside and hoping the process lives to move them
+        # back.
+        self._eval_dir = eval_dir
+        self._promptfoo_dir = promptfoo_dir
+        self._benchmark_dir = benchmark_dir
+
     def collect(self):  # noqa: ANN201 - prometheus_client's collector protocol
         try:
             # Imported lazily: `ml_quality` reaches into the API and lineage
             # layers, which import this module.
             from server.observability.ml_quality import latest_quality_values
 
-            values = latest_quality_values()
+            values = latest_quality_values(
+                eval_dir=self._eval_dir,
+                promptfoo_dir=self._promptfoo_dir,
+                benchmark_dir=self._benchmark_dir,
+            )
         except Exception:
             # A scrape must never fail wholesale because the run store is
             # unreadable; the absent series is the honest answer.

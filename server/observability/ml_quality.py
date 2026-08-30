@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from server.api.dataset import _dataset_path_for_corpus, _load_dataset
+from server.config import load_config
 from server.evaluation.path_match import path_matches
 from server.lineage import current_bundle, ensure_current_bundle, list_bundles, load_bundle
 from server.models.eval import EvalRun
@@ -25,11 +28,11 @@ from server.models.tribrid_config_model import (
 
 _ROOT = Path(__file__).resolve().parents[2]
 _EVAL_RUNS_DIR = _ROOT / "data" / "eval_runs"
-# `server/api/eval.py` persists Promptfoo runs beside the eval runs, and
-# `server/api/benchmark.py` writes benchmark runs here; both are invariants of
-# the on-disk layout, not operator-tunable paths.
+# `server/api/eval.py` persists Promptfoo runs beside the eval runs; that one is
+# an invariant of the on-disk layout. The benchmark directory is NOT: its writer
+# reads `chat.benchmark.results_path`, so the reader has to as well or an
+# operator who moves it gets a permanent "No data" with nothing saying why.
 _PROMPTFOO_RUNS_DIR = _EVAL_RUNS_DIR / "promptfoo"
-_BENCHMARK_RUNS_DIR = _ROOT / "data" / "benchmarks"
 
 
 @dataclass(frozen=True)
@@ -47,6 +50,17 @@ class LatestQualityValues:
     benchmark_average_latency_ms: float | None = None
 
 
+def configured_benchmark_runs_dir() -> Path:
+    """Where `server/api/benchmark.py` is currently writing benchmark runs."""
+
+    try:
+        config = load_config()
+        configured = str(getattr(config.chat.benchmark, "results_path", "") or "")
+    except Exception:
+        configured = ""
+    return _benchmark_results_dir(configured or "data/benchmarks/")
+
+
 def _newest_file(directory: Path) -> Path | None:
     """The most recently written `*.json` directly inside `directory`."""
 
@@ -58,51 +72,80 @@ def _newest_file(directory: Path) -> Path | None:
     return max(files, key=lambda path: path.stat().st_mtime)
 
 
-def latest_quality_values() -> LatestQualityValues:
+# Parsed newest-run values, keyed by the file's identity. The collector runs on
+# the event loop on every Prometheus scrape, so a run that has not been
+# rewritten is not re-parsed; a new or rewritten file changes the key and is.
+_PARSE_CACHE: dict[str, tuple[tuple[str, float, int], Any]] = {}
+
+
+def _parse_newest(kind: str, directory: Path, parse: Callable[[Path], Any]) -> Any:
+    path = _newest_file(directory)
+    if path is None:
+        _PARSE_CACHE.pop(kind, None)
+        return None
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    key = (str(path), stat.st_mtime, stat.st_size)
+    cached = _PARSE_CACHE.get(kind)
+    if cached is not None and cached[0] == key:
+        return cached[1]
+    try:
+        value = parse(path)
+    except Exception:
+        # A file that does not validate has no usable number in it; absence is
+        # the honest answer and the caller renders "No data".
+        return None
+    _PARSE_CACHE[kind] = (key, value)
+    return value
+
+
+def latest_quality_values(
+    *,
+    eval_dir: Path | None = None,
+    promptfoo_dir: Path | None = None,
+    benchmark_dir: Path | None = None,
+) -> LatestQualityValues:
     """Read the newest persisted eval / Promptfoo / benchmark run off disk.
 
     Called at Prometheus scrape time, so the dashboard's "Latest" gauges are a
     view of the persisted runs rather than of process memory. Restarting the
     API therefore cannot zero them.
+
+    The directories are parameters so a test can own an empty tree instead of
+    borrowing (and moving) the operator's real one.
     """
 
-    eval_top1: float | None = None
-    eval_topk: float | None = None
-    path = _newest_file(_EVAL_RUNS_DIR)
-    if path is not None:
-        try:
-            run = EvalRun.model_validate(json.loads(path.read_text(encoding="utf-8")))
-        except Exception:
-            run = None
-        if run is not None:
-            eval_top1 = float(run.top1_accuracy)
-            eval_topk = float(run.topk_accuracy)
+    run = _parse_newest(
+        "eval",
+        eval_dir if eval_dir is not None else _EVAL_RUNS_DIR,
+        lambda path: EvalRun.model_validate(json.loads(path.read_text(encoding="utf-8"))),
+    )
+    eval_top1 = float(run.top1_accuracy) if run is not None else None
+    eval_topk = float(run.topk_accuracy) if run is not None else None
 
-    promptfoo_ratio: float | None = None
-    path = _newest_file(_PROMPTFOO_RUNS_DIR)
-    if path is not None:
-        try:
-            promptfoo = PromptfooRun.model_validate_json(path.read_text(encoding="utf-8"))
-        except Exception:
-            promptfoo = None
-        if promptfoo is not None and promptfoo.total:
-            promptfoo_ratio = float(promptfoo.passed) / float(promptfoo.total)
+    promptfoo = _parse_newest(
+        "promptfoo",
+        promptfoo_dir if promptfoo_dir is not None else _PROMPTFOO_RUNS_DIR,
+        lambda path: PromptfooRun.model_validate_json(path.read_text(encoding="utf-8")),
+    )
+    promptfoo_ratio = (
+        float(promptfoo.passed) / float(promptfoo.total)
+        if promptfoo is not None and promptfoo.total
+        else None
+    )
 
+    benchmark = _parse_newest(
+        "benchmark",
+        benchmark_dir if benchmark_dir is not None else configured_benchmark_runs_dir(),
+        lambda path: BenchmarkRun.model_validate(json.loads(path.read_text(encoding="utf-8"))),
+    )
     benchmark_latency: float | None = None
-    path = _newest_file(_BENCHMARK_RUNS_DIR)
-    if path is not None:
-        try:
-            raw = json.loads(path.read_text(encoding="utf-8"))
-            raw.setdefault("prompt", "")
-            raw.setdefault("models", [str(item.get("model") or "") for item in raw.get("results", []) if isinstance(item, dict)])
-            raw.setdefault("corpus_id", raw.get("repo_id"))
-            benchmark = BenchmarkRun.model_validate(raw)
-        except Exception:
-            benchmark = None
-        if benchmark is not None:
-            latencies = [float(item.latency_ms) for item in (benchmark.results or []) if item.latency_ms is not None]
-            if latencies:
-                benchmark_latency = sum(latencies) / len(latencies)
+    if benchmark is not None:
+        latencies = [float(item.latency_ms) for item in (benchmark.results or []) if item.latency_ms is not None]
+        if latencies:
+            benchmark_latency = sum(latencies) / len(latencies)
 
     return LatestQualityValues(
         eval_top1_accuracy=eval_top1,
