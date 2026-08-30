@@ -8,7 +8,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   useAPI,
   useConfig,
@@ -119,10 +119,15 @@ export function IndexingSubtab() {
   const terminalRef = useRef<LiveTerminalHandle>(null);
 
   // UI state. The selected card is addressable as `?component=<id>` so a global-search hit
-  // (or a shared link) can open the card a setting actually lives on. Read reactively, not
-  // just at mount: arriving from another subtab does not remount this component, so a
-  // once-only initialiser would leave the wrong card open.
+  // (or a shared link) can open the card a setting actually lives on. It is a one-shot
+  // navigation aid, so it is CONSUMED: applied, then stripped from the URL. Left in place it
+  // becomes sticky global state that outranks the operator -- `RAGTab` unmounts this subtab
+  // on every subtab change and `useSubtab` copies the whole query string forward, so a
+  // surviving `component=` reopens its card on every return, and survives reload and
+  // sharing. Read reactively rather than at mount only, because the param can also arrive
+  // while this component is already on screen.
   const location = useLocation();
+  const navigate = useNavigate();
   const componentParam = useMemo(
     () => new URLSearchParams(location.search || '').get('component'),
     [location.search]
@@ -132,8 +137,15 @@ export function IndexingSubtab() {
   );
 
   useEffect(() => {
+    if (componentParam === null) return;
     if (isIndexingComponent(componentParam)) setSelectedComponent(componentParam);
-  }, [componentParam]);
+    // Stripped whether or not it named a real card, so a typo cannot stick either.
+    // `replace` keeps the consumed link out of the back stack.
+    const next = new URLSearchParams(location.search || '');
+    next.delete('component');
+    const search = next.toString();
+    navigate({ pathname: location.pathname, search: search ? `?${search}` : '' }, { replace: true });
+  }, [componentParam, location.pathname, location.search, navigate]);
   const [isIndexing, setIsIndexing] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 100, status: 'Ready' });
   const [terminalVisible, setTerminalVisible] = useState(false);

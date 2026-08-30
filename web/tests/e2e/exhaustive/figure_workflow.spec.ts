@@ -541,11 +541,49 @@ test('a global search hit for a figures setting opens the Figures & Vision card'
   await hit.click();
 
   await page.waitForURL(/\/rag\?[^#]*subtab=indexing/, { timeout: 30_000 });
-  const params = new URL(page.url()).searchParams;
-  expect(params.get('component')).toBe('figures');
-  // The corpus the operator was working on survives the jump, so the card edits that scope.
-  expect(params.get('corpus')).toBe(corpus.corpusId);
-
   await expect(page.getByTestId('figures-card')).toBeVisible({ timeout: 60_000 });
   await expect(page.getByTestId('figures-enabled')).toBeFocused({ timeout: 30_000 });
+  // The corpus the operator was working on survives the jump, so the card edits that scope.
+  expect(new URL(page.url()).searchParams.get('corpus')).toBe(corpus.corpusId);
+});
+
+// `?component=` is a one-shot navigation aid. `RAGTab.tsx` unmounts the subtab
+// (`activeSubtab === 'indexing' ? <IndexingSubtab /> : null`) and `useSubtab` copies the whole
+// query string forward on every subtab switch, so a param left in the URL becomes sticky
+// global state that reopens the deep-linked card for the rest of the session -- outranking
+// what the operator clicked, and surviving a reload and a shared link.
+test('a deep-linked card is consumed once and does not outrank the operator afterwards', async ({
+  page,
+}) => {
+  if (!corpus) throw new Error('corpus not provisioned');
+
+  await page.goto(
+    `rag?subtab=indexing&corpus=${encodeURIComponent(corpus.corpusId)}&component=figures`,
+    { waitUntil: 'domcontentloaded' },
+  );
+  await page.waitForSelector('.topbar', { timeout: 90_000 });
+  await expect(page.getByTestId('figures-card')).toBeVisible({ timeout: 90_000 });
+
+  // Applied, then removed from the URL.
+  await expect
+    .poll(() => new URL(page.url()).searchParams.get('component'), { timeout: 15_000 })
+    .toBeNull();
+  // Stripping it must not disturb the rest of the query string.
+  expect(new URL(page.url()).searchParams.get('corpus')).toBe(corpus.corpusId);
+  expect(new URL(page.url()).searchParams.get('subtab')).toBe('indexing');
+
+  // The operator picks a different card, leaves the subtab and comes back. The heading is
+  // the panel's only unconditional element -- its fields depend on the chunking strategy.
+  const chunkingPanel = page.getByRole('heading', { name: /Chunking Configuration/ });
+  await page.getByTestId('indexing-component-card-chunking').click();
+  await expect(chunkingPanel).toBeVisible({ timeout: 30_000 });
+
+  await page.locator('button[data-subtab="retrieval"]').click();
+  await expect(page.getByTestId('indexing-component-card-figures')).toHaveCount(0);
+  await page.locator('button[data-subtab="indexing"]').click();
+  await expect(page.getByTestId('indexing-component-card-figures')).toBeVisible({ timeout: 30_000 });
+
+  // Figures does not reopen: the deep link was spent on the navigation that carried it.
+  await expect(page.getByTestId('figures-card')).toHaveCount(0);
+  expect(new URL(page.url()).searchParams.get('component')).toBeNull();
 });
