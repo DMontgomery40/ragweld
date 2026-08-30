@@ -48,11 +48,11 @@
 
 ```mermaid
 flowchart LR
-    Start["POST /index"] --> Worker["Indexer"]
-    Worker --> Status["GET /index/status"]
-    Worker --> Stats["GET /index/stats"]
-    Worker --> Latest["GET /index/{corpus_id}/runs/latest"]
-    Latest --> Events["GET /index/{corpus_id}/runs/{run_id}/events"]
+    Start["POST /api/index"] --> Worker["Indexer"]
+    Worker --> Status["GET /api/index/status"]
+    Worker --> Stats["GET /api/index/stats"]
+    Worker --> Latest["GET /api/index/{corpus_id}/runs/latest"]
+    Latest --> Events["GET /api/index/{corpus_id}/runs/{run_id}/events"]
 ```
 
 !!! note "The estimate itemises optional vision costs"
@@ -67,17 +67,17 @@ flowchart LR
 === "Python"
 ```python
 import httpx
-httpx.post("http://localhost:8000/index", json={"corpus_id":"tribrid","repo_path":"/repo","force_reindex":False})
+httpx.post("http://127.0.0.1:58012/api/index", json={"corpus_id":"docs","repo_path":"/repo","force_reindex":False})
 ```
 
 === "curl"
 ```bash
-curl -sS -X POST http://localhost:8000/index -H 'Content-Type: application/json' -d '{"corpus_id":"tribrid","repo_path":"/repo","force_reindex":false}'
+curl -sS -X POST http://127.0.0.1:58012/api/index -H 'Content-Type: application/json' -d '{"corpus_id":"docs","repo_path":"/repo","force_reindex":false}'
 ```
 
 === "TypeScript"
 ```typescript
-await fetch('/index', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ corpus_id:'tribrid', repo_path:'/repo', force_reindex:false }) })
+await fetch('http://127.0.0.1:58012/api/index', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ corpus_id:'docs', repo_path:'/repo', force_reindex:false }) })
 ```
 
 ??? info "Dashboard"
