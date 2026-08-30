@@ -7,6 +7,7 @@ import pytest
 from httpx import AsyncClient
 
 from server.models.tribrid_config_model import TriBridConfig
+from server.services.config_store import get_config as load_scoped_config
 
 
 @pytest.mark.asyncio
@@ -153,7 +154,6 @@ async def test_put_config_persists_hard_cut_observability_fields(client: AsyncCl
     assert tracing["tracing_mode"] == "otel_langfuse"
     assert tracing["otel_export_enabled"] is True
     assert tracing["otlp_endpoint"] == "http://localhost:4318/v1/traces"
-    assert tracing["otlp_headers"] == "Authorization=Bearer test"
     assert tracing["otel_service_name"] == "ragweld-api-test"
     assert tracing["langfuse_enabled"] is True
     assert tracing["langfuse_base_url"] == "http://localhost:3005"
@@ -161,6 +161,13 @@ async def test_put_config_persists_hard_cut_observability_fields(client: AsyncCl
     assert tracing["tempo_base_url"] == "http://localhost:3200"
     assert tracing["alloy_base_url"] == "http://localhost:12345"
     assert tracing["cost_tracking_enabled"] is True
+
+    # The authorization header is a credential and never comes back on the wire; the
+    # response carries the marker while the real value is on disk (see
+    # tests/api/test_config_redaction.py for the full round trip).
+    assert tracing["otlp_headers"] == "Authorization=[redacted]"
+    stored = await load_scoped_config(repo_id=None)
+    assert stored.tracing.otlp_headers == "Authorization=Bearer test"
 
 
 @pytest.mark.asyncio
