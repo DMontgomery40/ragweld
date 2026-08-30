@@ -326,6 +326,12 @@ export function DockPanel() {
           flex: '1 1 auto',
           minHeight: 0,
           overflow: 'hidden',
+          // Every docked pane wraps rather than clipping mid-word (A-44/M-109):
+          // `overflow-wrap` is inherited, so a long id/token in any mode (native
+          // page, source document, settings) breaks to the next line instead of
+          // spilling past the pane edge. Overflow that still cannot wrap scrolls
+          // in the mode's own scroll container, never silently clips.
+          overflowWrap: 'anywhere',
         }}
       >
         {mode === 'settings' ? (
