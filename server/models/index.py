@@ -286,6 +286,15 @@ class IndexEstimate(BaseModel):
         ge=0.0,
         description="Estimated GraphRAG semantic phase time (seconds) when enabled.",
     )
+    estimated_seconds_figures: float | None = Field(
+        default=None,
+        ge=0.0,
+        description=(
+            "Estimated figure-description phase time (seconds) when indexing.figures is enabled: "
+            "the estimated figure count at ~20 s per vision call, divided by "
+            "indexing.figures.concurrency."
+        ),
+    )
     assumptions: list[str] = Field(
         default_factory=list, description="Human-readable assumptions used for the estimate"
     )

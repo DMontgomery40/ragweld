@@ -362,6 +362,29 @@ export function IndexingSubtab() {
   const resolvedPath = useMemo(() => String(activeCorpus?.path || ''), [activeCorpus]);
   const effectivePath = useMemo(() => (pathOverride.trim() ? pathOverride.trim() : resolvedPath), [pathOverride, resolvedPath]);
 
+  // "Embed ~" is the remainder of the time estimate, so every phase folded into the total has
+  // to come back out of it: without subtracting the figure seconds, turning figures on would
+  // silently inflate the embedding line by exactly the figure time.
+  const estimateTimeBreakdown = useMemo(() => {
+    if (!indexEstimate) return '';
+    const { estimated_seconds_low: low, estimated_seconds_high: high } = indexEstimate;
+    const kgSeconds = indexEstimate.estimated_seconds_semantic_kg;
+    const figureSeconds = indexEstimate.estimated_seconds_figures;
+    if (low == null || high == null) return '';
+    if (kgSeconds == null && figureSeconds == null) return '';
+    const embedSeconds = Math.max(
+      0,
+      (Number(low) + Number(high)) / 2 - Number(kgSeconds || 0) - Number(figureSeconds || 0)
+    );
+    return [
+      `Embed ~${formatDuration(embedSeconds * 1000)}`,
+      kgSeconds == null ? null : `KG ~${formatDuration(Number(kgSeconds) * 1000)}`,
+      figureSeconds == null ? null : `Figures ~${formatDuration(Number(figureSeconds) * 1000)}`,
+    ]
+      .filter(Boolean)
+      .join(' + ');
+  }, [indexEstimate]);
+
   useEffect(() => {
     setIndexEstimate(null);
   }, [activeRepo, effectivePath]);
@@ -840,7 +863,11 @@ export function IndexingSubtab() {
                 semanticKgCostUsd == null ? null : `Semantic KG ${formatCurrency(Number(semanticKgCostUsd || 0))}`,
                 figureCostUsd == null
                   ? null
-                  : `Figures ≤ ${formatCurrency(Number(figureCostUsd || 0))}${estimate.estimated_figures != null ? ` (~${formatNumber(Number(estimate.estimated_figures))})` : ''}`,
+                  : `Figures ≤ ${formatCurrency(Number(figureCostUsd || 0))}${
+                      estimate.estimated_figures != null
+                        ? ` (~${formatNumber(Number(estimate.estimated_figures))} figures)`
+                        : ''
+                    }`,
               ]
                 .filter(Boolean)
                 .join(' + ');
@@ -851,12 +878,24 @@ export function IndexingSubtab() {
               )}`
             : 'N/A';
         const semanticKgSeconds = estimate.estimated_seconds_semantic_kg;
+        const figureSeconds = estimate.estimated_seconds_figures;
         const midTotalSeconds =
           estimate.estimated_seconds_low != null && estimate.estimated_seconds_high != null
             ? (Number(estimate.estimated_seconds_low) + Number(estimate.estimated_seconds_high)) / 2
             : null;
+        // Embed time is the remainder, so every phase folded into the total has to come back
+        // out of it -- otherwise turning figures on silently inflates the "Embed ~" line.
         const embedSecondsApprox =
-          semanticKgSeconds != null && midTotalSeconds != null ? Math.max(0, midTotalSeconds - Number(semanticKgSeconds)) : null;
+          (semanticKgSeconds != null || figureSeconds != null) && midTotalSeconds != null
+            ? Math.max(0, midTotalSeconds - Number(semanticKgSeconds || 0) - Number(figureSeconds || 0))
+            : null;
+        const timeBreakdown = [
+          `Embed ${embedSecondsApprox == null ? 'N/A' : `~${formatDuration(embedSecondsApprox * 1000)}`}`,
+          semanticKgSeconds == null ? null : `Semantic KG ~${formatDuration(Number(semanticKgSeconds) * 1000)}`,
+          figureSeconds == null ? null : `Figures ~${formatDuration(Number(figureSeconds) * 1000)}`,
+        ]
+          .filter(Boolean)
+          .join(' + ');
         const msg = [
           `Index estimate for "${rid}"`,
           `Files: ${formatNumber(Number(estimate.total_files || 0))} • Size: ${formatBytes(
@@ -870,12 +909,8 @@ export function IndexingSubtab() {
           }, skip_dense=${estimate.skip_dense ? 'yes' : 'no'})`,
           `Cost (est): ${cost} • Time (est): ${time}`,
           ...(costBreakdown ? [`Cost breakdown: ${costBreakdown}`] : []),
-          ...(semanticKgSeconds != null
-            ? [
-                `Time breakdown (est): Embed ${
-                  embedSecondsApprox == null ? 'N/A' : `~${formatDuration(embedSecondsApprox * 1000)}`
-                } + Semantic KG ~${formatDuration(Number(semanticKgSeconds) * 1000)}`,
-              ]
+          ...(semanticKgSeconds != null || figureSeconds != null
+            ? [`Time breakdown (est): ${timeBreakdown}`]
             : []),
         ].join('\n');
 
@@ -3309,7 +3344,11 @@ export function IndexingSubtab() {
                 )})`
               : ''}
             {indexEstimate.figure_description_cost_usd != null
-              ? ` + Figures ≤ ${formatCurrency(Number(indexEstimate.figure_description_cost_usd || 0))}`
+              ? ` + Figures ≤ ${formatCurrency(Number(indexEstimate.figure_description_cost_usd || 0))}${
+                  indexEstimate.estimated_figures != null
+                    ? ` (~${formatNumber(Number(indexEstimate.estimated_figures))} figures)`
+                    : ''
+                }`
               : ''}
             {' • '}
             {indexEstimate.estimated_seconds_low != null && indexEstimate.estimated_seconds_high != null
@@ -3317,18 +3356,7 @@ export function IndexingSubtab() {
                   Number(indexEstimate.estimated_seconds_high) * 1000
                 )}`
               : 'N/A'}
-            {indexEstimate.estimated_seconds_semantic_kg != null &&
-            indexEstimate.estimated_seconds_low != null &&
-            indexEstimate.estimated_seconds_high != null
-              ? ` (Embed ~${formatDuration(
-                  Math.max(
-                    0,
-                    ((Number(indexEstimate.estimated_seconds_low) + Number(indexEstimate.estimated_seconds_high)) / 2 -
-                      Number(indexEstimate.estimated_seconds_semantic_kg)) *
-                      1000
-                  )
-                )} + KG ~${formatDuration(Number(indexEstimate.estimated_seconds_semantic_kg) * 1000)})`
-              : ''}
+            {estimateTimeBreakdown ? ` (${estimateTimeBreakdown})` : ''}
             {' '}
             • {formatNumber(Number(indexEstimate.total_files || 0))} files • {formatBytes(Number(indexEstimate.total_size_bytes || 0))}
           </div>

@@ -6,10 +6,13 @@ from pathlib import Path
 
 from server.api.index import (
     _FIGURE_INPUT_TOKENS,
+    _FIGURE_SECONDS_PER_CALL,
     _FIGURES_PER_PAGE_HEURISTIC,
     _count_pdf_pages,
     _estimate_figure_description_cost_usd,
+    _estimate_figure_seconds,
     _estimate_figures,
+    _figure_seconds_assumption,
 )
 from server.models.index import IndexEstimate
 from server.models.tribrid_config_model import TriBridConfig
@@ -114,3 +117,63 @@ def test_estimate_figures_is_none_when_describe_is_off_or_no_pdfs() -> None:
     cfg2 = TriBridConfig()
     cfg2.indexing.figures.enabled = True
     assert _estimate_figures(cfg2, []) == (None, None)
+
+
+def test_the_per_call_figure_duration_is_the_measured_one() -> None:
+    """Pins the calibration, not just its arithmetic.
+
+    Measured on the Apollo 11 run: about 140 figures added roughly 12 minutes of wall clock at
+    ``concurrency=4``, i.e. ~5.1 s per figure of wall time, so ~20 s per vision call. Before
+    this the dialog quoted 6m51s-21m29s for a run that took 32 minutes, about 12 of them
+    vision calls -- the figure phase was simply absent from the time estimate.
+    """
+    assert _FIGURE_SECONDS_PER_CALL == 20.0
+
+
+def test_figure_seconds_divide_the_calls_across_the_configured_concurrency() -> None:
+    # The two-page fixture rounds to one figure; one 20 s call, four in flight -> 5 s.
+    assert _estimate_figure_seconds(figures=1, concurrency=4) == 5.0
+    assert _estimate_figure_seconds(figures=140, concurrency=4) == 700.0
+    # Serial description is the full per-call cost.
+    assert _estimate_figure_seconds(figures=3, concurrency=1) == 60.0
+
+
+def test_no_figures_takes_no_time_and_a_broken_concurrency_never_divides_by_zero() -> None:
+    assert _estimate_figure_seconds(figures=0, concurrency=4) == 0.0
+    assert _estimate_figure_seconds(figures=-5, concurrency=4) == 0.0
+    assert _estimate_figure_seconds(figures=2, concurrency=0) == 40.0
+
+
+def test_the_figure_time_assumption_names_the_count_the_rate_and_the_concurrency() -> None:
+    """The dialog's assumptions are the only place the operator can see WHY the estimate moved
+    when they turned figures on, so all three inputs have to appear.
+    """
+    line = _figure_seconds_assumption(figures=140, concurrency=4)
+    assert "140" in line
+    assert "20" in line
+    assert "4" in line
+
+
+def test_the_estimate_model_carries_the_figure_time_field() -> None:
+    fields = IndexEstimate.model_fields
+    assert "estimated_seconds_figures" in fields
+    assert (fields["estimated_seconds_figures"].description or "").strip()
+    assert fields["estimated_seconds_figures"].default is None
+
+
+def test_the_two_page_fixture_prices_and_times_one_figure_together() -> None:
+    """The count that drives the cost is the count that drives the time: one heuristic, both
+    numbers, so the dialog can never quote a figure price for a run it says takes no longer.
+    """
+    cfg = TriBridConfig()
+    cfg.indexing.figures.enabled = True
+    cfg.indexing.figures.describe = True
+    cfg.indexing.figures.concurrency = 4
+    estimated_figures, figure_cost = _estimate_figures(cfg, [Path(apollo_figure_pages())])
+    assert estimated_figures == 1 and figure_cost is not None and figure_cost > 0
+    assert (
+        _estimate_figure_seconds(
+            figures=estimated_figures, concurrency=cfg.indexing.figures.concurrency
+        )
+        == 5.0
+    )

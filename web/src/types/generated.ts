@@ -3900,6 +3900,8 @@ export interface IndexEstimate {
   estimated_seconds_high?: number | null;
   /** Estimated GraphRAG semantic phase time (seconds) when enabled. */
   estimated_seconds_semantic_kg?: number | null;
+  /** Estimated figure-description phase time (seconds) when indexing.figures is enabled: the estimated figure count at ~20 s per vision call, divided by indexing.figures.concurrency. */
+  estimated_seconds_figures?: number | null;
   /** Human-readable assumptions used for the estimate */
   assumptions?: string[];
 }

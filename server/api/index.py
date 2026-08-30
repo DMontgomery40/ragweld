@@ -1376,6 +1376,30 @@ def _estimate_figures(cfg: TriBridConfig, pdf_paths: list[Path]) -> tuple[int | 
     return estimated_figures, figure_cost
 
 
+# Measured on the Apollo 11 run: about 140 figures added roughly 12 minutes of wall clock at
+# concurrency 4 (~5.1 s per figure of wall time), so ~20 s per vision call. Before this the
+# figure phase was absent from the time estimate entirely: the dialog quoted 6m51s-21m29s for a
+# run that took 32 minutes, about 12 of them vision calls.
+_FIGURE_SECONDS_PER_CALL = 20.0
+
+
+def _estimate_figure_seconds(*, figures: int, concurrency: int) -> float:
+    """Wall-clock seconds the figure-description phase adds, at the configured concurrency."""
+    count = max(0, int(figures or 0))
+    if count <= 0:
+        return 0.0
+    workers = max(1, int(concurrency or 1))
+    return float(count) * _FIGURE_SECONDS_PER_CALL / float(workers)
+
+
+def _figure_seconds_assumption(*, figures: int, concurrency: int) -> str:
+    """Why the estimate moved when figures were turned on: the count, the rate and the parallelism."""
+    return (
+        f"figure descriptions≈{max(0, int(figures or 0)):,} vision calls at "
+        f"{_FIGURE_SECONDS_PER_CALL:g}s each, {max(1, int(concurrency or 1))} in parallel"
+    )
+
+
 def _estimate_semantic_kg_seconds(
     *,
     provider: str,
@@ -3476,6 +3500,7 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
     est_low: float | None = None
     est_high: float | None = None
     estimated_seconds_semantic_kg: float | None = None
+    estimated_seconds_figures: float | None = None
     assumptions: list[str] = [
         f"tokens≈bytes/{_EST_BYTES_PER_TOKEN:g}",
         "time range is a heuristic (very rough)",
@@ -3534,6 +3559,19 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
             assumptions.append(
                 f"semantic_graphrag≈{semantic_kg_chunks:,} chunks using {semantic_provider_for_time or 'unknown'}"
             )
+        if estimated_figures is not None:
+            # Same figure count that priced the cost line above: one heuristic, both numbers,
+            # so the dialog can never quote a figure price for a run it says takes no longer.
+            figure_concurrency = int(cfg.indexing.figures.concurrency)
+            estimated_seconds_figures = _estimate_figure_seconds(
+                figures=estimated_figures, concurrency=figure_concurrency
+            )
+            base_total_seconds += float(estimated_seconds_figures)
+            assumptions.append(
+                _figure_seconds_assumption(
+                    figures=estimated_figures, concurrency=figure_concurrency
+                )
+            )
         est_low = max(
             0.0, (base_total_seconds * _EST_RANGE_LOW_MULT) + float(_EST_OVERHEAD_SECONDS)
         )
@@ -3562,6 +3600,7 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
         estimated_seconds_low=est_low,
         estimated_seconds_high=est_high,
         estimated_seconds_semantic_kg=estimated_seconds_semantic_kg,
+        estimated_seconds_figures=estimated_seconds_figures,
         assumptions=assumptions,
     )
 
