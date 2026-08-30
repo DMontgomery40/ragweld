@@ -190,9 +190,30 @@ test('Reranker Training Studio: an out-of-range epoch count clamps to the Pydant
 
   expect(patchedBody).toContain('"reranker_train_epochs":20');
   for (const body of allPatchBodies) {
-    expect(body, 'no PATCH ever carried the raw out-of-range value').not.toContain('999');
+    expect(body, 'no PATCH ever carried the raw out-of-range value').not.toContain('"reranker_train_epochs":999');
   }
 
   const persisted = await configSection<{ reranker_train_epochs: number }>(request, 'training');
   expect(persisted.reranker_train_epochs).toBe(20);
+});
+
+test('Storage Calculator: a typed free-form value survives blur unchanged, no step-snapping', async ({ page }) => {
+  // Not config-bound (a local calculator input, requirement 1) -- no corpus scoping needed.
+  await page.goto('dashboard?subtab=storage', { waitUntil: 'domcontentloaded' });
+  const field = page.getByTestId('storage-calc-hydration');
+  await expect(field).toBeVisible();
+
+  // M1: these 16 fields kept their old `step` literals when migrated to NumberField, whose
+  // clamp *snaps* to step (origin = min), not just clamps -- so a typed 25 silently committed
+  // 30 (step=10) even though the value was already inside [0,100]. `step` is dropped from all
+  // 16 free-form calculator inputs; NumberField still clamps to min/max, it just no longer
+  // snaps a value that was never out of range.
+  await field.fill('25');
+  await field.press('Tab');
+  await expect(field).toHaveValue('25');
+
+  // min/max clamping itself is unaffected by dropping step: still refuses to exceed the bound.
+  await field.fill('150');
+  await field.press('Tab');
+  await expect(field).toHaveValue('100');
 });
