@@ -20,7 +20,6 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { Corpus } from '@/types/generated';
 import { useRepoStore } from '@/stores/useRepoStore';
-import { useConfig } from '@/hooks';
 import { confirmDialog } from '@/components/ui/confirmDialog';
 
 type CorpusRegistryProps = {
@@ -95,10 +94,6 @@ export function CorpusRegistry({ isOpen, onClose }: CorpusRegistryProps) {
   const [newDescription, setNewDescription] = useState('');
   const [createError, setCreateError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
-  // Recall is written and re-created by the chat runtime itself, so it is listed but not
-  // deletable here. Its id is config, not a constant hard-coded into the UI.
-  const { config } = useConfig();
-  const runtimeManagedId = String(config?.chat?.recall?.default_corpus_id || '').trim();
 
   useEffect(() => {
     if (isOpen && !initialized && !loading) {
@@ -225,7 +220,10 @@ export function CorpusRegistry({ isOpen, onClose }: CorpusRegistryProps) {
               const corpusId = String(corpus.corpus_id || '');
               const isActive =
                 corpusId === activeRepo || corpus.slug === activeRepo || corpus.name === activeRepo;
-              const isInternal = Boolean(runtimeManagedId) && corpusId === runtimeManagedId;
+              // Runtime-managed corpora (Recall) are re-created by the server, so they are
+              // listed but not deletable here. `internal` is the registry's own flag, the
+              // same one Recent index runs and the unindexed-corpus cleanup filter on.
+              const isInternal = Boolean(corpus.internal);
               return (
                 <div
                   key={corpusId}
