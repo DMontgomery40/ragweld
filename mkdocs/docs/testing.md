@@ -92,5 +92,55 @@ test('fusion weight slider updates config', async ({ page }) => {
 - [x] Configure LLM credentials in `.env`
 - [ ] Convert legacy mocked tests before editing feature areas
 
+## Exhaustive e2e: real workflows, zero mocks
+
+The Playwright suite under `web/tests/e2e/exhaustive/` exercises whole operator workflows against the live stack — real corpus provisioning, real indexing, real retrieval — with no route mocking, following the same zero-mock discipline as the pytest side. Two shared helpers make these specs cheap to write and honest by construction:
+
+| Helper | What it does | Why it matters |
+|--------|--------------|----------------|
+| `corpus_fixture.ts` (`provisionExhaustiveCorpus`) | Creates a uniquely-named temp corpus, patches per-corpus config sections, optionally runs a real index (`POST /api/index` with `force_reindex=true`), and disposes everything afterward — even when a test fails | Specs cannot leak corpora into the operator's registry or fight over a shared corpus id |
+| `chat_seed.ts` (`seedAnswerFromSearch`) | Runs a real `POST /api/search` against the indexed corpus, then seeds a chat thread in `localStorage` whose assistant message carries exactly those matches as sources | Citation-rendering specs assert on real retrieval evidence without depending on a paid gateway model being reachable |
+
+*Concept diagram (the seeded-citation mechanism only — the full fused retrieval pipeline is on the [generated retrieval-pipeline page](reference/architecture/retrieval-pipeline.md)):*
+
+```mermaid
+flowchart LR
+  subgraph s_fixture["Fixture (web/tests/e2e/exhaustive)"]
+    CF["corpus_fixture.ts\nprovisionExhaustiveCorpus"]
+    IDX["POST /api/index\nforce_reindex=true"]
+    ST["GET /api/index/{corpus_id}/status\nwait for complete"]
+    CS["chat_seed.ts\nseedAnswerFromSearch"]
+    CF --> IDX
+    IDX --> ST
+  end
+  subgraph s_seed["Seeded thread (localStorage)"]
+    SEARCH["POST /api/search\ncache_mode=bypass"]
+    MATCHES["ChunkMatch[]\nprovenance + metadata"]
+    THREAD["ragweld-chat-threads:v2\nassistant message sources = matches"]
+    SEARCH --> MATCHES
+    MATCHES --> THREAD
+  end
+  subgraph s_spec["Assertions"]
+    UI["Chat citations,\nfigure badges, source viewer"]
+  end
+  ST --> SEARCH
+  CS --> SEARCH
+  THREAD --> UI
+```
+
+### The figure workflow spec (`figure_workflow.spec.ts`)
+
+A serial-mode spec that drives [figure descriptions](manual/indexing.md) end to end over one temp corpus (the Apollo two-page fixture PDF plus the markdown acceptance fixture, so the citation list is a genuinely mixed list of figure chunks and ordinary text chunks):
+
+- [x] Figures enabled from the **RAG → Indexing** tab (Figures & Vision card), persisted per corpus, and the operator's global config left untouched
+- [x] `POST /api/index/estimate` prices the vision calls (`Figures ≤ $… (~N)`) before any run starts, and cancelling the dialog starts no run
+- [x] A real index describes the figures; the replayed run log (via the `indexing-show-logs` and `live-terminal-output` test ids) reports `figures_described ≥ 1`
+- [x] Figure citations carry the **Figure** badge, thumbnails box the figure region, and clicking one opens the page viewer with the **Figure description** panel
+- [x] The badge is conditional: ordinary citations in the same list carry none
+- [x] GUI contract: numeric fields clamp to Pydantic bounds, commit on blur (not per keystroke), Escape abandons the edit without emitting a PATCH, and two nested `indexing.figures.*` edits inside the debounce window deep-merge into one PATCH
+
+!!! tip "Long-running indexes need an explicit deadline"
+    `indexCorpus` in `corpus_fixture.ts` accepts a `timeoutMs` override. A Docling conversion of scanned pages plus per-figure vision calls can take tens of minutes on a loaded box — `figure_workflow.spec.ts` passes a 30-minute deadline explicitly rather than relying on the shared `EXHAUSTIVE_INDEX_TIMEOUT_MS` env default (5 minutes), so the spec cannot fail for whoever forgets the env var.
+
 ??? info "Artifacts"
     Temporary feature tests and results go in `.tests/`; permanent tests go under `tests/`.

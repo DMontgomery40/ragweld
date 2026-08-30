@@ -192,6 +192,9 @@ Enable it per corpus:
 !!! warning "Vision costs are per figure"
     A dense scanned PDF can hold hundreds of figures. Run `/api/index/estimate` first — the estimate includes the figure cost before you commit. There is no per-file figure cap: bound cost with `min_area_fraction`, `skip_classes`, and `max_completion_tokens`, and point hard scanned schematics at a stronger vision alias per corpus.
 
+!!! note "Automated end-to-end coverage"
+    The whole figure workflow is exercised by `web/tests/e2e/exhaustive/figure_workflow.spec.ts` against a live stack with zero mocking: figures enabled from this very tab, estimate pricing (including the "cancelling starts no run" guarantee), a real index whose replayed run log reports `figures_described`, badged citations with boxed thumbnails, the source viewer's **Figure description** panel, and the field-clamping / commit-on-blur / Escape / nested-PATCH deep-merge behavior of these controls. See [Testing](../testing.md) for how the exhaustive suite is wired.
+
 ### How the estimate prices figures
 
 `POST /api/index/estimate` counts the PDF pages in scope (real page counts via pypdfium2, skipping files it cannot open), multiplies by the shipped heuristic of **0.4 describable figures per page** (rounded; omitted entirely when it rounds to zero), and prices the result from the model catalog:
