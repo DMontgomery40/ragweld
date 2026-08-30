@@ -209,7 +209,7 @@ export function ModelPicker({
 
       {/* Show model info if available */}
       {!customMode && value && (
-        <ModelInfo model={providerModels.find(m => m.model === value)} />
+        <ModelInfo model={providerModels.find(m => m.model === value)} componentType={componentType} />
       )}
     </div>
   );
@@ -217,14 +217,19 @@ export function ModelPicker({
 
 /**
  * ModelInfo - Shows additional model details
+ *
+ * The context window is an LLM/chat property; for a reranker it is not a
+ * meaningful knob (a reranker scores query/passage pairs, it does not consume a
+ * long generation context), so it is not shown for RERANK.
  */
-function ModelInfo({ model }: { model?: Model }) {
+function ModelInfo({ model, componentType }: { model?: Model; componentType: 'EMB' | 'RERANK' }) {
   if (!model) return null;
+  const showContext = componentType !== 'RERANK' && model.context != null;
 
   return (
     <div
       style={{
-        fontSize: '11px',
+        fontSize: '11.5px',
         color: 'var(--fg-muted)',
         marginTop: '4px',
         display: 'flex',
@@ -232,7 +237,7 @@ function ModelInfo({ model }: { model?: Model }) {
       }}
     >
       {model.dimensions && <span>Dimensions: {model.dimensions}</span>}
-      {model.context && <span>Context: {model.context.toLocaleString()} tokens</span>}
+      {showContext && <span>Context: {model.context!.toLocaleString()} tokens</span>}
       {model.embed_per_1k != null && (
         <span>Cost: ${model.embed_per_1k.toFixed(5)}/1k tokens</span>
       )}
