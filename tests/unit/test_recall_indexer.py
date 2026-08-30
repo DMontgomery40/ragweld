@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -17,8 +17,8 @@ from server.models.chat_config import RecallConfig
 def test_build_recall_document_turn_strategy() -> None:
     cfg = RecallConfig(chunking_strategy="turn")
     conversation_id = "conv_123"
-    ts0 = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
-    ts1 = datetime(2026, 1, 1, 0, 1, 0, tzinfo=timezone.utc)
+    ts0 = datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC)
+    ts1 = datetime(2026, 1, 1, 0, 1, 0, tzinfo=UTC)
 
     messages = [
         Message(role="user", content="Hello world. How are you?", timestamp=ts0),
@@ -51,7 +51,7 @@ def test_build_recall_document_turn_strategy() -> None:
 def test_build_recall_document_sentence_strategy() -> None:
     cfg = RecallConfig(chunking_strategy="sentence")
     conversation_id = "conv_abc"
-    ts = datetime(2026, 2, 2, 12, 0, 0, tzinfo=timezone.utc)
+    ts = datetime(2026, 2, 2, 12, 0, 0, tzinfo=UTC)
 
     messages = [
         Message(role="user", content="Hello world. How are you?", timestamp=ts),
@@ -100,7 +100,7 @@ def test_every_chunk_line_range_addresses_its_own_text_in_the_document(
     before this, `start_line` was a counter with no document behind it at all.
     """
     cfg = RecallConfig(chunking_strategy=strategy)
-    ts = datetime(2026, 3, 3, 9, 0, 0, tzinfo=timezone.utc)
+    ts = datetime(2026, 3, 3, 9, 0, 0, tzinfo=UTC)
     messages = [
         Message(role="user", content=content, timestamp=ts),
         Message(role="assistant", content="Understood.\nHere is the answer.", timestamp=ts),
@@ -123,7 +123,7 @@ def test_every_chunk_line_range_addresses_its_own_text_in_the_document(
 
 def test_the_document_records_every_message_role_and_timestamp() -> None:
     cfg = RecallConfig(chunking_strategy="turn")
-    ts = datetime(2026, 4, 4, 8, 30, 0, tzinfo=timezone.utc)
+    ts = datetime(2026, 4, 4, 8, 30, 0, tzinfo=UTC)
     messages = [
         Message(role="user", content="What is the calibration interval?", timestamp=ts),
         Message(role="assistant", content="Every 14 days.", timestamp=ts),
@@ -139,7 +139,7 @@ def test_the_document_records_every_message_role_and_timestamp() -> None:
 
 def test_a_conversation_with_no_content_produces_no_document() -> None:
     cfg = RecallConfig(chunking_strategy="turn")
-    ts = datetime(2026, 4, 4, 8, 30, 0, tzinfo=timezone.utc)
+    ts = datetime(2026, 4, 4, 8, 30, 0, tzinfo=UTC)
     doc = build_recall_document(
         conversation_id="conv-empty",
         messages=[Message(role="user", content="   ", timestamp=ts)],
@@ -155,7 +155,7 @@ def test_a_conversation_with_no_content_produces_no_document() -> None:
 def test_a_conversation_id_that_could_escape_the_corpus_is_refused(conversation_id: str) -> None:
     """Recall conversation ids come straight from the client and now name a file on disk."""
     cfg = RecallConfig(chunking_strategy="turn")
-    ts = datetime(2026, 5, 5, 0, 0, 0, tzinfo=timezone.utc)
+    ts = datetime(2026, 5, 5, 0, 0, 0, tzinfo=UTC)
     with pytest.raises(ValueError):
         build_recall_document(
             conversation_id=conversation_id,
