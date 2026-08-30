@@ -204,9 +204,9 @@ across those runs; a single value means all three agreed.
 | content | page_hit@5 | 5/10 (4–5) | **8/10 (8–9)** |
 | content | precise_page_hit@3 | **0/10** | **8/10** |
 | content | figure_chunk@3 | 0/10 | **8/10** |
-| prose | page_hit@3 | 4/5 | 3/5 (3–4) |
-| prose | page_hit@5 | 4/5 | 3/5 (3–4) |
-| prose | precise_page_hit@3 | 4/5 | 3/5 (3–4) |
+| prose | page_hit@3 | 4/5 | 3–4/5 |
+| prose | page_hit@5 | 4/5 | 3–4/5 |
+| prose | precise_page_hit@3 | 4/5 | 3–4/5 |
 | prose | figure_chunk@3 | 0/5 | 0/5 |
 | overall | page_hit@3 | 11/25 (10–12) | 19/25 (19–20) |
 | overall | page_hit@5 | 16/25 (14–16) | 20/25 (20–21) |
@@ -224,11 +224,13 @@ The plan's bar was "figure questions improve and prose does not regress".
 - **Prose is flat, with one item worth naming.** Three of the five prose items hit at ranks 1–3 in all six
   runs, before and after. A fourth — the crew-roster question grounded on the Summary page — missed in all
   six runs, before *and* after, so it is a hard question rather than a regression. The fifth, the Mobile
-  Quarantine Facility arrival time (p272), was a stable top-3 hit in all three before-runs but in one of the
-  three after-runs dropped out of the top 5 entirely (that run returned the Summary's recovery paragraphs on
-  pages 13–14 instead); it hit at rank ≤ 3 in the other two. So this is a one-item, one-run flip, not the
-  "no distinguishable change" a flat 4/5 would suggest. With n = 5 a genuine small prose regression cannot be
-  separated from noise — a limitation of the control group's size, stated rather than papered over.
+  Quarantine Facility arrival time (p272), was a stable top-3 hit in all three before-runs; **in after-run 1
+  of 3 it dropped out of the top 5 entirely** (that run returned the Summary's recovery paragraphs on pages
+  13–14 at ranks 1–3), and it hit at rank ≤ 3 in after-runs 2 and 3. The prose column above is therefore
+  written as the range `3–4/5`: 4/5 in two of three runs, 3/5 in the one run carrying that flip. So this is a
+  one-item, one-run flip, not the "no distinguishable change" a flat 4/5 would suggest. With n = 5 a genuine
+  small prose regression cannot be separated from noise — a limitation of the control group's size, stated
+  rather than papered over.
 
 A second, unlooked-for improvement shows in the chunk store: **chunk page spans collapsed.** Before the
 re-index, chunks spanned up to 12 pages (63 of the baseline's 125 retrieved chunks spanned 1 page, 31 spanned

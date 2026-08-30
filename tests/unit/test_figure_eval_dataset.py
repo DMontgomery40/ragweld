@@ -9,6 +9,7 @@ page spans, and the rank-4 boundary between @3 and @5.
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
 from pathlib import Path
@@ -18,6 +19,7 @@ import pytest
 from pydantic import ValidationError
 
 from scripts.eval_figure_grounding import (
+    _top_k,
     item_group,
     match_chunk_kind,
     match_covers_page,
@@ -29,6 +31,7 @@ from scripts.eval_figure_grounding import (
     summarize,
 )
 from server.models.eval_figures import FigureEvalDataset, FigureEvalItem
+from server.models.index import ChunkProvenance
 
 DATASET_PATH = (
     Path(__file__).resolve().parents[2] / "data" / "eval_datasets" / "nasa-apollo-11-figures.json"
@@ -171,7 +174,13 @@ def _match(
     summary: str | None = None,
     provenance: bool = True,
 ) -> dict[str, Any]:
-    """A match shaped like a real ``ChunkMatch`` serialization."""
+    """A match shaped like a real ``ChunkMatch`` serialization.
+
+    The provenance block is a *valid* ``ChunkProvenance`` serialization, not a convenient
+    approximation: the real model requires both pages set or both ``None``, and ``regions``
+    non-empty exactly when ``page_start`` is set. ``test_match_fixture_is_a_valid_chunk_provenance``
+    validates it through the model so the fixture cannot drift into a shape search never returns.
+    """
     metadata: dict[str, Any] = {"corpus_id": "nasa-apollo-11"}
     if chunk_kind is not None:
         metadata["chunk_kind"] = chunk_kind
@@ -179,13 +188,32 @@ def _match(
         metadata["figure"] = {"kind": "chart", "summary": summary}
     match: dict[str, Any] = {"chunk_id": chunk_id, "score": 0.9, "metadata": metadata}
     if provenance:
+        regions = (
+            []
+            if page_start is None
+            else [
+                {"page": page, "left": 0.1, "top": 0.2, "right": 0.9, "bottom": 0.8}
+                for page in range(page_start, (page_end if page_end is not None else page_start) + 1)
+            ]
+        )
         match["provenance"] = {
             "extraction": "docling",
             "page_start": page_start,
             "page_end": page_end,
-            "regions": [],
+            "regions": regions,
         }
     return match
+
+
+def test_match_fixture_is_a_valid_chunk_provenance() -> None:
+    """Every provenance shape the scorer tests against must be one the real model accepts."""
+    for match in (
+        _match("paged", page_start=72, page_end=72),
+        _match("spanning", page_start=72, page_end=74),
+        _match("direct", page_start=None, page_end=None),
+    ):
+        ChunkProvenance.model_validate(match["provenance"])
+    assert "provenance" not in _match("none", provenance=False)
 
 
 def test_page_span_of_a_match_with_no_provenance_is_empty() -> None:
@@ -357,3 +385,12 @@ def test_summarize_reports_rates_and_the_raw_counts_behind_them() -> None:
 
 def test_summarize_of_no_items_does_not_divide_by_zero() -> None:
     assert summarize([])["page_hit_at_3"] == 0.0
+
+
+def test_top_k_below_five_is_rejected() -> None:
+    """``page_hit@5`` reads rank 5; a smaller window would silently make it equal ``page_hit@3``."""
+    for good in ("5", "10", "20"):
+        assert _top_k(good) == int(good)
+    for bad in ("4", "3", "1", "0"):
+        with pytest.raises(argparse.ArgumentTypeError):
+            _top_k(bad)

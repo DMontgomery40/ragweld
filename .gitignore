@@ -118,9 +118,14 @@ adapters/
 data/*
 !data/models.json
 !data/glossary.json
-# Committed eval datasets. The directory itself must be re-included: `data/*` excludes it,
-# and git does not descend into an excluded directory, so a file-level negation alone is inert.
+# Committed eval datasets, named one by one. The directory must be re-included first because
+# `data/*` excludes it and git does not descend into an excluded directory, which would make a
+# file-level negation inert; `data/eval_datasets/*` then re-excludes its contents, because the
+# runtime writes published datasets here as `<corpus_id>.json` (server/api/dataset.py,
+# server/synthetic/publish.py) and those must stay ignored.
 !data/eval_datasets/
+data/eval_datasets/*
+!data/eval_datasets/nasa-apollo-11-figures.json
 *.db
 *.sqlite
 *.sqlite3

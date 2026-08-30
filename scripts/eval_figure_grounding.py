@@ -218,7 +218,14 @@ def search(
     except urllib.error.URLError as exc:
         raise SystemExit(f"search unreachable at {base_url}: {exc.reason}") from exc
     matches = body.get("matches")
-    return list(matches) if isinstance(matches, list) else []
+    if not isinstance(matches, list):
+        # Treating an unexpected body as "no matches" would score every item a miss and
+        # report a plausible-looking zero instead of a broken response contract.
+        raise SystemExit(
+            f"search response for {query!r} has no 'matches' list "
+            f"(got {type(matches).__name__}; body keys: {sorted(body)})"
+        )
+    return list(matches)
 
 
 def run(
@@ -265,11 +272,26 @@ def run(
     }
 
 
+def _top_k(raw: str) -> int:
+    """``--top-k`` must cover the deepest rank any metric reads."""
+    value = int(raw)
+    if value < 5:
+        raise argparse.ArgumentTypeError(
+            f"--top-k must be >= 5 so page_hit@5 is a real measurement, not a copy of page_hit@3 (got {value})"
+        )
+    return value
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", type=Path, default=DEFAULT_DATASET)
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
-    parser.add_argument("--top-k", type=int, default=5)
+    parser.add_argument(
+        "--top-k",
+        type=_top_k,
+        default=5,
+        help="matches to request; must be >= 5 or page_hit@5 silently collapses onto page_hit@3",
+    )
     parser.add_argument(
         "--cache-mode",
         default="bypass",
