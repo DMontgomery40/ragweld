@@ -81,13 +81,26 @@ export async function patchCorpusConfigSection(
   if (!response.ok()) await failWithBody(`PATCH /api/config/${section} for ${corpusId}`, response);
 }
 
-/** Run a real index over the corpus path and wait for the persisted run to complete. */
-export async function indexCorpus(request: APIRequestContext, corpusId: string, corpusPath: string): Promise<void> {
+/**
+ * Run a real index over the corpus path and wait for the persisted run to complete.
+ *
+ * `timeoutMs` overrides the shared deadline (`EXHAUSTIVE_INDEX_TIMEOUT_MS`, default 5 min) for
+ * a spec whose run is legitimately longer — a Docling conversion plus per-figure vision calls
+ * can take tens of minutes when another figure-enabled index holds the shared converter, and a
+ * spec that only passes when the runner remembers an env var is a trap for the next person.
+ */
+export async function indexCorpus(
+  request: APIRequestContext,
+  corpusId: string,
+  corpusPath: string,
+  opts: { timeoutMs?: number } = {}
+): Promise<void> {
+  const timeoutMs = opts.timeoutMs ?? INDEX_TIMEOUT_MS;
   const started = await request.post(`${API_BASE}/index`, {
     data: { corpus_id: corpusId, repo_path: corpusPath, force_reindex: true },
   });
   if (!started.ok()) await failWithBody(`POST /api/index for ${corpusId}`, started);
-  const deadline = Date.now() + INDEX_TIMEOUT_MS;
+  const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const statusResp = await request.get(`${API_BASE}/index/${encodeURIComponent(corpusId)}/status`);
     if (!statusResp.ok()) await failWithBody(`GET /api/index/${corpusId}/status`, statusResp);
@@ -98,7 +111,7 @@ export async function indexCorpus(request: APIRequestContext, corpusId: string, 
     }
     await sleep(2000);
   }
-  throw new Error(`indexing ${corpusId} did not complete within ${INDEX_TIMEOUT_MS} ms`);
+  throw new Error(`indexing ${corpusId} did not complete within ${timeoutMs} ms`);
 }
 
 /**
@@ -109,7 +122,7 @@ export async function indexCorpus(request: APIRequestContext, corpusId: string, 
  */
 export async function provisionExhaustiveCorpus(
   request: APIRequestContext,
-  opts: { index?: boolean; corpusPath?: string } = {}
+  opts: { index?: boolean; corpusPath?: string; indexTimeoutMs?: number } = {}
 ): Promise<ExhaustiveCorpus> {
   const corpusId = uniqueCorpusId();
   // Default: the Aurora acceptance fixture. A spec may point at its own materialized directory
@@ -162,7 +175,7 @@ export async function provisionExhaustiveCorpus(
     await patchCorpusConfigSection(request, corpusId, 'training', {
       tribrid_triplets_path: path.posix.join(runDir, 'triplets.jsonl'),
     });
-    if (opts.index) await indexCorpus(request, corpusId, corpusPath);
+    if (opts.index) await indexCorpus(request, corpusId, corpusPath, { timeoutMs: opts.indexTimeoutMs });
   } catch (error) {
     try {
       await dispose();

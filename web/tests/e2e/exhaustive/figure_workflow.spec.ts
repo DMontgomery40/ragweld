@@ -15,9 +15,11 @@ import { copyFileSync, cpSync, mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { expect, test, type APIRequestContext, type Locator, type Page, type Request } from '@playwright/test';
+import { seedAnswerFromSearch } from './chat_seed';
 import {
   API_BASE,
   acceptanceCorpusPath,
+  indexCorpus,
   patchCorpusConfigSection,
   provisionExhaustiveCorpus,
   type ExhaustiveCorpus,
@@ -43,11 +45,11 @@ const FIGURE_QUESTION =
 const CITATION_TOP_K = 12;
 
 /**
- * Deadline for the one real index. `corpus_fixture.indexCorpus` waits 5 minutes by default
- * (`EXHAUSTIVE_INDEX_TIMEOUT_MS`), which is shorter than a Docling conversion of scanned
- * pages plus the per-figure vision calls takes on a loaded box — a measured 10-minute wait
- * was not enough while a production re-index held the CPU. The index is still driven through
- * the API (not the "Index Now" button) so this spec owns force_reindex and completion.
+ * Deadline handed to `corpus_fixture.indexCorpus`. Its own default is 5 minutes
+ * (`EXHAUSTIVE_INDEX_TIMEOUT_MS`), shorter than a Docling conversion of scanned pages plus the
+ * per-figure vision calls takes on a loaded box — a measured 10-minute wait was not enough
+ * while a production re-index held the shared converter. Passed explicitly rather than set in
+ * the environment so the spec cannot fail for whoever forgets the env var.
  */
 const INDEX_DEADLINE_MS = 30 * 60 * 1000;
 
@@ -66,13 +68,6 @@ type FigureSettings = {
   max_completion_tokens: number;
   concurrency: number;
   timeout_s: number;
-};
-
-type SeededMatch = {
-  file_path: string;
-  content: string;
-  metadata?: Record<string, unknown> | null;
-  provenance?: { extraction?: string | null; page_start?: number | null; regions?: { page: number }[] } | null;
 };
 
 let corpus: ExhaustiveCorpus | null = null;
@@ -102,30 +97,6 @@ async function latestRunFingerprint(request: APIRequestContext, corpusId: string
   if (!response.ok()) return `status=${response.status()}`;
   const run = (await response.json()) as { run_id?: string };
   return `status=200 run_id=${String(run.run_id || '')}`;
-}
-
-/** POST /api/index with force_reindex and poll the persisted run until it leaves "indexing". */
-async function startIndexAndWait(request: APIRequestContext, corpusId: string, corpusPath: string): Promise<void> {
-  const started = await request.post(`${API_BASE}/index`, {
-    data: { corpus_id: corpusId, repo_path: corpusPath, force_reindex: true },
-  });
-  if (!started.ok()) {
-    throw new Error(`POST /api/index -> ${started.status()} ${(await started.text()).slice(0, 300)}`);
-  }
-  const deadline = Date.now() + INDEX_DEADLINE_MS;
-  while (Date.now() < deadline) {
-    const response = await request.get(`${API_BASE}/index/${encodeURIComponent(corpusId)}/status`);
-    if (!response.ok()) {
-      throw new Error(`GET /api/index/${corpusId}/status -> ${response.status()}`);
-    }
-    const status = (await response.json()) as { status?: string; error?: string | null };
-    if (status.status === 'complete') return;
-    if (status.status === 'error' || status.status === 'cancelled') {
-      throw new Error(`indexing ${corpusId} ended with status=${status.status}: ${status.error || 'no error text'}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 5_000));
-  }
-  throw new Error(`indexing ${corpusId} did not complete within ${INDEX_DEADLINE_MS} ms`);
 }
 
 /**
@@ -158,66 +129,6 @@ async function gotoChat(page: Page, corpusId: string): Promise<void> {
   await page.goto(`chat?corpus=${encodeURIComponent(corpusId)}`, { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('.topbar', { timeout: 90_000 });
   await page.waitForSelector('#chat-input', { timeout: 90_000 });
-}
-
-/**
- * Seed a chat thread whose assistant message carries the REAL retrieval results for `query`
- * (POST /api/search against the indexed corpus). Mirrors `seedAnswerFromSearch` in
- * `source_viewer.spec.ts`: citation rendering is about retrieval evidence, not generation,
- * so the spec does not depend on a paid gateway model being reachable. Kept local rather
- * than shared because both copies are small and `source_viewer.spec.ts` is owned elsewhere.
- */
-async function seedAnswerFromSearch(
-  page: Page,
-  request: APIRequestContext,
-  corpusId: string,
-  query: string,
-  topK: number,
-): Promise<SeededMatch[]> {
-  const res = await request.post(`${API_BASE}/search`, {
-    data: {
-      query,
-      corpus_id: corpusId,
-      top_k: topK,
-      include_vector: true,
-      include_sparse: true,
-      include_graph: true,
-      cache_mode: 'bypass',
-    },
-  });
-  if (!res.ok()) throw new Error(`POST /api/search -> ${res.status()} ${(await res.text()).slice(0, 300)}`);
-  const matches = ((await res.json()) as { matches: SeededMatch[] }).matches;
-  expect(matches.length, 'retrieval returned no matches for the seeded question').toBeGreaterThan(0);
-  await page.addInitScript(
-    ({ cid, q, sources }) => {
-      const now = Date.now();
-      const convId = `figure-spec-${now}`;
-      const session = {
-        conversation_id: convId,
-        created_at: now,
-        updated_at: now,
-        title: 'Figure workflow spec',
-        model_override: '',
-        sources: { corpus_ids: [cid] },
-        messages: [
-          { id: `user-${now}`, role: 'user', createdAt: new Date(now).toISOString(), content: [{ type: 'text', text: q }] },
-          {
-            id: `assistant-${now}`,
-            role: 'assistant',
-            createdAt: new Date(now + 1).toISOString(),
-            content: [{ type: 'text', text: 'Grounded answer seeded from retrieval (see sources).' }],
-            status: { type: 'complete', reason: 'stop' },
-            metadata: { unstable_state: null, unstable_annotations: [], unstable_data: [], steps: [], custom: { runId: `spec-${now}`, sources } },
-          },
-        ],
-      };
-      localStorage.setItem('ragweld-chat-threads:v2', JSON.stringify({ version: 2, active_conversation_id: convId, sessions: [session] }));
-      localStorage.setItem('tribrid_active_corpus', cid);
-      localStorage.setItem('tribrid_active_repo', cid);
-    },
-    { cid: corpusId, q: query, sources: matches },
-  );
-  return matches;
 }
 
 /** The citation card for a figure chunk: a PDF thumbnail card carrying the figure badge. */
@@ -265,6 +176,7 @@ test('Figures are enabled from the Indexing tab, persist per corpus, and leave t
   request,
 }) => {
   if (!corpus || !globalFiguresBaseline) throw new Error('corpus not provisioned');
+  const persistedVisionModel = (await figureSettings(request, corpus.corpusId)).vision_model;
   await gotoFiguresPanel(page, corpus.corpusId);
 
   const enabled = page.getByTestId('figures-enabled');
@@ -286,6 +198,11 @@ test('Figures are enabled from the Indexing tab, persist per corpus, and leave t
   await expect(page.getByTestId('figures-concurrency')).toHaveValue('4');
   await expect(page.getByTestId('figures-timeout-s')).toHaveValue('90');
   await expect(page.getByTestId('figures-skip-classes')).toHaveValue(SKIP_CLASSES_DEFAULT.join(', '));
+  // The absent-warning assertion below is only meaningful once the catalog has loaded: the
+  // picker renders value="" until then, and the warning is suppressed for an empty catalog.
+  // Assert the saved alias is actually selected first, so "no warning" cannot pass vacuously.
+  expect(persistedVisionModel, 'no vision alias configured to assert on').not.toEqual('');
+  await expect(page.getByTestId('figures-vision-model')).toHaveValue(persistedVisionModel);
   // The configured alias must actually be a vision-capable route in the live catalog, or
   // the run would be refused with 409 figure_vision_alias.
   await expect(page.getByTestId('figures-vision-model-warning')).toHaveCount(0);
@@ -355,12 +272,14 @@ test('a real index describes the figures and the run log reports the count', asy
   const scoped = await figureSettings(request, corpus.corpusId);
   expect(scoped.enabled && scoped.describe).toBe(true);
 
-  await startIndexAndWait(request, corpus.corpusId, corpusDir);
+  await indexCorpus(request, corpus.corpusId, corpusDir, { timeoutMs: INDEX_DEADLINE_MS });
 
   await gotoFiguresPanel(page, corpus.corpusId);
+  // Scoped to the Indexing subtab: RAGTab mounts every subtab at once, and more than one of
+  // them renders a LiveTerminal, so the shared test id is not unique across the page.
   const indexingPanel = page.locator('#tab-rag-indexing');
-  await indexingPanel.getByRole('button', { name: /Show Logs/ }).click();
-  const terminal = indexingPanel.locator('.terminal-output');
+  await indexingPanel.getByTestId('indexing-show-logs').click();
+  const terminal = indexingPanel.getByTestId('live-terminal-output');
   await expect(terminal).toContainText('Figure summary:', { timeout: 60_000 });
   const log = await terminal.innerText();
   const described = /figures_described=(\d+)/.exec(log);
@@ -370,7 +289,10 @@ test('a real index describes the figures and the run log reports the count', asy
 
 test('a figure citation is badged and its thumbnail boxes the figure region', async ({ page, request }) => {
   if (!corpus) throw new Error('corpus not provisioned');
-  const matches = await seedAnswerFromSearch(page, request, corpus.corpusId, FIGURE_QUESTION, CITATION_TOP_K);
+  const matches = await seedAnswerFromSearch(page, request, corpus.corpusId, FIGURE_QUESTION, {
+    topK: CITATION_TOP_K,
+    label: 'Figure workflow spec',
+  });
   // API-level precondition: separates "retrieval never surfaced a figure chunk" from
   // "the badge did not render".
   const figureMatches = matches.filter((m) => m.metadata?.chunk_kind === 'figure');
@@ -406,7 +328,10 @@ test('a figure citation is badged and its thumbnail boxes the figure region', as
 
 test('clicking the figure citation opens the page image with the figure description', async ({ page, request }) => {
   if (!corpus) throw new Error('corpus not provisioned');
-  await seedAnswerFromSearch(page, request, corpus.corpusId, FIGURE_QUESTION, CITATION_TOP_K);
+  await seedAnswerFromSearch(page, request, corpus.corpusId, FIGURE_QUESTION, {
+    topK: CITATION_TOP_K,
+    label: 'Figure workflow spec',
+  });
   await gotoChat(page, corpus.corpusId);
   await expect(page.getByTestId('chat-sources').last()).toBeVisible({ timeout: 60_000 });
 
@@ -437,7 +362,10 @@ test('clicking the figure citation opens the page image with the figure descript
 
 test('the figure badge is conditional: ordinary citations in the same list carry none', async ({ page, request }) => {
   if (!corpus) throw new Error('corpus not provisioned');
-  const matches = await seedAnswerFromSearch(page, request, corpus.corpusId, FIGURE_QUESTION, CITATION_TOP_K);
+  const matches = await seedAnswerFromSearch(page, request, corpus.corpusId, FIGURE_QUESTION, {
+    topK: CITATION_TOP_K,
+    label: 'Figure workflow spec',
+  });
   expect(
     matches.filter((m) => m.metadata?.chunk_kind !== 'figure').length,
     'every seeded match was a figure chunk, so the control is vacuous',

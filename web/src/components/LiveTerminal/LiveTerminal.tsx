@@ -270,7 +270,7 @@ export const LiveTerminal = forwardRef<LiveTerminalHandle, LiveTerminalProps>(({
         className="terminal-body"
         onScroll={handleScroll}
       >
-        <pre ref={outputRef} className="terminal-output">
+        <pre ref={outputRef} className="terminal-output" data-testid="live-terminal-output">
           {lines.map((line, i) => (
             <div key={i}>{parseANSI(line)}</div>
           ))}

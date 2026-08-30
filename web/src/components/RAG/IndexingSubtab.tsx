@@ -3243,6 +3243,7 @@ export function IndexingSubtab() {
               </label>
               <button
                 onClick={() => setTerminalVisible(!terminalVisible)}
+                data-testid="indexing-show-logs"
                 style={{
                   padding: '10px 14px',
                   background: 'var(--bg-elev2)',
