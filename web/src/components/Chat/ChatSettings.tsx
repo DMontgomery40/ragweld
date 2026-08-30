@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useConfig, useConfigField } from '@/hooks';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
+import { NumberField } from '@/components/ui/NumberField';
 import { ProviderSetup } from '@/components/Chat/ProviderSetup';
 import type { ChatMultimodalConfig, RecallConfig, RecallGateConfig, RecallIntensity } from '@/types/generated';
 
@@ -227,13 +228,14 @@ export function ChatSettings() {
                 <label>
                   Temperature <TooltipIcon name="chat.temperature" />
                 </label>
-                <input
-                  type="number"
+                <NumberField
+                  data-testid="chat-settings-temperature"
+                  configPath="chat.temperature"
                   value={temperature}
-                  min="0"
-                  max="2"
-                  step="0.05"
-                  onChange={(e) => setTemperature(Number(e.target.value))}
+                  min={0}
+                  max={2}
+                  step={0.05}
+                  onCommit={setTemperature}
                 />
               </div>
 
@@ -241,13 +243,13 @@ export function ChatSettings() {
                 <label>
                   Temperature (no retrieval) <TooltipIcon name="chat.temperature_no_retrieval" />
                 </label>
-                <input
-                  type="number"
+                <NumberField
+                  configPath="chat.temperature_no_retrieval"
                   value={temperatureNoRetrieval}
-                  min="0"
-                  max="2"
-                  step="0.05"
-                  onChange={(e) => setTemperatureNoRetrieval(Number(e.target.value))}
+                  min={0}
+                  max={2}
+                  step={0.05}
+                  onCommit={setTemperatureNoRetrieval}
                 />
               </div>
 
@@ -255,13 +257,13 @@ export function ChatSettings() {
                 <label>
                   Max tokens <TooltipIcon name="chat.max_tokens" />
                 </label>
-                <input
-                  type="number"
+                <NumberField
+                  configPath="chat.max_tokens"
                   value={maxTokens}
-                  min="100"
-                  max="16384"
-                  step="1"
-                  onChange={(e) => setMaxTokens(Number(e.target.value))}
+                  min={100}
+                  max={16384}
+                  step={1}
+                  onCommit={setMaxTokens}
                 />
               </div>
             </div>
@@ -308,13 +310,13 @@ export function ChatSettings() {
                 <label>
                   Index delay (seconds) <TooltipIcon name="chat.recall.index_delay_seconds" />
                 </label>
-                <input
-                  type="number"
+                <NumberField
+                  configPath="chat.recall.index_delay_seconds"
                   value={recallDelaySeconds}
-                  min="1"
-                  max="60"
-                  step="1"
-                  onChange={(e) => setRecall({ ...(recall || {}), index_delay_seconds: Number(e.target.value) })}
+                  min={1}
+                  max={60}
+                  step={1}
+                  onCommit={(next) => setRecall({ ...(recall || {}), index_delay_seconds: next })}
                 />
                 <p className="small">Delay before indexing a new message into Recall memory.</p>
               </div>
@@ -452,15 +454,13 @@ export function ChatSettings() {
                   <label>
                     Max skip tokens <TooltipIcon name="chat.recall_gate.skip_max_tokens" />
                   </label>
-                  <input
-                    type="number"
+                  <NumberField
+                    configPath="chat.recall_gate.skip_max_tokens"
                     value={gateSkipMaxTokens}
-                    min="1"
-                    max="20"
-                    step="1"
-                    onChange={(e) =>
-                      setRecallGate({ ...(recallGate || {}), skip_max_tokens: Number(e.target.value) })
-                    }
+                    min={1}
+                    max={20}
+                    step={1}
+                    onCommit={(next) => setRecallGate({ ...(recallGate || {}), skip_max_tokens: next })}
                   />
                 </div>
               </div>
@@ -488,13 +488,13 @@ export function ChatSettings() {
                   <label>
                     Light top_k <TooltipIcon name="chat.recall_gate.light_top_k" />
                   </label>
-                  <input
-                    type="number"
+                  <NumberField
+                    configPath="chat.recall_gate.light_top_k"
                     value={gateLightTopK}
-                    min="1"
-                    max="10"
-                    step="1"
-                    onChange={(e) => setRecallGate({ ...(recallGate || {}), light_top_k: Number(e.target.value) })}
+                    min={1}
+                    max={10}
+                    step={1}
+                    onCommit={(next) => setRecallGate({ ...(recallGate || {}), light_top_k: next })}
                   />
                 </div>
               </div>
@@ -504,15 +504,13 @@ export function ChatSettings() {
                   <label>
                     Standard top_k <TooltipIcon name="chat.recall_gate.standard_top_k" />
                   </label>
-                  <input
-                    type="number"
+                  <NumberField
+                    configPath="chat.recall_gate.standard_top_k"
                     value={gateStandardTopK}
-                    min="1"
-                    max="20"
-                    step="1"
-                    onChange={(e) =>
-                      setRecallGate({ ...(recallGate || {}), standard_top_k: Number(e.target.value) })
-                    }
+                    min={1}
+                    max={20}
+                    step={1}
+                    onCommit={(next) => setRecallGate({ ...(recallGate || {}), standard_top_k: next })}
                   />
                 </div>
 
@@ -520,15 +518,13 @@ export function ChatSettings() {
                   <label>
                     Standard recency weight <TooltipIcon name="chat.recall_gate.standard_recency_weight" />
                   </label>
-                  <input
-                    type="number"
+                  <NumberField
+                    configPath="chat.recall_gate.standard_recency_weight"
                     value={gateStandardRecencyWeight}
-                    min="0"
-                    max="1"
-                    step="0.05"
-                    onChange={(e) =>
-                      setRecallGate({ ...(recallGate || {}), standard_recency_weight: Number(e.target.value) })
-                    }
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    onCommit={(next) => setRecallGate({ ...(recallGate || {}), standard_recency_weight: next })}
                   />
                 </div>
               </div>
@@ -556,13 +552,13 @@ export function ChatSettings() {
                   <label>
                     Deep top_k <TooltipIcon name="chat.recall_gate.deep_top_k" />
                   </label>
-                  <input
-                    type="number"
+                  <NumberField
+                    configPath="chat.recall_gate.deep_top_k"
                     value={gateDeepTopK}
-                    min="3"
-                    max="30"
-                    step="1"
-                    onChange={(e) => setRecallGate({ ...(recallGate || {}), deep_top_k: Number(e.target.value) })}
+                    min={3}
+                    max={30}
+                    step={1}
+                    onCommit={(next) => setRecallGate({ ...(recallGate || {}), deep_top_k: next })}
                   />
                 </div>
 
@@ -570,15 +566,13 @@ export function ChatSettings() {
                   <label>
                     Deep recency weight <TooltipIcon name="chat.recall_gate.deep_recency_weight" />
                   </label>
-                  <input
-                    type="number"
+                  <NumberField
+                    configPath="chat.recall_gate.deep_recency_weight"
                     value={gateDeepRecencyWeight}
-                    min="0"
-                    max="1"
-                    step="0.05"
-                    onChange={(e) =>
-                      setRecallGate({ ...(recallGate || {}), deep_recency_weight: Number(e.target.value) })
-                    }
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    onCommit={(next) => setRecallGate({ ...(recallGate || {}), deep_recency_weight: next })}
                   />
                 </div>
               </div>

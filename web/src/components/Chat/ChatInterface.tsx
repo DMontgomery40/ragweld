@@ -42,6 +42,7 @@ import {
   toAbortReason,
 } from '@/components/Chat/chatTransport';
 import { EmbeddingMismatchWarning } from '@/components/ui/EmbeddingMismatchWarning';
+import { NumberField } from '@/components/ui/NumberField';
 import { confirmDialog } from '@/components/ui/confirmDialog';
 import { useAPI, useConfig, useConfigField, useEmbeddingStatus } from '@/hooks';
 import { useUIHelpers } from '@/hooks/useUIHelpers';
@@ -2187,12 +2188,12 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
               <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: 'var(--fg-muted)', marginBottom: '4px' }}>
                 Max Tokens
               </label>
-              <input
-                type="number"
+              <NumberField
+                configPath="chat.max_tokens"
                 value={maxTokens}
-                onChange={(event) => setMaxTokens(parseInt(event.target.value, 10))}
-                min="100"
-                max="16384"
+                onCommit={setMaxTokens}
+                min={100}
+                max={16384}
                 style={{
                   width: '100%',
                   background: 'var(--input-bg)',
@@ -2212,6 +2213,17 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
               >
                 Top-K (results) for this conversation
               </label>
+              {/*
+                Deliberately NOT a NumberField (T5/M-25): this control is a *nullable* override
+                -- clearing it and blurring reverts to the corpus's configured final_k
+                (`topKDisplay = topKOverride ?? topKBaseline`), it is never itself persisted to
+                config. `NumberField.commit()` treats an empty box as "fall back to the last
+                committed number" and always calls `onCommit` with a `number`, so it has no way
+                to express "the operator cleared this" -- adopting it here would silently break
+                the only way to return to the corpus default. Still clamped consistently with
+                every other field (1-100, matching the range below) via the same
+                Math.max/Math.min pattern NumberField's own clamp uses, just inline.
+              */}
               <input
                 id="chat-top-k"
                 data-testid="chat-top-k"
