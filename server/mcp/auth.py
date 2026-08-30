@@ -30,14 +30,27 @@ class MCPApiKeyMissingError(RuntimeError):
     """`mcp.require_api_key` is on and `MCP_API_KEY` is not set in the environment."""
 
 
-def _presented_bearer(scope: Scope) -> str:
+def _presented_bearer(scope: Scope) -> bytes:
+    """The token from an `Authorization: Bearer` header, as raw bytes.
+
+    Bytes end to end, deliberately. Decoding first (latin-1 maps every byte, so it never
+    raises) produced a `str` that could hold code points above U+007F, and
+    `secrets.compare_digest` rejects a non-ASCII `str` with `TypeError` -- so a token with
+    one high byte in it crashed out of the ASGI app instead of being refused. A credential
+    check must answer 401 to garbage, not 500.
+
+    Split on RFC 7235 OWS rather than a single space: `split(maxsplit=1)` treats any run of
+    ASCII whitespace as one separator, so `Bearer\ttoken` and `Bearer  token` are accepted
+    as the grammar allows.
+    """
     for raw_name, raw_value in scope.get("headers") or []:
         if bytes(raw_name).lower() != b"authorization":
             continue
-        value = bytes(raw_value).decode("latin-1").strip()
-        scheme, _, token = value.partition(" ")
-        return token.strip() if scheme.lower() == "bearer" else ""
-    return ""
+        parts = bytes(raw_value).strip().split(maxsplit=1)
+        if len(parts) != 2 or parts[0].lower() != b"bearer":
+            return b""
+        return parts[1].strip()
+    return b""
 
 
 class RequireMCPApiKey:
@@ -45,7 +58,8 @@ class RequireMCPApiKey:
 
     def __init__(self, app: Callable[..., Awaitable[None]], api_key: str) -> None:
         self._app = app
-        self._api_key = api_key
+        # Held as bytes so the comparison below can never be handed a non-ASCII `str`.
+        self._api_key = api_key.encode("utf-8")
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         # `lifespan` must reach the transport or its session manager never starts, and the
@@ -55,7 +69,7 @@ class RequireMCPApiKey:
             return
 
         presented = _presented_bearer(scope)
-        # Constant-time: the comparison is against a secret, and a length- or
+        # Constant-time, and byte-wise: the comparison is against a secret, and a length- or
         # prefix-sensitive `==` leaks it one byte at a time to anyone who can time it.
         if not presented or not secrets.compare_digest(presented, self._api_key):
             body = MCPUnauthorizedResponse(

@@ -84,6 +84,52 @@ async def test_the_flag_on_refuses_a_wrong_or_malformed_bearer() -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_non_ascii_token_is_refused_rather_than_crashing() -> None:
+    """401, not a 500 out of the ASGI app.
+
+    The header was decoded with latin-1 -- which maps every byte and never raises -- and
+    the result handed to `secrets.compare_digest`, which rejects a non-ASCII `str` with
+    `TypeError`. One high byte in the token therefore crashed the app instead of being
+    refused. This path becomes publicly reachable the moment `/mcp` moves outside
+    forward_auth, so garbage has to be answered, not propagated.
+    """
+    guarded = guarded_mcp_app(_inner_app, require_api_key=True, api_key=API_KEY)
+
+    async with _client(guarded) as client:
+        for token in ("kéy-with-an-accent", "ключ", "🔑", API_KEY + "é"):
+            response = await client.post(
+                "/",
+                headers={"Authorization": f"Bearer {token}".encode()},
+                json={"jsonrpc": "2.0", "id": 1},
+            )
+            assert response.status_code == 401, token
+            assert "reached the transport" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_the_scheme_and_token_may_be_separated_by_rfc7235_whitespace() -> None:
+    """RFC 7235 allows a run of OWS between the scheme and the credential.
+
+    A single-space `partition(" ")` refused a tab-separated header -- a correct client,
+    turned away.
+    """
+    guarded = guarded_mcp_app(_inner_app, require_api_key=True, api_key=API_KEY)
+
+    async with _client(guarded) as client:
+        for raw in (
+            f"Bearer\t{API_KEY}",
+            f"Bearer  {API_KEY}",
+            f"Bearer \t {API_KEY}",
+            f"  Bearer {API_KEY}  ",
+        ):
+            response = await client.post(
+                "/", headers={"Authorization": raw}, json={"jsonrpc": "2.0", "id": 1}
+            )
+            assert response.status_code == 200, repr(raw)
+            assert response.text == "reached the transport"
+
+
+@pytest.mark.asyncio
 async def test_the_flag_on_admits_the_configured_bearer() -> None:
     guarded = guarded_mcp_app(_inner_app, require_api_key=True, api_key=API_KEY)
 
