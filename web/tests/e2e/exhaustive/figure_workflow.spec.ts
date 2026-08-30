@@ -513,3 +513,39 @@ test('two nested figures edits inside the debounce window are sent as one deep-m
   expect(scoped.images_scale).toBe(4);
   expect(scoped.skip_classes).toEqual(['logo']);
 });
+
+// F4 (2026-08-30 drive): every `indexing.figures.*` hit in the global search routed to the
+// Admin Advanced explorer -- a raw registry row -- so the Figures & Vision card the settings
+// actually live on was unreachable from search.
+test('a global search hit for a figures setting opens the Figures & Vision card', async ({ page }) => {
+  if (!corpus) throw new Error('corpus not provisioned');
+
+  // The dashboard renders no `figures` control, so this hit has to come from the config
+  // registry: started from the Indexing tab, the on-page DOM index would answer first and
+  // the config route would never be exercised.
+  await page.goto(`dashboard?corpus=${encodeURIComponent(corpus.corpusId)}`, {
+    waitUntil: 'domcontentloaded',
+  });
+  await page.waitForSelector('.topbar', { timeout: 90_000 });
+
+  await page.locator('#global-search').click();
+  // Both terms, so the row is inside the 20-result cap whatever else mentions figures.
+  await page.getByPlaceholder('Search all settings... (Ctrl+K)').fill('figures enabled');
+
+  const hit = page.locator(
+    '[data-testid="global-search-result"][data-path="indexing.figures.enabled"]',
+  );
+  await expect(hit).toBeVisible({ timeout: 30_000 });
+  await expect(hit).toHaveAttribute('data-kind', 'config');
+  await expect(hit).toContainText('Figures & Vision');
+  await hit.click();
+
+  await page.waitForURL(/\/rag\?[^#]*subtab=indexing/, { timeout: 30_000 });
+  const params = new URL(page.url()).searchParams;
+  expect(params.get('component')).toBe('figures');
+  // The corpus the operator was working on survives the jump, so the card edits that scope.
+  expect(params.get('corpus')).toBe(corpus.corpusId);
+
+  await expect(page.getByTestId('figures-card')).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByTestId('figures-enabled')).toBeFocused({ timeout: 30_000 });
+});

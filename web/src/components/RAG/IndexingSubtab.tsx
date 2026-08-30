@@ -8,6 +8,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
   useAPI,
   useConfig,
@@ -57,6 +58,12 @@ const COMPONENT_CARDS: Array<{
   { id: 'enrichment', icon: '🧠', label: 'Graph & Options', description: 'Graph build + dense skip mode' },
   { id: 'figures', icon: '🖼️', label: 'Figures & Vision', description: 'Describe charts, diagrams, drawings via the gateway' },
 ];
+
+const INDEXING_COMPONENT_IDS = new Set<string>(COMPONENT_CARDS.map((card) => card.id));
+
+function isIndexingComponent(value: string | null): value is IndexingComponent {
+  return value !== null && INDEXING_COMPONENT_IDS.has(value);
+}
 
 const FALLBACK_CHUNKING_STRATEGIES = [
   { id: 'fixed_tokens', label: 'Fixed tokens', description: 'Token-window chunking (best default for text corpora)' },
@@ -111,8 +118,22 @@ export function IndexingSubtab() {
   // Terminal ref (slide-down UI)
   const terminalRef = useRef<LiveTerminalHandle>(null);
 
-  // UI state
-  const [selectedComponent, setSelectedComponent] = useState<IndexingComponent>('embedding');
+  // UI state. The selected card is addressable as `?component=<id>` so a global-search hit
+  // (or a shared link) can open the card a setting actually lives on. Read reactively, not
+  // just at mount: arriving from another subtab does not remount this component, so a
+  // once-only initialiser would leave the wrong card open.
+  const location = useLocation();
+  const componentParam = useMemo(
+    () => new URLSearchParams(location.search || '').get('component'),
+    [location.search]
+  );
+  const [selectedComponent, setSelectedComponent] = useState<IndexingComponent>(
+    isIndexingComponent(componentParam) ? componentParam : 'embedding'
+  );
+
+  useEffect(() => {
+    if (isIndexingComponent(componentParam)) setSelectedComponent(componentParam);
+  }, [componentParam]);
   const [isIndexing, setIsIndexing] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 100, status: 'Ready' });
   const [terminalVisible, setTerminalVisible] = useState(false);

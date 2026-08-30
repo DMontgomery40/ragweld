@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { configApi } from '@/api/config';
+import { configDeepLink } from '@/config/configDeepLinks';
 import type { ConfigFieldDescriptor } from '@/types/generated';
 
 /**
@@ -39,7 +40,10 @@ function buildConfigIndex(fields: ConfigFieldDescriptor[]): ConfigIndexItem[] {
   return fields.map((field) => {
     const label = String(field.label || field.path).trim();
     const description = String(field.description || '').trim();
-    const location = `${field.ui_surface} · ${field.section}`;
+    // A path with a purpose-built card names that card, so the row says where it will land
+    // rather than naming the registry bucket it happens to be classified under.
+    const location =
+      configDeepLink(field.path)?.location ?? `${field.ui_surface} · ${field.section}`;
     return {
       kind: 'config',
       id: field.path,
@@ -76,6 +80,32 @@ function buildControlIndex(): ControlIndexItem[] {
     });
   });
   return index;
+}
+
+/**
+ * Highlight and focus a control once the surface that owns it has rendered.
+ *
+ * Deliberately a bounded poll rather than one fixed timeout: the target card mounts only
+ * after the route change and the component switch, and how long that takes depends on what
+ * else the box is doing. A fixed delay either fires too early or wastes the wait.
+ */
+function highlightWhenRendered(testId: string, attempts = 60, intervalMs = 100): void {
+  let tries = 0;
+  const tick = () => {
+    const target = document.querySelector(
+      `[data-testid="${CSS.escape(testId)}"]`
+    ) as HTMLElement | null;
+    if (!target) {
+      tries += 1;
+      if (tries < attempts) window.setTimeout(tick, intervalMs);
+      return;
+    }
+    target.classList.add('search-hit');
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    target.focus?.({ preventScroll: true });
+    window.setTimeout(() => target.classList.remove('search-hit'), 1200);
+  };
+  window.setTimeout(tick, 0);
 }
 
 export function useGlobalSearch() {
@@ -209,13 +239,22 @@ export function useGlobalSearch() {
           window.setTimeout(() => target?.classList.remove('search-hit'), 1200);
         }, 200);
       } else {
-        // Config field on another page: open it in the Admin explorer, filtered to
-        // the path, keeping the active corpus in the URL.
         const params = new URLSearchParams(location.search);
         const corpus = params.get('corpus') || params.get('repo');
-        const target = new URLSearchParams({ subtab: 'advanced', q: result.path });
-        if (corpus) target.set('corpus', corpus);
-        navigate(`/admin?${target.toString()}`);
+        const deepLink = configDeepLink(result.path);
+        if (deepLink) {
+          // The setting has a card of its own: open that, not the raw registry row.
+          const target = new URLSearchParams(deepLink.params);
+          if (corpus) target.set('corpus', corpus);
+          navigate(`${deepLink.pathname}?${target.toString()}`);
+          if (deepLink.testId) highlightWhenRendered(deepLink.testId);
+        } else {
+          // Config field with no dedicated surface: open it in the Admin explorer, filtered
+          // to the path, keeping the active corpus in the URL.
+          const target = new URLSearchParams({ subtab: 'advanced', q: result.path });
+          if (corpus) target.set('corpus', corpus);
+          navigate(`/admin?${target.toString()}`);
+        }
       }
       setIsOpen(false);
       setQuery('');
