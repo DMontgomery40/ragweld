@@ -234,7 +234,10 @@ class IndexEstimate(BaseModel):
     estimated_figures: int | None = Field(
         default=None,
         ge=0,
-        description="Figures expected to be described (heuristic: PDF pages x 0.6), when indexing.figures is enabled",
+        description=(
+            "Figures expected to be described (heuristic: PDF pages x 0.4, rounded; "
+            "omitted entirely when it rounds to zero), when indexing.figures is enabled"
+        ),
     )
     figure_description_cost_usd: float | None = Field(
         default=None,

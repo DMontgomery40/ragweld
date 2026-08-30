@@ -3884,7 +3884,7 @@ export interface IndexEstimate {
   embedding_cost_usd?: number | null;
   /** Estimated GraphRAG semantic extraction cost (USD) when enabled and pricing data is available. */
   semantic_kg_cost_usd?: number | null;
-  /** Figures expected to be described (heuristic: PDF pages x 0.6), when indexing.figures is enabled */
+  /** Figures expected to be described (heuristic: PDF pages x 0.4, rounded; omitted entirely when it rounds to zero), when indexing.figures is enabled */
   estimated_figures?: number | null;
   /** Estimated vision-call cost (USD) to describe figures, from catalog pricing for indexing.figures.vision_model */
   figure_description_cost_usd?: number | null;
