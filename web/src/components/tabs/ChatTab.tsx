@@ -140,9 +140,6 @@ export default function ChatTab() {
     const startMs = Math.max(0, Number(t.started_at_ms || 0) - 1500);
     const endMs = typeof t.ended_at_ms === 'number' ? Number(t.ended_at_ms) + 2000 : undefined;
 
-    terminalRef.current?.setTitle(
-      `Chat logs (${logService === 'all' ? 'api|postgres|neo4j' : logService})${lokiStatus?.reachable === false ? ' — Loki unreachable' : ''}`
-    );
     terminalRef.current?.setContent([`LogQL: ${lokiQuery}`, `time: ${startMs}${endMs ? ` → ${endMs}` : ' → now'}`, '---']);
 
     const qs = new URLSearchParams();
@@ -162,7 +159,20 @@ export default function ChatTab() {
       onError: (err) => terminalRef.current?.appendLine(`\u001b[31mERROR: ${err}\u001b[0m`),
       onComplete: () => terminalRef.current?.appendLine('\u001b[90m[complete]\u001b[0m'),
     });
-  }, [logService, lokiQuery, lokiStatus?.reachable, refreshLokiStatus, trace, traceOpen]);
+    // `lokiStatus` is deliberately NOT a dependency. It only ever fed the terminal title,
+    // and the title now has its own effect: leaving it here made every reachability flip
+    // change this callback's identity, which disconnected and reopened the tail. On a
+    // flapping box that restarted the server's two-minute retry budget from zero every
+    // time, so the bounded give-up was never reached and each reconnect paid for another
+    // candidate resolve.
+  }, [logService, lokiQuery, refreshLokiStatus, trace, traceOpen]);
+
+  // The header tracks Loki's reachability; the stream must not.
+  useEffect(() => {
+    terminalRef.current?.setTitle(
+      `Chat logs (${logService === 'all' ? 'api|postgres|neo4j' : logService})${lokiStatus?.reachable === false ? ' — Loki unreachable' : ''}`
+    );
+  }, [logService, lokiStatus?.reachable]);
 
   // Reconnect logs when selection/filter changes
   useEffect(() => {
