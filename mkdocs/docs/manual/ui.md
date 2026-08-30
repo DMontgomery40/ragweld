@@ -100,6 +100,14 @@ Why this matters: if you pin a specific LiteLLM gateway alias for your conversat
     - `GET /api/chat/health` (default dev base `http://127.0.0.1:58012/api`) for provider readiness
     - The LiteLLM gateway service on port `54000` (see the [runtime topology](../reference/architecture/runtime-topology.md) for the full service map)
 
+### RAG → Data Quality reviews what it says it reviews
+
+The Data Quality subtab now fetches what it promises: chunk summaries load with the corpus, and a **Corpus keywords** panel lists the keywords stored on the corpus that weight retrieval. Empty states say why they are empty — "no build has been run for this corpus yet" versus "could not be loaded" versus "select a corpus" — instead of a blanket "No chunk summaries to show" for every corpus, indexed or not. **Generate keywords** fills the panel from what was persisted, so it survives a reload.
+
+The **Synthetic Lab** jump buttons beside each panel are labelled as what they do — "Generate keywords in Synthetic Lab →", not "Corpus Keywords" — carry the recipe they preselect in their tooltip, keep the current corpus in the URL, and Synthetic Lab announces "Recipe preset to … Nothing has run" on arrival. Nothing runs until you start it there.
+
+Index Now on the **Indexing** subtab is a hard consent gate: the estimate is measured (token/chunk bands, sampled-file counts), a failed or refused estimate blocks the run with an actionable error banner instead of starting unpriced, and the confirmation dialog can no longer open on an unmeasured payload. See [Indexing a corpus](indexing.md).
+
 ## Main tabs (what they’re for)
 
 The UI is organized into top-level tabs. Here’s the practical meaning of each:

@@ -455,7 +455,7 @@ flowchart LR
     n_index --> n_index_4
     n_index_5["GET /api/index/{corpus_id}/runs/latest\n-> IndexRunSummary"]
     n_index --> n_index_5
-    n_index_6["GET /api/index/{corpus_id}/runs/{run_id}/events\n-> list[IndexRunEvent]"]
+    n_index_6["GET /api/index/{corpus_id}/runs/{run_id}/events\n-> IndexRunEventPage"]
     n_index --> n_index_6
     n_index_7["GET /api/index/{corpus_id}/stats\n-> IndexStats"]
     n_index --> n_index_7
@@ -475,7 +475,7 @@ flowchart LR
 | `GET` | `/api/index/status` | `get_dashboard_index_status` | `DashboardIndexStatusResponse` |
 | `DELETE` | `/api/index/{corpus_id}` | `delete_index` | `-` |
 | `GET` | `/api/index/{corpus_id}/runs/latest` | `get_latest_index_run` | `IndexRunSummary` |
-| `GET` | `/api/index/{corpus_id}/runs/{run_id}/events` | `get_index_run_events` | `list[IndexRunEvent]` |
+| `GET` | `/api/index/{corpus_id}/runs/{run_id}/events` | `get_index_run_events` | `IndexRunEventPage` |
 | `GET` | `/api/index/{corpus_id}/stats` | `get_index_stats` | `IndexStats` |
 | `GET` | `/api/index/{corpus_id}/status` | `get_index_status` | `IndexStatus` |
 | `POST` | `/api/index/{corpus_id}/stop` | `stop_index_for_corpus` | `IndexStatus` |

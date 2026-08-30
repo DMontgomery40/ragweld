@@ -22,7 +22,7 @@ flowchart LR
     root --> n_tokenization
     n_chunking["chunking\n18 fields"]
     root --> n_chunking
-    n_indexing["indexing\n19 fields"]
+    n_indexing["indexing\n20 fields"]
     root --> n_indexing
     n_graph_storage["graph_storage\n12 fields"]
     root --> n_graph_storage
@@ -81,7 +81,7 @@ flowchart LR
 | `embedding` | 18 | Embedding generation and caching configuration. | [embedding](../config/embedding.md) |
 | `tokenization` | 7 | Tokenizer configuration used for token-aware chunking and budgeting. | [tokenization](../config/tokenization.md) |
 | `chunking` | 18 | Chunking configuration for documents and code. | [chunking](../config/chunking.md) |
-| `indexing` | 19 | Indexing and vector storage configuration. | [indexing](../config/indexing.md) |
+| `indexing` | 20 | Indexing and vector storage configuration. | [indexing](../config/indexing.md) |
 | `graph_storage` | 12 | Configuration for Neo4j graph storage and traversal. | [graph_storage](../config/graph_storage.md) |
 | `graph_indexing` | 28 | Configuration for building/persisting graph data during indexing. | [graph_indexing](../config/graph_indexing.md) |
 | `qdrant` | 1 | Qdrant vector-store connection for the canonical dense + sparse retrieval lane. | [qdrant](../config/qdrant.md) |

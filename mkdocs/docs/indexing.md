@@ -45,6 +45,9 @@
 !!! note "Storage Layout"
     Chunks, embeddings, and FTS are in PostgreSQL. Graph artifacts are in Neo4j. Sizes are summarized via dashboard endpoints.
 
+!!! note "The pre-run estimate is measured"
+    `POST /api/index/estimate` no longer divides bytes by a constant. It samples the corpus through the configured chunker (`server/indexing/estimate.py`), reports token/chunk bands (`estimated_*_low/high`, `±estimate_relative_error`), what it measured (`sampled_files`, `sampled_bytes`), and a `status` of `ready`, `warming` (tokenizer still loading; every measured field is `null`) or `insufficient_sample`. The estimate is also the consent gate: a failed or refused estimate blocks the run instead of letting it start unpriced. See [Indexing API](api_indexing.md) and [Indexing a corpus](manual/indexing.md).
+
 !!! warning "Large Corpora"
     Configure Neo4j heap and page cache via environment for multi-million edge graphs. Monitor Postgres disk growth for pgvector indexes.
 

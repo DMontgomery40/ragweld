@@ -234,8 +234,16 @@ curl -sS -X POST "http://127.0.0.1:58012/api/index/estimate" \
   }' | jq .
 ```
 
-!!! note "Estimates are heuristics"
-    The estimate is intentionally rough (machine speed, provider latency, DB IO, and corpus makeup all matter). Use it for sizing, not for SLAs.
+!!! note "The estimate measures your corpus — and it is the consent gate"
+    Tokens and chunks are **measured**, not divided out of bytes: `POST /api/index/estimate` samples files across every format in the corpus, runs them through the configured chunker, and scales by byte share (`server/indexing/estimate.py`). The dialog shows a point estimate with a band — `Tokens (est): 362,000 (317,000–407,000)` — plus how many files were sampled and how long the measurement took.
+
+    Three things can happen instead of a number:
+
+    - **The estimator is warming.** The first call after a service restart pays for loading the chunker's tokenizer (~27 s), so the endpoint answers immediately with nothing measured and `warmup_seconds_remaining` for the wait message; the UI shows "Preparing the estimator" and asks again. The Indexing tab warms the tokenizer from its status reads, so this is usually done before you click.
+    - **The sample is insufficient.** If a file format was never measured, or the error band saturated past `indexing.estimate.max_relative_error` (default `0.9`), the endpoint refuses with the reason and the real file inventory rather than extrapolating a guess — a cold run once measured 8 bytes of 8.5 MB and reported 15,437 tokens for a 3,531,477-token corpus, which is exactly what the refusal exists to prevent.
+    - **The estimate fails** (for example, a registered relative path that no longer resolves — relative paths resolve against the project root). Index Now **blocks**: the run is not started, and an error banner names the corpus and the path that was looked for. No run starts without consent.
+
+    If the first estimate after a restart still times out, click Index Now again — the tokenizer is warm by then.
 
 ## Start indexing
 
@@ -258,6 +266,15 @@ curl -sS "http://127.0.0.1:58012/api/index/demo/stats" | jq .
 
 In the UI, this typically maps to **RAG → Indexing** and **Dashboard → Storage**.
 
+
+### Reading the run report
+
+The replayed log comes from `GET /api/index/{corpus_id}/runs/{run_id}/events`, which returns an `IndexRunEventPage` — the most recent events, the run's real `total`, and where the slice starts. The header therefore reports what the run recorded, never the cap it asked for: a run whose log holds 1,284 events reads "showing the most recent 500 of 1,284 events" instead of "500 replayed events".
+
+Two things the tab does so the signal survives the replay:
+
+- **Conversion heartbeats collapse.** A long Docling conversion emits a `Converting <file>: still running (Ns elapsed)` beat every few minutes, which used to bury everything around it — the figure summary included — under dozens of identical lines. Only the last beat per file is kept, labelled `[N progress notices]`, so the figure summary and per-file events stay readable.
+- **Figure outcomes are listed per document.** When a figure-enabled run finishes, the tab shows a **Figures this run failed to describe** panel (or "Figures this run filtered out, as configured" when nothing failed), one row per document with failed / filtered-out / described counts, from the run's own per-document `figure_outcome` events. "Failed" means the vision call was made and the gateway returned nothing — check the alias and `indexing.figures.max_completion_tokens`, then re-run with Force reindex. "Filtered out" means the picture never reached the vision call (`indexing.figures.skip_classes`, `min_area_fraction`, or `classify`) — the configured rules working, not a fault.
 
 ### Runs started outside the tab are mirrored, not lost
 

@@ -34,6 +34,7 @@
 
 !!! warning "Repo path"
     Ensure `repo_path` points to a locally accessible directory (bind-mount in Docker).
+    A registered relative path — for example the Recall corpus's `data/recall` — resolves against the project root, not the API process's working directory (`_resolve_corpus_root` in `server/api/index.py`), and a `422` for a missing root names the resolved path it looked for.
 
 | Route | Method | Description |
 |-------|--------|-------------|
@@ -41,7 +42,7 @@
 | `/index/status` | GET | Current state |
 | `/index/stats` | GET | Storage stats |
 | `/index/{corpus_id}/runs/latest` | GET | Latest run summary (run id, status, progress, figure counts); `?finalize=false` for a pure read |
-| `/index/{corpus_id}/runs/{run_id}/events` | GET | Event log for a run (`?limit=500`), usable for replay or live tailing |
+| `/index/{corpus_id}/runs/{run_id}/events` | GET | One page of a run's event log as `IndexRunEventPage` (`?limit=500`): the most recent events plus the run's real `total` and `first_index`, so a cap is never shown as a fact |
 
 !!! note "Runs are observable regardless of who started them"
     Every indexing run is recorded against the corpus and can be polled by any client — the UI, a CI job that started the run via `POST /api/index`, or a scheduled automation. The **RAG → Indexing** tab polls `/api/index/{corpus_id}/status` and, when it finds a run it did not start itself, mirrors its progress bar, current file, event log, and Stop button, marking the run "started outside this tab". This means an indexing job kicked off by an API call or a schedule is never invisible in the workbench.
@@ -53,6 +54,9 @@
     - `stage` — what the holding run last reported doing (its most recent `log`/`progress` run event, e.g. `Converting apollo-11-mission-report.pdf: still running (600s elapsed)`), or `null` when the run has logged nothing yet. The stage is read from the tail of the holding run's event log — never the full file — and the reader deliberately does not drain the live write queue, so it can lag by at most a moment and never hangs the response.
 
     The same builder serves the corpus-delete refusal (`DELETE /api/repos/{corpus_id}` and `DELETE /api/corpora/{corpus_id}`, both of which document the `409` in their OpenAPI responses), so the delete refusal and the index-start refusal cannot drift apart.
+
+!!! note "Run event logs are pages, not bare lists"
+    `GET /api/index/{corpus_id}/runs/{run_id}/events` now answers `IndexRunEventPage`: `events` (the most recent `limit`, oldest first), `total` (everything the run recorded) and `first_index` (where this slice starts). A client that asked for `?limit=500` of a 1,284-event run can now say so, instead of printing its own cap as a fact about the run.
 
 ```mermaid
 flowchart LR
@@ -69,6 +73,17 @@ flowchart LR
 !!! tip "Polling many corpora? Read runs with `?finalize=false`"
     By default `GET /api/index/{corpus_id}/runs/latest` reconciles a persisted `indexing` run against the manifest and fence before answering — a fence read, a scoped-config load and an event-queue flush per call, and it rewrites the summary when the run turns out to have finished. Pass `finalize=false` for a pure read of the stored summary: no reconcile, no write, no event flush. A never-indexed corpus still answers `404`, so callers can tell “never indexed” from “could not be read”.
 
+!!! note "Tokens and chunks are measured, not a byte ratio"
+    `POST /api/index/estimate` no longer divides bytes by a constant. It samples the corpus through the configured chunker (`server/indexing/estimate.py`): for every file format present it measures a systematic sample across the size distribution, extracts each sampled file the way the indexer does, and extrapolates with a ratio estimator on the group's known bytes. The answer carries the point estimate (`estimated_total_tokens`, `estimated_total_chunks`), an error band (`estimated_tokens_low/high`, `estimated_chunks_low/high`, half-width `estimate_relative_error`), what was measured (`sampled_files`, `sampled_bytes`), and `elapsed_seconds`.
+
+    The new `status` field is the contract for when numbers exist at all:
+
+    - `ready` — the only state that carries measurements. Everything measured is populated.
+    - `warming` — the estimator's tokenizer is still loading in a fresh API process (~27 s). The endpoint answers immediately with every measured field `null` and `warmup_seconds_remaining` for the wait message; clients poll until `ready`. The Dashboard and Indexing tab warm the tokenizer from their status reads, so this is usually gone before you click.
+    - `insufficient_sample` — the sample says nothing about this corpus: a file format group measured nothing, or the band saturated past `indexing.estimate.max_relative_error` (default `0.9`). The file inventory is real; every measured field is `null`, and asking again returns the same refusal.
+
+    In both non-ready states every measured field is `null`, not zero — a consumer that would have rendered "0 chunks" cannot. The floors live under `indexing.estimate.*` in the config model.
+
 !!! note "The estimate itemises optional vision costs"
     `POST /api/index/estimate` returns an `IndexEstimate` whose cost fields are additive:
 
@@ -78,7 +93,7 @@ flowchart LR
 
     `total_cost_usd` sums whichever components apply and is `null` when any applicable component has no catalog price. When figures are off (or the corpus has no PDFs), the figure fields stay `null` — the estimate never shows a `$0` figure cost that isn't really zero. The **RAG → Indexing** tab renders the breakdown as `Embed $X + Semantic KG $Y + Figures $Z (~N figures)`.
 
-    Time is itemized the same way: `estimated_seconds_figures` appears whenever the figure count does — the measured ~20 s per vision call divided by `indexing.figures.concurrency`, folded into the total time range — so the tab's `Embed ~X + Semantic KG ~Y + Figures ~Z` breakdown never double-counts the figure phase into the embedding line.
+    Time comes from one model (`server/api/index.py` `_index_time_model`): `estimated_seconds` is the point estimate, the phases printed beside it — `estimated_seconds_embedding`, `estimated_seconds_semantic_kg`, `estimated_seconds_figures` — plus the fixed `estimated_seconds_overhead` sum to it exactly, and `estimated_seconds_low/high` are that same number scaled (×0.6–×1.9). The embedding phase is stated rather than derived by subtraction, so the tab's `Embed ~X + Semantic KG ~Y + Figures ~Z + startup ~Zs` breakdown can never disagree with the range quoted next to it — previously the embed leg alone could exceed the range's own lower bound.
 
 !!! tip "Semantic KG cost is priced through the gateway alias"
     `semantic_kg_cost_usd` resolves its model through the same `gateway_alias` lookup the figure price uses — the alias the run would actually call (`graph_indexing.semantic_kg_llm_model`, else the gateway default). A catalog `model` id such as `z-ai/glm-5.3-flash` is not an alias (aliases may not contain a `/`), so resolving by model id would price nothing at all; the default `ragweld-local` alias is a real, priced catalog row at $0/$0, so a default-config corpus reports a true zero rather than an unknown total.

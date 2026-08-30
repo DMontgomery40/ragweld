@@ -26,10 +26,11 @@
 [Config API & workflow](../../configuration.md){ .md-button }
 [Glossary](../../glossary.md){ .md-button }
 
-**Total parameters**: 29
+**Total parameters**: 31
 
 ??? info "Group index"
     - `(root)`
+    - `estimate`
     - `figures`
 
 ## `(root)`
@@ -232,6 +233,13 @@
     - [PostgreSQL Full Text Search](https://www.postgresql.org/docs/current/textsearch.html)
     - [Elasticsearch Reciprocal Rank Fusion (RRF)](https://www.elastic.co/guide/en/elasticsearch/reference/current/rrf.html)
     - [Search in PostgreSQL: Full Text Search (ParadeDB)](https://www.paradedb.com/learn/search-in-postgresql/full-text-search)
+
+## `estimate`
+
+| JSON key | Env key(s) | Type | Default | Constraints | Summary |
+|---------|------------|------|---------|-------------|---------|
+| `indexing.estimate.max_relative_error` | — | `float` | `0.9` | > 0.0, ≤ 1.0 | Widest error band that may still be published as a point estimate. The band is computed from the measured spread of tokens-per-byte, so it saturates exactly when the sample says nothing about the corpus -- which is the honest signal, unlike a share-of-bytes floor that would refuse 2,000 similar small files whose estimate is accurate. |
+| `indexing.estimate.min_files_per_format` | — | `int` | `1` | ≥ 1, ≤ 1000 | Files that must be measured in every format group present. A group that measured nothing contributes neither tokens, chunks, nor its one-chunk-per-file floor, so the corpus total would silently omit it. |
 
 ## `figures`
 
