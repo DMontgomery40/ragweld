@@ -76,10 +76,27 @@ THEMES = _load_themes()
 SURFACES = ("bg", "bg-elev1", "bg-elev2", "panel")
 
 # (token name, WCAG floor) per design-legibility.md: body >= 7:1, support >= 4.5:1
+#
+# `ok`/`warn`/`err` are added here because they are used as ordinary TEXT color
+# in several places (e.g. HelpGlossary.css, EmbeddingMismatchWarning.tsx), so
+# the same 4.5:1 support-text floor applies to them against the page surfaces.
+#
+# `--accent` is intentionally NOT included: it is dual-purpose (also a BUTTON
+# BACKGROUND paired with `--accent-contrast`, e.g. `.btn-primary`,
+# `.top-actions button`, ~20 sites). The dark value fails this floor as text
+# (3.72-4.18:1 on the four surfaces below) but lightening it to fix that drops
+# its background pairing with white `--accent-contrast` text from 4.76:1 to
+# 3.81:1 -- trading one violation for another. Fixing the ~48 standalone-text
+# call sites (across 22 files) needs a distinct `--accent-text` token and a
+# call-site migration, which is a separate, larger change than this token-only
+# pass; see the task report for the proposed value and the ready-to-add tuple.
 TEXT_TOKEN_FLOORS = (
     ("fg", 7.0),
     ("fg-muted", 4.5),
     ("link", 4.5),
+    ("ok", 4.5),
+    ("warn", 4.5),
+    ("err", 4.5),
 )
 
 

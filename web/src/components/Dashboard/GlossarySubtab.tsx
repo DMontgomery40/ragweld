@@ -389,7 +389,7 @@ export function GlossarySubtab() {
                                 fontWeight: '600',
                                 borderRadius: '3px',
                                 background: 'var(--warn)',
-                                color: '#000',
+                                color: 'var(--on-warn)',
                                 textTransform: 'uppercase',
                                 letterSpacing: '0.3px'
                               }}

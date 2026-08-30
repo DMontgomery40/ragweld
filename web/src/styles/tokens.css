@@ -81,9 +81,9 @@ html, :root, [data-theme="dark"] {
   --link: #334155;             /* slate-700 */
   --on-link: #ffffff;
 
-  --ok: #16a34a;
-  --warn: #d97706;
-  --err: #dc2626;
+  --ok: #117f3a;
+  --warn: #a75b05;
+  --err: #d62323;
   --on-warn: #ffffff;
   --on-err: #ffffff;
 
