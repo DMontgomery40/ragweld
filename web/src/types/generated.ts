@@ -977,6 +977,17 @@ export interface EvaluationConfig {
   judge_max_tokens?: number; // default: 4096
 }
 
+/** Public error detail (HTTP 409) when indexing.figures.vision_model cannot be used. */
+export interface FigureRouteConflictDetail {
+  code?: "figure_vision_alias"; // default: "figure_vision_alias"
+  /** The configured indexing.figures.vision_model alias */
+  alias: string;
+  /** Stable, non-sensitive summary */
+  message: string;
+  /** What the operator can do next */
+  operator_hint: string;
+}
+
 /** Configuration for tri-brid fusion of vector + sparse + graph results. */
 export interface FusionConfig {
   /** Fusion method: 'rrf' (Reciprocal Rank Fusion) or 'weighted' (score-based) */
@@ -1364,8 +1375,6 @@ export interface IndexingFiguresConfig {
   min_area_fraction?: number; // default: 0.02
   /** Classifier classes that are never sent for description */
   skip_classes?: string[];
-  /** Cap on described figures per document; the rest keep caption-only text */
-  max_figures_per_file?: number; // default: 200
   /** Output token budget per figure description */
   max_completion_tokens?: number; // default: 600
   /** Parallel vision calls while converting one document */
@@ -3810,6 +3819,11 @@ export interface FeedbackRequest {
 export interface FeedbackResponse {
   /** Whether feedback was accepted */
   ok: boolean;
+}
+
+/** FastAPI response envelope for an unusable figure vision alias (HTTP 409). */
+export interface FigureRouteConflictResponse {
+  detail: FigureRouteConflictDetail;
 }
 
 /** FastAPI response envelope for a generation-gateway failure. */

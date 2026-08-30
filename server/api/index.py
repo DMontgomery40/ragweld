@@ -70,6 +70,8 @@ from server.indexing.text_extractors import (
 )
 from server.models.index import (
     Chunk,
+    FigureRouteConflictDetail,
+    FigureRouteConflictResponse,
     IndexDeletionIncompleteResponse,
     IndexedDocumentRecord,
     IndexEstimate,
@@ -991,7 +993,27 @@ def _figure_model_spec(alias: str) -> dict[str, Any] | None:
     return None
 
 
-def _resolve_figure_route(cfg: TriBridConfig) -> FigureGateway | None:
+def _figure_route_refusal(alias: str, message: str, *, as_http: bool) -> Exception:
+    """The refusal for an unusable figure alias, shaped for its caller.
+
+    A request gets the typed 409 the endpoint documents; a background run gets a plain
+    RuntimeError, because a run failure recorded as "409: ..." names a status code nobody
+    is there to receive.
+    """
+    if not as_http:
+        return RuntimeError(message)
+    detail = FigureRouteConflictDetail(
+        alias=alias,
+        message=message,
+        operator_hint=(
+            "Set indexing.figures.vision_model to a vision-capable gateway alias from "
+            "data/models.json, or turn indexing.figures.describe off."
+        ),
+    )
+    return HTTPException(status_code=409, detail=detail.model_dump(mode="json"))
+
+
+def _resolve_figure_route(cfg: TriBridConfig, *, as_http: bool = True) -> FigureGateway | None:
     """Validated gateway route for figure description, or None when figures are off.
 
     Fails closed: an alias that is not in the catalog, is not vision-capable, or cannot be
@@ -1003,18 +1025,17 @@ def _resolve_figure_route(cfg: TriBridConfig) -> FigureGateway | None:
     alias = str(figures.vision_model or "").strip()
     spec = _figure_model_spec(alias)
     if spec is None or not bool(spec.get("supports_vision")):
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"indexing.figures.vision_model {alias!r} is not a vision-capable gateway alias "
-                "in the model catalog"
-            ),
+        raise _figure_route_refusal(
+            alias,
+            f"indexing.figures.vision_model {alias!r} is not a vision-capable gateway alias "
+            "in the model catalog",
+            as_http=as_http,
         )
     try:
         route = select_provider_route(config=cfg, model_override=alias)
     except Exception as exc:  # fail closed with the alias in the message
-        raise HTTPException(
-            status_code=409, detail=f"figure vision alias {alias!r} is not routable: {exc}"
+        raise _figure_route_refusal(
+            alias, f"figure vision alias {alias!r} is not routable: {exc}", as_http=as_http
         ) from exc
     return FigureGateway(
         base_url=str(route.base_url), api_key=str(route.api_key), model=str(route.model)
@@ -1567,6 +1588,17 @@ def _extract_text_for_index_sync(
     )
     if extracted is not None:
         return extracted
+    if extraction_method_for_path(path) == "docling" and bool(
+        getattr(figures, "enabled", False)
+    ):
+        # Reading a PDF as UTF-8 yields binary mojibake or a NUL-byte skip. That is a
+        # tolerable "unparseable document" outcome for a plain run, but with figures on it
+        # would let one bad conversion quietly drop documents from an index the operator is
+        # paying a vision model to enrich.
+        raise RuntimeError(
+            f"figure-enabled Docling extraction produced no text for {path}; "
+            "refusing to index it as raw bytes"
+        )
     return ExtractedDocument(
         text=path.read_text(encoding="utf-8", errors="ignore"),
         extraction="direct",
@@ -1768,7 +1800,7 @@ async def _run_index_body(
     # Resolved from this run's config snapshot, like the semantic-KG route below: the
     # figures the pipeline is asked for and the alias that describes them must come from
     # one decision. ``start_index`` already refused an unroutable alias before the fence.
-    figure_gateway = _resolve_figure_route(cfg)
+    figure_gateway = _resolve_figure_route(cfg, as_http=False)
     figures_described_total = 0
     figures_undescribed_total = 0
     contextual_mode = (
@@ -2286,14 +2318,29 @@ async def _run_index_body(
     # Docling exposes no per-picture failure reason, so an eligible picture that came back
     # without a description is reported as undescribed rather than guessed to be a failure.
     if event_queue is not None and cfg.indexing.figures.enabled:
+        # Docling absorbs a per-picture vision failure and returns the picture undescribed,
+        # so an unreachable alias produces a completely normal-looking run. Describing
+        # nothing at all when descriptions were requested is reported as a warning, not a
+        # log line, because it is the one shape that means the vision alias never answered.
+        described_nothing = (
+            cfg.indexing.figures.describe
+            and figures_described_total == 0
+            and figures_undescribed_total > 0
+        )
         _emit_event(
             event_queue,
             {
-                "type": "log",
+                "type": "warning" if described_nothing else "log",
                 "message": (
                     "Figure summary: "
                     f"figures_described={figures_described_total} "
                     f"figures_undescribed={figures_undescribed_total}"
+                    + (
+                        " (description was enabled but no figure was described; check the "
+                        "vision alias)"
+                        if described_nothing
+                        else ""
+                    )
                 ),
             },
             drop_oldest=True,
@@ -3263,12 +3310,15 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
     responses={
         404: {"description": "Unknown corpus"},
         409: {
-            "model": IndexRunConflictResponse | PersistedStateCorruptResponse,
+            "model": (
+                IndexRunConflictResponse
+                | PersistedStateCorruptResponse
+                | FigureRouteConflictResponse
+            ),
             "description": (
                 "An index run already holds this corpus (durable per-corpus run fence), its "
                 "persisted index state is malformed (de-index to repair), or "
-                "indexing.figures.vision_model is not a routable vision-capable gateway alias "
-                "(that one carries a plain string detail, not one of the models above)."
+                "indexing.figures.vision_model is not a routable vision-capable gateway alias."
             ),
         },
         503: {

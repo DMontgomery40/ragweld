@@ -198,7 +198,12 @@ def extract_text_for_path(
     if ext in {".csv", ".tsv"}:
         return _direct(_read_delimited(path, delimiter="," if ext == ".csv" else "\t"))
     if ext in DOCLING_SUFFIXES:
-        return _read_with_docling(path, converter=docling_converter_for(figures, gateway))
+        figures_on = figures is not None and bool(getattr(figures, "enabled", False))
+        return _read_with_docling(
+            path,
+            converter=docling_converter_for(figures, gateway),
+            fail_closed=figures_on,
+        )
     if ext == ".parquet":
         return _direct(
             _read_parquet(
@@ -296,11 +301,18 @@ def _build_source_map(doc: Any, serializer: Any, full: str) -> tuple[tuple[Sourc
     return tuple(spans), unlocated
 
 
-def _read_with_docling(path: Path, *, converter: Any | None = None) -> ExtractedDocument | None:
+def _read_with_docling(
+    path: Path, *, converter: Any | None = None, fail_closed: bool = False
+) -> ExtractedDocument | None:
     """Convert a rich document to markdown via Docling with a page/bbox source map.
 
     ``converter`` lets the indexer pass a converter configured for figure enrichment
     (Task 6); the default is the plain cached converter.
+
+    ``fail_closed`` is set when figure enrichment is on. Degrading a failed conversion to
+    None then lets the caller fall back to reading the PDF as text, which indexes binary
+    mojibake or drops the document with no error; with figures enabled that would turn one
+    infrastructure failure into silent corpus-wide data loss, so the failure is raised.
 
     Returns None when the document is unparseable or serializes to nothing. The returned text
     is the whole-document markdown serialization, unmodified, so chunk char offsets index it
@@ -321,6 +333,8 @@ def _read_with_docling(path: Path, *, converter: Any | None = None) -> Extracted
         result = (converter or _docling_converter()).convert(str(path))
         doc = result.document
     except Exception:
+        if fail_closed:
+            raise
         return None
     serializer = make_markdown_serializer(doc)
     full = str(serializer.serialize().text or "")

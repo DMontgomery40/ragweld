@@ -305,6 +305,15 @@ class IndexDeletionIncompleteDetail(BaseModel):
     operator_hint: str = Field(description="What the operator can do next")
 
 
+class FigureRouteConflictDetail(BaseModel):
+    """Public error detail (HTTP 409) when indexing.figures.vision_model cannot be used."""
+
+    code: Literal["figure_vision_alias"] = "figure_vision_alias"
+    alias: str = Field(description="The configured indexing.figures.vision_model alias")
+    message: str = Field(description="Stable, non-sensitive summary")
+    operator_hint: str = Field(description="What the operator can do next")
+
+
 class PersistedStateCorruptDetail(BaseModel):
     """Public error detail (HTTP 409) when a corpus's persisted index state does not validate."""
 
@@ -317,6 +326,12 @@ class PersistedStateCorruptDetail(BaseModel):
     )
     message: str = Field(description="Stable, non-sensitive summary")
     operator_hint: str = Field(description="The repair action (de-index the corpus, then re-index)")
+
+
+class FigureRouteConflictResponse(BaseModel):
+    """FastAPI response envelope for an unusable figure vision alias (HTTP 409)."""
+
+    detail: FigureRouteConflictDetail
 
 
 class PersistedStateCorruptResponse(BaseModel):
@@ -466,6 +481,8 @@ __all__ = [
     "IndexDeletionIncompleteDetail",
     "IndexDeletionIncompleteResponse",
     "IndexEstimate",
+    "FigureRouteConflictDetail",
+    "FigureRouteConflictResponse",
     "IndexFenceCorruptDetail",
     "IndexRequest",
     "IndexRunConflictDetail",

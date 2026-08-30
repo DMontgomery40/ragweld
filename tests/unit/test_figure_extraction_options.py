@@ -10,8 +10,10 @@ from server.indexing.text_extractors import (
     _docling_converter,
     build_figure_pipeline_options,
     docling_converter_for,
+    extract_text_for_path,
 )
 from server.models.tribrid_config_model import IndexingFiguresConfig
+from tests.fixtures.pdf_builder import apollo_figure_pages
 
 
 def test_disabled_config_uses_the_plain_cached_converter() -> None:
@@ -91,3 +93,49 @@ def test_enrichment_converter_still_accepts_every_format_the_plain_one_does() ->
     figures = IndexingFiguresConfig(enabled=True, describe=False)
     enriched = set(docling_converter_for(figures, None).allowed_formats)
     assert enriched >= set(_docling_converter().allowed_formats)
+
+
+def test_extract_text_for_path_runs_the_classifier_over_a_real_pdf() -> None:
+    """The integration point: config in, a classified Docling document out.
+
+    Classification is local (no gateway), so this pins the whole
+    ``extract_text_for_path -> docling_converter_for -> _read_with_docling`` path against a
+    real PDF, including that the enrichment converter still produces a usable source map.
+    """
+    pdf = apollo_figure_pages()
+    figures = IndexingFiguresConfig(enabled=True, classify=True, describe=False)
+
+    plain = extract_text_for_path(pdf)
+    assert plain is not None
+
+    doc = extract_text_for_path(pdf, figures=figures, gateway=None)
+    assert doc is not None
+    assert doc.extraction == "docling"
+    assert doc.text.strip()
+    assert doc.spans
+    for span in doc.spans:
+        assert 0 <= span.char_start < span.char_end <= len(doc.text)
+    # Enrichment must not cost us provenance: the same file locates the same way.
+    assert doc.unlocated_items == plain.unlocated_items
+    assert any(span.figure_class for span in doc.spans), "the figure classifier did not run"
+
+
+def test_unreachable_vision_gateway_yields_undescribed_pictures_not_an_exception() -> None:
+    """Pinned Docling behaviour: a dead vision endpoint does NOT fail the conversion.
+
+    Docling absorbs the per-picture API failure and returns the document with its pictures
+    undescribed. That is why the run log reports ``figures_undescribed`` and why the
+    described/undescribed split is the only signal an operator gets that the vision alias
+    was unreachable -- the conversion itself still succeeds.
+    """
+    figures = IndexingFiguresConfig(
+        enabled=True, describe=True, classify=True, timeout_s=5, concurrency=1
+    )
+    gateway = FigureGateway(
+        base_url="http://127.0.0.1:9/v1", api_key="x", model="z-ai.glm-5.3-flash"
+    )
+    doc = extract_text_for_path(apollo_figure_pages(), figures=figures, gateway=gateway)
+    assert doc is not None
+    assert doc.extraction == "docling"
+    assert doc.figures_described == 0
+    assert doc.figures_skipped > 0

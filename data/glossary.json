@@ -12676,17 +12676,6 @@
       "badges": []
     },
     {
-      "term": "Figures Max Per File",
-      "key": "FIGURES_MAX_FIGURES_PER_FILE",
-      "definition": "Hard cap on described figures per document; figures beyond the cap keep caption-only text and are counted as skipped in the run summary.",
-      "category": "indexing",
-      "related": [
-        "FIGURES_ENABLED"
-      ],
-      "links": [],
-      "badges": []
-    },
-    {
       "term": "Figures Max Completion Tokens",
       "key": "FIGURES_MAX_COMPLETION_TOKENS",
       "definition": "Output token budget for one figure description.",

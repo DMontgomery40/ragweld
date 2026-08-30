@@ -11,6 +11,15 @@ from server.api.index import _resolve_figure_route
 from server.models.tribrid_config_model import TriBridConfig
 
 
+def test_the_run_body_form_raises_runtime_error_not_an_http_error() -> None:
+    """Inside a background run there is no request to answer: a 409 must not become the error."""
+    cfg = TriBridConfig(indexing={"figures": {"enabled": True, "vision_model": "nope.not-a-model"}})
+    with pytest.raises(RuntimeError) as excinfo:
+        _resolve_figure_route(cfg, as_http=False)
+    assert "nope.not-a-model" in str(excinfo.value)
+    assert not isinstance(excinfo.value, HTTPException)
+
+
 def test_figures_disabled_resolves_no_route() -> None:
     assert _resolve_figure_route(TriBridConfig()) is None
 
@@ -26,7 +35,10 @@ def test_unknown_alias_refuses_the_run() -> None:
     with pytest.raises(HTTPException) as excinfo:
         _resolve_figure_route(cfg)
     assert excinfo.value.status_code == 409
-    assert "nope.not-a-model" in str(excinfo.value.detail)
+    detail = excinfo.value.detail
+    assert detail["code"] == "figure_vision_alias"
+    assert detail["alias"] == "nope.not-a-model"
+    assert "nope.not-a-model" in detail["message"]
 
 
 def test_disabled_gateway_refuses_a_vision_capable_alias() -> None:
@@ -38,7 +50,9 @@ def test_disabled_gateway_refuses_a_vision_capable_alias() -> None:
     with pytest.raises(HTTPException) as excinfo:
         _resolve_figure_route(cfg)
     assert excinfo.value.status_code == 409
-    assert "z-ai.glm-5.3-flash" in str(excinfo.value.detail)
+    detail = excinfo.value.detail
+    assert detail["code"] == "figure_vision_alias"
+    assert detail["alias"] == "z-ai.glm-5.3-flash"
 
 
 @pytest.mark.skipif(

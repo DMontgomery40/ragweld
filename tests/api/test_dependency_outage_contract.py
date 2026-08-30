@@ -87,6 +87,8 @@ def test_index_start_409_is_the_discriminated_fence_union() -> None:
     assert {r.rsplit("/", 1)[-1] for r in refs} == {
         "IndexRunConflictResponse",
         "PersistedStateCorruptResponse",
+        # Starting a run also refuses an unusable indexing.figures.vision_model with a 409.
+        "FigureRouteConflictResponse",
     }, body
     for path, method in (
         ("/api/index/{corpus_id}/status", "get"),

@@ -4438,11 +4438,6 @@ class IndexingFiguresConfig(BaseModel):
         default_factory=lambda: ["logo", "signature", "icon"],
         description="Classifier classes that are never sent for description",
     )
-    max_figures_per_file: int = Field(
-        default=200,
-        ge=0,
-        description="Cap on described figures per document; the rest keep caption-only text",
-    )
     max_completion_tokens: int = Field(
         default=600,
         ge=64,
