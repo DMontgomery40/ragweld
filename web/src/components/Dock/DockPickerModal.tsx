@@ -198,7 +198,7 @@ export function DockPickerModal({ isOpen, onClose, onPick }: DockPickerModalProp
   const SectionTitle = ({ children }: { children: string }) => (
     <div
       style={{
-        fontSize: '11px',
+        fontSize: '11.5px',
         color: 'var(--fg-muted)',
         textTransform: 'uppercase',
         letterSpacing: '0.4px',
@@ -246,7 +246,7 @@ export function DockPickerModal({ isOpen, onClose, onPick }: DockPickerModalProp
           </div>
           <div
             style={{
-              fontSize: '11px',
+              fontSize: '11.5px',
               color: 'var(--fg-muted)',
               marginTop: '2px',
               overflow: 'hidden',
@@ -263,7 +263,7 @@ export function DockPickerModal({ isOpen, onClose, onPick }: DockPickerModalProp
         {entry.renderMode === 'iframe' ? (
           <span
             style={{
-              fontSize: '10px',
+              fontSize: '11.5px',
               padding: '2px 6px',
               borderRadius: '6px',
               border: '1px solid var(--line)',

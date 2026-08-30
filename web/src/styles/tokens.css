@@ -10,7 +10,7 @@ html, :root, [data-theme="dark"] {
   --bg-elev1: #0f0f12;
   --bg-elev2: #18181b;
   --panel: #0f0f12;
-  --line: #27272a;
+  --line: #6b6b74;           /* zinc hairline @ 3.36:1 min vs surfaces (decorative-ink floor) */
 
   --fg: #e4e4e7;
   --fg-muted: #8b8b95;
@@ -76,7 +76,7 @@ html, :root, [data-theme="dark"] {
   --bg-elev1: #ffffff;
   --bg-elev2: #f4f4f5;
   --panel: #ffffff;
-  --line: #e4e4e7;
+  --line: #87878f;           /* zinc hairline @ 3.24:1 min vs surfaces (decorative-ink floor) */
 
   --fg: #18181b;
   --fg-muted: #6b6b74;

@@ -422,3 +422,136 @@ def test_the_app_shell_focus_ring_is_at_least_two_pixels() -> None:
     widths = [int(w) for w in re.findall(r"(\d+)px", block)]
     assert widths, f"the app-shell focus rule declares no size:\n{block.strip()}"
     assert max(widths) >= 2, f"the app-shell focus ring is thinner than 2px:\n{block.strip()}"
+
+
+# ===========================================================================
+# Legibility floor scans (T15 / M-05, M-108..M-114) -- font-size >= 11.5px and
+# no text/control opacity < 0.8, across the web tree.
+#
+# design-legibility.md sets a hard type floor: "nothing below 11px CSS ...
+# Labels/captions >= 11.5px". This lane's ownership is `web/src/styles/**` and
+# `web/src/components/Dock/**`, so those surfaces are held to a HARD floor here
+# (any sub-11.5px `font-size`/`fontSize` fails with file:line). The rest of the
+# tree carries a large inventory of inline `fontSize: '10px'` sub-floor tiers
+# baked into component *logic* (e.g. `EvalDrillDown.tsx`, `IndexingSubtab.tsx`)
+# that a stylesheet cannot override (an inline style beats any class) -- those
+# belong to the owning feature lanes, not this one. They are guarded by a
+# ratchet: the count may not GROW past the frozen baseline, and every offender
+# is printed file:line so the controller can route them. This is the honest
+# split -- a hard gate on what this lane can hold green, a non-regression
+# ceiling + routable inventory on what it cannot.
+# ===========================================================================
+
+FONT_FLOOR_PX = 11.5
+
+_CSS_FONT_SIZE_RE = re.compile(r"font-size\s*:\s*([0-9]*\.?[0-9]+)px")
+_TSX_FONT_SIZE_RE = re.compile(r"fontSize\s*:\s*['\"]([0-9]*\.?[0-9]+)px['\"]")
+
+# Files this lane owns and must keep at/above the floor.
+_OWNED_PREFIXES = ("web/src/styles/", "web/src/components/Dock/")
+
+# Frozen count of sub-floor inline/CSS font sizes in files this lane does NOT
+# own (component logic + component-scoped CSS in other lanes' trees). This is a
+# CEILING, not an equality: a lane that fixes its own tiers only lowers the
+# number, which still passes; adding a new sub-floor tier anywhere raises it and
+# fails. When the tree is fully migrated this reaches 0 and the ratchet can
+# become a hard zero. Measured on origin/main c4a55fd5: 182 inline `fontSize`
+# in `.tsx` + 6 in non-owned component `.css` = 188.
+UNOWNED_SUBFLOOR_FONT_BASELINE = 188
+
+
+def _rel(path: Path) -> str:
+    return path.relative_to(ROOT).as_posix()
+
+
+def _is_owned(path: Path) -> bool:
+    rel = _rel(path)
+    return any(rel.startswith(pfx) for pfx in _OWNED_PREFIXES)
+
+
+def _iter_web_source_files() -> list[Path]:
+    return sorted(
+        p
+        for pattern in ("**/*.css", "**/*.tsx", "**/*.ts")
+        for p in CSS_ROOT.glob(pattern)
+    )
+
+
+def _font_size_violations(path: Path) -> list[str]:
+    """Return `rel:line: font-size Npx` for every sub-floor size in `path`.
+
+    CSS comments are stripped first so a commented-out declaration is not a
+    false positive; the CSS regex is applied to `.css` files and the inline-JSX
+    `fontSize: 'Npx'` regex to `.tsx`/`.ts`. A value of exactly 11.5px passes.
+    """
+    raw = path.read_text(encoding="utf-8", errors="replace")
+    text = _CSS_COMMENT_RE.sub(lambda m: "\n" * m.group(0).count("\n"), raw)
+    regex = _CSS_FONT_SIZE_RE if path.suffix == ".css" else _TSX_FONT_SIZE_RE
+    out = []
+    for line_no, line in enumerate(text.splitlines(), 1):
+        for m in regex.finditer(line):
+            if float(m.group(1)) < FONT_FLOOR_PX:
+                out.append(f"{_rel(path)}:{line_no}: font-size {m.group(1)}px")
+    return out
+
+
+def test_owned_surfaces_have_no_subfloor_font_size() -> None:
+    """styles/** and Dock/** must not render any text below 11.5px."""
+    violations: list[str] = []
+    for path in _iter_web_source_files():
+        if _is_owned(path):
+            violations.extend(_font_size_violations(path))
+
+    assert not violations, (
+        "font-size below the 11.5px legibility floor in a surface this lane "
+        "owns (design-legibility.md; raise the tier, do not dim it):\n"
+        + "\n".join(violations)
+    )
+
+
+def test_unowned_subfloor_font_debt_does_not_grow() -> None:
+    """Ratchet: sub-floor font sizes in other lanes' files may not increase.
+
+    The offenders are printed file:line so the controller can route each to its
+    owning lane. Fixing any of them (in the owning lane) only lowers the count;
+    this test never forces this lane to edit a file it does not own.
+    """
+    offenders: list[str] = []
+    for path in _iter_web_source_files():
+        if not _is_owned(path):
+            offenders.extend(_font_size_violations(path))
+
+    assert len(offenders) <= UNOWNED_SUBFLOOR_FONT_BASELINE, (
+        f"sub-floor font-size count in unowned files rose to {len(offenders)} "
+        f"(baseline {UNOWNED_SUBFLOOR_FONT_BASELINE}); a new tier below 11.5px "
+        f"was introduced. Raise it to >=11.5px or lower the baseline:\n"
+        + "\n".join(offenders)
+    )
+
+
+# --- Decorative-ink floor for the border token -----------------------------
+#
+# design-legibility.md: "decorative-only ink >= 3:1". The `--line` border token
+# was 1.34:1 (dark) / 1.22:1 (light) against the page -- an invisible hairline
+# on the operator's low-DPI monitors (M-155/A-56 borders that "read as panels
+# that failed to load"). It is pinned here at the 3:1 decorative floor against
+# every surface a border is drawn on, in both themes. `--line` is a border/
+# background/decorative-glyph token (verified: its only `color:` use is the
+# 20px `.ob-stage-arrow` separator, decorative ink, not body text), so the 3:1
+# decorative floor -- not the 4.5:1 text floor -- is the correct bar.
+
+LINE_DECORATIVE_FLOOR = 3.0
+
+
+@pytest.mark.parametrize("theme_name", ["dark", "light"])
+@pytest.mark.parametrize("surface", SURFACES)
+def test_line_token_meets_decorative_floor(theme_name: str, surface: str) -> None:
+    theme = THEMES[theme_name]
+    assert "line" in theme, f"{theme_name} block is missing --line"
+    ratio = _contrast_ratio(theme["line"], theme[surface])
+    assert ratio >= LINE_DECORATIVE_FLOOR, (
+        f"{theme_name} theme: --line {theme['line']} on --{surface} "
+        f"{theme[surface]} = {ratio:.2f}:1, below the {LINE_DECORATIVE_FLOOR}:1 "
+        f"decorative-ink floor (design-legibility.md); a border this faint is "
+        f"invisible at dpr 1."
+    )
