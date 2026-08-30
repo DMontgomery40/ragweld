@@ -17,6 +17,7 @@ import re
 import threading
 import time
 from collections.abc import Generator
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -73,6 +74,16 @@ def _messages(repo_id: str, run_id: str) -> list[str]:
 
 def _matching(messages: list[str], needle: str) -> list[str]:
     return [message for message in messages if needle in message]
+
+
+def _heartbeat_times(repo_id: str, run_id: str) -> list[datetime]:
+    """Emit timestamps of the heartbeat events, so the interval is measured, not parsed."""
+    _flush_run_events_sync()
+    return [
+        event.ts
+        for event in _load_run_events(repo_id, run_id, limit=500)
+        if "still running" in str(event.message or "")
+    ]
 
 
 async def _await_holder(holding: asyncio.Task[Any], *, timeout: float = 10.0) -> None:
@@ -194,14 +205,61 @@ HEARTBEAT_PATTERN = re.compile(
 )
 
 
-def test_a_long_conversion_keeps_saying_it_is_still_running() -> None:
+def test_a_long_conversion_says_it_is_still_running_then_backs_off() -> None:
     """One Docling conversion can outlive every other event, so it has to report itself.
 
     The Apollo run spent 32 minutes inside single-file conversions. Between them the run
-    log said nothing, which is indistinguishable from a wedged worker.
+    log said nothing, which is indistinguishable from a wedged worker. But one line a minute
+    for forty minutes is forty identical lines, which buries every other event in the run
+    log: the first beat lands quickly, and after that the interval widens.
     """
 
-    async def scenario() -> tuple[list[str], list[str]]:
+    async def scenario() -> tuple[list[str], list[str], list[datetime], datetime]:
+        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        _register(queue, WAITER_CORPUS, WAITER_RUN)
+        started = datetime.now(UTC)
+        await _run_docling_extraction_locked(
+            time.sleep,
+            5.0,
+            event_queue=queue,
+            conversion=DoclingConversion(
+                repo_id=WAITER_CORPUS, run_id=WAITER_RUN, file="apollo-11-mission-report.pdf"
+            ),
+            wait_notice_seconds=0.0,
+            heartbeat_seconds=0.6,
+            heartbeat_backoff_seconds=2.0,
+        )
+        during = _matching(_messages(WAITER_CORPUS, WAITER_RUN), "still running")
+        times = _heartbeat_times(WAITER_CORPUS, WAITER_RUN)
+        # The beat has to stop with the conversion, not outlive it as a leaked task.
+        await asyncio.sleep(2.5)
+        after = _matching(_messages(WAITER_CORPUS, WAITER_RUN), "still running")
+        return during, after, times, started
+
+    during, after, times, started = asyncio.run(scenario())
+
+    assert len(during) >= 3, during
+    elapsed: list[int] = []
+    for message in during:
+        match = HEARTBEAT_PATTERN.match(message)
+        assert match is not None, message
+        assert match.group("file") == "apollo-11-mission-report.pdf", message
+        elapsed.append(int(match.group("elapsed")))
+    assert elapsed == sorted(set(elapsed)), elapsed
+    assert after == during, (during, after)
+
+    # The shape is the whole point: the first beat lands on the short interval, and every
+    # beat after it waits the backoff. At 60s/60s a 40-minute conversion wrote 40 lines.
+    assert (times[0] - started).total_seconds() < 1.6, (times, started)
+    gaps = [(b - a).total_seconds() for a, b in zip(times, times[1:], strict=False)]
+    assert gaps, times
+    assert all(gap >= 1.5 for gap in gaps), gaps
+
+
+def test_a_heartbeat_without_a_backoff_reports_once_and_stops() -> None:
+    """`heartbeat_backoff_seconds <= 0` means one notice, like `wait_repeat_seconds <= 0`."""
+
+    async def scenario() -> list[str]:
         queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         _register(queue, WAITER_CORPUS, WAITER_RUN)
         await _run_docling_extraction_locked(
@@ -212,26 +270,14 @@ def test_a_long_conversion_keeps_saying_it_is_still_running() -> None:
                 repo_id=WAITER_CORPUS, run_id=WAITER_RUN, file="apollo-11-mission-report.pdf"
             ),
             wait_notice_seconds=0.0,
-            heartbeat_seconds=1.0,
+            heartbeat_seconds=0.5,
+            heartbeat_backoff_seconds=0.0,
         )
-        during = _matching(_messages(WAITER_CORPUS, WAITER_RUN), "still running")
-        # The beat has to stop with the conversion, not outlive it as a leaked task.
-        await asyncio.sleep(2.2)
-        after = _matching(_messages(WAITER_CORPUS, WAITER_RUN), "still running")
-        return during, after
+        return _matching(_messages(WAITER_CORPUS, WAITER_RUN), "still running")
 
-    during, after = asyncio.run(scenario())
+    messages = asyncio.run(scenario())
 
-    assert len(during) >= 2, during
-    elapsed: list[int] = []
-    for message in during:
-        match = HEARTBEAT_PATTERN.match(message)
-        assert match is not None, message
-        assert match.group("file") == "apollo-11-mission-report.pdf", message
-        elapsed.append(int(match.group("elapsed")))
-    assert elapsed[0] >= 1, elapsed
-    assert elapsed == sorted(set(elapsed)), elapsed
-    assert after == during, (during, after)
+    assert len(messages) == 1, messages
 
 
 def test_a_short_conversion_emits_no_heartbeat() -> None:

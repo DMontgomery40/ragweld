@@ -147,9 +147,15 @@ _DOCLING_WAIT_REPEAT_SECONDS = 60.0
 
 # A single scanned PDF can hold the extractor for many minutes (the Apollo 11 mission report
 # ran 32), and nothing else in the run emits while it does. Past this the conversion says it
-# is still alive, every interval, so a slow file never reads as a wedged worker. Same kind of
-# invariant as the wait notice above, and a parameter for the same reason.
+# is still alive, so a slow file never reads as a wedged worker. Same kind of invariant as
+# the wait notice above, and a parameter for the same reason.
 _DOCLING_HEARTBEAT_SECONDS = 60.0
+
+# The first beat answers "is it wedged?" and every beat after it only says "still not done".
+# At one a minute a 40-minute conversion wrote 40 identical lines, which buries every other
+# event in the run log, so the interval widens once the question has been answered. Zero
+# means one notice and no repeat, the same as `_DOCLING_WAIT_REPEAT_SECONDS`.
+_DOCLING_HEARTBEAT_BACKOFF_SECONDS = 300.0
 
 
 @dataclass(slots=True)
@@ -2018,6 +2024,7 @@ async def _run_docling_extraction_locked(
     wait_notice_seconds: float = _DOCLING_WAIT_NOTICE_SECONDS,
     wait_repeat_seconds: float = _DOCLING_WAIT_REPEAT_SECONDS,
     heartbeat_seconds: float = _DOCLING_HEARTBEAT_SECONDS,
+    heartbeat_backoff_seconds: float = _DOCLING_HEARTBEAT_BACKOFF_SECONDS,
     **kwargs: Any,
 ) -> T:
     """Serialize Docling conversions process-wide, and put both silences in the run log.
@@ -2031,7 +2038,7 @@ async def _run_docling_extraction_locked(
 
     The conversion itself is the other silence: one long file emits nothing between its
     surrounding per-file events, so past `heartbeat_seconds` it reports that it is still
-    running, every interval, until it finishes.
+    running, and every `heartbeat_backoff_seconds` after that until it finishes.
     """
     global _DOCLING_LOCK_HOLDER
 
@@ -2108,8 +2115,9 @@ async def _run_docling_extraction_locked(
 
     async def _beat(file: str) -> None:
         started = time.monotonic()
+        interval = heartbeat_seconds
         while True:
-            await asyncio.sleep(heartbeat_seconds)
+            await asyncio.sleep(interval)
             _emit_event(
                 event_queue,
                 {
@@ -2122,6 +2130,11 @@ async def _run_docling_extraction_locked(
                 },
                 drop_oldest=True,
             )
+            # The first beat rules out a wedged worker; after that the run log only needs a
+            # periodic sign of life, not one line a minute for the length of the conversion.
+            if heartbeat_backoff_seconds <= 0:
+                return
+            interval = heartbeat_backoff_seconds
 
     worker_coroutine: Any = None
     worker: asyncio.Task[T] | None = None
