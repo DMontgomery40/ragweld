@@ -124,18 +124,48 @@ async def _ensure_local_docker_context(*, timeout_s: int, env: dict[str, str]) -
         raise HTTPException(status_code=403, detail="Ragweld Docker control requires a local Docker context.")
 
 
+# Loki does not move while the process runs, but the probe that finds it shares a box with
+# indexing: under a Docling re-index the 0.6s `/ready` probe timed out and every caller --
+# `/api/loki/status` and the chat log tail alike -- reported "Loki not reachable" while Loki
+# was up, and the Chat log panel stayed stuck on that error until the page was reloaded.
+# Resolve once, keep the answer for this long, and re-probe only when a request against the
+# cached URL cannot connect at all.
+_LOKI_CACHE_TTL_SECONDS = 300.0
+
+# The probe competes with whatever else the box is doing, and 0.6s was inside the noise of a
+# loaded host. An invariant of the resolver, not an operator tunable: a parameter of
+# `_resolve_loki_base_url` only so tests can drive it.
+_LOKI_PROBE_TIMEOUT_SECONDS = 2.0
+
+# A tail that opens while the box is busy must not end: it says it is retrying and holds the
+# stream open until Loki answers, so a busy box self-heals without a page reload. Retrying
+# forever would be its own lie, so the budget bounds it. Same kind of invariant as above.
+_LOKI_TAIL_RETRY_SECONDS = 10.0
+_LOKI_TAIL_RETRY_BUDGET_SECONDS = 120.0
+
+# (base_url, monotonic expiry) for the resolved Loki, process-wide.
+_LOKI_BASE_CACHE: tuple[str, float] | None = None
+
+
 def _loki_candidate_urls() -> list[str]:
-    """Return candidate Loki base URLs (best-effort, local-dev oriented)."""
+    """Return candidate Loki base URLs.
+
+    `LOKI_BASE_URL` is authoritative when it is set: an operator who names Loki means that
+    one, and probing local-dev guesses behind it would answer from a different Loki than the
+    one configured. The guesses exist only for a local dev stack that sets nothing.
+    """
     env = (os.getenv("LOKI_BASE_URL") or "").strip()
-    candidates = []
     if env:
-        candidates.append(env)
-    # Local dev (run on host)
-    candidates.append("http://127.0.0.1:53100")
-    # Docker-compose network (backend inside compose)
-    candidates.append("http://loki:3100")
-    # Docker Desktop host alias
-    candidates.append("http://host.docker.internal:3100")
+        candidates = [env]
+    else:
+        candidates = [
+            # Local dev (run on host)
+            "http://127.0.0.1:53100",
+            # Docker-compose network (backend inside compose)
+            "http://loki:3100",
+            # Docker Desktop host alias
+            "http://host.docker.internal:3100",
+        ]
 
     out: list[str] = []
     seen: set[str] = set()
@@ -148,10 +178,48 @@ def _loki_candidate_urls() -> list[str]:
     return out
 
 
-async def _resolve_loki_base_url(timeout_s: float = 0.6) -> str | None:
-    """Return the first reachable Loki base URL (or None)."""
+def _cached_loki_base_url() -> str | None:
+    """The resolved Loki URL while it is still fresh."""
+    cached = _LOKI_BASE_CACHE
+    if cached is None:
+        return None
+    base, expires_at = cached
+    if time.monotonic() >= expires_at:
+        return None
+    return base
+
+
+def invalidate_loki_base_url(base: str | None = None) -> None:
+    """Drop the cached Loki URL after a request against it failed to connect.
+
+    Only a transport failure invalidates. A 4xx/5xx answer -- a malformed LogQL query, a Loki
+    that is up but not ready -- says the URL is right and the request was wrong, and dropping
+    it there would put every caller back on the per-call probe this cache exists to remove.
+    """
+    global _LOKI_BASE_CACHE
+    cached = _LOKI_BASE_CACHE
+    if cached is None:
+        return
+    if base is not None and cached[0] != str(base).strip().rstrip("/"):
+        return
+    _LOKI_BASE_CACHE = None
+
+
+async def _resolve_loki_base_url(timeout_s: float | None = None) -> str | None:
+    """Return the first reachable Loki base URL (or None), cached for `_LOKI_CACHE_TTL_SECONDS`.
+
+    A miss is deliberately not cached: when Loki is genuinely absent the next caller should
+    find it as soon as it comes up, and the callers that would otherwise re-probe in a loop
+    (the tail) rate-limit themselves.
+    """
+    global _LOKI_BASE_CACHE
+    cached = _cached_loki_base_url()
+    if cached is not None:
+        return cached
+    probe_timeout = _LOKI_PROBE_TIMEOUT_SECONDS if timeout_s is None else float(timeout_s)
     for base in _loki_candidate_urls():
-        if await _http_ok(f"{base}/ready", timeout_s=timeout_s):
+        if await _http_ok(f"{base}/ready", timeout_s=probe_timeout):
+            _LOKI_BASE_CACHE = (base, time.monotonic() + _LOKI_CACHE_TTL_SECONDS)
             return base
     return None
 
@@ -505,7 +573,7 @@ async def loki_status(request: Request) -> LokiStatus:
         return LokiStatus(reachable=False, url=None, status="unreachable")
 
     try:
-        async with httpx.AsyncClient(timeout=1.5) as client:
+        async with httpx.AsyncClient(timeout=_LOKI_PROBE_TIMEOUT_SECONDS) as client:
             r = await client.get(f"{base}/ready")
         reachable = r.status_code < 500
         return LokiStatus(
@@ -513,6 +581,11 @@ async def loki_status(request: Request) -> LokiStatus:
             url=str(base),
             status=("ok" if reachable else f"status_{r.status_code}"),
         )
+    except httpx.TransportError as e:
+        # The cached URL could not be connected to at all, so it is the wrong URL: drop it
+        # rather than answer "unreachable" from a stale cache for the rest of the TTL.
+        invalidate_loki_base_url(base)
+        return LokiStatus(reachable=False, url=str(base), status=f"error: {e.__class__.__name__}")
     except Exception as e:
         return LokiStatus(reachable=False, url=str(base), status=f"error: {e.__class__.__name__}")
 
@@ -534,9 +607,21 @@ async def loki_tail(
     - {"type":"complete"}
     """
     _ensure_local_request(request)
-    base = await _resolve_loki_base_url()
 
     async def _gen() -> Any:
+        # Resolved inside the stream, not above it: a resolve that fails because the box is
+        # busy is not the same answer as "Loki is gone", and ending here left the Chat log
+        # panel stuck on an error until the operator reloaded the page. Say it is retrying,
+        # hold the stream open, and pick Loki up as soon as it answers.
+        base = await _resolve_loki_base_url()
+        if not base:
+            deadline = time.monotonic() + _LOKI_TAIL_RETRY_BUDGET_SECONDS
+            while not base and time.monotonic() < deadline:
+                yield f"data: {json.dumps({'type': 'error', 'message': 'Loki not reachable (retrying)'})}\n\n"
+                await asyncio.sleep(_LOKI_TAIL_RETRY_SECONDS)
+                if await request.is_disconnected():
+                    return
+                base = await _resolve_loki_base_url()
         if not base:
             yield f"data: {json.dumps({'type': 'error', 'message': 'Loki not reachable'})}\n\n"
             yield f"data: {json.dumps({'type': 'complete'})}\n\n"
@@ -573,6 +658,8 @@ async def loki_tail(
                     raise RuntimeError(f"{r.status_code}: {r.text}")
                 payload = r.json()
             except Exception as e:
+                if isinstance(e, httpx.TransportError):
+                    invalidate_loki_base_url(base)
                 yield f"data: {json.dumps({'type': 'error', 'message': f'Loki tail error: {e}'})}\n\n"
                 yield f"data: {json.dumps({'type': 'complete'})}\n\n"
                 break

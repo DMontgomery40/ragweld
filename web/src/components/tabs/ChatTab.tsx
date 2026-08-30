@@ -154,10 +154,15 @@ export default function ChatTab() {
 
     TerminalService.connectToStream('chat_loki', `loki/tail?${qs.toString()}`, {
       onLine: (line) => terminalRef.current?.appendLine(line),
+      // The tail is still open and still resolving Loki: re-read the status so the header
+      // stops saying "unreachable" the moment the box frees up, without a page reload.
+      onTransient: () => {
+        void refreshLokiStatus();
+      },
       onError: (err) => terminalRef.current?.appendLine(`\u001b[31mERROR: ${err}\u001b[0m`),
       onComplete: () => terminalRef.current?.appendLine('\u001b[90m[complete]\u001b[0m'),
     });
-  }, [logService, lokiQuery, lokiStatus?.reachable, trace, traceOpen]);
+  }, [logService, lokiQuery, lokiStatus?.reachable, refreshLokiStatus, trace, traceOpen]);
 
   // Reconnect logs when selection/filter changes
   useEffect(() => {
@@ -314,7 +319,10 @@ export default function ChatTab() {
             <div style={{ marginTop: '12px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginBottom: '8px' }}>
                 <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--fg)' }}>Logs</div>
-                <div style={{ fontSize: '11px', color: 'var(--fg-muted)' }}>
+                <div
+                  style={{ fontSize: '11px', color: 'var(--fg-muted)' }}
+                  data-testid="chat-loki-status"
+                >
                   {lokiStatus
                     ? lokiStatus.reachable
                       ? `Loki: ${lokiStatus.status}${lokiStatus.url ? ` (${lokiStatus.url})` : ''}`

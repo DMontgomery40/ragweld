@@ -5,6 +5,18 @@
 
 import { apiUrl } from '@/api/client';
 
+/**
+ * A stream error marked `(retrying)` is a transient status, not a failure.
+ *
+ * The producer is still connected and still trying (the Loki tail while the box is busy
+ * re-resolves for two minutes before it gives up), so rendering it as a red ERROR made a
+ * self-healing stream look dead until the operator reloaded the page. The marker is part of
+ * the SSE contract with those producers, not a guess about wording.
+ */
+export function isTransientStreamStatus(message: unknown): boolean {
+  return typeof message === 'string' && /\(retrying\)\s*$/.test(message.trim());
+}
+
 interface TerminalInstance {
   id: string;
   sse?: EventSource;
@@ -140,6 +152,8 @@ class TerminalServiceClass {
       onLine?: (line: string) => void;
       onProgress?: (percent: number, message: string) => void;
       onError?: (error: string) => void;
+      /** A `(retrying)` status: the stream is still open and the producer is still trying. */
+      onTransient?: (message: string) => void;
       onComplete?: () => void;
       onCancelled?: () => void;
     }
@@ -176,6 +190,16 @@ class TerminalServiceClass {
             break;
 
           case 'error':
+            if (isTransientStreamStatus(data.message)) {
+              // Muted, not red, and no onError: the stream is still open.
+              if (callbacks.onTransient) {
+                callbacks.onTransient(data.message);
+              }
+              if (callbacks.onLine) {
+                callbacks.onLine(`\x1b[90m${data.message}\x1b[0m`);
+              }
+              break;
+            }
             if (callbacks.onError) {
               callbacks.onError(data.message);
             }

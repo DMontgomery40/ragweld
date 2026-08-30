@@ -1,18 +1,24 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import stat
 import sys
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from starlette.requests import Request
+from starlette.responses import StreamingResponse
 
+from server.api import docker as docker_api
 from server.main import app
-
 
 MANAGED_ID = "a" * 64
 FOREIGN_ID = "b" * 64
@@ -338,3 +344,292 @@ async def test_arbitrary_container_and_legacy_routes_are_removed(
         ]
 
     assert [response.status_code for response in responses] == [404] * len(responses)
+
+
+# ==============================================================================
+# Loki resolver + tail (F12): a busy box must not read as "Loki not reachable"
+# ==============================================================================
+#
+# `_resolve_loki_base_url` probed `/ready` on every single call with a 0.6s timeout. Under a
+# Docling re-index that probe times out, so `/api/loki/status` and `/api/stream/loki/tail`
+# both answered "not reachable" while Loki was up, and the Chat log panel stayed stuck on
+# that error until the page was reloaded.
+#
+# Every server below is a real `http.server` on an ephemeral port: the resolver runs its real
+# httpx probe against it, so nothing here can pass on a stub that agrees with itself.
+
+
+class _LokiStubHandler(BaseHTTPRequestHandler):
+    """The two Loki routes the resolver and the tail actually call."""
+
+    def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler's interface
+        path = self.path.split("?", 1)[0]
+        server = cast(Any, self.server)
+        if path == "/ready":
+            server.ready_hits += 1
+            status = int(server.ready_status)
+            self._respond(status, b"ready\n" if status == 200 else b"not ready\n", "text/plain")
+            return
+        if path == "/loki/api/v1/query_range":
+            server.query_hits += 1
+            payload = json.dumps(
+                {
+                    "status": "success",
+                    "data": {
+                        "resultType": "streams",
+                        "result": [
+                            {
+                                "stream": {"compose_service": "api"},
+                                "values": [[str(ts), line] for ts, line in server.entries],
+                            }
+                        ],
+                    },
+                }
+            ).encode()
+            self._respond(200, payload, "application/json")
+            return
+        self._respond(404, b"", "text/plain")
+
+    def _respond(self, status: int, body: bytes, content_type: str) -> None:
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        if body:
+            self.wfile.write(body)
+
+    def log_message(self, format: str, *args: Any) -> None:  # noqa: A002 - stdlib signature
+        """Keep the real server out of the pytest log."""
+
+
+@contextmanager
+def _loki_stub(*, ready_status: int = 200, entries: list[tuple[int, str]] | None = None) -> Iterator[Any]:
+    """A real Loki-shaped HTTP server on an ephemeral port, stopped on exit."""
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _LokiStubHandler)
+    server.ready_hits = 0  # type: ignore[attr-defined]
+    server.query_hits = 0  # type: ignore[attr-defined]
+    server.ready_status = ready_status  # type: ignore[attr-defined]
+    server.entries = list(entries or [])  # type: ignore[attr-defined]
+    server.base_url = f"http://127.0.0.1:{server.server_address[1]}"  # type: ignore[attr-defined]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield server
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+@pytest.fixture(autouse=True)
+def reset_loki_resolver_cache() -> Iterator[None]:
+    """The resolved URL is process-wide, so a leaked entry would answer the next test."""
+    docker_api._LOKI_BASE_CACHE = None
+    try:
+        yield
+    finally:
+        docker_api._LOKI_BASE_CACHE = None
+
+
+def _sse_payloads(chunks: list[str]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for chunk in chunks:
+        for line in chunk.splitlines():
+            if line.startswith("data: "):
+                out.append(json.loads(line[len("data: ") :]))
+    return out
+
+
+def _local_tail_request() -> Request:
+    """A real local Starlette request for the tail endpoint (it refuses remote clients)."""
+
+    async def _receive() -> dict[str, Any]:
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    return Request(
+        {
+            "type": "http",
+            "asgi": {"version": "3.0", "spec_version": "2.3"},
+            "http_version": "1.1",
+            "method": "GET",
+            "scheme": "http",
+            "path": "/api/stream/loki/tail",
+            "raw_path": b"/api/stream/loki/tail",
+            "root_path": "",
+            "query_string": b"",
+            "headers": [],
+            "client": ("127.0.0.1", 54321),
+            "server": ("127.0.0.1", 58012),
+        },
+        receive=_receive,
+    )
+
+
+async def _drain_tail(
+    response: StreamingResponse,
+    *,
+    limit: int,
+    stop_type: str | None = None,
+    timeout: float = 30.0,
+) -> list[dict[str, Any]]:
+    """Read SSE payloads off the real tail stream until `stop_type`, `limit` or the timeout."""
+    payloads: list[dict[str, Any]] = []
+    iterator = response.body_iterator
+
+    async def _read() -> None:
+        async for chunk in iterator:
+            payloads.extend(_sse_payloads([chunk if isinstance(chunk, str) else chunk.decode()]))
+            if stop_type is not None and any(p.get("type") == stop_type for p in payloads):
+                return
+            if len(payloads) >= limit:
+                return
+
+    try:
+        await asyncio.wait_for(_read(), timeout=timeout)
+    except TimeoutError:
+        pass
+    finally:
+        await cast(Any, iterator).aclose()
+    return payloads
+
+
+@pytest.mark.asyncio
+async def test_the_resolver_caches_the_reachable_loki_and_rides_out_a_probe_outage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The whole defect: one slow probe made a live Loki read as unreachable."""
+    with _loki_stub() as stub:
+        monkeypatch.setenv("LOKI_BASE_URL", stub.base_url)
+
+        assert await docker_api._resolve_loki_base_url() == stub.base_url
+        assert stub.ready_hits == 1
+
+        # A second caller is answered from the cache, not from another probe.
+        assert await docker_api._resolve_loki_base_url() == stub.base_url
+        assert stub.ready_hits == 1
+
+    # The probe would now fail outright (the server is gone); the cache still answers, which
+    # is exactly what a probe timing out under load must look like.
+    assert await docker_api._resolve_loki_base_url() == stub.base_url
+
+
+@pytest.mark.asyncio
+async def test_the_cached_loki_url_expires_and_is_probed_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The cache is a five-minute shock absorber, not a permanent answer."""
+    with _loki_stub() as stub:
+        monkeypatch.setenv("LOKI_BASE_URL", stub.base_url)
+        monkeypatch.setattr(docker_api, "_LOKI_CACHE_TTL_SECONDS", 0.2)
+
+        assert await docker_api._resolve_loki_base_url() == stub.base_url
+        assert stub.ready_hits == 1
+
+        await asyncio.sleep(0.3)
+
+        assert await docker_api._resolve_loki_base_url() == stub.base_url
+        assert stub.ready_hits == 2
+
+
+@pytest.mark.asyncio
+async def test_a_connection_failure_against_the_cached_loki_drops_it(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A cached URL that cannot be connected to is wrong, and must not be kept for 5 minutes."""
+    with _loki_stub() as stub:
+        monkeypatch.setenv("LOKI_BASE_URL", stub.base_url)
+        ok = await client.get("/api/loki/status")
+        assert ok.status_code == 200
+        assert ok.json() == {"reachable": True, "url": stub.base_url, "status": "ok"}
+        assert docker_api._LOKI_BASE_CACHE is not None
+
+    monkeypatch.setattr(docker_api, "_LOKI_PROBE_TIMEOUT_SECONDS", 0.3)
+    gone = await client.get("/api/loki/status")
+    assert gone.status_code == 200
+    assert gone.json()["reachable"] is False
+    assert docker_api._LOKI_BASE_CACHE is None
+
+
+@pytest.mark.asyncio
+async def test_a_loki_status_error_response_keeps_the_cached_url(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A 503 from Loki says the URL is right and Loki is busy: only transport failures invalidate."""
+    with _loki_stub() as stub:
+        monkeypatch.setenv("LOKI_BASE_URL", stub.base_url)
+        assert (await client.get("/api/loki/status")).json()["reachable"] is True
+
+        stub.ready_status = 503
+        busy = await client.get("/api/loki/status")
+        assert busy.json() == {"reachable": False, "url": stub.base_url, "status": "status_503"}
+        assert docker_api._LOKI_BASE_CACHE is not None
+
+
+@pytest.mark.asyncio
+async def test_the_tail_retries_the_resolver_and_recovers_without_a_reconnect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The stuck panel: the tail ended on the first failed resolve and never came back."""
+    with _loki_stub(ready_status=503, entries=[(1_700_000_000_000_000_000, "hello from loki")]) as stub:
+        monkeypatch.setenv("LOKI_BASE_URL", stub.base_url)
+        monkeypatch.setattr(docker_api, "_LOKI_PROBE_TIMEOUT_SECONDS", 0.3)
+        monkeypatch.setattr(docker_api, "_LOKI_TAIL_RETRY_SECONDS", 0.2)
+        monkeypatch.setattr(docker_api, "_LOKI_TAIL_RETRY_BUDGET_SECONDS", 30.0)
+
+        response = await docker_api.loki_tail(
+            _local_tail_request(),
+            query='{ragweld_service="api"}',
+            start_ms=1_700_000_000_000,
+            end_ms=None,
+            limit=100,
+            poll_ms=250,
+        )
+
+        async def _heal() -> None:
+            await asyncio.sleep(0.6)
+            stub.ready_status = 200
+
+        healer = asyncio.create_task(_heal())
+        try:
+            payloads = await _drain_tail(response, limit=40, stop_type="log", timeout=25.0)
+        finally:
+            healer.cancel()
+
+    retrying = [p for p in payloads if p.get("type") == "error"]
+    assert retrying, payloads
+    assert all(p["message"] == "Loki not reachable (retrying)" for p in retrying), payloads
+    # The stream stayed open across the outage and delivered real Loki lines afterwards.
+    logs = [p for p in payloads if p.get("type") == "log"]
+    assert logs, payloads
+    assert "hello from loki" in logs[0]["message"]
+    assert not [p for p in payloads if p.get("type") == "complete"], payloads
+
+
+@pytest.mark.asyncio
+async def test_the_tail_gives_up_after_the_retry_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Retrying forever would be its own lie: past the budget the stream says so and ends."""
+    with _loki_stub(ready_status=503) as stub:
+        monkeypatch.setenv("LOKI_BASE_URL", stub.base_url)
+        monkeypatch.setattr(docker_api, "_LOKI_PROBE_TIMEOUT_SECONDS", 0.3)
+        monkeypatch.setattr(docker_api, "_LOKI_TAIL_RETRY_SECONDS", 0.2)
+        monkeypatch.setattr(docker_api, "_LOKI_TAIL_RETRY_BUDGET_SECONDS", 1.0)
+
+        response = await docker_api.loki_tail(
+            _local_tail_request(),
+            query='{ragweld_service="api"}',
+            start_ms=1_700_000_000_000,
+            end_ms=None,
+            limit=100,
+            poll_ms=250,
+        )
+        payloads = await _drain_tail(response, limit=50, timeout=25.0)
+
+    messages = [p.get("message") for p in payloads if p.get("type") == "error"]
+    assert messages.count("Loki not reachable (retrying)") >= 2, payloads
+    assert messages[-1] == "Loki not reachable", payloads
+    assert payloads[-1] == {"type": "complete"}, payloads
