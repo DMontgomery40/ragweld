@@ -289,3 +289,126 @@ def test_no_async_generator_holds_a_span_context_across_a_yield() -> None:
         for description in _offending_blocks(tree):
             offenders.append(f"{path.relative_to(ROOT)}:{description}")
     assert not offenders, "\n".join(offenders)
+
+
+def _is_os_environ_attr(node: ast.expr, attr: str) -> bool:
+    """True for an `os.environ.<attr>` attribute access node."""
+    return (
+        isinstance(node, ast.Attribute)
+        and node.attr == attr
+        and isinstance(node.value, ast.Attribute)
+        and node.value.attr == "environ"
+        and isinstance(node.value.value, ast.Name)
+        and node.value.value.id == "os"
+    )
+
+
+def _is_os_environ_subscript(node: ast.expr) -> bool:
+    """True for an `os.environ[...]` subscript node."""
+    return (
+        isinstance(node, ast.Subscript)
+        and isinstance(node.value, ast.Attribute)
+        and node.value.attr == "environ"
+        and isinstance(node.value.value, ast.Name)
+        and node.value.value.id == "os"
+    )
+
+
+def _os_environ_pop_key(node: ast.expr) -> str | None:
+    """If `node` is a call to `os.environ.pop(key, ...)`, return the unparsed key text."""
+    if isinstance(node, ast.Call) and _is_os_environ_attr(node.func, "pop") and node.args:
+        return ast.unparse(node.args[0])
+    return None
+
+
+def _os_environ_keys_touched(stmts: list[ast.stmt]) -> tuple[set[str], bool]:
+    """Keys restored/mutated anywhere in `stmts` (e.g. a `finally` body), plus whether a
+    wildcard restore (`os.environ.update(...)`/`os.environ.clear()`) is present -- a
+    wildcard restores every key regardless of which ones were individually popped."""
+    keys: set[str] = set()
+    wildcard = False
+    for stmt in stmts:
+        for node in ast.walk(stmt):
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if _is_os_environ_subscript(target):
+                        keys.add(ast.unparse(target.slice))
+            elif isinstance(node, ast.Delete):
+                for target in node.targets:
+                    if _is_os_environ_subscript(target):
+                        keys.add(ast.unparse(target.slice))
+            elif isinstance(node, ast.Call):
+                pop_key = _os_environ_pop_key(node)
+                if pop_key is not None:
+                    keys.add(pop_key)
+                elif _is_os_environ_attr(node.func, "update") or _is_os_environ_attr(node.func, "clear"):
+                    wildcard = True
+    return keys, wildcard
+
+
+def _walk_scope(body: list[ast.stmt]):
+    """Like `ast.walk` over a list of statements, but does not descend into nested
+    `def`/`async def`/`lambda` bodies -- those are their own independent scopes."""
+    stack: list[ast.AST] = list(body)
+    while stack:
+        node = stack.pop()
+        yield node
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            continue
+        stack.extend(ast.iter_child_nodes(node))
+
+
+def _unrestored_os_environ_mutations(tree: ast.Module) -> list[tuple[int, str]]:
+    """Raw `os.environ.pop(...)`/`del os.environ[...]` occurrences (module body plus every
+    function/method) that are not guarded by a `finally`-guaranteed restore of the same
+    key (or a wildcard restore-all)."""
+    scopes: list[list[ast.stmt]] = [tree.body]
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            scopes.append(node.body)
+
+    violations: list[tuple[int, str]] = []
+    for body in scopes:
+        occurrences: list[tuple[int, str]] = []
+        restored_keys: set[str] = set()
+        wildcard_restore = False
+
+        for node in _walk_scope(body):
+            if isinstance(node, ast.Try):
+                keys, wildcard = _os_environ_keys_touched(node.finalbody)
+                restored_keys |= keys
+                wildcard_restore = wildcard_restore or wildcard
+            pop_key = _os_environ_pop_key(node) if isinstance(node, ast.Call) else None
+            if pop_key is not None:
+                occurrences.append((node.lineno, pop_key))
+            elif isinstance(node, ast.Delete):
+                for target in node.targets:
+                    if _is_os_environ_subscript(target):
+                        occurrences.append((node.lineno, ast.unparse(target.slice)))
+
+        if wildcard_restore:
+            continue
+        violations.extend((lineno, key) for lineno, key in occurrences if key not in restored_keys)
+
+    return violations
+
+
+def test_no_unrestored_os_environ_mutations_in_tests() -> None:
+    """A raw `os.environ.pop(...)`/`del os.environ[...]` with no `finally`-guaranteed
+    restore of the same key leaks across every later test in the same pytest process --
+    see the historical bug in `tests/unit/test_reranker.py`, where an unrestored
+    `os.environ.pop("LITELLM_API_KEY", None)` silently failed 17 unrelated tests
+    elsewhere in `tests/api` whenever the full suite ran (each one passed in isolation).
+    Restore the same key in a `try/finally`, or use an env-patching pytest fixture that
+    restores automatically.
+    """
+    violations: list[str] = []
+    for path in sorted((ROOT / "tests").rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        rel = path.relative_to(ROOT)
+        for lineno, key in _unrestored_os_environ_mutations(tree):
+            violations.append(f"{rel}:{lineno} (key={key})")
+
+    assert not violations, "unrestored os.environ mutation(s), restore the same key in a finally:\n" + "\n".join(
+        violations
+    )

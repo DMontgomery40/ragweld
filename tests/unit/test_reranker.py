@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-
 import pytest
 from pydantic import ValidationError
 
@@ -54,8 +52,8 @@ async def test_reranker_learning_missing_trained_model_reports_skipped() -> None
 
 
 @pytest.mark.asyncio
-async def test_reranker_cloud_missing_api_key_reports_skipped() -> None:
-    os.environ.pop("COHERE_API_KEY", None)
+async def test_reranker_cloud_missing_api_key_reports_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("COHERE_API_KEY", raising=False)
 
     config = RerankingConfig(
         reranker_mode="cloud",
@@ -86,9 +84,9 @@ async def test_reranker_empty_input() -> None:
 
 
 @pytest.mark.asyncio
-async def test_reranker_cloud_litellm_without_a_gateway_reports_skipped() -> None:
+async def test_reranker_cloud_litellm_without_a_gateway_reports_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
     """No authenticated gateway in the test process: the gateway provider skips, never fakes scores."""
-    os.environ.pop("LITELLM_API_KEY", None)
+    monkeypatch.delenv("LITELLM_API_KEY", raising=False)
     config = RerankingConfig(
         reranker_mode="cloud",
         reranker_cloud_provider="litellm",
