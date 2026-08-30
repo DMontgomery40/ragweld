@@ -80,9 +80,23 @@ export function MCPSubtab() {
           </div>
           <div style={{ marginTop: '8px', fontSize: '13px', color: 'var(--fg-muted)', lineHeight: 1.5 }}>
             {http && httpHref ? (
-              <a href={httpHref} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--link)', textDecoration: 'none' }} data-testid="mcp-http-url">
-                {httpHref}
-              </a>
+              <>
+                <a href={httpHref} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--link)', textDecoration: 'none' }} data-testid="mcp-http-url">
+                  {httpHref}
+                </a>
+                {http.host_allowed === false ? (
+                  <div
+                    role="alert"
+                    data-testid="mcp-host-not-allowed"
+                    style={{ marginTop: '8px', color: 'var(--err)', fontSize: '12px', lineHeight: 1.5 }}
+                  >
+                    A client using this URL is answered 421: its host is not in{' '}
+                    <span className="mono">config.mcp.allowed_hosts</span>, and DNS rebinding
+                    protection is on. Add <span className="mono">{new URL(httpHref).host}</span>{' '}
+                    there, or turn the protection off deliberately.
+                  </div>
+                ) : null}
+              </>
             ) : (
               <span>disabled (config.mcp.enabled=false) or the Python MCP runtime is not installed</span>
             )}

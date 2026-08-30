@@ -9,6 +9,9 @@ than through the redacting endpoint that is under test.
 from __future__ import annotations
 
 import re
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+from urllib.parse import urlsplit
 
 import pytest
 from httpx import AsyncClient
@@ -185,3 +188,66 @@ def test_the_frontend_and_the_api_agree_on_the_marker() -> None:
             f"{rel} spells the marker literally instead of importing SECRET_REDACTED"
         )
 
+
+@asynccontextmanager
+async def _client_with_lifespan() -> AsyncGenerator[AsyncClient, None]:
+    """A client whose app has actually started.
+
+    The shared `client` fixture uses `ASGITransport`, which never runs the lifespan, and
+    the MCP streamable-HTTP manager refuses every request until its task group exists.
+    These two tests drive the real mounted transport, so they need the real startup.
+    """
+    from httpx import ASGITransport
+
+    from server.main import app
+
+    async with app.router.lifespan_context(app):
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as started:
+            yield started
+
+
+@pytest.mark.asyncio
+async def test_the_advertised_mcp_host_is_one_the_transport_actually_accepts() -> None:
+    """M-91's second half: advertising a host the transport refuses is not a fix.
+
+    `/api/mcp/status` reports `host_allowed` by asking the transport's own validator. This
+    drives the REAL mounted transport and asserts the two agree, so if the library's rule
+    ever changes this fails instead of the workbench quietly advertising a URL that
+    answers 421.
+
+    Both probes share one lifespan on purpose: `StreamableHTTPSessionManager.run()` may be
+    called only once per process, so a second entry would raise rather than test anything.
+    """
+    async with _client_with_lifespan() as client:
+        status = (await client.get("/api/mcp/status")).json()
+        http = status.get("python_http")
+        if not http:
+            pytest.skip("the MCP HTTP transport is not enabled in this environment")
+
+        async def probe(host: str) -> int:
+            response = await client.post(
+                http["path"],
+                headers={
+                    "Host": host,
+                    "Content-Type": "application/json",
+                    "Accept": "application/json, text/event-stream",
+                },
+                json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+            )
+            return response.status_code
+
+        # The premise. Without this the agreement check below could pass on a transport
+        # that happily accepts every Host, which would make `host_allowed` meaningless.
+        assert await probe("mcp-host-that-is-not-allowed.example") == 421, (
+            "DNS rebinding protection is not refusing an unknown Host"
+        )
+
+        advertised = urlsplit(http["url"]).netloc
+        assert advertised, http["url"]
+        refused = await probe(advertised) == 421
+        assert http["host_allowed"] is not refused, (
+            f"status says host_allowed={http['host_allowed']} for {advertised!r}, but the "
+            f"transport refused it"
+        )

@@ -813,6 +813,38 @@ async def check_secrets(
     return {name: bool(os.getenv(name)) for name in names}
 
 
+
+def _advertised_host_is_allowed(cfg: TriBridConfig, url: str) -> bool:
+    """Would the transport accept a request whose Host header is this URL's host?
+
+    Answered by the transport's own validator, constructed from the same settings
+    `server/mcp/server.py` gives it. `enable_dns_rebinding_protection` defaults on and
+    `allowed_hosts` defaults to loopback only, so pointing `public_base_url` at the
+    deployment's public origin without also allowing that host swaps "redirected or
+    plaintext" (M-91) for a 421 -- which is not a fix.
+    """
+    from urllib.parse import urlsplit
+
+    from mcp.server.transport_security import (
+        TransportSecurityMiddleware,
+        TransportSecuritySettings,
+    )
+
+    host = urlsplit(url).netloc
+    if not host:
+        return False
+    if not cfg.mcp.enable_dns_rebinding_protection:
+        return True
+    validator = TransportSecurityMiddleware(
+        TransportSecuritySettings(
+            enable_dns_rebinding_protection=True,
+            allowed_hosts=list(cfg.mcp.allowed_hosts),
+            allowed_origins=list(cfg.mcp.allowed_origins),
+        )
+    )
+    return bool(validator._validate_host(host))
+
+
 @router.get("/mcp/status", response_model=MCPStatusResponse)
 async def mcp_status(request: Request) -> MCPStatusResponse:
     """Return status for MCP transports built into TriBridRAG.
@@ -855,12 +887,17 @@ async def mcp_status(request: Request) -> MCPStatusResponse:
                 # Advertise the canonical URL that does not redirect for POST.
                 path = str(cfg.mcp.mount_path).rstrip("/") + "/"
                 url = f"{str(cfg.mcp.public_base_url).rstrip('/')}{path}"
+                # Asked of the transport's OWN validator rather than re-implemented here:
+                # two copies of the rule would drift silently, and a wrong answer here is
+                # an operator following a URL the server then answers 421 to.
+                host_allowed = _advertised_host_is_allowed(cfg, url)
                 python_http = MCPHTTPTransportStatus(
                     host=str(host),
                     port=int(port),
                     path=path,
                     running=True,
                     url=url,
+                    host_allowed=host_allowed,
                 )
                 from server.mcp.server import get_mcp_server
 
@@ -872,6 +909,11 @@ async def mcp_status(request: Request) -> MCPStatusResponse:
                     f"Python HTTP MCP transport is enabled and mounted at {cfg.mcp.mount_path} "
                     f"(connect to {url})."
                 )
+                if not host_allowed:
+                    details.append(
+                        f"The advertised host is not in config.mcp.allowed_hosts, so the "
+                        f"transport answers 421 to clients using {url}."
+                    )
             else:
                 details.append(
                     "Python HTTP MCP transport is configured as enabled, but the 'mcp' package is not installed."

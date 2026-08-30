@@ -1605,7 +1605,7 @@ export interface MCPConfig {
   enabled?: boolean; // default: True
   /** Mount path for the MCP Streamable HTTP endpoint (e.g. /mcp). */
   mount_path?: string; // default: "/mcp"
-  /** Externally reachable base URL (scheme://host[:port]) that MCP clients should connect to; the mount path is appended to it. Set this to the deployment's public origin when the API sits behind a proxy -- the workbench advertises exactly this value, and deriving it from the request would advertise the proxy's internal hop instead of the address a client can actually reach. */
+  /** Externally reachable base URL (scheme://host[:port]) that MCP clients should connect to; the mount path is appended to it. Set this to the deployment's public origin when the API sits behind a proxy -- the workbench advertises exactly this value, and deriving it from the request would advertise the proxy's internal hop instead of the address a client can actually reach. Its host must also appear in `allowed_hosts`: with DNS rebinding protection on, the transport answers 421 to any Host header it does not recognise, so advertising a host that is not allowed trades one broken instruction for another. */
   public_base_url?: string; // default: "http://127.0.0.1:58012"
   /** Run MCP Streamable HTTP in stateless mode (recommended). */
   stateless_http?: boolean; // default: True
@@ -1637,6 +1637,8 @@ export interface MCPHTTPTransportStatus {
   running: boolean;
   /** The canonical URL to point an MCP client at, built from `config.mcp.public_base_url` and the mount path. The server owns this string: the workbench used to assemble `http://{host}:{port}{path}` itself, which advertised plain HTTP on port 80 for a deployment that is HTTPS-only. */
   url: string;
+  /** Whether the advertised URL's host passes the transport's own Host check. False means a client following this URL is answered 421 by DNS rebinding protection until the host is added to `config.mcp.allowed_hosts`. */
+  host_allowed?: boolean; // default: True
 }
 
 /** One tool registered on the embedded MCP server. */

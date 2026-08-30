@@ -329,7 +329,7 @@ test.describe('help, search and keyboard access', () => {
     expect(await link.innerText()).not.toMatch(/:80\//);
   });
 
-  test('M-88: the DSN field says the password is withheld, and keeps it on save', async ({ page, baseURL, request }) => {
+  test('M-88: the DSN field shows no credential and says the password is withheld', async ({ page, baseURL, request }) => {
     const config = await (await request.get(`${API_BASE}/config`)).json();
     const dsn = String(config.indexing.postgres_url);
     expect(dsn, 'the API must already be withholding the password').toContain('[redacted]');
@@ -344,6 +344,8 @@ test.describe('help, search and keyboard access', () => {
     await expect(page.getByTestId('postgres-url-secret-note')).toContainText('[redacted]');
     // And the field never shows a credential pair, not even as a placeholder.
     expect(await field.getAttribute('placeholder')).not.toMatch(/:[^@/]+@/);
+    // The save round trip -- marker means "unchanged", a real value rotates -- is proven
+    // against the store in tests/api/test_config_redaction.py, not here.
   });
 
   test('M-80: the Frontend row reports how the frontend is actually served', async ({ page, baseURL, request }) => {

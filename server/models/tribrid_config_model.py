@@ -371,6 +371,14 @@ class MCPHTTPTransportStatus(BaseModel):
             "advertised plain HTTP on port 80 for a deployment that is HTTPS-only."
         ),
     )
+    host_allowed: bool = Field(
+        default=True,
+        description=(
+            "Whether the advertised URL's host passes the transport's own Host check. "
+            "False means a client following this URL is answered 421 by DNS rebinding "
+            "protection until the host is added to `config.mcp.allowed_hosts`."
+        ),
+    )
 
 
 class MCPToolInfo(BaseModel):
@@ -429,7 +437,11 @@ class MCPConfig(BaseModel):
             "connect to; the mount path is appended to it. Set this to the deployment's "
             "public origin when the API sits behind a proxy -- the workbench advertises "
             "exactly this value, and deriving it from the request would advertise the "
-            "proxy's internal hop instead of the address a client can actually reach."
+            "proxy's internal hop instead of the address a client can actually reach. "
+            "Its host must also appear in `allowed_hosts`: with DNS rebinding protection "
+            "on, the transport answers 421 to any Host header it does not recognise, so "
+            "advertising a host that is not allowed trades one broken instruction for "
+            "another."
         ),
     )
     stateless_http: bool = Field(
@@ -7197,6 +7209,7 @@ class TriBridConfig(BaseModel):
             # MCP (inbound) params (7)
             'MCP_HTTP_ENABLED': self.mcp.enabled,
             'MCP_HTTP_PATH': self.mcp.mount_path,
+            'MCP_PUBLIC_BASE_URL': self.mcp.public_base_url,
             'MCP_HTTP_STATELESS': self.mcp.stateless_http,
             'MCP_HTTP_JSON_RESPONSE': self.mcp.json_response,
             'MCP_HTTP_DNS_REBIND_PROTECTION': self.mcp.enable_dns_rebinding_protection,
@@ -7607,6 +7620,7 @@ class TriBridConfig(BaseModel):
             mcp=MCPConfig(
                 enabled=data.get('MCP_HTTP_ENABLED', MCPConfig().enabled),
                 mount_path=data.get('MCP_HTTP_PATH', MCPConfig().mount_path),
+                public_base_url=data.get('MCP_PUBLIC_BASE_URL', MCPConfig().public_base_url),
                 stateless_http=data.get('MCP_HTTP_STATELESS', MCPConfig().stateless_http),
                 json_response=data.get('MCP_HTTP_JSON_RESPONSE', MCPConfig().json_response),
                 enable_dns_rebinding_protection=data.get(
@@ -7900,6 +7914,7 @@ TRIBRID_CONFIG_KEYS = {
     # MCP (inbound) params (7)
     'MCP_HTTP_ENABLED',
     'MCP_HTTP_PATH',
+    'MCP_PUBLIC_BASE_URL',
     'MCP_HTTP_STATELESS',
     'MCP_HTTP_JSON_RESPONSE',
     'MCP_HTTP_DNS_REBIND_PROTECTION',

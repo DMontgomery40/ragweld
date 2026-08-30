@@ -165,11 +165,22 @@ test.describe('app shell', () => {
       scroller.scrollTop = 400;
       window.scrollTo(0, 400);
 
-      const el = document.createElement('div');
-      el.style.cssText = 'position:fixed;top:0;left:0;width:8px;height:8px;';
-      route.appendChild(el);
-      const rect = el.getBoundingClientRect();
-      el.remove();
+      const fixed = document.createElement('div');
+      fixed.style.cssText = 'position:fixed;top:0;left:0;width:8px;height:8px;';
+      route.appendChild(fixed);
+      const rect = fixed.getBoundingClientRect();
+      fixed.remove();
+
+      // The transform was doing two jobs. It was the containing block for `absolute`
+      // children too, so removing it outright would have re-anchored every absolutely
+      // positioned child in every route to whatever ancestor came next. `.tab-content`
+      // now carries `position: relative`, which keeps exactly that half.
+      const abs = document.createElement('div');
+      abs.style.cssText = 'position:absolute;top:0;left:0;width:8px;height:8px;';
+      route.appendChild(abs);
+      const absRect = abs.getBoundingClientRect();
+      const routeRect = route.getBoundingClientRect();
+      abs.remove();
 
       // Anything between the probe and the document that establishes a containing block
       // for fixed descendants is the defect, whichever property produced it.
@@ -181,7 +192,14 @@ test.describe('app shell', () => {
           promoted.push(`${node.className || node.tagName}: transform=${cs.transform} filter=${cs.filter} willChange=${cs.willChange}`);
         }
       }
-      return { top: rect.top, left: rect.left, scrolled: scroller.scrollTop, promoted } as const;
+      return {
+        top: rect.top,
+        left: rect.left,
+        absOffsetTop: Math.round(absRect.top - routeRect.top),
+        absOffsetLeft: Math.round(absRect.left - routeRect.left),
+        scrolled: scroller.scrollTop,
+        promoted,
+      } as const;
     });
 
     expect('error' in probe ? probe.error : '').toBe('');
@@ -194,6 +212,9 @@ test.describe('app shell', () => {
       // the viewport origin no matter how far the route has been scrolled.
       expect(probe.top, 'a fixed element drifted with the route scroll').toBe(0);
       expect(probe.left, 'a fixed element drifted with the route scroll').toBe(0);
+      // ...and an absolutely positioned child is still anchored to the route itself.
+      expect(probe.absOffsetTop, 'an absolute child is no longer anchored to .tab-content').toBe(0);
+      expect(probe.absOffsetLeft, 'an absolute child is no longer anchored to .tab-content').toBe(0);
     }
   });
 

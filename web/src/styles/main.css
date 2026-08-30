@@ -435,6 +435,12 @@
         .tab-content {
             /* React Router only renders active route, so tab-content is always visible */
             /* THIS is the scroll container - sticky subtab-bar sticks to top of THIS */
+            /* Containing block for absolutely positioned children, and ONLY for those.
+               This used to come as a side effect of a `transform: translateZ(0)` GPU hint
+               in micro-interactions.css, which also captured `position: fixed` children
+               and opened every inline modal off-screen. `position: relative` keeps the
+               half the layouts depend on and drops the half that broke them. */
+            position: relative;
             display: flex;
             flex-direction: column;
             flex: 1;
