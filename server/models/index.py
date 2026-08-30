@@ -231,6 +231,16 @@ class IndexEstimate(BaseModel):
         ge=0.0,
         description="Estimated GraphRAG semantic extraction cost (USD) when enabled and pricing data is available.",
     )
+    estimated_figures: int | None = Field(
+        default=None,
+        ge=0,
+        description="Figures expected to be described (heuristic: PDF pages x 0.6), when indexing.figures is enabled",
+    )
+    figure_description_cost_usd: float | None = Field(
+        default=None,
+        ge=0.0,
+        description="Estimated vision-call cost (USD) to describe figures, from catalog pricing for indexing.figures.vision_model",
+    )
     total_cost_usd: float | None = Field(
         default=None,
         ge=0.0,

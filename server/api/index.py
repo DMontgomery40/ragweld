@@ -1126,6 +1126,63 @@ def _estimate_semantic_kg_cost_usd(
     )
 
 
+_FIGURE_INPUT_TOKENS = 1200  # image at images_scale 2 (~800) + prompt (~400)
+_FIGURES_PER_PAGE_HEURISTIC = 0.6
+
+
+def _estimate_figure_description_cost_usd(
+    *, alias: str, figures: int, max_completion_tokens: int
+) -> float | None:
+    """Vision-call cost for describing ``figures`` pictures with ``alias``, from models.json GEN pricing."""
+    count = max(0, int(figures or 0))
+    if count <= 0:
+        return 0.0
+    spec = _figure_model_spec(str(alias or "").strip())
+    if not spec or str(spec.get("unit") or "").strip() != "1k_tokens":
+        return None
+    in_rate = _to_float(spec.get("input_per_1k"))
+    out_rate = _to_float(spec.get("output_per_1k"))
+    if in_rate is None and out_rate is None:
+        return None
+    return count * (
+        (_FIGURE_INPUT_TOKENS / 1000.0) * float(in_rate or 0.0)
+        + (float(max_completion_tokens) / 1000.0) * float(out_rate or 0.0)
+    )
+
+
+def _count_pdf_pages(paths: list[Path]) -> int:
+    """Total page count across ``paths``, skipping files pdfium cannot open."""
+    from server.services.pdf_render import pdf_page_sizes
+
+    total = 0
+    for path in paths:
+        try:
+            total += len(pdf_page_sizes(path))
+        except Exception:
+            continue
+    return total
+
+
+def _estimate_figures(cfg: TriBridConfig, pdf_paths: list[Path]) -> tuple[int | None, float | None]:
+    """Estimated figure count and description cost for one indexing estimate.
+
+    Returns ``(None, None)`` when figure description is off (either the feature flag or the
+    per-figure describe step) or there are no PDFs in scope — the estimate then omits the
+    figure line entirely rather than showing a $0 figure cost that isn't really zero.
+    """
+    figures_cfg = cfg.indexing.figures
+    if not figures_cfg.enabled or not figures_cfg.describe or not pdf_paths:
+        return None, None
+    pages = _count_pdf_pages(pdf_paths)
+    estimated_figures = int(round(pages * _FIGURES_PER_PAGE_HEURISTIC))
+    figure_cost = _estimate_figure_description_cost_usd(
+        alias=figures_cfg.vision_model,
+        figures=estimated_figures,
+        max_completion_tokens=figures_cfg.max_completion_tokens,
+    )
+    return estimated_figures, figure_cost
+
+
 def _estimate_semantic_kg_seconds(
     *,
     provider: str,
@@ -3150,6 +3207,7 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
     total_files = 0
     total_bytes = 0
     skipped_large_files = 0
+    pdf_paths: list[Path] = []
 
     root = Path(repo_path).expanduser().resolve()
     if not root.exists():
@@ -3165,6 +3223,8 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
             continue
         total_files += 1
         total_bytes += max(0, size_bytes)
+        if p.suffix.lower() == ".pdf":
+            pdf_paths.append(p)
 
     est_tokens = _estimate_tokens_from_bytes(total_bytes)
     est_chunks = _estimate_chunks_from_tokens(
@@ -3208,15 +3268,18 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
             enrich_max_chars=int(cfg.enrichment.enrich_max_chars or 1000),
         )
 
-    total_cost: float | None
+    estimated_figures, figure_cost = _estimate_figures(cfg, pdf_paths)
+
+    cost_components: list[float | None] = [embedding_cost]
     if semantic_kg_enabled:
-        total_cost = (
-            None
-            if embedding_cost is None or semantic_kg_cost is None
-            else float(embedding_cost) + float(semantic_kg_cost)
-        )
-    else:
-        total_cost = embedding_cost
+        cost_components.append(semantic_kg_cost)
+    if estimated_figures is not None:
+        cost_components.append(figure_cost)
+    total_cost: float | None = (
+        None
+        if any(component is None for component in cost_components)
+        else sum(float(component) for component in cost_components)  # type: ignore[arg-type]
+    )
 
     # Time estimate (rough): embedding throughput + optional semantic KG extraction phase + overhead.
     est_low: float | None = None
@@ -3228,6 +3291,10 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
     ]
     if skipped_large_files > 0:
         assumptions.append(f"skips files > {max_indexable_bytes} bytes")
+    if estimated_figures is not None:
+        assumptions.append(
+            f"figures≈{_FIGURES_PER_PAGE_HEURISTIC} per PDF page; {_FIGURE_INPUT_TOKENS} input tokens per figure"
+        )
 
     if skip_dense:
         tps = _EST_TOKENS_PER_SECOND_DETERMINISTIC
@@ -3296,6 +3363,8 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
         skip_dense=bool(skip_dense),
         embedding_cost_usd=embedding_cost,
         semantic_kg_cost_usd=semantic_kg_cost,
+        estimated_figures=estimated_figures,
+        figure_description_cost_usd=figure_cost,
         total_cost_usd=total_cost,
         estimated_seconds_low=est_low,
         estimated_seconds_high=est_high,

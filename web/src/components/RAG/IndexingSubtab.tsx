@@ -732,11 +732,20 @@ export function IndexingSubtab() {
         const totalCostUsd = estimate.total_cost_usd ?? estimate.embedding_cost_usd;
         const embedCostUsd = estimate.embedding_cost_usd;
         const semanticKgCostUsd = estimate.semantic_kg_cost_usd;
+        const figureCostUsd = estimate.figure_description_cost_usd;
         const cost = totalCostUsd == null ? 'N/A' : formatCurrency(Number(totalCostUsd || 0));
         const costBreakdown =
-          semanticKgCostUsd == null
+          semanticKgCostUsd == null && figureCostUsd == null
             ? null
-            : `Embed ${embedCostUsd == null ? 'N/A' : formatCurrency(Number(embedCostUsd || 0))} + Semantic KG ${formatCurrency(Number(semanticKgCostUsd || 0))}`;
+            : [
+                `Embed ${embedCostUsd == null ? 'N/A' : formatCurrency(Number(embedCostUsd || 0))}`,
+                semanticKgCostUsd == null ? null : `Semantic KG ${formatCurrency(Number(semanticKgCostUsd || 0))}`,
+                figureCostUsd == null
+                  ? null
+                  : `Figures ${formatCurrency(Number(figureCostUsd || 0))}${estimate.estimated_figures != null ? ` (~${formatNumber(Number(estimate.estimated_figures))})` : ''}`,
+              ]
+                .filter(Boolean)
+                .join(' + ');
         const time =
           estimate.estimated_seconds_low != null && estimate.estimated_seconds_high != null
             ? `${formatDuration(Number(estimate.estimated_seconds_low) * 1000)}–${formatDuration(
@@ -2980,6 +2989,9 @@ export function IndexingSubtab() {
               ? ` (Embed ${indexEstimate.embedding_cost_usd == null ? 'N/A' : formatCurrency(Number(indexEstimate.embedding_cost_usd || 0))} + KG ${formatCurrency(
                   Number(indexEstimate.semantic_kg_cost_usd || 0)
                 )})`
+              : ''}
+            {indexEstimate.figure_description_cost_usd != null
+              ? ` + Figures ${formatCurrency(Number(indexEstimate.figure_description_cost_usd || 0))}`
               : ''}
             {' • '}
             {indexEstimate.estimated_seconds_low != null && indexEstimate.estimated_seconds_high != null
