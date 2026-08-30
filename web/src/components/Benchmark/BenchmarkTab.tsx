@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAPI } from '@/hooks';
 import { withCorpusScope } from '@/api/client';
 import { Button } from '@/components/ui/Button';
@@ -7,8 +7,27 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { PipelineProfile } from '@/components/Benchmark/PipelineProfile';
 import { ResultsTable } from '@/components/Benchmark/ResultsTable';
 import { SplitScreen } from '@/components/Benchmark/SplitScreen';
-import type { BenchmarkRun, BenchmarkRunRequest, ChatModelInfo, ChatModelsResponse } from '@/types/generated';
+import type {
+  BenchmarkRun,
+  BenchmarkRunRequest,
+  BenchmarkRunsResponse,
+  ChatModelInfo,
+  ChatModelsResponse,
+} from '@/types/generated';
 import { chatModelDetail, chatModelLabel, chatModelName, groupChatModels } from '@/components/Chat/modelLabel';
+
+function estimatePromptTokens(text: string): number {
+  // A deliberately coarse chars/4 heuristic; the estimate is flagged approximate in the UI.
+  return Math.max(1, Math.ceil(text.trim().length / 4));
+}
+
+const BENCHMARK_EST_OUTPUT_TOKENS = 500;
+
+function formatUsd(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '$0';
+  if (value < 0.01) return `$${value.toFixed(4)}`;
+  return `$${value.toFixed(2)}`;
+}
 
 function toModelValue(model: ChatModelInfo): string {
   return String(model.override || model.id || '').trim();
@@ -35,22 +54,69 @@ export default function BenchmarkTab() {
 
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
   const [prompt, setPrompt] = useState('');
+  const [modelFilter, setModelFilter] = useState('');
 
   const [runLoading, setRunLoading] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
   const [runResult, setRunResult] = useState<BenchmarkRun | null>(null);
 
+  const [pastRuns, setPastRuns] = useState<BenchmarkRun[]>([]);
+
   const initSelectionRef = useRef(false);
 
+  // 387 checkboxes with no filter (B-14) — match on the same label + alias the row shows.
+  const filterText = modelFilter.trim().toLowerCase();
   const groupedModels = useMemo(
     () =>
-      groupChatModels(availableModels.filter((m) => m.source === 'litellm')).map(({ group, models }) => ({
-        source: group,
-        label: `${group} (${models.length})`,
-        items: models,
-      })),
-    [availableModels]
+      groupChatModels(availableModels.filter((m) => m.source === 'litellm'))
+        .map(({ group, models }) => {
+          const items = filterText
+            ? models.filter((m) => `${chatModelLabel(m)} ${m.id} ${chatModelName(m)}`.toLowerCase().includes(filterText))
+            : models;
+          return { source: group, label: `${group} (${items.length})`, items };
+        })
+        .filter((group) => group.items.length > 0),
+    [availableModels, filterText]
   );
+
+  const selectedModelInfos = useMemo(
+    () => availableModels.filter((m) => selectedModels.includes(toModelValue(m))),
+    [availableModels, selectedModels]
+  );
+
+  // Approximate pre-run cost across the selected models: prompt tokens in + a fixed output
+  // estimate out, priced from the catalog per-1k figures every row already prints (B-15).
+  const costEstimate = useMemo(() => {
+    const promptTokens = estimatePromptTokens(prompt);
+    let total = 0;
+    let priced = 0;
+    for (const model of selectedModelInfos) {
+      const inputPer1k = typeof model.input_per_1k === 'number' ? model.input_per_1k : null;
+      const outputPer1k = typeof model.output_per_1k === 'number' ? model.output_per_1k : null;
+      if (inputPer1k === null && outputPer1k === null) continue;
+      priced += 1;
+      total += (promptTokens / 1000) * (inputPer1k ?? 0) + (BENCHMARK_EST_OUTPUT_TOKENS / 1000) * (outputPer1k ?? 0);
+    }
+    return { total, priced, count: selectedModelInfos.length, promptTokens };
+  }, [prompt, selectedModelInfos]);
+
+  const loadPastRuns = useCallback(async () => {
+    try {
+      const r = await fetch(withCorpusScope(api('benchmark/results?limit=10')));
+      if (!r.ok) {
+        setPastRuns([]);
+        return;
+      }
+      const d = (await r.json()) as BenchmarkRunsResponse;
+      setPastRuns(Array.isArray(d?.runs) ? (d.runs as BenchmarkRun[]) : []);
+    } catch {
+      setPastRuns([]);
+    }
+  }, [api]);
+
+  useEffect(() => {
+    void loadPastRuns();
+  }, [loadPastRuns]);
 
   const selectedCount = selectedModels.length;
   const selectionOk = selectedCount >= 2 && selectedCount <= 4;
@@ -146,6 +212,7 @@ export default function BenchmarkTab() {
       }
 
       setRunResult(payload as BenchmarkRun);
+      void loadPastRuns();
     } catch (e) {
       setRunError(e instanceof Error ? e.message : String(e));
       setRunResult(null);
@@ -180,6 +247,25 @@ export default function BenchmarkTab() {
             </div>
           </div>
 
+          <input
+            type="search"
+            data-testid="benchmark-model-filter"
+            value={modelFilter}
+            onChange={(e) => setModelFilter(e.target.value)}
+            placeholder="Filter models by name or alias…"
+            aria-label="Filter benchmark models"
+            style={{
+              width: '100%',
+              marginTop: 10,
+              background: 'var(--input-bg)',
+              border: '1px solid var(--line)',
+              color: 'var(--fg)',
+              padding: '8px 10px',
+              borderRadius: '8px',
+              fontSize: '13px',
+            }}
+          />
+
           {modelsLoading ? (
             <div style={{ padding: '12px 0' }}>
               <LoadingSpinner size="md" color="accent" label="Loading models…" />
@@ -199,9 +285,16 @@ export default function BenchmarkTab() {
               Failed to load models: {modelsError}
             </div>
           ) : groupedModels.length === 0 ? (
-            <div style={{ marginTop: 10, color: 'var(--fg-muted)', fontSize: 12 }}>No models available.</div>
+            <div style={{ marginTop: 10, color: 'var(--fg-muted)', fontSize: 12 }}>
+              {filterText ? `No models match "${modelFilter.trim()}".` : 'No models available.'}
+            </div>
           ) : (
-            <div style={{ marginTop: 12, display: 'grid', gap: 12 }}>
+            // Capped so the (potentially hundreds of) model rows scroll here instead of growing
+            // the page and pushing the Prompt/Run column off screen (B-14).
+            <div
+              data-testid="benchmark-model-list"
+              style={{ marginTop: 12, display: 'grid', gap: 12, maxHeight: '46vh', overflowY: 'auto', paddingRight: 4 }}
+            >
               {groupedModels.map((group) => (
                 <div key={group.source}>
                   <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--fg-muted)', marginBottom: 8 }}>
@@ -319,6 +412,22 @@ export default function BenchmarkTab() {
             <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>{promptOk ? `${prompt.trim().length} chars` : ''}</div>
           </div>
 
+          {selectionOk && promptOk ? (
+            <div
+              data-testid="benchmark-cost-estimate"
+              style={{ marginTop: 8, fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.5 }}
+            >
+              Estimated cost{' '}
+              <strong style={{ color: 'var(--fg)' }}>~{formatUsd(costEstimate.total)}</strong>{' '}
+              for {costEstimate.count} model{costEstimate.count === 1 ? '' : 's'}
+              {costEstimate.priced < costEstimate.count
+                ? ` (${costEstimate.count - costEstimate.priced} with no catalog pricing)`
+                : ''}
+              {' — approximate: ~'}
+              {costEstimate.promptTokens} prompt tokens in, ~{BENCHMARK_EST_OUTPUT_TOKENS} out per model.
+            </div>
+          ) : null}
+
           {runResult?.retrieval ? (() => {
             const grounding = groundingState(runResult);
             const retrieval = runResult.retrieval;
@@ -401,9 +510,79 @@ export default function BenchmarkTab() {
       </div>
 
       <section style={{ display: 'grid', gap: 12 }} aria-label="Benchmark results">
-        <ResultsTable results={splitResults} />
-        {splitResults.length > 0 ? <SplitScreen results={splitResults} /> : null}
-        <PipelineProfile results={pipelineResults} />
+        {runResult ? (
+          <>
+            <ResultsTable results={splitResults} />
+            {splitResults.length > 0 ? <SplitScreen results={splitResults} /> : null}
+            <PipelineProfile results={pipelineResults} />
+          </>
+        ) : (
+          <div
+            data-testid="benchmark-empty-state"
+            style={{
+              background: 'var(--bg-elev1)',
+              border: '1px solid var(--line)',
+              borderRadius: 12,
+              padding: 16,
+              display: 'grid',
+              gap: 14,
+            }}
+          >
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg)' }}>What a benchmark produces</div>
+              <div style={{ marginTop: 6, fontSize: 13, color: 'var(--fg-muted)', lineHeight: 1.55 }}>
+                Running sends the same prompt to every model you select and shows their answers side by side, each
+                model&apos;s latency and per-stage pipeline timing, and — when a corpus is scoped — the retrieval
+                grounding each answer used. Select 2–4 models, enter a prompt, and press Run.
+              </div>
+            </div>
+
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--fg-muted)', marginBottom: 8 }}>Recent runs</div>
+              {pastRuns.length === 0 ? (
+                <div data-testid="benchmark-no-past-runs" style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
+                  No past runs yet. Your saved runs will appear here.
+                </div>
+              ) : (
+                <div data-testid="benchmark-past-runs" style={{ display: 'grid', gap: 8 }}>
+                  {pastRuns.map((run) => {
+                    const startedAt = Number(run.started_at_ms || 0);
+                    const modelCount = (run.models || []).length;
+                    return (
+                      <button
+                        key={run.run_id}
+                        type="button"
+                        onClick={() => setRunResult(run)}
+                        style={{
+                          textAlign: 'left',
+                          background: 'var(--bg-elev2)',
+                          border: '1px solid var(--line)',
+                          borderRadius: 10,
+                          padding: '8px 10px',
+                          color: 'var(--fg)',
+                          cursor: 'pointer',
+                          display: 'grid',
+                          gap: 3,
+                        }}
+                      >
+                        <span
+                          style={{ fontSize: 12.5, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                        >
+                          {String(run.prompt || '').trim() || '(no prompt)'}
+                        </span>
+                        <span style={{ fontSize: 11.5, color: 'var(--fg-muted)' }}>
+                          {modelCount} model{modelCount === 1 ? '' : 's'}
+                          {run.corpus_id ? ` · ${run.corpus_id}` : ''}
+                          {startedAt ? ` · ${new Date(startedAt).toLocaleString()}` : ''}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </section>
     </div>
   );
