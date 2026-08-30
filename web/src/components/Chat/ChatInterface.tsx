@@ -1306,8 +1306,20 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
     loadChatHistory();
   }, [loadChatHistory, sending]);
 
+  // Initial load, and a reload when the loader's inputs change - but NEVER mid-send. This used
+  // to also live in the unmount effect below, whose cleanup then aborted and nulled the
+  // in-flight request every time `loadChatHistory`'s identity changed (config settling churns
+  // it through activateSession -> notifyTrace -> chatShowTrace). A send in flight when that
+  // happened lost its abort controller, so a later Stop had nothing to abort and the answer
+  // stayed "Streaming" forever (M-93). Reloading history over a live answer would also drop its
+  // accumulation, so this defers while sending, exactly like the mirror listener.
   useEffect(() => {
+    if (sendingRef.current) return;
     loadChatHistory();
+  }, [loadChatHistory]);
+
+  // Abort any in-flight request only on a real unmount, never on a dependency change.
+  useEffect(() => {
     return () => {
       const controller = requestAbortControllerRef.current;
       if (controller) {
@@ -1319,7 +1331,7 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
       }
       requestAbortControllerRef.current = null;
     };
-  }, [loadChatHistory]);
+  }, []);
 
   // Default sources for a new thread: the configured defaults (recall memory)
   // plus the app's active corpus, so a first question goes to the corpus the
