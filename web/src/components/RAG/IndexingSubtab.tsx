@@ -105,6 +105,17 @@ function isIndexingComponent(value: string | null): value is IndexingComponent {
 }
 
 /**
+ * A duration in ms for `formatDuration`, rounded.
+ *
+ * `formatDuration` prints sub-second values verbatim, so a phase of 0.148833... seconds
+ * rendered as "148.83333333333334ms" in the estimate dialog. The phases are estimates to one
+ * or two significant figures; printing fourteen decimals of one is noise.
+ */
+function durationMs(seconds: number): number {
+  return Math.round(Number(seconds) * 1000);
+}
+
+/**
  * The operator-readable reason inside an API error.
  *
  * An axios rejection's own `message` is "Request failed with status code 422", which names
@@ -481,10 +492,10 @@ export function IndexingSubtab() {
     const overheadSeconds = indexEstimate.estimated_seconds_overhead;
     if (embedSeconds == null) return '';
     return [
-      `Embed ~${formatDuration(Number(embedSeconds) * 1000)}`,
-      kgSeconds == null ? null : `KG ~${formatDuration(Number(kgSeconds) * 1000)}`,
-      figureSeconds == null ? null : `Figures ~${formatDuration(Number(figureSeconds) * 1000)}`,
-      overheadSeconds == null ? null : `startup ~${formatDuration(Number(overheadSeconds) * 1000)}`,
+      `Embed ~${formatDuration(durationMs(Number(embedSeconds)))}`,
+      kgSeconds == null ? null : `KG ~${formatDuration(durationMs(Number(kgSeconds)))}`,
+      figureSeconds == null ? null : `Figures ~${formatDuration(durationMs(Number(figureSeconds)))}`,
+      overheadSeconds == null ? null : `startup ~${formatDuration(durationMs(Number(overheadSeconds)))}`,
     ]
       .filter(Boolean)
       .join(' + ');
@@ -1077,19 +1088,19 @@ export function IndexingSubtab() {
           pointSeconds != null &&
           estimate.estimated_seconds_low != null &&
           estimate.estimated_seconds_high != null
-            ? `~${formatDuration(Number(pointSeconds) * 1000)} (${formatDuration(
-                Number(estimate.estimated_seconds_low) * 1000
-              )}–${formatDuration(Number(estimate.estimated_seconds_high) * 1000)})`
+            ? `~${formatDuration(durationMs(Number(pointSeconds)))} (${formatDuration(
+                durationMs(Number(estimate.estimated_seconds_low))
+              )}–${formatDuration(durationMs(Number(estimate.estimated_seconds_high)))})`
             : 'N/A';
         const semanticKgSeconds = estimate.estimated_seconds_semantic_kg;
         const figureSeconds = estimate.estimated_seconds_figures;
         const embedSeconds = estimate.estimated_seconds_embedding;
         const overheadSeconds = estimate.estimated_seconds_overhead;
         const timeBreakdown = [
-          embedSeconds == null ? null : `Embed ~${formatDuration(Number(embedSeconds) * 1000)}`,
-          semanticKgSeconds == null ? null : `Semantic KG ~${formatDuration(Number(semanticKgSeconds) * 1000)}`,
-          figureSeconds == null ? null : `Figures ~${formatDuration(Number(figureSeconds) * 1000)}`,
-          overheadSeconds == null ? null : `startup ~${formatDuration(Number(overheadSeconds) * 1000)}`,
+          embedSeconds == null ? null : `Embed ~${formatDuration(durationMs(Number(embedSeconds)))}`,
+          semanticKgSeconds == null ? null : `Semantic KG ~${formatDuration(durationMs(Number(semanticKgSeconds)))}`,
+          figureSeconds == null ? null : `Figures ~${formatDuration(durationMs(Number(figureSeconds)))}`,
+          overheadSeconds == null ? null : `startup ~${formatDuration(durationMs(Number(overheadSeconds)))}`,
         ]
           .filter(Boolean)
           .join(' + ');
@@ -3687,8 +3698,8 @@ export function IndexingSubtab() {
               : ''}
             {' • '}
             {indexEstimate.estimated_seconds_low != null && indexEstimate.estimated_seconds_high != null
-              ? `${formatDuration(Number(indexEstimate.estimated_seconds_low) * 1000)}–${formatDuration(
-                  Number(indexEstimate.estimated_seconds_high) * 1000
+              ? `${formatDuration(durationMs(Number(indexEstimate.estimated_seconds_low)))}–${formatDuration(
+                  durationMs(Number(indexEstimate.estimated_seconds_high))
                 )}`
               : 'N/A'}
             {estimateTimeBreakdown ? ` (${estimateTimeBreakdown})` : ''}
