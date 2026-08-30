@@ -4,6 +4,7 @@ import { useReranker } from '@/hooks/useReranker';
 import { SyntheticCallout } from '@/components/RAG/SyntheticCallout';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { ApiKeyStatus } from '@/components/ui/ApiKeyStatus';
+import { NumberField } from '@/components/ui/NumberField';
 import { ModelPicker } from '@/components/RAG/ModelPicker';
 import type { TrainingConfig } from '@/types/generated';
 
@@ -233,12 +234,12 @@ export function RerankerConfigSubtab() {
               <label>
                 Cloud Top-N <TooltipIcon name="RERANKER_CLOUD_TOP_N" />
               </label>
-              <input
-                type="number"
+              <NumberField
+                configPath="reranking.reranker_cloud_top_n"
                 min={1}
-                max={100}
+                max={200}
                 value={cloudTopN}
-                onChange={(e) => setCloudTopN(parseInt(e.target.value || '50', 10))}
+                onCommit={setCloudTopN}
               />
             </div>
             <div className="input-group">
@@ -303,37 +304,37 @@ export function RerankerConfigSubtab() {
               <label>
                 Alpha <TooltipIcon name="TRIBRID_RERANKER_ALPHA" />
               </label>
-              <input
-                type="number"
+              <NumberField
+                configPath="reranking.tribrid_reranker_alpha"
                 min={0}
                 max={1}
                 step={0.05}
                 value={alpha}
-                onChange={(e) => setAlpha(parseFloat(e.target.value || '0.7'))}
+                onCommit={setAlpha}
               />
             </div>
             <div className="input-group">
               <label>
                 Top-N <TooltipIcon name="TRIBRID_RERANKER_TOPN" />
               </label>
-              <input
-                type="number"
+              <NumberField
+                configPath="reranking.tribrid_reranker_topn"
                 min={10}
                 max={200}
                 value={topN}
-                onChange={(e) => setTopN(parseInt(e.target.value || '10', 10))}
+                onCommit={setTopN}
               />
             </div>
             <div className="input-group">
               <label>
                 Batch <TooltipIcon name="TRIBRID_RERANKER_BATCH" />
               </label>
-              <input
-                type="number"
+              <NumberField
+                configPath="reranking.tribrid_reranker_batch"
                 min={1}
                 max={128}
                 value={batch}
-                onChange={(e) => setBatch(parseInt(e.target.value || '16', 10))}
+                onCommit={setBatch}
               />
             </div>
           </div>
@@ -343,24 +344,24 @@ export function RerankerConfigSubtab() {
               <label>
                 Max length <TooltipIcon name="TRIBRID_RERANKER_MAXLEN" />
               </label>
-              <input
-                type="number"
-                min={64}
+              <NumberField
+                configPath="reranking.tribrid_reranker_maxlen"
+                min={128}
                 max={2048}
                 value={maxLen}
-                onChange={(e) => setMaxLen(parseInt(e.target.value || '512', 10))}
+                onCommit={setMaxLen}
               />
             </div>
             <div className="input-group">
               <label>
                 Unload after sec <TooltipIcon name="LEARNING_RERANKER_UNLOAD_AFTER_SEC" />
               </label>
-              <input
-                type="number"
+              <NumberField
+                configPath="training.learning_reranker_unload_after_sec"
                 min={0}
                 max={86400}
                 value={learningUnloadAfterSec}
-                onChange={(e) => setLearningUnloadAfterSec(parseInt(e.target.value || '0', 10))}
+                onCommit={setLearningUnloadAfterSec}
               />
             </div>
             <div className="input-group" />
@@ -383,13 +384,14 @@ export function RerankerConfigSubtab() {
             <label>
               Input snippet chars <TooltipIcon name="RERANK_INPUT_SNIPPET_CHARS" />
             </label>
-            <input
-              type="number"
-              min={100}
-              max={5000}
+            <NumberField
+              data-testid="reranker-config-snippet-chars"
+              configPath="reranking.rerank_input_snippet_chars"
+              min={200}
+              max={2000}
               step={50}
               value={snippetChars}
-              onChange={(e) => setSnippetChars(parseInt(e.target.value || '700', 10))}
+              onCommit={setSnippetChars}
             />
           </div>
           <div className="input-group" />
