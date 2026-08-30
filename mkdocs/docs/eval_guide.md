@@ -74,6 +74,23 @@ const result = await (await fetch('/reranker/evaluate', { method:'POST', headers
 ??? info "Prompt analysis"
     Use `system_prompts.eval_analysis` to generate skeptical post-hoc analysis comparing two runs.
 
+## AI analysis: persisted, exportable, and honest about what changed
+
+The comparison analysis is a costed LLM generation, so the drilldown treats it as an artifact rather than a transient panel:
+
+- **Cached per run + baseline.** Generating an analysis persists it (`EvalAnalysisArtifact`) keyed by the current run id and the baseline it compared against. Re-opening the run serves the saved text with a **cached** badge and never calls the gateway again; **Regenerate** is the only control that re-charges. A cached analysis is never served for a different baseline — the read answers `404` and offers a fresh generate instead (see [Evaluation models](api_models_eval.md)).
+- **Copy / Export .md.** The analysis (with the run ids and the model used in a header) can be copied to the clipboard or downloaded as Markdown, so reading it later costs nothing.
+- **Per-question detail is already in the run.** Clicking a question row shows the retrieved chunks with rank, retrieval leg (`vector` / `sparse` / `graph`), fused score, and a highlight on chunks whose path matches `expected_paths`; when the gateway answered the question, the generated answer and the per-entry Ragas judge scores render below it (through the same markdown renderer chat uses). Opening a row fires no extra request.
+
+Two honesty rules in the drilldown:
+
+- **Changed params are counted once.** The eval knobs are carried in the flat snapshot (`EVAL_MULTI`, `EVAL_FINAL_K`) and as runtime fields (`use_multi`, `final_k`); aliases collapse to one canonical key before diffing, so "N params changed" counts distinct settings, not spellings of the same setting.
+- **A config change is neutral.** A changed value no longer renders green or red based on whether the run improved — a single knob move does not map to the run's overall delta. Only real regressions (questions that got worse) are red.
+
+## Give the grader something to grade: expected answers
+
+The eval dataset form has an optional **expected answer** field. Promptfoo regression entries are graded against it — an entry without an expected answer is skipped by the grader, so filling it in is what makes a question gradeable rather than merely retrievable. It round-trips through the dataset API and shows on the saved entry.
+
 ## Page-grounded figure retrieval (single-PDF corpora)
 
 The standard eval lane scores retrieval by `expected_paths`, which works when a corpus spans many files but is meaningless on a corpus that is one PDF: every match has the same path, so path-level MRR is 1.0 whatever the retriever does. For document corpora indexed with [figure descriptions](manual/indexing.md), use the page-grounded dataset and scorer instead — each question is grounded on the **pages** where the answer is printed. See [Figure grounding eval](guides/eval_figure_grounding.md).

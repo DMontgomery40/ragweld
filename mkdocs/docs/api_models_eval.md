@@ -32,6 +32,9 @@
 !!! note "Config Snapshots"
     `EvalRun` stores both nested and flat config snapshots for reproducibility.
 
+!!! note "AI analyses are persisted, not re-charged"
+    `POST /api/eval/analyze_comparison` saves the generated analysis as an `EvalAnalysisArtifact` (under `data/eval_runs/analysis/`). `GET /api/eval/analysis/{run_id}?compare_run_id=...` serves it back without touching the gateway; it answers `404` when nothing is cached **or** when the cached analysis was generated against a different baseline — a stale pair is never served. Deleting a run deletes its cached analysis. See [Evaluation Guide](eval_guide.md).
+
 !!! warning "Latency Budget"
     Track `latency_p95_ms` across runs to guard against regressions.
 
@@ -41,6 +44,7 @@
 | `EvalMetrics` | Aggregated metrics (MRR, Recall@K, NDCG@10, latency percentiles) |
 | `EvalRun` | Complete run with config snapshot and results |
 | `EvalComparisonResult` | Delta between baseline and current runs |
+| `EvalAnalysisArtifact` | Persisted AI comparison analysis, keyed by (run_id, compare_run_id) |
 
 ```mermaid
 flowchart TB

@@ -63,10 +63,10 @@ flowchart TB
 
 | Section | Key Fields (examples) | Why it matters |
 |--------|------------------------|----------------|
-| retrieval | `final_k`, `topk_dense`, `topk_sparse`, `fallback_confidence`, `conf_top1`, `conf_avg5`, `multi_query_m` | Controls candidate sizes and retry/accept gates |
+| retrieval | `final_k`, `eval_final_k`, `fallback_confidence`, `conf_top1`, `conf_avg5`, `conf_any`, `multi_query_m` | Retry/accept gates, result shaping, and the eval-only final-k |
 | fusion | `method`, `vector_weight`, `sparse_weight`, `graph_weight`, `rrf_k`, `normalize_scores` | How legs combine into a single ranking |
-| vector_search | `enabled`, `top_k`, `similarity_threshold` | pgvector retrieval specifics |
-| sparse_search | `enabled`, `top_k`, `bm25_k1`, `bm25_b` | BM25/FTS scoring and candidate sizes |
+| vector_search | `enabled`, `top_k`, `similarity_threshold` | Dense (Qdrant) candidate size |
+| sparse_search | `enabled`, `top_k`, `bm25_k1`, `bm25_b` | Sparse (Qdrant BM25) candidate size and scoring |
 | graph_search | `enabled`, `mode`, `max_hops`, `top_k`, `chunk_neighbor_window`, `chunk_entity_expansion_*` | Neo4j traversal behavior |
 | embedding | `embedding_type`, `embedding_model`, `embedding_dim`, `embedding_batch_size` | Embedding provider + dimensions |
 | chunking | `chunking_strategy`, `chunk_size`, `chunk_overlap`, `max_chunk_tokens`, `preserve_imports` | Index quality and performance |
@@ -76,6 +76,9 @@ flowchart TB
 | chat.web | `enabled`, `engine`, `max_results`, `max_total_results`, `max_characters` | Server-owned web-search policy for Chat |
 | indexing | `figures.*`, `estimate.*` | Vision-described figures inside Docling-converted PDFs (off by default; the run refuses to start if the vision alias is not vision-capable), plus the measured-estimate floors `estimate.max_relative_error` and `estimate.min_files_per_format` |
 | document_viewer | `page_render_scale`, `thumbnail_render_scale`, `max_text_bytes` | Source document evidence viewer limits |
+
+!!! note "Removed: the dead `retrieval.topk_*` and weight duplicates"
+    `retrieval.rrf_k_div`, `retrieval.langgraph_final_k`, `retrieval.bm25_weight`, `retrieval.vector_weight`, `retrieval.topk_dense`, and `retrieval.topk_sparse` are gone from the config model. They duplicated the knobs the pipeline actually reads (`server/retrieval/fusion.py`): fusion weights live under `fusion.*`, the dense candidate size is `vector_search.top_k`, and the sparse candidate size is `sparse_search.top_k`. A saved config that still carries the old keys simply ignores them — retune at the canonical homes. `retrieval.eval_final_k` stays: it is the evaluation-only final-k (`server/api/eval.py`) and is deliberately distinct from `retrieval.final_k`, not a duplicate.
 
 ### Fusion Configuration
 
@@ -108,8 +111,9 @@ flowchart TB
 | Field | Default | Description |
 |-------|---------|-------------|
 | `retrieval.final_k` | 10 | Final top-k after fusion/rerank |
-| `retrieval.topk_dense` | 75 | Vector candidates (pgvector) |
-| `retrieval.topk_sparse` | 75 | BM25 candidates |
+| `retrieval.eval_final_k` | 5 | Final-k used only by the evaluation flow (`server/api/eval.py`); a distinct knob from `retrieval.final_k` |
+| `vector_search.top_k` | 50 | Dense (Qdrant) candidates per query |
+| `sparse_search.top_k` | 50 | Sparse (Qdrant BM25) candidates per query |
 | `retrieval.conf_top1` | 0.62 | Early accept top-1 threshold |
 | `retrieval.conf_avg5` | 0.55 | Group quality threshold (top-5) |
 | `retrieval.conf_any` | 0.55 | Safety net minimum |
@@ -195,7 +199,7 @@ async function patchFusion() {
 - Vector vs Sparse vs Graph weights
   - If unsure, do this: `fusion.method = "rrf"`, `fusion.rrf_k = 60`. RRF is robust across modalities.
 - Candidate sizes
-  - Start with `topk_dense=75`, `topk_sparse=75`, `graph_search.top_k=30`. Increase for recall-heavy workloads.
+  - Start with `vector_search.top_k=50`, `sparse_search.top_k=50`, `graph_search.top_k=30`. Increase for recall-heavy workloads. (`retrieval.topk_dense` and `retrieval.topk_sparse` no longer exist.)
 - Confidence gates
   - Start with `conf_top1=0.62`, `conf_avg5=0.55`. Raise to increase precision (fewer answers), lower for more answers.
 

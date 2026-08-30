@@ -18,8 +18,8 @@ flowchart TB
     end
     subgraph s_legs["Three retrieval legs"]
     embed["Embedder (server/indexing/embedder.py)\nembedding_backend=deterministic\nembedding_type=openai\nembedding_model=text-embedding-3-large\nembedding_dim=3072"]
-    dense["Dense leg -> Qdrant dense generation\nenabled=True\ntop_k=50\ntopk_dense=75\nmin_score_vector=0.0"]
-    sparse["Sparse leg -> Qdrant sparse generation (BM25)\nenabled=True\ntop_k=50\nbm25_k1=1.2\nbm25_b=0.4\ntopk_sparse=75\nmin_score_sparse=0.0"]
+    dense["Dense leg -> Qdrant dense generation\nenabled=True\ntop_k=50\nmin_score_vector=0.0"]
+    sparse["Sparse leg -> Qdrant sparse generation (BM25)\nenabled=True\ntop_k=50\nbm25_k1=1.2\nbm25_b=0.4\nmin_score_sparse=0.0"]
     graph["Graph leg -> Neo4j (Document/Chunk lexical graph)\nenabled=True\nmode=chunk\nmax_hops=2\ntop_k=30\nchunk_neighbor_window=1\ninclude_communities=True\nmin_score_graph=0.0"]
     end
     subgraph s_stores["Stores"]
@@ -28,7 +28,7 @@ flowchart TB
     neo4j["Neo4j (server/db/neo4j.py)\nneo4j_uri=bolt://localhost:7687\nneo4j_database_mode=shared\ncommunity_algorithm=louvain"]
     end
     subgraph s_fuse["Fusion and shaping (server/retrieval/fusion.py)"]
-    fusion["Weighted RRF fusion\nvector_weight=0.4\nsparse_weight=0.3\ngraph_weight=0.3\nrrf_k=60\nrrf_k_div=60\nbm25_weight=0.3\nvector_weight=0.7"]
+    fusion["Weighted RRF fusion\nvector_weight=0.4\nsparse_weight=0.3\ngraph_weight=0.3\nrrf_k=60\n"]
     boost["Scoring boosts (server/retrieval/scoring_boosts.py)\nchunk_summary_bonus=0.08\nfilename_boost_exact=1.5\nfilename_boost_partial=1.2\nvendor_mode=prefer_first_party\ngui=0.15\nretrieval=0.15\nindexer=0.15\nvendor_penalty=-0.1\nfreshness_bonus=0.05"]
     shape["Dedup / MMR / neighbours\ndedup_by=chunk_id\nmax_chunks_per_file=3\nneighbor_window=1\nenable_mmr=False\nmmr_lambda=0.7\nchunk_summary_search_enabled=True"]
     end
@@ -89,20 +89,16 @@ flowchart TB
 
 | Field | Default | What it does |
 |---|---|---|
-| `rrf_k_div` | `60` | RRF rank smoothing constant (higher = more weight to top ranks) |
-| `langgraph_final_k` | `20` | Number of final results to return in LangGraph pipeline |
 | `max_query_rewrites` | `2` | Maximum number of query rewrites for multi-query expansion |
 | `langgraph_max_query_rewrites` | `2` | Maximum number of query rewrites for LangGraph pipeline |
 | `fallback_confidence` | `0.55` | Confidence threshold for fallback retrieval strategies |
 | `final_k` | `10` | Default top-k for search results |
-| `eval_final_k` | `5` | Top-k for evaluation runs |
+| `eval_final_k` | `5` | Final-k used only by the evaluation flow (server/api/eval.py); the live retrieval pipeline uses retrieval.final_k. Distinct knob, not a duplicate. |
 | `conf_top1` | `0.62` | Confidence threshold for top-1 |
 | `conf_avg5` | `0.55` | Confidence threshold for avg top-5 |
 | `conf_any` | `0.55` | Minimum confidence threshold |
 | `eval_multi` | `True` | Enable multi-query in eval |
 | `query_expansion_enabled` | `True` | Enable synonym expansion |
-| `bm25_weight` | `0.3` | Weight for BM25 in hybrid search |
-| `vector_weight` | `0.7` | Weight for vector search |
 | `chunk_summary_search_enabled` | `True` | Enable chunk_summary-based retrieval |
 | `max_chunks_per_file` | `3` | Max chunks to return per file_path (document-aware result shaping). |
 | `dedup_by` | `chunk_id` | Dedup key for final results. |
@@ -115,8 +111,6 @@ flowchart TB
 | `multi_query_m` | `4` | Query variants for multi-query |
 | `use_semantic_synonyms` | `True` | Enable semantic synonym expansion |
 | `tribrid_synonyms_path` | `` | Custom path to semantic_synonyms.json (default: data/semantic_synonyms.json) |
-| `topk_dense` | `75` | Top-K for dense vector search |
-| `topk_sparse` | `75` | Top-K for sparse BM25 search |
 | `hydration_mode` | `lazy` | Result hydration mode |
 | `hydration_max_chars` | `2000` | Max characters for result hydration |
 

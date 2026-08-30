@@ -27,7 +27,7 @@
 [API](../api.md){ .md-button }
 
 !!! tip "Tune Weights"
-    Set `retrieval.vector_weight` vs `retrieval.bm25_weight` (and/or `fusion.*_weight`) based on corpus characteristics.
+    Weighting lives in one place: `fusion.vector_weight`, `fusion.sparse_weight`, and `fusion.graph_weight` (weighted mode only — RRF ignores them). The old `retrieval.vector_weight` / `retrieval.bm25_weight` fields were removed as duplicates of these.
 
 !!! note "Top-K Budget"
     Keep `topk_dense` and `topk_sparse` high enough that `final_k` always has good candidates.

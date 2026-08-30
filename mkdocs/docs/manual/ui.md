@@ -101,6 +101,19 @@ Why this matters: if you pin a specific LiteLLM gateway alias for your conversat
     - `GET /api/chat/health` (default dev base `http://127.0.0.1:58012/api`) for provider readiness
     - The LiteLLM gateway service on port `54000` (see the [runtime topology](../reference/architecture/runtime-topology.md) for the full service map)
 
+### Chat reliability: Stop, Retry, Export, and honest sources
+
+A handful of chat behaviors changed so the thread never lies to you:
+
+- **Stop always lands.** Pressing Stop (or hitting the stream timeout) finalizes the in-flight answer as an interrupted, retryable error card — it can no longer sit at "Streaming" forever. A page load reconciles any abandoned running bubble the same way, and the card's **Retry** replays your question without duplicating it.
+- **Streaming shows progress.** While an answer streams, the header shows a live elapsed counter (`Streaming · 12s`) instead of a static label.
+- **Attachments say what they are.** The composer preview shows each image's name, type, and size; non-image files are refused with a toast naming them (previously dropped silently); and the answer's Sources block lists attached images as real inputs (`N attached images used as an answer input`).
+- **Sources are labeled.** The Sources header carries a count; Recall citations read `Recall · <first line of the recalled turn>` instead of a raw `conversations/<id>.md` path; and the source dropdown summary counts corpora and Recall separately (`2 corpora + Recall`, never a bare `3 selected`).
+- **History shows context.** Each chat-history row carries badges for the corpora (plus Recall) the conversation used.
+- **Export works and confirms.** Export downloads a JSON file reliably and shows a toast with the filename; an empty chat says "Nothing to export yet".
+- **One prompt system.** Exactly one of the four state prompts (Direct / RAG / Recall / RAG+Recall) is sent, chosen by whether RAG and/or Recall context is present; the legacy base+suffix fallback composition is gone. Set them in **Chat → Settings**.
+- **One markdown renderer.** Assistant answers (and onboarding answers) render through a single GFM renderer — tables, bold, inline code, fenced code with syntax highlighting, and nested lists all render, and wide content wraps inside the pane instead of growing it sideways.
+
 ### Top-bar health pill: the /api/ready breakdown in one click
 
 The top bar's **Health** control is now a pill: `OK · just now` or `Not OK · 2m ago`. The status word is backed by the same health probe the app runs every 30 seconds while the tab is visible, and the label shows **how stale the reading is** instead of a bare time-of-day — the underlying tooltip carries the full date and time of the last check.
@@ -265,4 +278,5 @@ A handful of workbench-shell behaviors changed recently; none change any workflo
 - **Credential fields explain themselves.** The Postgres DSN shows a "Password configured" chip and a note that `[redacted]` means "kept in the backend", and nested config fields read their units properly ("Timeout (seconds)", not "Timeout S"). See [Security](../security.md).
 - **Numeric fields commit on blur.** Every numeric config control clamps to its Pydantic bounds when you leave the field — a typed out-of-range value is corrected before anything is sent, and a rejected save shows its message under the field itself. See [Configuration](../configuration.md).
 - **The dock has one set of controls.** When nothing is docked, **Dock Chat** / **Dock Current** / **Choose…** live in the dock header and the empty body is guidance text — the duplicate control set in the empty body is gone. Docking the page you are on (which moves the main view to Chat) now announces it with a one-click undo toast instead of silently relocating the page.
+- **The settings rail links, it doesn't duplicate.** The rail's old "Quick Model Switcher" — a second copy of generation/embedding/reranker assignment with its own Apply button — is gone; it now links to **RAG → Retrieval**, the single surface that assigns models. Long lineage/eval ids render middle-truncated with a one-click **copy full id** control.
 ```

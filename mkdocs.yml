@@ -129,6 +129,8 @@ nav:
       - Retrieval overview: retrieval/overview.md
       - Indexing pipeline: indexing.md
       - Corpus vs repo_id: guides/corpus.md
+      - Evaluation guide: eval_guide.md
+      - Synthetic Data Lab: guides/synthetic_lab.md
       - Figure grounding eval: guides/eval_figure_grounding.md
   - Reference:
       - Configuration: configuration.md

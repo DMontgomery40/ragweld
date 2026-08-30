@@ -5,7 +5,7 @@
     mount prefixes in `server/main.py` on every docs-autopilot run. The wire schemas are the registered
     Pydantic models; see the configuration reference for their fields.
 
-169 routes across 24 routers, all served by the FastAPI app in `server/main.py`.
+171 routes across 24 routers, all served by the FastAPI app in `server/main.py`.
 
 ```mermaid
 flowchart LR
@@ -28,7 +28,7 @@ flowchart LR
     app --> n_docker
     n_documents["documents\n3 routes: GET"]
     app --> n_documents
-    n_eval["eval\n13 routes: DELETE, GET, POST"]
+    n_eval["eval\n14 routes: DELETE, GET, POST"]
     app --> n_eval
     n_feedback["feedback\n1 routes: POST"]
     app --> n_feedback
@@ -56,7 +56,7 @@ flowchart LR
     app --> n_runtime_capabilities
     n_search["search\n3 routes: POST"]
     app --> n_search
-    n_synthetic["synthetic\n11 routes: GET, POST"]
+    n_synthetic["synthetic\n12 routes: GET, POST"]
     app --> n_synthetic
 ```
 
@@ -320,41 +320,44 @@ flowchart LR
 | `GET` | `/api/corpora/{corpus_id}/documents/raw` | `raw_document` | `-` |
 | `GET` | `/api/corpora/{corpus_id}/documents/view` | `view_document` | `DocumentView` |
 
-### `eval` (13 routes)
+### `eval` (14 routes)
 
 ```mermaid
 flowchart LR
     n_eval["eval\nserver/api/eval.py"]
-    n_eval_0["POST /api/eval/analyze_comparison\n-> EvalAnalyzeComparisonResponse"]
+    n_eval_0["GET /api/eval/analysis/{run_id}\n-> EvalAnalysisArtifact"]
     n_eval --> n_eval_0
-    n_eval_1["GET /api/eval/observability/summary\n-> EvalObservabilitySummaryResponse"]
+    n_eval_1["POST /api/eval/analyze_comparison\n-> EvalAnalyzeComparisonResponse"]
     n_eval --> n_eval_1
-    n_eval_2["POST /api/eval/promptfoo/run\n-> PromptfooRun"]
+    n_eval_2["GET /api/eval/observability/summary\n-> EvalObservabilitySummaryResponse"]
     n_eval --> n_eval_2
-    n_eval_3["GET /api/eval/promptfoo/runs\n-> PromptfooRunsResponse"]
+    n_eval_3["POST /api/eval/promptfoo/run\n-> PromptfooRun"]
     n_eval --> n_eval_3
-    n_eval_4["GET /api/eval/results\n-> EvalRun"]
+    n_eval_4["GET /api/eval/promptfoo/runs\n-> PromptfooRunsResponse"]
     n_eval --> n_eval_4
-    n_eval_5["GET /api/eval/results/{run_id}\n-> EvalRun"]
+    n_eval_5["GET /api/eval/results\n-> EvalRun"]
     n_eval --> n_eval_5
-    n_eval_6["POST /api/eval/run\n-> EvalRun"]
+    n_eval_6["GET /api/eval/results/{run_id}\n-> EvalRun"]
     n_eval --> n_eval_6
-    n_eval_7["GET /api/eval/run/stream"]
+    n_eval_7["POST /api/eval/run\n-> EvalRun"]
     n_eval --> n_eval_7
-    n_eval_8["DELETE /api/eval/run/{run_id}"]
+    n_eval_8["GET /api/eval/run/stream"]
     n_eval --> n_eval_8
-    n_eval_9["GET /api/eval/run/{run_id}\n-> EvalRun"]
+    n_eval_9["DELETE /api/eval/run/{run_id}"]
     n_eval --> n_eval_9
-    n_eval_10["GET /api/eval/runs\n-> EvalRunsResponse"]
+    n_eval_10["GET /api/eval/run/{run_id}\n-> EvalRun"]
     n_eval --> n_eval_10
-    n_eval_11["GET /api/eval/status"]
+    n_eval_11["GET /api/eval/runs\n-> EvalRunsResponse"]
     n_eval --> n_eval_11
-    n_eval_12["POST /api/eval/test\n-> EvalResult"]
+    n_eval_12["GET /api/eval/status"]
     n_eval --> n_eval_12
+    n_eval_13["POST /api/eval/test\n-> EvalResult"]
+    n_eval --> n_eval_13
 ```
 
 | Method | Path | Handler | Response model |
 |---|---|---|---|
+| `GET` | `/api/eval/analysis/{run_id}` | `get_eval_analysis` | `EvalAnalysisArtifact` |
 | `POST` | `/api/eval/analyze_comparison` | `analyze_eval_comparison` | `EvalAnalyzeComparisonResponse` |
 | `GET` | `/api/eval/observability/summary` | `eval_observability_summary` | `EvalObservabilitySummaryResponse` |
 | `POST` | `/api/eval/promptfoo/run` | `run_promptfoo` | `PromptfooRun` |
@@ -766,7 +769,7 @@ flowchart LR
 | `POST` | `/api/answer/stream` | `answer_stream` | `-` |
 | `POST` | `/api/search` | `search` | `SearchResponse` |
 
-### `synthetic` (11 routes)
+### `synthetic` (12 routes)
 
 ```mermaid
 flowchart LR
@@ -781,18 +784,20 @@ flowchart LR
     n_synthetic --> n_synthetic_3
     n_synthetic_4["POST /api/synthetic/run/{run_id}/cancel\n-> OkResponse"]
     n_synthetic --> n_synthetic_4
-    n_synthetic_5["POST /api/synthetic/run/{run_id}/publish/config_patch\n-> SyntheticConfigPatchResponse"]
+    n_synthetic_5["POST /api/synthetic/run/{run_id}/promote/{alias}\n-> LineageAliasesResponse"]
     n_synthetic --> n_synthetic_5
-    n_synthetic_6["POST /api/synthetic/run/{run_id}/publish/eval_dataset\n-> SyntheticPublishResponse"]
+    n_synthetic_6["POST /api/synthetic/run/{run_id}/publish/config_patch\n-> SyntheticConfigPatchResponse"]
     n_synthetic --> n_synthetic_6
-    n_synthetic_7["POST /api/synthetic/run/{run_id}/publish/keywords\n-> SyntheticPublishResponse"]
+    n_synthetic_7["POST /api/synthetic/run/{run_id}/publish/eval_dataset\n-> SyntheticPublishResponse"]
     n_synthetic --> n_synthetic_7
-    n_synthetic_8["POST /api/synthetic/run/{run_id}/publish/semantic_cards\n-> SyntheticPublishResponse"]
+    n_synthetic_8["POST /api/synthetic/run/{run_id}/publish/keywords\n-> SyntheticPublishResponse"]
     n_synthetic --> n_synthetic_8
-    n_synthetic_9["POST /api/synthetic/run/{run_id}/publish/triplets\n-> SyntheticPublishResponse"]
+    n_synthetic_9["POST /api/synthetic/run/{run_id}/publish/semantic_cards\n-> SyntheticPublishResponse"]
     n_synthetic --> n_synthetic_9
-    n_synthetic_10["GET /api/synthetic/runs\n-> SyntheticRunsResponse"]
+    n_synthetic_10["POST /api/synthetic/run/{run_id}/publish/triplets\n-> SyntheticPublishResponse"]
     n_synthetic --> n_synthetic_10
+    n_synthetic_11["GET /api/synthetic/runs\n-> SyntheticRunsResponse"]
+    n_synthetic --> n_synthetic_11
 ```
 
 | Method | Path | Handler | Response model |
@@ -802,6 +807,7 @@ flowchart LR
 | `GET` | `/api/synthetic/run/{run_id}` | `synthetic_run_get` | `SyntheticRun` |
 | `GET` | `/api/synthetic/run/{run_id}/artifact/preview` | `synthetic_artifact_preview` | `SyntheticArtifactPreviewResponse` |
 | `POST` | `/api/synthetic/run/{run_id}/cancel` | `synthetic_run_cancel` | `OkResponse` |
+| `POST` | `/api/synthetic/run/{run_id}/promote/{alias}` | `synthetic_run_promote` | `LineageAliasesResponse` |
 | `POST` | `/api/synthetic/run/{run_id}/publish/config_patch` | `synthetic_publish_config_patch` | `SyntheticConfigPatchResponse` |
 | `POST` | `/api/synthetic/run/{run_id}/publish/eval_dataset` | `synthetic_publish_eval_dataset` | `SyntheticPublishResponse` |
 | `POST` | `/api/synthetic/run/{run_id}/publish/keywords` | `synthetic_publish_keywords` | `SyntheticPublishResponse` |

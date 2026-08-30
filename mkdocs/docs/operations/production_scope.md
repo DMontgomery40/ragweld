@@ -77,7 +77,7 @@ flowchart LR
 
 ## Retrieval surface: the non-chat generation alias is deployment-locked
 
-In production mode, the **RAG → Retrieval** subtab no longer treats the generation alias as a per-corpus knob. The picker is read-only, relabeled, and explained in place (`web/src/components/RAG/RetrievalSubtab.tsx`):
+The generation alias renders **once** on the **RAG → Retrieval** subtab, under **Generation → Answer Routing** (`web/src/components/RAG/RetrievalSubtab.tsx`) — the duplicate picker that used to sit in Universal Controls was removed. In production mode that single picker no longer treats the alias as a per-corpus knob: it is read-only, relabeled, and explained in place:
 
 | What you see | What it means |
 |---|---|

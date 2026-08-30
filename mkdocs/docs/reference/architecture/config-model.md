@@ -8,7 +8,7 @@
 ```mermaid
 flowchart LR
     root["TriBridConfig\nserver/models/tribrid_config_model.py"]
-    n_retrieval["retrieval\n30 fields"]
+    n_retrieval["retrieval\n24 fields"]
     root --> n_retrieval
     n_semantic_cache["semantic_cache\n13 fields"]
     root --> n_semantic_cache
@@ -74,7 +74,7 @@ flowchart LR
 
 | Section | Fields | Purpose | Reference |
 |---|---|---|---|
-| `retrieval` | 30 | Configuration for retrieval and search parameters. | [retrieval](../config/retrieval.md) |
+| `retrieval` | 24 | Configuration for retrieval and search parameters. | [retrieval](../config/retrieval.md) |
 | `semantic_cache` | 13 | Configuration for semantic caching across search/answer/chat endpoints. | [semantic_cache](../config/semantic_cache.md) |
 | `scoring` | 5 | Configuration for result scoring and boosting. | [scoring](../config/scoring.md) |
 | `layer_bonus` | 6 | Layer-specific scoring bonuses with intent-aware matrix. | [layer_bonus](../config/layer_bonus.md) |

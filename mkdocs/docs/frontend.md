@@ -143,11 +143,13 @@ All GUI color choices live in `web/src/styles/tokens.css`, and the legibility ru
 | `--accent-text` | Standalone **text** that wants the accent hue | Lightness-adjusted to clear 4.5:1 against `--bg`, `--bg-elev1`, `--bg-elev2`, and `--panel` in both themes; on the light theme it equals `--accent`, which already passes |
 | `--fg` | Body text | >= 7:1 against every composited surface |
 | `--fg-muted`, `--link`, `--ok`, `--warn`, `--err` | Support text and status colors | >= 4.5:1 against every composited surface |
+| `--line` | Borders, hairlines, and divider strokes | >= 3:1 (the decorative-ink floor) against every surface it is drawn on, in both themes — a fainter border reads as a panel that failed to load on a low-DPI monitor |
 
 ### Two rules enforced beyond the tokens
 
 1. **Never dim text with `opacity`.** A muted color tier is the only allowed way to de-emphasize text — an `opacity: 0.6` rule composites a token that passes its own floor down to well below it on screen.
 2. **Resting opacity on visible controls >= 0.8.** Disabled and loading states communicate through `cursor`, border, and color, not through a sub-0.8 fade.
+3. **Type and dimming floors are ownership-scoped.** Nothing under `web/src/styles/**` or `web/src/components/Dock/**` may render text below **11.5px** (a hard gate). Everywhere else a ratchet applies: the counts of sub-11.5px inline `fontSize` values and of inline text `opacity` below 0.8 may not grow, and every offender prints `file:line` so it can be routed to its owning lane. De-emphasize with a muted color tier at 11.5px or larger, never by shrinking or fading.
 
 The test parses the hex values straight out of `tokens.css` (zero mocks, no hand-copied constants) and computes WCAG 2.x relative luminance and contrast ratios directly, across both theme blocks and all four surfaces text actually paints on. When an edit breaks a floor, the failure names the theme, the token, the surface, and the measured ratio.
 
@@ -156,6 +158,9 @@ The test parses the hex values straight out of `tokens.css` (zero mocks, no hand
 
 !!! note "What changed visually (operators)"
     Muted text is slightly brighter in both themes, the light-theme status colors were darkened to clear the 4.5:1 floor, and disabled/loading buttons no longer fade below 0.8 resting opacity. Nothing functional changed — this is a legibility pass, not a feature change.
+
+!!! note "Shell geometry follows the same discipline"
+    The app shell sizes itself from `--topbar-h` and `100dvh` (no more `calc(100vh - 56px)` magic numbers), so the fixed footer sits at the viewport bottom at every width, and a <=1200px compact breakpoint narrows the sidebar and settings rail — with the resize handle disabled there — so the content column keeps a readable width on half-screen windows. Borders in both themes were raised to the 3:1 decorative floor, so panels read as panels again.
 
 ??? note "Component Inventory"
     - `DockerStatusCard.tsx`, `HealthStatusCard.tsx` show system state

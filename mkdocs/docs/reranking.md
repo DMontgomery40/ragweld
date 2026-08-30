@@ -42,6 +42,9 @@
 | `reranking.tribrid_reranker_topn` | Candidates to rerank |
 | `reranking.reranker_timeout` | Timeout for API calls |
 
+!!! note "Configured vs Active on `/api/reranker/info`"
+    Reranker config is **corpus-scoped**, and `GET /api/reranker/info?corpus_id=...` now resolves the same scoped config the mode selector writes — calling it without a corpus reports the global config. The response carries an authoritative `active` flag plus an `active_reason` sentence computed server-side: `active=true` means reranking will actually run for that corpus (cloud mode with provider and model set, or a learning adapter promoted), and `active=false` says why not (mode `none`, cloud selected but nothing configured, or learning selected with no adapter promoted under `models/learning-reranker-active`). The **RAG → Reranker** card shows both lines — `Configured: … · Active: yes/no` with the reason underneath — so the page can no longer say CLOUD in the mode selector while the runtime is silently disabled.
+
 ### Example: Enable Weighted Fusion + Learning Rerank
 
 === "Python"
