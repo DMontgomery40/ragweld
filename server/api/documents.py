@@ -72,6 +72,23 @@ def _not_found(corpus_id: str) -> HTTPException:
     return HTTPException(status_code=404, detail=f"File is not indexed in corpus {corpus_id}")
 
 
+def _indexed_but_absent(corpus_id: str, rel_path: str) -> HTTPException:
+    """The corpus scored this path but the file is not on disk.
+
+    Distinct from `_not_found` because "not indexed" would be a lie: the chunks exist and
+    retrieval still cites them. Recall conversations indexed before they were written as
+    documents are exactly this state, and telling the operator the opposite sends them
+    looking in the wrong place.
+    """
+    return HTTPException(
+        status_code=404,
+        detail=(
+            f"Corpus {corpus_id} indexed {rel_path}, but its source file is missing on disk. "
+            "Index that source again to restore the document."
+        ),
+    )
+
+
 def _safe_relative_path(corpus_id: str, path: str) -> str:
     """Corpus-root-relative POSIX path as the indexer stored it; anything else is a 404."""
     text = str(path or "").strip()
@@ -117,12 +134,14 @@ async def _resolve(corpus_id: str, path: str, *, boundary: str) -> _Resolved:
     if not corpus_root.is_absolute():
         corpus_root = PROJECT_ROOT / corpus_root
     abs_path = resolve_corpus_file(corpus_root, rel_path)
-    if abs_path is None or not abs_path.is_file():
-        raise _not_found(corpus_id)
 
     try:
+        # Whether the corpus indexed the path is asked FIRST, so a file the corpus does not
+        # know about and a file it does know about but cannot find get different answers.
         if not await pg.file_is_indexed(corpus_id, rel_path):
             raise _not_found(corpus_id)
+        if abs_path is None or not abs_path.is_file():
+            raise _indexed_but_absent(corpus_id, rel_path)
         record = await pg.get_document(corpus_id, rel_path)
     except HTTPException:
         raise

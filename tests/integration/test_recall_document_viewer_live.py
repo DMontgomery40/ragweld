@@ -108,6 +108,17 @@ async def test_a_recall_conversation_opens_in_the_document_viewer(client: AsyncC
             params={"path": "conversations/does-not-exist.md"},
         )
         assert missing.status_code == 404
+        assert "not indexed" in missing.text
+
+        # A path the corpus DID index whose file is gone must not be called "not indexed":
+        # the chunks exist and retrieval still cites them. This is the state every recall
+        # conversation indexed before this branch is in.
+        path.unlink()
+        absent = await client.get(f"/api/corpora/{corpus_id}/documents/view", params={"path": rel})
+        assert absent.status_code == 404, absent.text
+        assert "not indexed" not in absent.text
+        assert "source file is missing on disk" in absent.text
+        assert rel in absent.text
 
         # Re-indexing the same conversation rewrites the one document in place.
         again = await index_recall_conversation(
@@ -123,6 +134,7 @@ async def test_a_recall_conversation_opens_in_the_document_viewer(client: AsyncC
             embedder=embedder,
         )
         assert again == 3
+        assert path.is_file(), "re-indexing must write the document back"
         refetched = await client.get(
             f"/api/corpora/{corpus_id}/documents/view", params={"path": rel}
         )
