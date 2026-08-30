@@ -268,6 +268,9 @@ async def index_recall_conversation(
     embedder: Embedder,
 ) -> int:
     """Index a conversation into the Recall corpus (chunk rows in Postgres, dense + sparse vectors in Qdrant)."""
+    # Before any side effect: a conversation that cannot be stored under a safe name must
+    # not leave a corpus row, a directory or a contract behind.
+    validate_conversation_id(conversation_id)
     await ensure_recall_corpus(pg, config)
     await _ensure_recall_contracts(
         pg,

@@ -146,5 +146,8 @@ async def test_a_conversation_id_that_escapes_the_corpus_root_is_refused() -> No
                 config=recall_cfg,
                 embedder=embedder,
             )
+        # Refused before any side effect: no corpus row, no directory.
+        assert await pg.get_corpus(corpus_id) is None
+        assert not recall_corpus_root(corpus_id).exists()
     finally:
         shutil.rmtree(recall_corpus_root(corpus_id), ignore_errors=True)
