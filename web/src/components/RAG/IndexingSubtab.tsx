@@ -2145,7 +2145,7 @@ export function IndexingSubtab() {
                         gap: '6px',
                       }}
                     >
-                      <span aria-hidden="true" style={{ color: selected ? 'var(--accent)' : 'var(--fg-muted)' }}>
+                      <span aria-hidden="true" style={{ color: selected ? 'var(--accent-text)' : 'var(--fg-muted)' }}>
                         {selected ? '\u25c9' : '\u25cb'}
                       </span>
                       {strat.label}

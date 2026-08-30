@@ -48,23 +48,30 @@ async def test_background_index_job_fails_closed_and_cleans_staging_on_a_missing
     """A run over a path that does not exist ends in status=error, leaves no
     staging corpus behind, and does not publish stats for the failed build."""
     import asyncio
-    import os
     import uuid
+    from datetime import UTC, datetime
 
     import server.api.index as index_api
     from server.db.postgres import PostgresClient
-    from server.models.tribrid_config_model import IndexRequest
+    from server.models.index import IndexRequest
 
     repo_id = f"index-error-{uuid.uuid4().hex[:8]}"
     queue: asyncio.Queue[dict[str, object]] = asyncio.Queue(maxsize=16)
     req = IndexRequest(repo_id=repo_id, repo_path=f"/nonexistent/{repo_id}", force_reindex=True)
-    await index_api._background_index_job(req, queue)
+    # `run_id` is keyword-only and supplied by start_index; the shape it generates is
+    # "<UTC timestamp>_<hex>", so the run summary this job persists is named the same way a
+    # real one is.
+    run_id = f"{datetime.now(UTC).strftime('%Y%m%dT%H%M%S')}_{uuid.uuid4().hex[:10]}"
+    await index_api._background_index_job(req, queue, run_id=run_id)
 
     status = index_api._STATUS.get(repo_id)
     assert status is not None and status.status == "error", status
     assert status.error, "the operator must see why the run failed"
     assert repo_id not in index_api._STATS
-    pg = PostgresClient(os.environ["POSTGRES_DSN"])
+    # Same constructor every other tests/api/ case uses: the client resolves the DSN from
+    # POSTGRES_* like the app does, so this does not additionally require POSTGRES_DSN to
+    # be exported. (tests/integration/** still reads it directly; that family is T-hyg2's.)
+    pg = PostgresClient("postgresql://ignored")
     await pg.connect()
     try:
         corpora = await pg.list_corpora()
