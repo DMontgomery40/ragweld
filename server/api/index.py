@@ -2648,7 +2648,11 @@ async def _run_index_body(
                 _emit_event(
                     event_queue,
                     {
-                        "type": "warning",
+                        # Same convention as _figure_summary_event: a filtered picture is the
+                        # skip_classes/min_area_fraction rules working, so only a failed
+                        # vision call is a warning. Otherwise a correctly configured run that
+                        # skips logos would warn once per document.
+                        "type": "warning" if extracted.figures_failed else "log",
                         "message": (
                             f"Figures not described in {rel_path}: "
                             f"{extracted.figures_failed} failed, "

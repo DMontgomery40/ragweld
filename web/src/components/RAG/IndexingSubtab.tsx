@@ -699,6 +699,11 @@ export function IndexingSubtab() {
     return rows;
   }, [latestRunEvents]);
 
+  const figureFailureCount = useMemo(
+    () => figureOutcomes.reduce((sum, row) => sum + row.failed, 0),
+    [figureOutcomes]
+  );
+
   const visionAliasPricing = useMemo(() => {
     const alias = String(figuresVisionModel || '').trim();
     if (!alias) return '';
@@ -1004,9 +1009,19 @@ export function IndexingSubtab() {
         // count, the chunk count and what the run will cost before it spends anything. A run
         // that starts without it is a run nobody agreed to, so a failed estimate stops here
         // and says why.
+        // The estimate samples the corpus through the real tokenizer, which loads its model
+        // on first use in a fresh API process -- so the first estimate after a restart can
+        // outrun the client's 30s timeout even though nothing is wrong. Blocking is still
+        // right (no run without consent), but the operator has to be told to try again.
+        const timedOut =
+          (e as { code?: string } | null)?.code === 'ECONNABORTED' ||
+          /timeout/i.test(e instanceof Error ? e.message : '');
         setErrorBanner(
           `Index estimate failed for "${rid}" (${effectivePath}): ` +
-            `${errorDetail(e)}. Indexing was not started.`
+            `${errorDetail(e)}. Indexing was not started.` +
+            (timedOut
+              ? ' The first estimate after a service restart is slow because the tokenizer loads on first use — click Index Now again.'
+              : '')
         );
         return;
       } finally {
@@ -1334,14 +1349,18 @@ export function IndexingSubtab() {
                 marginTop: '10px',
                 padding: '10px 12px',
                 borderRadius: '8px',
-                border: '1px solid var(--warn)',
-                background: 'rgba(var(--warn-rgb), 0.08)',
+                // Filtered-out pictures are the configured rules working; only a failed
+                // vision call is worth painting as a warning.
+                border: `1px solid ${figureFailureCount > 0 ? 'var(--warn)' : 'var(--line)'}`,
+                background: figureFailureCount > 0 ? 'rgba(var(--warn-rgb), 0.08)' : 'var(--bg-elev2)',
                 fontSize: '12px',
                 color: 'var(--fg)',
               }}
             >
               <div style={{ fontWeight: 700, marginBottom: '6px' }}>
-                Figures this run did not describe
+                {figureFailureCount > 0
+                  ? `Figures this run failed to describe (${formatNumber(figureFailureCount)})`
+                  : 'Figures this run filtered out, as configured'}
               </div>
               <ul style={{ margin: 0, paddingLeft: '18px', display: 'grid', gap: '2px' }}>
                 {figureOutcomes.map((row) => (
@@ -1352,10 +1371,9 @@ export function IndexingSubtab() {
                 ))}
               </ul>
               <div style={{ marginTop: '6px', fontSize: '11.5px', color: 'var(--fg-muted)' }}>
-                &quot;Failed&quot; means the vision call was made and the gateway returned nothing — check the
-                alias and indexing.figures.max_completion_tokens, then re-run with Force reindex.
-                &quot;Filtered out&quot; means the picture never reached the vision call
-                (indexing.figures.skip_classes, min_area_fraction, or classify).
+                {figureFailureCount > 0
+                  ? '"Failed" means the vision call was made and the gateway returned nothing — check the alias and indexing.figures.max_completion_tokens, then re-run with Force reindex. "Filtered out" means the picture never reached the vision call (indexing.figures.skip_classes, min_area_fraction, or classify).'
+                  : 'Nothing failed. These pictures never reached the vision call, by configuration: indexing.figures.skip_classes, min_area_fraction, or classify.'}
               </div>
             </div>
           )}
