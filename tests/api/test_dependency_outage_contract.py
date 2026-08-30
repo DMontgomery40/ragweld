@@ -402,3 +402,91 @@ def test_the_fence_conflict_detail_reports_no_stage_for_a_run_that_logged_nothin
     assert detail.stage is None
     assert detail.phase == "retiring"
     assert "index_run_lease_seconds" in detail.operator_hint
+
+
+def test_the_conflict_stage_reads_only_events_that_describe_a_stage(tmp_path: Path) -> None:
+    """A warning is about a file that was skipped, not about what the run is doing now.
+
+    Also drives the bounded tail read past a log far longer than the window it inspects: the
+    stage has to come off the end of a long-running run's log without parsing all of it.
+    """
+    import asyncio
+    from datetime import UTC, datetime
+
+    import server.api.index as index_api
+    from server.api.index import _append_run_event, _flush_run_events_sync, index_run_conflict
+    from server.indexing.generations import IndexRunFence
+    from server.models.index import IndexRunConflictDetail
+
+    fence = IndexRunFence(
+        run_id="7be21c04-2f9a-4a1b-9f0e-1d2c3b4a5e6f",
+        owner="ragweld:4711",
+        started_at=datetime(2026, 8, 30, 9, 15, tzinfo=UTC),
+        heartbeat_at=datetime(2026, 8, 30, 9, 41, tzinfo=UTC),
+    )
+    old_runs_dir = index_api._INDEX_RUNS_DIR
+    index_api._INDEX_RUNS_DIR = tmp_path
+    try:
+        for ordinal in range(400):
+            _append_run_event(
+                "nasa-apollo-11",
+                fence.run_id,
+                {"type": "log", "message": f"Indexed file {ordinal}"},
+            )
+        _append_run_event(
+            "nasa-apollo-11",
+            fence.run_id,
+            {
+                "type": "progress",
+                "message": "Converting apollo-11.pdf: still running (600s elapsed)",
+            },
+        )
+        # Last line in the log, and not a stage: the run kept going past it.
+        _append_run_event(
+            "nasa-apollo-11",
+            fence.run_id,
+            {"type": "warning", "message": "Skipping file due to read/extract failure: junk.bin"},
+        )
+        _flush_run_events_sync()
+        conflict = asyncio.run(index_run_conflict("nasa-apollo-11", fence))
+    finally:
+        index_api._INDEX_RUNS_DIR = old_runs_dir
+
+    detail = IndexRunConflictDetail.model_validate(conflict.detail)
+    assert detail.stage == "Converting apollo-11.pdf: still running (600s elapsed)"
+
+
+def test_the_conflict_stage_is_capped_at_the_field_length(tmp_path: Path) -> None:
+    """The run log is not a length-checked surface, so the reader has to cap what it lifts.
+
+    `stage` declares `max_length=200`; without the cap an over-long message would fail the
+    detail's own validation and turn a 409 into a 500.
+    """
+    import asyncio
+    from datetime import UTC, datetime
+
+    import server.api.index as index_api
+    from server.api.index import _append_run_event, _flush_run_events_sync, index_run_conflict
+    from server.indexing.generations import IndexRunFence
+    from server.models.index import IndexRunConflictDetail
+
+    long_message = "Converting " + ("deeply-nested-" * 40) + "report.pdf"
+    assert len(long_message) > 200
+    fence = IndexRunFence(
+        run_id="0d3f9a71-1111-2222-3333-444455556666",
+        owner="ragweld:4711",
+        started_at=datetime(2026, 8, 30, 9, 15, tzinfo=UTC),
+        heartbeat_at=datetime(2026, 8, 30, 9, 15, tzinfo=UTC),
+    )
+    old_runs_dir = index_api._INDEX_RUNS_DIR
+    index_api._INDEX_RUNS_DIR = tmp_path
+    try:
+        _append_run_event("nasa-apollo-11", fence.run_id, {"type": "log", "message": long_message})
+        _flush_run_events_sync()
+        conflict = asyncio.run(index_run_conflict("nasa-apollo-11", fence))
+    finally:
+        index_api._INDEX_RUNS_DIR = old_runs_dir
+
+    detail = IndexRunConflictDetail.model_validate(conflict.detail)
+    assert detail.stage == long_message[:200]
+    assert len(detail.stage or "") == 200

@@ -320,7 +320,8 @@ class IndexRunConflictDetail(BaseModel):
     )
     stage: str | None = Field(
         default=None,
-        description="What the holding run last reported doing (its most recent run-log event), when it has logged one",
+        max_length=200,
+        description="What the holding run last reported doing (its most recent log/progress run event), when it has logged one",
     )
     message: str = Field(description="Stable, non-sensitive conflict summary")
     operator_hint: str = Field(description="What the operator can do next")

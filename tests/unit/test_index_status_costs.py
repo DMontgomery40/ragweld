@@ -295,7 +295,7 @@ async def test_the_unfiltered_loader_still_answers_with_the_newest_run() -> None
 def test_the_semantic_kg_cost_prices_the_gateway_alias_the_run_would_actually_use() -> None:
     """Semantic KG was structurally unpriced, and nothing said so.
 
-    `_find_model_spec` matches a catalog row's `model` -- every priced GEN row's model id
+    It used to look the model up by a catalog row's `model` id -- every priced GEN row's id
     carries a slash (`z-ai/glm-5.3-flash`) -- while the semantic-KG model is a LiteLLM alias,
     which the config validator forbids from containing one (`z-ai.glm-5.3-flash`). Zero rows
     could ever match, so `semantic_kg_cost_usd` was None for every corpus, and a None

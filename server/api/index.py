@@ -139,6 +139,12 @@ _DOCLING_EXTRACTION_LOCK = asyncio.Lock()
 # `_run_docling_extraction_locked` only so tests can drive it.
 _DOCLING_WAIT_NOTICE_SECONDS = 15.0
 
+# A queue this long is measured in files ahead of you, not seconds, so one notice would itself
+# go stale: the run log would show a single "queued 15s" line and then nothing for the rest of
+# a 19-minute wait, which reads exactly like the hang this is meant to rule out. Repeat until
+# the extractor is ours. Same kind of invariant as the threshold above.
+_DOCLING_WAIT_REPEAT_SECONDS = 60.0
+
 # A single scanned PDF can hold the extractor for many minutes (the Apollo 11 mission report
 # ran 32), and nothing else in the run emits while it does. Past this the conversion says it
 # is still alive, every interval, so a slow file never reads as a wedged worker. Same kind of
@@ -161,6 +167,14 @@ class DoclingConversion:
 
 
 _DOCLING_LOCK_HOLDER: DoclingConversion | None = None
+
+# What `IndexRunConflictDetail.stage` is allowed to cost and to say. The tail window is
+# generous next to one JSONL event (a few hundred bytes) and still a fixed read against a log
+# that grows all run; the char cap matches the field's own `max_length`.
+_RUN_STAGE_TAIL_BYTES = 16_384
+_RUN_STAGE_TAIL_LINES = 20
+_RUN_STAGE_MAX_CHARS = 200
+_RUN_STAGE_EVENT_TYPES = frozenset({"log", "progress"})
 
 _MODELS_JSON_PATH = Path(__file__).parent.parent.parent / "data" / "models.json"
 _INDEX_RUNS_DIR = Path(__file__).parent.parent.parent / "data" / "index_runs"
@@ -234,10 +248,14 @@ _LOCAL_EMBED_TPS_TABLE: dict[str, dict[str, int]] = {
     "cpu_only": {"mlx": 6_000, "huggingface": 5_000, "local": 4_000, "_default": 4_500},
 }
 
-# Semantic KG LLM extraction throughput heuristic (calls/sec) by provider.
-_SEMANTIC_KG_CALLS_PER_SECOND: dict[str, float] = {
-    "litellm": 1.0,
-}
+# Semantic KG LLM extraction throughput heuristic: one extraction call per second per worker.
+# Deliberately one number and not a per-provider table. The old table had a single entry,
+# "litellm", which was reachable only while the caller passed that word as a provider hint;
+# now that the alias resolves to its catalog row, the provider is a real one (openrouter,
+# z-ai, ragweld) and no key would ever have matched. A table that cannot be hit is worse than
+# a constant: it reads as calibrated when it is not. Per-provider numbers belong here only
+# once someone measures them.
+_SEMANTIC_KG_CALLS_PER_SECOND = 1.0
 
 
 def _idle_status(repo_id: str) -> IndexStatus:
@@ -931,17 +949,46 @@ def _fence_corrupt_conflict(repo_id: str, exc: IndexFenceCorruptError) -> HTTPEx
 def _latest_run_stage(repo_id: str, run_id: str) -> str | None:
     """The last thing a run reported doing, or None when it has logged nothing.
 
+    Bounded on both axes, because this serves an error response about a run that is still
+    writing. It reads only the tail of the log (never `_load_run_events`, which parses every
+    line of a run that may have logged for half an hour) and validates at most the last few
+    records of that tail.
+
     Deliberately does NOT drain the event writer first. `_flush_run_events_sync` joins the
     whole process-wide write queue, and the run this is asked about is by definition a LIVE
     one that keeps feeding that queue (per-file progress, extractor heartbeats), so the join
     has no bounded completion. An event still in flight costs this string a second of
-    staleness; waiting for it would hang an error response. Reads the run's JSONL log, so
-    callers on the event loop hand it to a thread.
+    staleness; waiting for it would hang the response.
+
+    Only `log` and `progress` events describe a stage. Warnings are about a file that was
+    skipped, and terminal events belong to a run that is no longer holding anything, so
+    neither answers "what is it doing now".
+
+    Blocking (file I/O), so callers on the event loop hand it to a thread.
     """
-    events = _load_run_events(repo_id, run_id, limit=1)
-    if not events:
+    path = _run_events_path(repo_id, run_id)
+    try:
+        with path.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            handle.seek(max(0, handle.tell() - _RUN_STAGE_TAIL_BYTES))
+            tail = handle.read().decode("utf-8", errors="ignore")
+    except OSError:
         return None
-    return str(events[-1].message or "").strip() or None
+
+    # Seeking into the middle of the file lands mid-line; that leading fragment is not valid
+    # JSON and is dropped by the parse below rather than needing to be detected.
+    lines = [line for line in tail.splitlines() if line.strip()]
+    for line in reversed(lines[-_RUN_STAGE_TAIL_LINES:]):
+        try:
+            event = IndexRunEvent.model_validate_json(line)
+        except Exception:
+            continue
+        if event.type not in _RUN_STAGE_EVENT_TYPES:
+            continue
+        message = str(event.message or "").strip()
+        if message:
+            return message[:_RUN_STAGE_MAX_CHARS]
+    return None
 
 
 async def index_run_conflict(
@@ -1019,28 +1066,6 @@ def _model_has_component(spec: dict[str, Any], component: str) -> bool:
     return any(str(c or "").strip().upper() == target for c in comps)
 
 
-def _find_model_spec(
-    models: list[dict[str, Any]], *, provider: str | None, model: str | None
-) -> dict[str, Any] | None:
-    """Best-effort model lookup (provider+model, then model, then provider)."""
-    prov = _norm_key(provider)
-    mdl = _norm_key(model)
-
-    if prov and mdl:
-        for m in models:
-            if _norm_key(m.get("provider")) == prov and _norm_key(m.get("model")) == mdl:
-                return m
-
-    if mdl:
-        for m in models:
-            if _norm_key(m.get("model")) == mdl:
-                return m
-
-    # No provider-only fallback: returning the first model for a provider
-    # when the requested model is missing would silently price the wrong model.
-    return None
-
-
 def _semantic_kg_model_override(cfg: TriBridConfig) -> str:
     alias = str(
         cfg.graph_indexing.semantic_kg_llm_model or cfg.chat.litellm.default_model or ""
@@ -1067,7 +1092,7 @@ def _gateway_model_spec(alias: str) -> dict[str, Any] | None:
     Every model the runtime actually reaches is named by its LiteLLM alias (`z-ai.glm-5.3-flash`),
     which is never the catalog's `model` id (`z-ai/glm-5.3-flash`) -- the alias validator forbids
     the slash. Anything pricing a configured alias resolves it here, not through
-    `_find_model_spec`, which matches provider/model ids and can match no alias at all.
+    a provider/model id lookup, which can match no alias at all.
     """
     for m in _load_models_json():
         if str(m.get("gateway_alias") or "").strip() == alias:
@@ -1471,15 +1496,13 @@ def _figure_seconds_assumption(*, figures: int, concurrency: int) -> str:
 
 def _estimate_semantic_kg_seconds(
     *,
-    provider: str,
     chunks_in_scope: int,
     indexing_workers: int,
 ) -> float:
     count = max(0, int(chunks_in_scope or 0))
     if count <= 0:
         return 0.0
-    p = _norm_key(provider)
-    calls_per_second = float(_SEMANTIC_KG_CALLS_PER_SECOND.get(p, 1.0))
+    calls_per_second = _SEMANTIC_KG_CALLS_PER_SECOND
     workers = max(1, int(indexing_workers or 1))
     # Runtime executes semantic extraction in batches up to indexing_workers.
     effective_calls_per_second = max(0.1, calls_per_second * float(min(workers, 8)))
@@ -1993,6 +2016,7 @@ async def _run_docling_extraction_locked(
     event_queue: asyncio.Queue[dict[str, Any]] | None = None,
     conversion: DoclingConversion | None = None,
     wait_notice_seconds: float = _DOCLING_WAIT_NOTICE_SECONDS,
+    wait_repeat_seconds: float = _DOCLING_WAIT_REPEAT_SECONDS,
     heartbeat_seconds: float = _DOCLING_HEARTBEAT_SECONDS,
     **kwargs: Any,
 ) -> T:
@@ -2000,7 +2024,9 @@ async def _run_docling_extraction_locked(
 
     Waiting here is invisible from the outside: the queued run keeps its `indexing` status
     and emits nothing at all while the run ahead of it converts. A wait longer than
-    `wait_notice_seconds` names the corpus and run that hold the extractor, and the
+    `wait_notice_seconds` names the corpus and run that hold the extractor, and repeats every
+    `wait_repeat_seconds` with the measured elapsed wait until the lock is taken -- one notice
+    at the front of a 19-minute queue would itself go stale and read as a hang. The
     acquisition that ends such a wait is logged too, so the run log accounts for the gap.
 
     The conversion itself is the other silence: one long file emits nothing between its
@@ -2015,20 +2041,28 @@ async def _run_docling_extraction_locked(
     async def _notice_wait() -> None:
         nonlocal notified
         await asyncio.sleep(wait_notice_seconds)
-        notified = True
-        _emit_event(
-            event_queue,
-            {
-                "type": "log",
-                "message": (
-                    "Waiting for the document extractor: another index run is converting"
-                    f"{_describe_docling_holder(_DOCLING_LOCK_HOLDER)}"
-                    f" — queued {wait_notice_seconds:.0f}s"
-                ),
-                **({"current_file": conversion.file} if conversion is not None else {}),
-            },
-            drop_oldest=True,
-        )
+        while True:
+            notified = True
+            # Both values are re-read every time: the elapsed wait is measured, not the
+            # threshold repeated, so a run queued for 20 minutes says so instead of saying
+            # "queued 15s" twenty times; and the holder is whoever holds the extractor NOW,
+            # which changes when the queue advances to the next run rather than to us.
+            _emit_event(
+                event_queue,
+                {
+                    "type": "log",
+                    "message": (
+                        "Waiting for the document extractor: another index run is converting"
+                        f"{_describe_docling_holder(_DOCLING_LOCK_HOLDER)}"
+                        f" — queued {time.monotonic() - wait_started:.0f}s"
+                    ),
+                    **({"current_file": conversion.file} if conversion is not None else {}),
+                },
+                drop_oldest=True,
+            )
+            if wait_repeat_seconds <= 0:
+                return
+            await asyncio.sleep(wait_repeat_seconds)
 
     notice: asyncio.Task[None] | None = None
     if wait_notice_seconds > 0:
@@ -3723,7 +3757,6 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
                     resolved_semantic_spec.get("provider") or semantic_provider_for_time
                 )
             estimated_seconds_semantic_kg = _estimate_semantic_kg_seconds(
-                provider=semantic_provider_for_time,
                 chunks_in_scope=semantic_kg_chunks,
                 indexing_workers=int(getattr(cfg.indexing, "indexing_workers", 1) or 1),
             )

@@ -75,6 +75,23 @@ def _matching(messages: list[str], needle: str) -> list[str]:
     return [message for message in messages if needle in message]
 
 
+async def _await_holder(holding: asyncio.Task[Any], *, timeout: float = 10.0) -> None:
+    """Block until the holder owns the extractor, on a deadline.
+
+    The holder has to own the lock before a waiter asks for it, or the test measures nothing.
+    Without the deadline a holder that died -- or one that never published itself -- left this
+    spinning until the whole suite timed out, reported as a hang rather than as this failure.
+    """
+    deadline = time.monotonic() + timeout
+    while index_api._DOCLING_LOCK_HOLDER is None:
+        assert time.monotonic() < deadline, (
+            f"the holder never took the extractor lock (task={holding!r})"
+        )
+        if holding.done():
+            await holding  # re-raise whatever killed it instead of waiting out the deadline
+        await asyncio.sleep(0.01)
+
+
 async def _await_message(repo_id: str, run_id: str, needle: str, *, timeout: float) -> str:
     """The first run-log message containing `needle`, or a failure naming what was logged."""
     deadline = time.monotonic() + timeout
@@ -110,10 +127,7 @@ def test_a_run_queued_behind_the_extractor_names_the_run_that_holds_it() -> None
                 wait_notice_seconds=0.2,
             )
         )
-        # The holder has to own the lock before the waiter asks for it, or the test is
-        # measuring nothing. Poll the published holder record rather than sleeping blind.
-        while index_api._DOCLING_LOCK_HOLDER is None:
-            await asyncio.sleep(0.01)
+        await _await_holder(holding)
 
         queued = asyncio.create_task(
             _run_docling_extraction_locked(
@@ -242,3 +256,73 @@ def test_a_short_conversion_emits_no_heartbeat() -> None:
     messages = asyncio.run(scenario())
 
     assert not _matching(messages, "still running"), messages
+
+
+QUEUED_PATTERN = re.compile(r"— queued (?P<elapsed>\d+)s$")
+
+
+def test_a_long_queue_keeps_reporting_how_long_it_has_waited() -> None:
+    """One notice at the front of a 19-minute queue goes stale and reads as a hang.
+
+    The wait is reported until it ends, and each notice carries the MEASURED elapsed wait --
+    repeating the threshold would say "queued 15s" twenty times over twenty minutes, which is
+    the same lie as saying nothing.
+    """
+
+    async def scenario() -> list[str]:
+        holder_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        waiter_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        _register(holder_queue, HOLDER_CORPUS, HOLDER_RUN)
+        _register(waiter_queue, WAITER_CORPUS, WAITER_RUN)
+        release = threading.Event()
+
+        def _hold() -> str:
+            release.wait(timeout=30)
+            return "held"
+
+        holding = asyncio.create_task(
+            _run_docling_extraction_locked(
+                _hold,
+                event_queue=holder_queue,
+                conversion=DoclingConversion(
+                    repo_id=HOLDER_CORPUS, run_id=HOLDER_RUN, file="apollo-11-mission-report.pdf"
+                ),
+                wait_notice_seconds=0.0,
+            )
+        )
+        await _await_holder(holding)
+
+        queued = asyncio.create_task(
+            _run_docling_extraction_locked(
+                lambda: "converted",
+                event_queue=waiter_queue,
+                conversion=DoclingConversion(
+                    repo_id=WAITER_CORPUS, run_id=WAITER_RUN, file="two-pager.pdf"
+                ),
+                wait_notice_seconds=1.0,
+                wait_repeat_seconds=1.0,
+            )
+        )
+        deadline = time.monotonic() + 20.0
+        while len(_matching(_messages(WAITER_CORPUS, WAITER_RUN), "queued")) < 3:
+            assert time.monotonic() < deadline, _messages(WAITER_CORPUS, WAITER_RUN)
+            await asyncio.sleep(0.05)
+        notices = _matching(_messages(WAITER_CORPUS, WAITER_RUN), "queued")
+
+        release.set()
+        assert await holding == "held"
+        assert await queued == "converted"
+        return notices
+
+    notices = asyncio.run(scenario())
+
+    assert len(notices) >= 3, notices
+    elapsed: list[int] = []
+    for message in notices:
+        match = QUEUED_PATTERN.search(message)
+        assert match is not None, message
+        assert HOLDER_CORPUS in message, message
+        elapsed.append(int(match.group("elapsed")))
+    # Strictly increasing is the whole point: a repeated constant would be flat.
+    assert elapsed == sorted(set(elapsed)), elapsed
+    assert elapsed[0] >= 1, elapsed
