@@ -143,6 +143,10 @@ _LOKI_PROBE_TIMEOUT_SECONDS = 2.0
 _LOKI_TAIL_RETRY_SECONDS = 10.0
 _LOKI_TAIL_RETRY_BUDGET_SECONDS = 120.0
 
+# One `query_range` poll is a bulk read, not a liveness probe, so it gets a longer budget
+# than `/ready`. Same kind of invariant as the two above, and a parameter for the same reason.
+_LOKI_TAIL_QUERY_TIMEOUT_SECONDS = 10.0
+
 # (base_url, monotonic expiry) for the resolved Loki, process-wide.
 _LOKI_BASE_CACHE: tuple[str, float] | None = None
 
@@ -212,21 +216,30 @@ def invalidate_loki_base_url(base: str | None = None) -> None:
     _LOKI_BASE_CACHE = None
 
 
-async def _resolve_loki_base_url(timeout_s: float | None = None) -> str | None:
-    """Return the first reachable Loki base URL (or None), cached for `_LOKI_CACHE_TTL_SECONDS`.
+async def _resolve_loki_base_url(
+    timeout_s: float | None = None,
+    *,
+    cache_ttl_s: float | None = None,
+) -> str | None:
+    """Return the first reachable Loki base URL (or None), cached for `cache_ttl_s`.
 
     A miss is deliberately not cached: when Loki is genuinely absent the next caller should
     find it as soon as it comes up, and the callers that would otherwise re-probe in a loop
     (the tail) rate-limit themselves.
+
+    The probe budget and the TTL are invariants of the resolver, not operator tunables; they
+    are parameters here only so tests can drive them, the same way
+    `_run_docling_extraction_locked` takes `heartbeat_seconds`.
     """
     global _LOKI_BASE_CACHE
     cached = _cached_loki_base_url()
     if cached is not None:
         return cached
     probe_timeout = _LOKI_PROBE_TIMEOUT_SECONDS if timeout_s is None else float(timeout_s)
+    ttl = _LOKI_CACHE_TTL_SECONDS if cache_ttl_s is None else float(cache_ttl_s)
     for base in _loki_candidate_urls():
         if await _http_ok(f"{base}/ready", timeout_s=probe_timeout):
-            _LOKI_BASE_CACHE = (base, time.monotonic() + _LOKI_CACHE_TTL_SECONDS)
+            _LOKI_BASE_CACHE = (base, time.monotonic() + ttl)
             return base
     return None
 
@@ -619,21 +632,50 @@ async def loki_tail(
     - {"type":"complete"}
     """
     _ensure_local_request(request)
+    return _loki_tail_response(
+        request, query=query, start_ms=start_ms, end_ms=end_ms, limit=limit, poll_ms=poll_ms
+    )
+
+
+def _loki_tail_response(
+    request: Request,
+    *,
+    query: str,
+    start_ms: int | None,
+    end_ms: int | None,
+    limit: int,
+    poll_ms: int,
+    probe_timeout_s: float | None = None,
+    retry_seconds: float | None = None,
+    retry_budget_seconds: float | None = None,
+    query_timeout_s: float | None = None,
+) -> StreamingResponse:
+    """Build the tail's SSE response.
+
+    Split out of the route so its timing invariants can be driven by a test without
+    rewriting module state: a FastAPI route turns every extra argument into a query
+    parameter, so they cannot live on `loki_tail` itself.
+    """
+    retry_s = _LOKI_TAIL_RETRY_SECONDS if retry_seconds is None else float(retry_seconds)
+    budget_s = (
+        _LOKI_TAIL_RETRY_BUDGET_SECONDS if retry_budget_seconds is None else float(retry_budget_seconds)
+    )
+    query_s = _LOKI_TAIL_QUERY_TIMEOUT_SECONDS if query_timeout_s is None else float(query_timeout_s)
 
     async def _gen() -> Any:
         # Resolved inside the stream, not above it: a resolve that fails because the box is
         # busy is not the same answer as "Loki is gone", and ending here left the Chat log
         # panel stuck on an error until the operator reloaded the page. Say it is retrying,
         # hold the stream open, and pick Loki up as soon as it answers.
-        base = await _resolve_loki_base_url()
+        base = await _resolve_loki_base_url(probe_timeout_s)
         if not base:
-            deadline = time.monotonic() + _LOKI_TAIL_RETRY_BUDGET_SECONDS
+            deadline = time.monotonic() + budget_s
             while not base and time.monotonic() < deadline:
                 yield f"data: {json.dumps({'type': 'error', 'message': 'Loki not reachable (retrying)'})}\n\n"
-                await asyncio.sleep(_LOKI_TAIL_RETRY_SECONDS)
+                await asyncio.sleep(retry_s)
                 if await request.is_disconnected():
                     return
-                base = await _resolve_loki_base_url()
+                base = await _resolve_loki_base_url(probe_timeout_s)
         if not base:
             yield f"data: {json.dumps({'type': 'error', 'message': 'Loki not reachable'})}\n\n"
             yield f"data: {json.dumps({'type': 'complete'})}\n\n"
@@ -664,7 +706,7 @@ async def loki_tail(
             }
 
             try:
-                async with httpx.AsyncClient(timeout=10.0) as client:
+                async with httpx.AsyncClient(timeout=query_s) as client:
                     r = await client.get(f"{base}/loki/api/v1/query_range", params=params)
                 if r.status_code >= 400:
                     raise RuntimeError(f"{r.status_code}: {r.text}")

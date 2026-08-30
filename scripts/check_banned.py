@@ -48,7 +48,6 @@ ZERO_MOCK_ALLOWLIST = {
     "tests/api/test_config_endpoints.py",
     "tests/api/test_cost_endpoints.py",
     "tests/api/test_dev_stack_endpoints.py",
-    "tests/api/test_docker_endpoints.py",
     "tests/api/test_index_dashboard_endpoints.py",
     "tests/api/test_rag_tab_endpoints.py",
     "tests/api/test_reranker_train_endpoints.py",

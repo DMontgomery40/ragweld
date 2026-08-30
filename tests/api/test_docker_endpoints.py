@@ -377,6 +377,9 @@ class _LokiStubHandler(BaseHTTPRequestHandler):
             return
         if path == "/loki/api/v1/query_range":
             server.query_hits += 1
+            stall = float(server.query_stall_s)
+            if stall > 0:
+                server.stop_event.wait(stall)
             payload = json.dumps(
                 {
                     "status": "success",
@@ -409,20 +412,33 @@ class _LokiStubHandler(BaseHTTPRequestHandler):
 
 @contextmanager
 def _loki_stub(*, ready_status: int = 200, entries: list[tuple[int, str]] | None = None) -> Iterator[Any]:
-    """A real Loki-shaped HTTP server on an ephemeral port, stopped on exit."""
+    """A real Loki-shaped HTTP server on an ephemeral port, stopped on exit.
+
+    `LOKI_BASE_URL` points at it for the duration and is restored afterwards, using the same
+    save/restore this file already applies to the Docker CLI environment. The Loki tests
+    therefore patch nothing at all, which is what takes this file off the zero-mock
+    allowlist in `scripts/check_banned.py`.
+    """
     server = ThreadingHTTPServer(("127.0.0.1", 0), _LokiStubHandler)
     server.ready_hits = 0  # type: ignore[attr-defined]
     server.query_hits = 0  # type: ignore[attr-defined]
     server.ready_status = ready_status  # type: ignore[attr-defined]
     server.ready_stall_s = 0.0  # type: ignore[attr-defined]
+    server.query_stall_s = 0.0  # type: ignore[attr-defined]
     server.stop_event = threading.Event()  # type: ignore[attr-defined]
     server.entries = list(entries or [])  # type: ignore[attr-defined]
     server.base_url = f"http://127.0.0.1:{server.server_address[1]}"  # type: ignore[attr-defined]
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
+    previous_base_url = os.environ.get("LOKI_BASE_URL")
+    os.environ["LOKI_BASE_URL"] = server.base_url
     try:
         yield server
     finally:
+        if previous_base_url is None:
+            os.environ.pop("LOKI_BASE_URL", None)
+        else:
+            os.environ["LOKI_BASE_URL"] = previous_base_url
         server.stop_event.set()
         server.shutdown()
         server.server_close()
@@ -503,12 +519,9 @@ async def _drain_tail(
 
 
 @pytest.mark.asyncio
-async def test_the_resolver_caches_the_reachable_loki_and_rides_out_a_probe_outage(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_the_resolver_caches_the_reachable_loki_and_rides_out_a_probe_outage() -> None:
     """The whole defect: one slow probe made a live Loki read as unreachable."""
     with _loki_stub() as stub:
-        monkeypatch.setenv("LOKI_BASE_URL", stub.base_url)
 
         assert await docker_api._resolve_loki_base_url() == stub.base_url
         assert stub.ready_hits == 1
@@ -523,37 +536,30 @@ async def test_the_resolver_caches_the_reachable_loki_and_rides_out_a_probe_outa
 
 
 @pytest.mark.asyncio
-async def test_the_cached_loki_url_expires_and_is_probed_again(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_the_cached_loki_url_expires_and_is_probed_again() -> None:
     """The cache is a five-minute shock absorber, not a permanent answer."""
     with _loki_stub() as stub:
-        monkeypatch.setenv("LOKI_BASE_URL", stub.base_url)
-        monkeypatch.setattr(docker_api, "_LOKI_CACHE_TTL_SECONDS", 0.2)
 
-        assert await docker_api._resolve_loki_base_url() == stub.base_url
+        assert await docker_api._resolve_loki_base_url(cache_ttl_s=0.2) == stub.base_url
         assert stub.ready_hits == 1
 
         await asyncio.sleep(0.3)
 
-        assert await docker_api._resolve_loki_base_url() == stub.base_url
+        assert await docker_api._resolve_loki_base_url(cache_ttl_s=0.2) == stub.base_url
         assert stub.ready_hits == 2
 
 
 @pytest.mark.asyncio
 async def test_a_connection_failure_against_the_cached_loki_drops_it(
     client: AsyncClient,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A cached URL that cannot be connected to is wrong, and must not be kept for 5 minutes."""
     with _loki_stub() as stub:
-        monkeypatch.setenv("LOKI_BASE_URL", stub.base_url)
         ok = await client.get("/api/loki/status")
         assert ok.status_code == 200
         assert ok.json() == {"reachable": True, "url": stub.base_url, "status": "ok"}
         assert docker_api._LOKI_BASE_CACHE is not None
 
-    monkeypatch.setattr(docker_api, "_LOKI_PROBE_TIMEOUT_SECONDS", 0.3)
     gone = await client.get("/api/loki/status")
     assert gone.status_code == 200
     assert gone.json()["reachable"] is False
@@ -563,7 +569,6 @@ async def test_a_connection_failure_against_the_cached_loki_drops_it(
 @pytest.mark.asyncio
 async def test_a_slow_but_reachable_loki_keeps_the_cached_url(
     client: AsyncClient,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The exact F12 condition: Loki is up, the box is too busy to answer the probe in time.
 
@@ -574,7 +579,6 @@ async def test_a_slow_but_reachable_loki_keeps_the_cached_url(
     candidate probe.
     """
     with _loki_stub() as stub:
-        monkeypatch.setenv("LOKI_BASE_URL", stub.base_url)
         assert (await client.get("/api/loki/status")).json()["reachable"] is True
         assert docker_api._LOKI_BASE_CACHE is not None
 
@@ -592,11 +596,9 @@ async def test_a_slow_but_reachable_loki_keeps_the_cached_url(
 @pytest.mark.asyncio
 async def test_a_loki_status_error_response_keeps_the_cached_url(
     client: AsyncClient,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A 503 from Loki says the URL is right and Loki is busy: only transport failures invalidate."""
     with _loki_stub() as stub:
-        monkeypatch.setenv("LOKI_BASE_URL", stub.base_url)
         assert (await client.get("/api/loki/status")).json()["reachable"] is True
 
         stub.ready_status = 503
@@ -606,23 +608,20 @@ async def test_a_loki_status_error_response_keeps_the_cached_url(
 
 
 @pytest.mark.asyncio
-async def test_the_tail_retries_the_resolver_and_recovers_without_a_reconnect(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_the_tail_retries_the_resolver_and_recovers_without_a_reconnect() -> None:
     """The stuck panel: the tail ended on the first failed resolve and never came back."""
     with _loki_stub(ready_status=503, entries=[(1_700_000_000_000_000_000, "hello from loki")]) as stub:
-        monkeypatch.setenv("LOKI_BASE_URL", stub.base_url)
-        monkeypatch.setattr(docker_api, "_LOKI_PROBE_TIMEOUT_SECONDS", 0.3)
-        monkeypatch.setattr(docker_api, "_LOKI_TAIL_RETRY_SECONDS", 0.2)
-        monkeypatch.setattr(docker_api, "_LOKI_TAIL_RETRY_BUDGET_SECONDS", 30.0)
 
-        response = await docker_api.loki_tail(
+        response = docker_api._loki_tail_response(
             _local_tail_request(),
             query='{ragweld_service="api"}',
             start_ms=1_700_000_000_000,
             end_ms=None,
             limit=100,
             poll_ms=250,
+            probe_timeout_s=0.3,
+            retry_seconds=0.2,
+            retry_budget_seconds=30.0,
         )
 
         async def _heal() -> None:
@@ -646,23 +645,48 @@ async def test_the_tail_retries_the_resolver_and_recovers_without_a_reconnect(
 
 
 @pytest.mark.asyncio
-async def test_the_tail_gives_up_after_the_retry_budget(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Retrying forever would be its own lie: past the budget the stream says so and ends."""
-    with _loki_stub(ready_status=503) as stub:
-        monkeypatch.setenv("LOKI_BASE_URL", stub.base_url)
-        monkeypatch.setattr(docker_api, "_LOKI_PROBE_TIMEOUT_SECONDS", 0.3)
-        monkeypatch.setattr(docker_api, "_LOKI_TAIL_RETRY_SECONDS", 0.2)
-        monkeypatch.setattr(docker_api, "_LOKI_TAIL_RETRY_BUDGET_SECONDS", 1.0)
+async def test_a_slow_query_range_keeps_the_cached_url() -> None:
+    """The tail's guard inherits the same subclass trap as `loki_status`.
 
-        response = await docker_api.loki_tail(
+    A `query_range` that times out ends this poll, but it does not say the URL is wrong --
+    and dropping the cache there would send the next resolve back through every candidate
+    on a box that is already too busy to answer.
+    """
+    with _loki_stub(entries=[(1_700_000_000_000_000_000, "hello from loki")]) as stub:
+        assert await docker_api._resolve_loki_base_url() == stub.base_url
+        assert docker_api._LOKI_BASE_CACHE is not None
+
+        stub.query_stall_s = 30.0
+        response = docker_api._loki_tail_response(
             _local_tail_request(),
             query='{ragweld_service="api"}',
             start_ms=1_700_000_000_000,
             end_ms=None,
             limit=100,
             poll_ms=250,
+            query_timeout_s=0.3,
+        )
+        payloads = await _drain_tail(response, limit=10, stop_type="complete", timeout=25.0)
+
+    errors = [p.get("message") for p in payloads if p.get("type") == "error"]
+    assert errors and "Loki tail error" in str(errors[0]), payloads
+    assert docker_api._LOKI_BASE_CACHE is not None, "a slow query must not tear down the cache"
+
+
+@pytest.mark.asyncio
+async def test_the_tail_gives_up_after_the_retry_budget() -> None:
+    """Retrying forever would be its own lie: past the budget the stream says so and ends."""
+    with _loki_stub(ready_status=503):
+        response = docker_api._loki_tail_response(
+            _local_tail_request(),
+            query='{ragweld_service="api"}',
+            start_ms=1_700_000_000_000,
+            end_ms=None,
+            limit=100,
+            poll_ms=250,
+            probe_timeout_s=0.3,
+            retry_seconds=0.2,
+            retry_budget_seconds=1.0,
         )
         payloads = await _drain_tail(response, limit=50, timeout=25.0)
 
