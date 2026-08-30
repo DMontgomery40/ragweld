@@ -616,6 +616,22 @@ class TestCorpusRowMapping:
         assert corpus.repo_id == "recall_default"
         assert corpus.slug == "recall_default"
 
+    def test_every_system_kind_marks_the_corpus_internal(self) -> None:
+        """Not just Recall: the Codex session ingester registers two corpora the same way."""
+        for system_kind in ("recall", "codex_session_ingest"):
+            corpus = _corpus_from_row(
+                {
+                    "repo_id": f"corpus-{system_kind}",
+                    "name": system_kind,
+                    "path": "/srv/corpora/system",
+                    "description": None,
+                    "meta": {"system_kind": system_kind},
+                    "created_at": datetime(2026, 8, 30, tzinfo=UTC),
+                    "last_indexed": None,
+                }
+            )
+            assert corpus.internal is True, system_kind
+
     def test_an_operator_corpus_is_not_internal(self) -> None:
         corpus = _corpus_from_row(
             {

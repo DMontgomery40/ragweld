@@ -484,9 +484,11 @@ class Corpus(BaseModel):
     internal: bool = Field(
         default=False,
         description=(
-            "True for a corpus the runtime registers and manages itself (the chat Recall "
-            "corpus), rather than one an operator created. Operator surfaces that list "
-            "corpora as work the operator is responsible for exclude these."
+            "True for a corpus the runtime registers and manages itself -- it carries a "
+            "system_kind marker and indexes through its own path, so it has no operator-run "
+            "index run. Today that is the chat Recall corpus and the two Codex session "
+            "corpora. Operator surfaces that list corpora as work the operator is "
+            "responsible for exclude these."
         ),
     )
     created_at: datetime = Field(

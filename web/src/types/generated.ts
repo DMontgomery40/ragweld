@@ -3460,7 +3460,7 @@ export interface Corpus {
   layer_bonuses?: Record<string, Record<string, number>> | null;
   /** Optional description */
   description?: string | null;
-  /** True for a corpus the runtime registers and manages itself (the chat Recall corpus), rather than one an operator created. Operator surfaces that list corpora as work the operator is responsible for exclude these. */
+  /** True for a corpus the runtime registers and manages itself -- it carries a system_kind marker and indexes through its own path, so it has no operator-run index run. Today that is the chat Recall corpus and the two Codex session corpora. Operator surfaces that list corpora as work the operator is responsible for exclude these. */
   internal?: boolean;
   /** When the corpus was created */
   created_at?: string;
