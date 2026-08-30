@@ -5,7 +5,18 @@
 import { useState, useEffect, useCallback } from 'react';
 import '@/styles/storage-calculator.css';
 import { configApi } from '@/api/config';
+import * as DashAPI from '@/api/dashboard';
+import { useRepoStore } from '@/stores/useRepoStore';
 import { NumberField } from '@/components/ui/NumberField';
+
+/** What the planner was seeded from, so every prefilled number can name its source (M-142). */
+interface PrefillInfo {
+  corpusName: string;
+  corpusSizeLabel: string;
+  chunkSizeLabel: string;
+  chunkCount: number;
+  embDim: number;
+}
 
 // Utility functions
 function formatBytes(bytes: number): string {
@@ -96,6 +107,11 @@ interface Calc2Results {
 }
 
 export function StorageCalculatorSuite() {
+  const activeRepo = useRepoStore((s) => s.activeRepo);
+  const repos = useRepoStore((s) => s.repos);
+  // What the planner was seeded from (null = still on generic defaults, no corpus to read).
+  const [prefill, setPrefill] = useState<PrefillInfo | null>(null);
+
   // Calculator 1 state - defaults will be overwritten by Pydantic config
   const [calc1, setCalc1] = useState<Calc1Inputs>({
     repoSize: 5,
@@ -127,21 +143,71 @@ export function StorageCalculatorSuite() {
     cardspct: 10,
   });
 
-  // Load defaults from Pydantic config
+  // Seed the planner from the active corpus so it opens grounded in the numbers shown 200px
+  // above it, instead of a hardcoded 5 GiB / 1.3M-chunk scenario that had nothing to do with a
+  // 3.5 MiB corpus (M-142). The embedding dim comes from Pydantic config; the corpus size and a
+  // representative chunk size are read from the live index stats. Every seeded value is labelled
+  // with its source in the banner below, and any field can still be edited to explore scenarios.
+  // If no corpus is indexed, the generic defaults stand and the banner says so.
   useEffect(() => {
-    async function loadConfig() {
+    let cancelled = false;
+    async function seedFromCorpus() {
+      let embDim = 3072;
       try {
         const config = await configApi.load();
-        const embDim = Number(config.embedding?.embedding_dim ?? 3072);
-        
-        setCalc1(prev => ({ ...prev, embDim }));
-        setCalc2(prev => ({ ...prev, embDim }));
+        embDim = Number(config.embedding?.embedding_dim ?? 3072);
       } catch (err) {
         console.error('[StorageCalculatorSuite] Failed to load config:', err);
       }
+      if (cancelled) return;
+      setCalc1((prev) => ({ ...prev, embDim }));
+      setCalc2((prev) => ({ ...prev, embDim }));
+
+      try {
+        const stats = await DashAPI.getIndexStats();
+        if (cancelled) return;
+        const chunkBytes = Number(stats.storage_breakdown?.chunks_bytes || 0);
+        const points = Number(stats.storage_breakdown?.qdrant_points || 0);
+        // Only seed when both are real: a confidently-wrong prefill is worse than an honest
+        // default. Chunk size is the mean stored chunk (corpus bytes / chunk count).
+        if (chunkBytes > 0 && points > 0) {
+          const repoSizeMiB = chunkBytes / 1048576;
+          const chunkSizeKiB = chunkBytes / points / 1024;
+          const corpusName =
+            String(repos.find((r) => r.corpus_id === activeRepo)?.name || activeRepo || 'the active corpus');
+          setCalc1((prev) => ({
+            ...prev,
+            repoSize: Number(repoSizeMiB.toFixed(3)),
+            repoUnit: 1048576,
+            chunkSize: Number(chunkSizeKiB.toFixed(3)),
+            chunkUnit: 1024,
+            embDim,
+          }));
+          setCalc2((prev) => ({
+            ...prev,
+            repoSize: Number(repoSizeMiB.toFixed(3)),
+            repoUnit: 1048576,
+            chunkSize: Number(chunkSizeKiB.toFixed(3)),
+            chunkUnit: 1024,
+            embDim,
+          }));
+          setPrefill({
+            corpusName,
+            corpusSizeLabel: formatBytes(chunkBytes),
+            chunkSizeLabel: `${chunkSizeKiB.toFixed(2)} KiB`,
+            chunkCount: points,
+            embDim,
+          });
+        }
+      } catch {
+        // No active corpus / not indexed yet: keep the generic defaults, banner says so.
+      }
     }
-    loadConfig();
-  }, []);
+    seedFromCorpus();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeRepo, repos]);
 
   // Results state
   const [results1, setResults1] = useState<Calc1Results | null>(null);
@@ -285,12 +351,26 @@ export function StorageCalculatorSuite() {
     <div className="storage-calc-wrapper">
       <div className="storage-calc-header">
         <h1><span className="brand">TriBrid RAG</span> Storage Calculator Suite</h1>
-        <p className="subtitle">MLOps Engineering Platform • Enterprise Memory Planning</p>
-        <div className="info-box">
-          <p>
-            <strong>Left:</strong> Calculate exact storage needs for your configuration.<br />
-            <strong>Right:</strong> See if your data fits within a target limit using different strategies.
-          </p>
+        <p className="subtitle">Hypothetical capacity planner — independent of the live storage shown above</p>
+        <div
+          className="info-box"
+          data-testid="storage-calc-prefill"
+          style={{ fontSize: '13px', lineHeight: 1.6, color: 'var(--fg)' }}
+        >
+          {prefill ? (
+            <p style={{ margin: 0 }}>
+              Seeded from <strong>{prefill.corpusName}</strong>: corpus size{' '}
+              <strong>{prefill.corpusSizeLabel}</strong> (stored chunk bytes), mean chunk{' '}
+              <strong>{prefill.chunkSizeLabel}</strong> across {prefill.chunkCount.toLocaleString()} chunks,
+              embedding dim <strong>{prefill.embDim.toLocaleString()}</strong> (from config). Edit any field to
+              model a different scenario — this planner never changes your stored index.
+            </p>
+          ) : (
+            <p style={{ margin: 0 }}>
+              No indexed corpus to seed from yet — the fields below hold generic planning defaults. Enter your own
+              numbers to size a future corpus; nothing here touches a stored index.
+            </p>
+          )}
         </div>
       </div>
 
@@ -577,8 +657,16 @@ export function StorageCalculatorSuite() {
             <span className="calculator-badge">Fit Analysis</span>
           </div>
 
-          <p style={{ fontSize: '12px', color: 'var(--fg-muted)', marginBottom: '20px', lineHeight: 1.5 }}>
+          <p style={{ fontSize: '12px', color: 'var(--fg-muted)', marginBottom: '12px', lineHeight: 1.5 }}>
             Compare two strategies: <strong>Minimal</strong> (smallest footprint, fetches data on-demand) vs <strong>Low Latency</strong> (everything in RAM for instant access).
+          </p>
+          <p
+            data-testid="storage-calc2-independent-note"
+            style={{ fontSize: '11.5px', color: 'var(--fg-muted)', marginBottom: '20px', lineHeight: 1.5 }}
+          >
+            Corpus Size, Chunk Size and Embedding Dims here are <strong>independent scenario inputs</strong> — editing
+            them does not change the left panel. Hydration %, Replication and HNSW overhead are read from the left
+            panel.
           </p>
 
           <div className="input-section">
