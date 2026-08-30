@@ -367,6 +367,11 @@ class _LokiStubHandler(BaseHTTPRequestHandler):
         server = cast(Any, self.server)
         if path == "/ready":
             server.ready_hits += 1
+            # A stall accepts the connection and then does not answer: Loki up, box busy.
+            # Interruptible so teardown never waits it out.
+            stall = float(server.ready_stall_s)
+            if stall > 0:
+                server.stop_event.wait(stall)
             status = int(server.ready_status)
             self._respond(status, b"ready\n" if status == 200 else b"not ready\n", "text/plain")
             return
@@ -409,6 +414,8 @@ def _loki_stub(*, ready_status: int = 200, entries: list[tuple[int, str]] | None
     server.ready_hits = 0  # type: ignore[attr-defined]
     server.query_hits = 0  # type: ignore[attr-defined]
     server.ready_status = ready_status  # type: ignore[attr-defined]
+    server.ready_stall_s = 0.0  # type: ignore[attr-defined]
+    server.stop_event = threading.Event()  # type: ignore[attr-defined]
     server.entries = list(entries or [])  # type: ignore[attr-defined]
     server.base_url = f"http://127.0.0.1:{server.server_address[1]}"  # type: ignore[attr-defined]
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -416,6 +423,7 @@ def _loki_stub(*, ready_status: int = 200, entries: list[tuple[int, str]] | None
     try:
         yield server
     finally:
+        server.stop_event.set()
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
@@ -550,6 +558,35 @@ async def test_a_connection_failure_against_the_cached_loki_drops_it(
     assert gone.status_code == 200
     assert gone.json()["reachable"] is False
     assert docker_api._LOKI_BASE_CACHE is None
+
+
+@pytest.mark.asyncio
+async def test_a_slow_but_reachable_loki_keeps_the_cached_url(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The exact F12 condition: Loki is up, the box is too busy to answer the probe in time.
+
+    A timeout is the one failure this cache exists to absorb, and `httpx.TimeoutException`
+    is a subclass of `httpx.TransportError` -- so the invalidation clause written for
+    "could not connect at all" also fired on "answered too slowly", tearing the cache down
+    under exactly the load it was built for and putting the next caller back on the full
+    candidate probe.
+    """
+    with _loki_stub() as stub:
+        monkeypatch.setenv("LOKI_BASE_URL", stub.base_url)
+        assert (await client.get("/api/loki/status")).json()["reachable"] is True
+        assert docker_api._LOKI_BASE_CACHE is not None
+
+        # The connection is accepted; the answer never arrives inside the probe budget.
+        stub.ready_stall_s = 30.0
+        busy = await client.get("/api/loki/status")
+
+    payload = busy.json()
+    assert payload["reachable"] is False
+    assert payload["url"] == stub.base_url
+    assert "Timeout" in payload["status"], payload
+    assert docker_api._LOKI_BASE_CACHE is not None, "a busy probe must not tear down the cache"
 
 
 @pytest.mark.asyncio

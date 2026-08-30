@@ -192,9 +192,16 @@ def _cached_loki_base_url() -> str | None:
 def invalidate_loki_base_url(base: str | None = None) -> None:
     """Drop the cached Loki URL after a request against it failed to connect.
 
-    Only a transport failure invalidates. A 4xx/5xx answer -- a malformed LogQL query, a Loki
-    that is up but not ready -- says the URL is right and the request was wrong, and dropping
-    it there would put every caller back on the per-call probe this cache exists to remove.
+    Only a refused/unreachable connection invalidates. Two other failures must not:
+
+    - a 4xx/5xx answer -- a malformed LogQL query, a Loki that is up but not ready -- says
+      the URL is right and the request was wrong;
+    - a timeout says the box is busy, which is the one condition this cache exists to
+      absorb. `httpx.TimeoutException` is a subclass of `httpx.TransportError`, so every
+      caller has to exclude it explicitly before the transport clause.
+
+    Dropping the URL for either would put every caller back on the per-call candidate probe
+    this cache exists to remove.
     """
     global _LOKI_BASE_CACHE
     cached = _LOKI_BASE_CACHE
@@ -581,6 +588,11 @@ async def loki_status(request: Request) -> LokiStatus:
             url=str(base),
             status=("ok" if reachable else f"status_{r.status_code}"),
         )
+    except httpx.TimeoutException as e:
+        # Loki accepted the connection and did not answer in time: the box is busy, not the
+        # URL wrong. Keeping the cached URL through exactly this is the point of the cache.
+        # Must precede the TransportError clause -- TimeoutException is a subclass of it.
+        return LokiStatus(reachable=False, url=str(base), status=f"error: {e.__class__.__name__}")
     except httpx.TransportError as e:
         # The cached URL could not be connected to at all, so it is the wrong URL: drop it
         # rather than answer "unreachable" from a stale cache for the rest of the TTL.
@@ -658,7 +670,9 @@ async def loki_tail(
                     raise RuntimeError(f"{r.status_code}: {r.text}")
                 payload = r.json()
             except Exception as e:
-                if isinstance(e, httpx.TransportError):
+                # Same ordering trap as `loki_status`: a slow answer from a reachable Loki
+                # is a TimeoutException, which is a TransportError, and must not invalidate.
+                if isinstance(e, httpx.TransportError) and not isinstance(e, httpx.TimeoutException):
                     invalidate_loki_base_url(base)
                 yield f"data: {json.dumps({'type': 'error', 'message': f'Loki tail error: {e}'})}\n\n"
                 yield f"data: {json.dumps({'type': 'complete'})}\n\n"
