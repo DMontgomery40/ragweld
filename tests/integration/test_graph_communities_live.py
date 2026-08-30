@@ -340,3 +340,91 @@ async def test_code_entity_ids_round_trip_and_a_search_carries_its_own_edges(
                 pass
         await neo.disconnect()
         await client.delete(f"/api/corpora/{active}")
+
+
+async def test_neighbors_never_return_the_centre_twice_on_a_cyclic_graph(
+    client: AsyncClient,
+) -> None:
+    """Review N-02: above 2 hops a path can return to the centre and bind it as its own
+    neighbour. The entity list then carried a duplicate row (a duplicate React key in the
+    entities table, two nodes sharing one nodeId in the visualizer) and the pre-limit count
+    added a second unit for it. The two errors cancelled in the total, so only a uniqueness
+    assertion catches it - a count assertion would have passed throughout.
+
+    The graph is a triangle so that a 3-hop walk from any node reaches that node again;
+    max hops is operator-settable 1-5, so this is reachable from the UI.
+    """
+    active = f"graph-cycle-{uuid4().hex[:8]}"
+    staging = f"__staging__{active}__{uuid4().hex[:6]}"
+    neo = Neo4jClient(
+        os.environ.get("NEO4J_URI", "bolt://127.0.0.1:7687"),
+        os.environ.get("NEO4J_USER", "neo4j"),
+        os.environ.get("NEO4J_PASSWORD", "password"),
+    )
+    created = await client.post(
+        "/api/corpora", json={"corpus_id": active, "name": active, "path": os.path.abspath(_CORPUS_PATH)}
+    )
+    assert created.status_code in (200, 201), created.text
+
+    a, b, c = "pkg/a.py::A", "pkg/b.py::B", "pkg/c.py::C"
+    await neo.connect()
+    try:
+        await neo.ensure_schema()
+        chunk = Chunk(
+            chunk_id="cycle-1",
+            content="class A: ...",
+            file_path="pkg/a.py",
+            start_line=1,
+            end_line=3,
+            token_count=4,
+            embedding=[0.3, 0.4],
+        )
+        _lexical, lexical_cfg = await write_lexical_graph_with_graphrag(
+            repo_id=staging, run_id="cycle-live", file_path="pkg/a.py", chunks=[chunk]
+        )
+        await neo.upsert_graphrag_graph(
+            staging,
+            Neo4jGraph(
+                nodes=[
+                    _code_entity(a, "A", "class"),
+                    _code_entity(b, "B", "class"),
+                    _code_entity(c, "C", "class"),
+                ],
+                relationships=[_rel(a, b), _rel(b, c), _rel(c, a)],
+            ),
+            lexical_graph_config=lexical_cfg,
+        )
+
+        pg = PostgresClient(os.environ["POSTGRES_DSN"])
+        await pg.connect()
+        try:
+            await pg.set_generation(
+                active, build_generation(run_id="cycle-live", qdrant_collection=None, graph_repo_id=staging)
+            )
+        finally:
+            await pg.disconnect()
+
+        for hops in (1, 2, 3, 4, 5):
+            response = await client.get(
+                f"/api/graph/{active}/entity/neighbors",
+                params={"entity_id": a, "max_hops": hops, "limit": 200},
+            )
+            assert response.status_code == 200, response.text
+            body = response.json()
+            ids = [e["entity_id"] for e in body["entities"]]
+            assert len(ids) == len(set(ids)), f"duplicate entity rows at hops={hops}: {ids}"
+            assert a in ids, f"the centre must always be returned (hops={hops})"
+            # Every node of the triangle is within one hop of A in an undirected walk,
+            # so the answer is the whole graph at every hop count - and exactly once.
+            assert set(ids) == {a, b, c}, f"hops={hops} returned {ids}"
+            assert body["total_matched"] == 3, (
+                f"total_matched must count the centre once, got {body['total_matched']} at hops={hops}"
+            )
+    finally:
+        for repo_id in (active, staging):
+            try:
+                await neo.delete_graph(repo_id)
+            except Exception:
+                pass
+        await neo.disconnect()
+        await client.delete(f"/api/corpora/{active}")

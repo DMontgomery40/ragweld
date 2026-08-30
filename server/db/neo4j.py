@@ -690,7 +690,7 @@ class Neo4jClient:
         MATCH (center:__Entity__ {{repo_id: $repo_id, entity_id: $entity_id}})
 
         OPTIONAL MATCH p = (center)-[rels*1..{hops}]-(n:__Entity__ {{repo_id: $repo_id}})
-        WHERE ALL(r IN rels WHERE type(r) IN $allowed_rels)
+        WHERE ALL(r IN rels WHERE type(r) IN $allowed_rels) AND n <> center
         WITH center, n, min(length(p)) AS min_hops
         ORDER BY min_hops ASC, n.name ASC
         LIMIT $limit
@@ -791,6 +791,11 @@ class Neo4jClient:
         ``total_matched`` promises a pre-limit count. Reporting ``len(entities)`` made it
         equal ``limit`` for any entity with more neighbours than the cap, so a 500-neighbour
         entity said "200 of 200" (review F-03).
+
+        ``n <> center`` matters above 2 hops: a path that returns to the centre binds ``n``
+        to it, so the centre counted as one of its own neighbours AND was appended again by
+        the caller. The two errors cancelled in the total, which is why the numbers agreed -
+        luck, not correctness - while the entity list carried a real duplicate row (N-02).
         """
         hops = min(max(1, int(max_hops or 1)), 5)
         allowed_rels = sorted(ALL_RELATION_TYPES)
@@ -798,7 +803,7 @@ class Neo4jClient:
         cypher = f"""
         MATCH (center:__Entity__ {{repo_id: $repo_id, entity_id: $entity_id}})
         OPTIONAL MATCH (center)-[rels*1..{hops}]-(n:__Entity__ {{repo_id: $repo_id}})
-        WHERE ALL(r IN rels WHERE type(r) IN $allowed_rels)
+        WHERE ALL(r IN rels WHERE type(r) IN $allowed_rels) AND n <> center
         RETURN count(DISTINCT n) AS neighbours;
         """
         async with driver.session(database=self.database) as session:
