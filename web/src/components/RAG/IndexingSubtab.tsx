@@ -1239,9 +1239,13 @@ export function IndexingSubtab() {
     if (!rid) return;
     const proceed = await confirmDialog({
       title: 'Delete index',
-      message: `Delete index for corpus "${rid}"?`,
+      message:
+        `Permanently delete the index for corpus "${rid}". This removes the stored chunks ` +
+        `and chunk summaries, the dense and sparse Qdrant generations, and the Neo4j graph ` +
+        `for this corpus. The source documents are not touched. This cannot be undone.`,
       confirmLabel: 'Delete index',
       danger: true,
+      requireTyped: { expected: rid, label: `Type the corpus id "${rid}" to confirm deletion` },
     });
     if (!proceed) return;
 
@@ -3654,6 +3658,7 @@ export function IndexingSubtab() {
               </button>
               <button
                 onClick={handleDeleteIndex}
+                data-testid="delete-index"
                 disabled={!String(activeRepo || '').trim()}
                 style={{
                   padding: '10px 14px',

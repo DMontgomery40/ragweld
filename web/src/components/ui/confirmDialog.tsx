@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 
 // In-app replacement for window.confirm. Native dialogs block the renderer's
@@ -12,6 +12,23 @@ export type ConfirmDialogOptions = {
   confirmLabel?: string;
   cancelLabel?: string;
   danger?: boolean;
+  /**
+   * Gate an IRREVERSIBLE action behind a deliberate typed step. When set, the
+   * dialog renders a text input and keeps the confirm button disabled until the
+   * operator types `expected` verbatim (trimmed). Enter cannot activate a
+   * disabled button, so a stray keypress right after the dialog opens does
+   * nothing (D-01: the delete-index dialog used to autofocus the destructive
+   * button, so one Enter destroyed the index). A single dialog carries the
+   * input because `confirmDialog` cancels any dialog already open, so a second
+   * chained "type the name" dialog would resolve the first as declined.
+   */
+  requireTyped?: {
+    /** The exact string the operator must type, e.g. the corpus id. */
+    expected: string;
+    /** Label above the input. Defaults to "Type to confirm". */
+    label?: string;
+    placeholder?: string;
+  };
 };
 
 function ConfirmDialogView({
@@ -22,12 +39,29 @@ function ConfirmDialogView({
   onResolve: (accepted: boolean) => void;
 }) {
   const confirmRef = useRef<HTMLButtonElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [typed, setTyped] = useState('');
+
+  const expected = options.requireTyped?.expected ?? '';
+  const typedMatches = !options.requireTyped || typed.trim() === expected.trim();
 
   useEffect(() => {
-    // Focus the confirm button so a bare Enter activates it NATIVELY; never
-    // intercept Enter globally — a keyboard user who tabs to Cancel must get
-    // Cancel, not a document-level confirm.
-    confirmRef.current?.focus();
+    // Where focus lands governs what a bare Enter does the instant the dialog
+    // opens. A typed-confirmation dialog focuses the input (Enter can't fire the
+    // disabled confirm anyway). A danger dialog with no typed gate focuses
+    // Cancel, so an accidental Enter/Space declines rather than destroys
+    // (D-01). A benign confirmation (an estimate, an acknowledgement) keeps the
+    // old behaviour: focus the confirm button so Enter accepts NATIVELY. Enter
+    // is never intercepted globally — a keyboard user who tabs to Cancel must
+    // get Cancel, not a document-level confirm.
+    if (options.requireTyped) {
+      inputRef.current?.focus();
+    } else if (options.danger) {
+      cancelRef.current?.focus();
+    } else {
+      confirmRef.current?.focus();
+    }
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
@@ -36,9 +70,10 @@ function ConfirmDialogView({
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [onResolve]);
+  }, [onResolve, options.danger, options.requireTyped]);
 
   const accent = options.danger ? 'var(--error, #e5484d)' : 'var(--accent)';
+  const confirmDisabled = !typedMatches;
 
   return (
     <div
@@ -76,12 +111,49 @@ function ConfirmDialogView({
         <h3 style={{ margin: '0 0 10px', fontSize: '1rem' }}>{options.title}</h3>
         <div
           data-testid="confirm-dialog-message"
-          style={{ whiteSpace: 'pre-wrap', fontSize: '0.85rem', lineHeight: 1.5, marginBottom: 18 }}
+          style={{ whiteSpace: 'pre-wrap', fontSize: '0.85rem', lineHeight: 1.5, marginBottom: options.requireTyped ? 14 : 18 }}
         >
           {options.message}
         </div>
+        {options.requireTyped ? (
+          <label
+            style={{ display: 'block', fontSize: '0.8rem', color: 'var(--fg)', marginBottom: 18 }}
+          >
+            <span style={{ display: 'block', marginBottom: 6 }}>
+              {options.requireTyped.label ?? `Type ${expected} to confirm`}
+            </span>
+            <input
+              ref={inputRef}
+              data-testid="confirm-dialog-typed-input"
+              type="text"
+              value={typed}
+              placeholder={options.requireTyped.placeholder}
+              autoComplete="off"
+              spellCheck={false}
+              onChange={(e) => setTyped(e.target.value)}
+              onKeyDown={(e) => {
+                // Enter submits only once the text matches; otherwise it does nothing.
+                if (e.key === 'Enter' && typedMatches) {
+                  e.preventDefault();
+                  onResolve(true);
+                }
+              }}
+              style={{
+                width: '100%',
+                padding: '8px 10px',
+                borderRadius: 6,
+                border: `1px solid ${typed.length > 0 && !typedMatches ? 'var(--error, #e5484d)' : 'var(--line)'}`,
+                background: 'var(--input-bg, var(--card-bg))',
+                color: 'var(--fg)',
+                fontSize: '0.85rem',
+                boxSizing: 'border-box',
+              }}
+            />
+          </label>
+        ) : null}
         <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
           <button
+            ref={cancelRef}
             data-testid="confirm-dialog-cancel"
             onClick={() => onResolve(false)}
             style={{
@@ -98,14 +170,19 @@ function ConfirmDialogView({
           <button
             ref={confirmRef}
             data-testid="confirm-dialog-accept"
-            onClick={() => onResolve(true)}
+            disabled={confirmDisabled}
+            aria-disabled={confirmDisabled}
+            onClick={() => {
+              if (confirmDisabled) return;
+              onResolve(true);
+            }}
             style={{
               padding: '8px 16px',
               borderRadius: 6,
-              border: `1px solid ${accent}`,
-              background: accent,
-              color: 'var(--accent-contrast, #fff)',
-              cursor: 'pointer',
+              border: `1px solid ${confirmDisabled ? 'var(--line)' : accent}`,
+              background: confirmDisabled ? 'var(--btn-disabled-bg, #3a3a3a)' : accent,
+              color: confirmDisabled ? 'var(--fg-muted, #9aa0a6)' : 'var(--accent-contrast, #fff)',
+              cursor: confirmDisabled ? 'not-allowed' : 'pointer',
               fontWeight: 600,
             }}
           >
