@@ -5,6 +5,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import '@/styles/storage-calculator.css';
 import { configApi } from '@/api/config';
+import { NumberField } from '@/components/ui/NumberField';
 
 // Utility functions
 function formatBytes(bytes: number): string {
@@ -315,12 +316,11 @@ export function StorageCalculatorSuite() {
                   </div>
                 </label>
                 <div className="unit-input">
-                  <input
-                    type="number"
+                  <NumberField
                     value={calc1.repoSize}
-                    onChange={(e) => setCalc1({ ...calc1, repoSize: parseFloat(e.target.value) || 0 })}
-                    step="0.1"
-                    min="0.1"
+                    onCommit={(next) => setCalc1({ ...calc1, repoSize: next })}
+                    step={0.1}
+                    min={0.1}
                   />
                   <select
                     value={calc1.repoUnit}
@@ -340,12 +340,11 @@ export function StorageCalculatorSuite() {
                   </div>
                 </label>
                 <div className="unit-input">
-                  <input
-                    type="number"
+                  <NumberField
                     value={calc1.chunkSize}
-                    onChange={(e) => setCalc1({ ...calc1, chunkSize: parseFloat(e.target.value) || 0 })}
-                    step="1"
-                    min="0.001"
+                    onCommit={(next) => setCalc1({ ...calc1, chunkSize: next })}
+                    step={1}
+                    min={0.001}
                   />
                   <select
                     value={calc1.chunkUnit}
@@ -366,12 +365,11 @@ export function StorageCalculatorSuite() {
                     <span className="tooltip" title="Vector size: 512 (small), 768 (BERT), 1536 (OpenAI)">?</span>
                   </div>
                 </label>
-                <input
-                  type="number"
+                <NumberField
                   value={calc1.embDim}
-                  onChange={(e) => setCalc1({ ...calc1, embDim: parseInt(e.target.value) || 0 })}
-                  step="1"
-                  min="1"
+                  onCommit={(next) => setCalc1({ ...calc1, embDim: next })}
+                  step={1}
+                  min={1}
                 />
               </div>
               <div className="input-group">
@@ -400,12 +398,11 @@ export function StorageCalculatorSuite() {
                     <span className="tooltip" title="HNSW index overhead over raw dense vectors. Typically 1.1-1.5x for Qdrant">?</span>
                   </div>
                 </label>
-                <input
-                  type="number"
+                <NumberField
                   value={calc1.pgvectorOverhead}
-                  onChange={(e) => setCalc1({ ...calc1, pgvectorOverhead: parseFloat(e.target.value) || 1 })}
-                  step="0.05"
-                  min="1"
+                  onCommit={(next) => setCalc1({ ...calc1, pgvectorOverhead: next })}
+                  step={0.05}
+                  min={1}
                 />
               </div>
               <div className="input-group">
@@ -415,13 +412,12 @@ export function StorageCalculatorSuite() {
                     <span className="tooltip" title="% of raw data kept in RAM for instant retrieval">?</span>
                   </div>
                 </label>
-                <input
-                  type="number"
+                <NumberField
                   value={calc1.hydration}
-                  onChange={(e) => setCalc1({ ...calc1, hydration: parseFloat(e.target.value) || 0 })}
-                  step="10"
-                  min="0"
-                  max="100"
+                  onCommit={(next) => setCalc1({ ...calc1, hydration: next })}
+                  step={10}
+                  min={0}
+                  max={100}
                 />
               </div>
             </div>
@@ -434,12 +430,11 @@ export function StorageCalculatorSuite() {
                     <span className="tooltip" title="Number of copies for HA/scaling">?</span>
                   </div>
                 </label>
-                <input
-                  type="number"
+                <NumberField
                   value={calc1.replication}
-                  onChange={(e) => setCalc1({ ...calc1, replication: parseInt(e.target.value) || 1 })}
-                  step="1"
-                  min="1"
+                  onCommit={(next) => setCalc1({ ...calc1, replication: next })}
+                  step={1}
+                  min={1}
                 />
               </div>
             </div>
@@ -457,12 +452,11 @@ export function StorageCalculatorSuite() {
                       <span className="tooltip" title="Estimated number of nodes (entities) in the knowledge graph">?</span>
                     </div>
                   </label>
-                  <input
-                    type="number"
+                  <NumberField
                     value={calc1.neo4jNodeCount}
-                    onChange={(e) => setCalc1({ ...calc1, neo4jNodeCount: parseInt(e.target.value) || 0 })}
-                    step="1000"
-                    min="0"
+                    onCommit={(next) => setCalc1({ ...calc1, neo4jNodeCount: next })}
+                    step={1000}
+                    min={0}
                   />
                 </div>
                 <div className="input-group">
@@ -472,12 +466,11 @@ export function StorageCalculatorSuite() {
                       <span className="tooltip" title="Estimated number of relationships between entities">?</span>
                     </div>
                   </label>
-                  <input
-                    type="number"
+                  <NumberField
                     value={calc1.neo4jRelCount}
-                    onChange={(e) => setCalc1({ ...calc1, neo4jRelCount: parseInt(e.target.value) || 0 })}
-                    step="1000"
-                    min="0"
+                    onCommit={(next) => setCalc1({ ...calc1, neo4jRelCount: next })}
+                    step={1000}
+                    min={0}
                   />
                 </div>
               </div>
@@ -489,12 +482,11 @@ export function StorageCalculatorSuite() {
                       <span className="tooltip" title="Average bytes per node including properties and labels">?</span>
                     </div>
                   </label>
-                  <input
-                    type="number"
+                  <NumberField
                     value={calc1.avgNodeBytes}
-                    onChange={(e) => setCalc1({ ...calc1, avgNodeBytes: parseInt(e.target.value) || 256 })}
-                    step="32"
-                    min="64"
+                    onCommit={(next) => setCalc1({ ...calc1, avgNodeBytes: next })}
+                    step={32}
+                    min={64}
                   />
                 </div>
                 <div className="input-group">
@@ -504,12 +496,11 @@ export function StorageCalculatorSuite() {
                       <span className="tooltip" title="Average bytes per relationship including properties">?</span>
                     </div>
                   </label>
-                  <input
-                    type="number"
+                  <NumberField
                     value={calc1.avgRelBytes}
-                    onChange={(e) => setCalc1({ ...calc1, avgRelBytes: parseInt(e.target.value) || 128 })}
-                    step="16"
-                    min="32"
+                    onCommit={(next) => setCalc1({ ...calc1, avgRelBytes: next })}
+                    step={16}
+                    min={32}
                   />
                 </div>
               </div>
@@ -609,12 +600,11 @@ export function StorageCalculatorSuite() {
                   </div>
                 </label>
                 <div className="unit-input">
-                  <input
-                    type="number"
+                  <NumberField
                     value={calc2.repoSize}
-                    onChange={(e) => setCalc2({ ...calc2, repoSize: parseFloat(e.target.value) || 0 })}
-                    step="0.1"
-                    min="0.1"
+                    onCommit={(next) => setCalc2({ ...calc2, repoSize: next })}
+                    step={0.1}
+                    min={0.1}
                   />
                   <select
                     value={calc2.repoUnit}
@@ -634,12 +624,11 @@ export function StorageCalculatorSuite() {
                   </div>
                 </label>
                 <div className="unit-input">
-                  <input
-                    type="number"
+                  <NumberField
                     value={calc2.targetSize}
-                    onChange={(e) => setCalc2({ ...calc2, targetSize: parseFloat(e.target.value) || 0 })}
-                    step="0.5"
-                    min="0.1"
+                    onCommit={(next) => setCalc2({ ...calc2, targetSize: next })}
+                    step={0.5}
+                    min={0.1}
                   />
                   <select
                     value={calc2.targetUnit}
@@ -661,12 +650,11 @@ export function StorageCalculatorSuite() {
                   </div>
                 </label>
                 <div className="unit-input">
-                  <input
-                    type="number"
+                  <NumberField
                     value={calc2.chunkSize}
-                    onChange={(e) => setCalc2({ ...calc2, chunkSize: parseFloat(e.target.value) || 0 })}
-                    step="1"
-                    min="0.001"
+                    onCommit={(next) => setCalc2({ ...calc2, chunkSize: next })}
+                    step={1}
+                    min={0.001}
                   />
                   <select
                     value={calc2.chunkUnit}
@@ -684,12 +672,11 @@ export function StorageCalculatorSuite() {
                     <span className="tooltip" title="Must match your model choice">?</span>
                   </div>
                 </label>
-                <input
-                  type="number"
+                <NumberField
                   value={calc2.embDim}
-                  onChange={(e) => setCalc2({ ...calc2, embDim: parseInt(e.target.value) || 0 })}
-                  step="1"
-                  min="1"
+                  onCommit={(next) => setCalc2({ ...calc2, embDim: next })}
+                  step={1}
+                  min={1}
                 />
               </div>
             </div>
@@ -702,13 +689,12 @@ export function StorageCalculatorSuite() {
                     <span className="tooltip" title="Text search index, typically 20% of data">?</span>
                   </div>
                 </label>
-                <input
-                  type="number"
+                <NumberField
                   value={calc2.bm25pct}
-                  onChange={(e) => setCalc2({ ...calc2, bm25pct: parseFloat(e.target.value) || 0 })}
-                  step="5"
-                  min="0"
-                  max="100"
+                  onCommit={(next) => setCalc2({ ...calc2, bm25pct: next })}
+                  step={5}
+                  min={0}
+                  max={100}
                 />
               </div>
               <div className="input-group">
@@ -718,13 +704,12 @@ export function StorageCalculatorSuite() {
                     <span className="tooltip" title="Pre-computed chunk summaries, typically 10% of data">?</span>
                   </div>
                 </label>
-                <input
-                  type="number"
+                <NumberField
                   value={calc2.cardspct}
-                  onChange={(e) => setCalc2({ ...calc2, cardspct: parseFloat(e.target.value) || 0 })}
-                  step="5"
-                  min="0"
-                  max="100"
+                  onCommit={(next) => setCalc2({ ...calc2, cardspct: next })}
+                  step={5}
+                  min={0}
+                  max={100}
                 />
               </div>
             </div>
