@@ -59,6 +59,8 @@ type SendRagweldChatArgs = {
   requestSources: ActiveSources;
   signal: AbortSignal;
   streamPreferred: boolean;
+  /** Per-message override of the corpus's retrieval.final_k; null uses the corpus default. */
+  topK: number | null;
   webEnabled: boolean;
 };
 
@@ -194,6 +196,7 @@ function buildChatPayload(
     include_sparse: args.includeSparse,
     include_graph: args.includeGraph,
     recall_intensity: args.recallIntensityOverride,
+    top_k: args.topK,
     web_enabled: args.webEnabled,
   };
 }

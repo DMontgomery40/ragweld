@@ -12,7 +12,6 @@ import {
   useAuiState,
   useExternalStoreRuntime,
 } from '@assistant-ui/react';
-import { withCorpusScope } from '@/api/client';
 import { ChatHistorySidebar } from '@/components/Chat/ChatHistorySidebar';
 import { ModelPicker } from '@/components/Chat/ModelPicker';
 import { SourceDropdown } from '@/components/Chat/SourceDropdown';
@@ -56,6 +55,7 @@ import type {
   RecallIntensity,
   RecallPlan,
   RerankDebugInfo,
+  TriBridConfig,
 } from '@/types/generated';
 import type {
   AppendMessage,
@@ -810,15 +810,17 @@ function AssistantThreadMessage(props: AssistantThreadMessageProps) {
                 <>
                   <button
                     type="button"
+                    data-testid="chat-feedback-thumbsup"
                     onClick={() => props.onSendFeedback(message, 'thumbsup')}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '10px', padding: 0 }}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px', padding: 0 }}
                   >
                     Helpful
                   </button>
                   <button
                     type="button"
+                    data-testid="chat-feedback-thumbsdown"
                     onClick={() => props.onSendFeedback(message, 'thumbsdown')}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '10px', padding: 0 }}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px', padding: 0 }}
                   >
                     Not helpful
                   </button>
@@ -935,7 +937,25 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
 
   const [temperature, setTemperature] = useConfigField<number>('chat.temperature', 0.3);
   const [maxTokens, setMaxTokens] = useConfigField<number>('chat.max_tokens', 512);
-  const [topK, setTopK] = useConfigField<number>('retrieval.final_k', 10);
+  // Top-K is a per-conversation retrieval override (ChatRequest.top_k), NOT a config write.
+  // As a config field it wrote `retrieval.final_k` into whatever corpus the URL named, so
+  // tuning a chat over corpus A silently mutated corpus B (M-02). null = use the
+  // conversation corpus's configured final_k, which is what `topKBaseline` reads.
+  const [topKOverride, setTopKOverride] = useState<number | null>(null);
+  const [topKBaseline, setTopKBaseline] = useState<number | null>(null);
+
+  // Recall is a source, not a corpus you tune. A chat-initiated corpus-scoped operation
+  // belongs to the conversation's first RAG corpus - the same one retrieval fusion picks for
+  // its reranker config on a mixed-corpus query (`rerank_config_corpus_id`), so the feedback
+  // this records and the config that ranked the answer name the same corpus.
+  const recallCorpusId = String(config?.chat?.recall?.default_corpus_id || 'recall_default');
+  const conversationCorpusId = useMemo(
+    () =>
+      (activeSources?.corpus_ids ?? [])
+        .map(String)
+        .find((id) => id && id !== recallCorpusId) ?? '',
+    [activeSources, recallCorpusId],
+  );
 
   const chatShowConfidence = config?.ui?.chat_show_confidence ?? false;
   const chatShowCitations = config?.ui?.chat_show_citations ?? true;
@@ -954,6 +974,7 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
   const conversationIdRef = useRef(conversationId);
   const modelOverrideRef = useRef(modelOverride);
   const activeSourcesRef = useRef(activeSources);
+  const topKOverrideRef = useRef(topKOverride);
   const requestAbortControllerRef = useRef<AbortController | null>(null);
   const activeRequestTokenRef = useRef(0);
   const sessionsLoadedRef = useRef(false);
@@ -963,6 +984,7 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
   useEffect(() => { conversationIdRef.current = conversationId; }, [conversationId]);
   useEffect(() => { modelOverrideRef.current = modelOverride; }, [modelOverride]);
   useEffect(() => { activeSourcesRef.current = activeSources; }, [activeSources]);
+  useEffect(() => { topKOverrideRef.current = topKOverride; }, [topKOverride]);
 
   const notifyTrace = useCallback(
     (steps: TraceStep[], open: boolean, source: 'config' | 'response' | 'clear' = 'response') => {
@@ -1060,9 +1082,20 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
       const nextConversationId = String(session.conversation_id || '').trim() || createConversationId();
       conversationIdRef.current = nextConversationId;
       setConversationId(nextConversationId);
-      setMessages(clampChatHistory(Array.isArray(session.messages) ? session.messages : [], chatHistoryMax));
+      const restoredMessages = clampChatHistory(
+        Array.isArray(session.messages) ? session.messages : [],
+        chatHistoryMax,
+      );
+      // Synchronously, not only through setMessages: the "an unused thread follows the active
+      // corpus" effect below runs in the SAME commit as this call, so it would otherwise read
+      // the previous thread's (empty) message list and overwrite the sources this conversation
+      // was actually answered with (M-03).
+      messagesRef.current = restoredMessages;
+      setMessages(restoredMessages);
       modelOverrideRef.current = String(session.model_override || '').trim();
       setModelOverride(modelOverrideRef.current);
+      topKOverrideRef.current = null;
+      setTopKOverride(null);
       const sessionSources = (session.sources || defaultChatSources()) as ActiveSources;
       activeSourcesRef.current = sessionSources;
       setActiveSources(sessionSources);
@@ -1118,14 +1151,13 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
   // operator is looking at (2026-08-25 drive finding M6: Chat opened scoped to a
   // stale thread's corpus while a different corpus was active).
   const defaultSourcesForActiveCorpus = useCallback((): ActiveSources => {
-    const configured = (config?.chat?.default_corpus_ids ?? ['recall_default']).map(String);
+    const configured = (config?.chat?.default_corpus_ids ?? [recallCorpusId]).map(String);
     const recallEnabled = config?.chat?.recall?.enabled ?? true;
-    const recallId = String(config?.chat?.recall?.default_corpus_id || 'recall_default');
-    const ids = configured.filter((id) => id !== recallId || recallEnabled);
+    const ids = configured.filter((id) => id !== recallCorpusId || recallEnabled);
     const corpus = String(activeRepo || '').trim();
     if (corpus && !ids.includes(corpus)) ids.push(corpus);
     return { corpus_ids: ids };
-  }, [activeRepo, config]);
+  }, [activeRepo, config, recallCorpusId]);
   const defaultSourcesRef = useRef(defaultSourcesForActiveCorpus);
   useEffect(() => {
     defaultSourcesRef.current = defaultSourcesForActiveCorpus;
@@ -1142,10 +1174,12 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
     });
   }, [config, defaultSourcesForActiveCorpus]);
 
-  // A thread that has not been used yet follows the active corpus when it changes.
+  // A thread that has not been used yet follows the active corpus when it changes. "Unused"
+  // is read from the ref as well as the state, because on the mount that restores a session
+  // this effect runs before React has flushed activateSession's setMessages.
   useEffect(() => {
     if (!config || !sessionsLoadedRef.current) return;
-    if (messages.length > 0) return;
+    if (messages.length > 0 || messagesRef.current.length > 0) return;
     const corpus = String(activeRepo || '').trim();
     if (!corpus) return;
     setActiveSources((current) => {
@@ -1156,6 +1190,35 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
       return next;
     });
   }, [activeRepo, config, defaultSourcesForActiveCorpus, messages.length]);
+
+  // The Top-K baseline is the CONVERSATION corpus's own retrieval.final_k. Reading the
+  // globally scoped config would show one corpus's number while the conversation queries
+  // another - the display half of M-02. No corpus selected means no baseline to show.
+  useEffect(() => {
+    let cancelled = false;
+    const corpusId = conversationCorpusId;
+    if (!corpusId) {
+      setTopKBaseline(null);
+      return;
+    }
+    (async () => {
+      try {
+        const response = await fetch(api(`config?corpus_id=${encodeURIComponent(corpusId)}`));
+        if (!response.ok) {
+          if (!cancelled) setTopKBaseline(null);
+          return;
+        }
+        const data = (await response.json()) as TriBridConfig;
+        const finalK = Number(data?.retrieval?.final_k);
+        if (!cancelled) setTopKBaseline(Number.isFinite(finalK) ? finalK : null);
+      } catch {
+        if (!cancelled) setTopKBaseline(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [api, conversationCorpusId]);
 
   useEffect(() => {
     if (!config) return;
@@ -1236,16 +1299,25 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
     });
   }, [activeSources, conversationId, persistSessions]);
 
+  // Drop corpus ids that no longer exist - but only against a registry that actually loaded.
+  // Unguarded, this ran on the first commit with `repos` still empty, pruned every real
+  // corpus out of the just-restored conversation and persisted the result (M-03). An empty
+  // or failed registry proves nothing about which corpora exist.
   useEffect(() => {
+    if (!initialized || repos.length === 0) return;
     const allowed = new Set<string>(repos.map((repo) => String(repo.corpus_id)));
-    allowed.add('recall_default');
+    allowed.add(recallCorpusId);
     const current = (activeSources?.corpus_ids ?? []).map(String);
     const next = current.filter((id) => allowed.has(id));
     if (next.length === current.length) return;
     const updated = { ...activeSources, corpus_ids: next };
     activeSourcesRef.current = updated;
     setActiveSources(updated);
-  }, [activeSources, repos]);
+  }, [activeSources, initialized, recallCorpusId, repos]);
+
+  // What the operator sees: their override if they set one, otherwise the conversation
+  // corpus's own configured breadth. Never a number belonging to a different corpus.
+  const topKDisplay = topKOverride ?? topKBaseline;
 
   const retrievalSelected = (activeSources?.corpus_ids ?? []).length > 0;
   const chatBlockedReason =
@@ -1298,7 +1370,13 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
           return;
         }
 
-        const response = await fetch(api(withCorpusScope('feedback')), {
+        // Explicit scoping, not withCorpusScope: its fallback to the URL / localStorage
+        // corpus is exactly the defect (M-02). A conversation with no RAG corpus (recall
+        // only) is genuinely unscoped, and the endpoint's global feedback log is correct.
+        const scopedFeedbackPath = conversationCorpusId
+          ? `feedback?corpus_id=${encodeURIComponent(conversationCorpusId)}`
+          : 'feedback';
+        const response = await fetch(api(scopedFeedbackPath), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
@@ -1319,7 +1397,7 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
         showToast('Feedback failed (network error).', 'error');
       }
     },
-    [api, showToast],
+    [api, conversationCorpusId, showToast],
   );
 
   const updateAssistantMessage = useCallback(
@@ -1414,6 +1492,7 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
           requestSources,
           signal: abortController.signal,
           streamPreferred: true,
+          topK: topKOverrideRef.current,
           webEnabled,
         });
 
@@ -1839,6 +1918,8 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
 
           <button
             type="button"
+            data-testid="chat-quick-settings"
+            aria-expanded={showSettings}
             onClick={() => setShowSettings((current) => !current)}
             style={{
               background: 'var(--bg-elev2)',
@@ -2081,13 +2162,24 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
             </div>
 
             <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: 'var(--fg-muted)', marginBottom: '4px' }}>
-                Top-K (results)
+              <label
+                htmlFor="chat-top-k"
+                style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--fg-muted)', marginBottom: '4px' }}
+              >
+                Top-K (results) for this conversation
               </label>
               <input
+                id="chat-top-k"
+                data-testid="chat-top-k"
                 type="number"
-                value={topK}
-                onChange={(event) => setTopK(Math.max(1, parseInt(event.target.value, 10) || 10))}
+                value={topKDisplay ?? ''}
+                placeholder={conversationCorpusId ? '' : 'Select a corpus'}
+                onChange={(event) => {
+                  const raw = event.target.value.trim();
+                  const next = raw === '' ? null : Math.max(1, Math.min(100, parseInt(raw, 10) || 1));
+                  topKOverrideRef.current = next;
+                  setTopKOverride(next);
+                }}
                 min="1"
                 max="100"
                 style={{
@@ -2097,9 +2189,16 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
                   color: 'var(--fg)',
                   padding: '6px 8px',
                   borderRadius: '8px',
-                  fontSize: '12px',
+                  fontSize: '14px',
                 }}
               />
+              <div style={{ fontSize: '12px', color: 'var(--fg-muted)', marginTop: '4px', lineHeight: 1.45 }}>
+                {topKOverride === null
+                  ? conversationCorpusId
+                    ? `Using ${conversationCorpusId}'s configured default.`
+                    : 'Select a corpus in Sources to set retrieval breadth.'
+                  : `Overrides ${conversationCorpusId || 'the corpus'} default for this conversation only; the corpus config is unchanged.`}
+              </div>
             </div>
           </div>
         )}
