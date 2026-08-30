@@ -144,5 +144,88 @@ test.describe('app shell', () => {
     // A third probe means a new uncoordinated `/health` client was added.
     expect(count('/api/health'), `too many GET /api/health\n${report}`).toBeLessThanOrEqual(2);
   });
+
+  test('a fixed-position modal inside a scrolled route anchors to the viewport', async ({ page, baseURL }) => {
+    // `.tab-content` carried `transform: translateZ(0)` as a GPU hint, which makes it a
+    // containing block for `position: fixed` descendants. Every inline fixed modal
+    // rendered inside a route then anchored to the scrolled content instead of the
+    // viewport and opened off-screen -- the reason the Dashboard corpus tile looked like
+    // it "did nothing". Seven modals sat on this one fault, so the assertion is about the
+    // mechanism, not about any single modal.
+    await activateCorpusInBrowser(page, corpusId);
+    await gotoWeb(page, baseURL, 'rag?subtab=retrieval');
+    await expect(page.locator('.tab-content').first()).toBeVisible({ timeout: 30_000 });
+
+    const probe = await page.evaluate(() => {
+      const route = document.querySelector('.tab-content') as HTMLElement | null;
+      if (!route) return { error: 'no .tab-content' } as const;
+
+      // Scroll whatever actually scrolls, then measure a real fixed element in the route.
+      const scroller = (document.querySelector('.content-scroll') as HTMLElement | null) ?? route;
+      scroller.scrollTop = 400;
+      window.scrollTo(0, 400);
+
+      const el = document.createElement('div');
+      el.style.cssText = 'position:fixed;top:0;left:0;width:8px;height:8px;';
+      route.appendChild(el);
+      const rect = el.getBoundingClientRect();
+      el.remove();
+
+      // Anything between the probe and the document that establishes a containing block
+      // for fixed descendants is the defect, whichever property produced it.
+      const promoted: string[] = [];
+      for (let node: HTMLElement | null = route; node; node = node.parentElement) {
+        const cs = getComputedStyle(node);
+        if (cs.transform !== 'none' || cs.filter !== 'none' || cs.perspective !== 'none' ||
+            cs.contain.includes('paint') || cs.willChange.includes('transform')) {
+          promoted.push(`${node.className || node.tagName}: transform=${cs.transform} filter=${cs.filter} willChange=${cs.willChange}`);
+        }
+      }
+      return { top: rect.top, left: rect.left, scrolled: scroller.scrollTop, promoted } as const;
+    });
+
+    expect('error' in probe ? probe.error : '').toBe('');
+    if ('promoted' in probe) {
+      expect(
+        probe.promoted,
+        `an ancestor of .tab-content still establishes a containing block for fixed children:\n${probe.promoted.join('\n')}`
+      ).toEqual([]);
+      // The probe is `position: fixed; top: 0; left: 0`, so on a correct page it sits at
+      // the viewport origin no matter how far the route has been scrolled.
+      expect(probe.top, 'a fixed element drifted with the route scroll').toBe(0);
+      expect(probe.left, 'a fixed element drifted with the route scroll').toBe(0);
+    }
+  });
+
+  test('the palettes still open and centre with the GPU hint gone', async ({ page, baseURL }) => {
+    await activateCorpusInBrowser(page, corpusId);
+    await gotoWeb(page, baseURL, 'rag?subtab=retrieval');
+    await expect(page.locator('.tab-content').first()).toBeVisible({ timeout: 30_000 });
+    await page.evaluate(() => {
+      const scroller = document.querySelector('.content-scroll') as HTMLElement | null;
+      if (scroller) scroller.scrollTop = 600;
+    });
+
+    const viewport = page.viewportSize()!;
+    const inViewport = async (locator: import('@playwright/test').Locator, what: string) => {
+      const box = await locator.boundingBox();
+      expect(box, `${what} has no box`).not.toBeNull();
+      expect(box!.y, `${what} opened above the viewport`).toBeGreaterThanOrEqual(0);
+      expect(box!.x, `${what} opened left of the viewport`).toBeGreaterThanOrEqual(0);
+      expect(box!.y, `${what} opened below the viewport`).toBeLessThan(viewport.height);
+      expect(box!.x, `${what} opened right of the viewport`).toBeLessThan(viewport.width);
+    };
+
+    await page.locator('#global-search').click();
+    const searchModal = page.locator('.global-search-modal');
+    await expect(searchModal).toBeVisible();
+    await inViewport(searchModal, 'the Ctrl+K palette');
+    await page.keyboard.press('Escape');
+
+    await page.getByTestId('dock-choose').click();
+    const picker = page.getByRole('dialog', { name: 'Choose something to dock' });
+    await expect(picker).toBeVisible();
+    await inViewport(picker.getByTestId('dock-picker-listbox'), 'the dock picker');
+  });
 });
 

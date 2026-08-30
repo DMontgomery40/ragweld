@@ -858,14 +858,25 @@ code:hover {
    PERFORMANCE OPTIMIZATIONS
    ============================================ */
 
-/* GPU acceleration hints */
-.tab-bar button,
-.subtab-btn,
-.top-actions button,
-.tab-content {
-    transform: translateZ(0);
-    backface-visibility: hidden;
-}
+/* The GPU hint that used to live here is deliberately gone.
+ *
+ * A `transform` on `.tab-content` -- the route's scroll container -- makes it a
+ * containing block for `position: fixed` descendants, so every inline fixed modal inside
+ * a route anchored to the scrolled content instead of the viewport and rendered
+ * off-screen once the page was scrolled. That is why the Dashboard corpus tile "did
+ * nothing": the modal opened, off-screen. Six more inline modals sat on the same fault
+ * (TooltipIcon, GraphSubtab, GlobalSearch, DockerSubtab, DockPanel, DockPickerModal).
+ *
+ * Removed rather than worked around: portalling each modal to `<body>` would have left
+ * the trap armed for the next one. `.tab-content` is a scrolling container with no
+ * animation of its own, so it never needed compositing promotion; the buttons that were
+ * in the same rule already get their own layer from the transforms in their hover and
+ * active states, at the moment they actually animate.
+ *
+ * `web/tests/e2e/exhaustive/routing_shell.spec.ts` measures this directly: it scrolls a
+ * route and asserts a fixed probe inside `.tab-content` still lands at the viewport
+ * origin.
+ */
 
 
 /* Running status pulse animation */
