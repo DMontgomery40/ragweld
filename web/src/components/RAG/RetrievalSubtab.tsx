@@ -10,7 +10,7 @@ import { PromptLink } from '@/components/ui/PromptLink';
 import { ApiKeyStatus } from '@/components/ui/ApiKeyStatus';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { createAlertError, createInlineError } from '@/utils/errorHelpers';
-import { clampInputNumber } from '@/utils/numbers';
+import { NumberField } from '@/components/ui/NumberField';
 import { useAPI, useConfig, useConfigField } from '@/hooks';
 import { tracesApi } from '@/api';
 import { useRepoStore } from '@/stores/useRepoStore';
@@ -471,12 +471,11 @@ export function RetrievalSubtab() {
               Final K
               <TooltipIcon name="FINAL_K" />
             </label>
-            <input
-              type="number"
+            <NumberField
               min={1}
               max={200}
               value={finalK}
-              onChange={(e) => setFinalK(clampInputNumber(e.target, 10))}
+              onCommit={setFinalK}
             />
           </div>
 
@@ -485,12 +484,11 @@ export function RetrievalSubtab() {
               Query Rewrites
               <TooltipIcon name="MAX_QUERY_REWRITES" />
             </label>
-            <input
-              type="number"
+            <NumberField
               min={1}
               max={10}
               value={multiQueryRewrites}
-              onChange={(e) => setMultiQueryRewrites(clampInputNumber(e.target, 2))}
+              onCommit={setMultiQueryRewrites}
             />
           </div>
         </div>
@@ -636,12 +634,11 @@ export function RetrievalSubtab() {
                     <label>
                       Vector Top-K <TooltipIcon name="VECTOR_SEARCH_TOP_K" />
                     </label>
-                    <input
-                      type="number"
+                    <NumberField
                       min={1}
                       max={200}
                       value={vectorSearchTopK}
-                      onChange={(e) => setVectorSearchTopK(clampInputNumber(e.target, 50))}
+                      onCommit={setVectorSearchTopK}
                       disabled={!vectorSearchEnabled}
                     />
                   </div>
@@ -649,13 +646,12 @@ export function RetrievalSubtab() {
                     <label>
                       Vector Similarity Threshold <TooltipIcon name="VECTOR_SIMILARITY_THRESHOLD" />
                     </label>
-                    <input
-                      type="number"
+                    <NumberField
                       min={0}
                       max={1}
                       step={0.01}
                       value={vectorSimilarityThreshold}
-                      onChange={(e) => setVectorSimilarityThreshold(clampInputNumber(e.target, 0.0))}
+                      onCommit={setVectorSimilarityThreshold}
                       disabled={!vectorSearchEnabled}
                     />
                   </div>
@@ -667,12 +663,11 @@ export function RetrievalSubtab() {
                     <label>
                       Sparse Top-K <TooltipIcon name="SPARSE_SEARCH_TOP_K" />
                     </label>
-                    <input
-                      type="number"
+                    <NumberField
                       min={1}
                       max={200}
                       value={sparseSearchTopK}
-                      onChange={(e) => setSparseSearchTopK(clampInputNumber(e.target, 50))}
+                      onCommit={setSparseSearchTopK}
                       disabled={!sparseSearchEnabled}
                     />
                   </div>
@@ -680,13 +675,12 @@ export function RetrievalSubtab() {
                     <label>
                       BM25 k1 <TooltipIcon name="BM25_K1" />
                     </label>
-                    <input
-                      type="number"
+                    <NumberField
                       min={0.5}
                       max={3}
                       step={0.1}
                       value={sparseBm25K1}
-                      onChange={(e) => setSparseBm25K1(clampInputNumber(e.target, 1.2))}
+                      onCommit={setSparseBm25K1}
                       disabled={!sparseSearchEnabled}
                     />
                   </div>
@@ -694,13 +688,12 @@ export function RetrievalSubtab() {
                     <label>
                       BM25 b <TooltipIcon name="BM25_B" />
                     </label>
-                    <input
-                      type="number"
+                    <NumberField
                       min={0}
                       max={1}
                       step={0.05}
                       value={sparseBm25B}
-                      onChange={(e) => setSparseBm25B(clampInputNumber(e.target, 0.4))}
+                      onCommit={setSparseBm25B}
                       disabled={!sparseSearchEnabled}
                     />
                   </div>
@@ -712,12 +705,11 @@ export function RetrievalSubtab() {
                     <label>
                       Graph Top-K <TooltipIcon name="GRAPH_SEARCH_TOP_K" />
                     </label>
-                    <input
-                      type="number"
+                    <NumberField
                       min={1}
                       max={200}
                       value={graphSearchTopK}
-                      onChange={(e) => setGraphSearchTopK(clampInputNumber(e.target, 30))}
+                      onCommit={setGraphSearchTopK}
                       disabled={!graphSearchEnabled}
                     />
                   </div>
@@ -739,12 +731,11 @@ export function RetrievalSubtab() {
                     <label>
                       Graph Max Hops <TooltipIcon name="GRAPH_MAX_HOPS" />
                     </label>
-                    <input
-                      type="number"
+                    <NumberField
                       min={1}
                       max={5}
                       value={graphMaxHops}
-                      onChange={(e) => setGraphMaxHops(clampInputNumber(e.target, 2))}
+                      onCommit={setGraphMaxHops}
                       disabled={!graphSearchEnabled}
                     />
                   </div>
@@ -768,12 +759,11 @@ export function RetrievalSubtab() {
                         <label>
                           Chunk Neighbor Window <TooltipIcon name="GRAPH_CHUNK_NEIGHBOR_WINDOW" />
                         </label>
-                        <input
-                          type="number"
+                        <NumberField
                           min={0}
                           max={10}
                           value={chunkNeighborWindow}
-                          onChange={(e) => setChunkNeighborWindow(clampInputNumber(e.target, 1))}
+                          onCommit={setChunkNeighborWindow}
                           disabled={!graphSearchEnabled}
                         />
                       </div>
@@ -781,12 +771,11 @@ export function RetrievalSubtab() {
                         <label>
                           Seed Overfetch Multiplier <TooltipIcon name="GRAPH_CHUNK_SEED_OVERFETCH" />
                         </label>
-                        <input
-                          type="number"
+                        <NumberField
                           min={1}
                           max={50}
                           value={chunkSeedOverfetchMultiplier}
-                          onChange={(e) => setChunkSeedOverfetchMultiplier(clampInputNumber(e.target, 10))}
+                          onCommit={setChunkSeedOverfetchMultiplier}
                           disabled={!graphSearchEnabled}
                         />
                       </div>
@@ -805,13 +794,12 @@ export function RetrievalSubtab() {
                         <label>
                           Entity Expansion Weight <TooltipIcon name="GRAPH_CHUNK_ENTITY_EXPANSION_WEIGHT" />
                         </label>
-                        <input
-                          type="number"
+                        <NumberField
                           min={0}
                           max={1}
                           step={0.05}
                           value={chunkEntityExpansionWeight}
-                          onChange={(e) => setChunkEntityExpansionWeight(clampInputNumber(e.target, 0.8))}
+                          onCommit={setChunkEntityExpansionWeight}
                           disabled={!graphSearchEnabled || !chunkEntityExpansionEnabled}
                         />
                       </div>
@@ -832,13 +820,12 @@ export function RetrievalSubtab() {
                   <label>
                     Max Chunks per File <TooltipIcon name="MAX_CHUNKS_PER_FILE" />
                   </label>
-                  <input
+                  <NumberField
                     data-testid="max-chunks-per-file"
-                    type="number"
                     min={1}
                     max={50}
                     value={maxChunksPerFile}
-                    onChange={(e) => setMaxChunksPerFile(clampInputNumber(e.target, 3))}
+                    onCommit={setMaxChunksPerFile}
                   />
                 </div>
                 <div className="input-group">
@@ -854,12 +841,11 @@ export function RetrievalSubtab() {
                   <label>
                     Neighbor Window <TooltipIcon name="NEIGHBOR_WINDOW" />
                   </label>
-                  <input
-                    type="number"
+                  <NumberField
                     min={0}
                     max={10}
                     value={neighborWindow}
-                    onChange={(e) => setNeighborWindow(clampInputNumber(e.target, 1))}
+                    onCommit={setNeighborWindow}
                     disabled={dedupBy === 'file_path'}
                   />
                 </div>
@@ -876,13 +862,12 @@ export function RetrievalSubtab() {
                   <label>
                     MMR Lambda <TooltipIcon name="MMR_LAMBDA" />
                   </label>
-                  <input
-                    type="number"
+                  <NumberField
                     min={0}
                     max={1}
                     step={0.05}
                     value={mmrLambda}
-                    onChange={(e) => setMmrLambda(clampInputNumber(e.target, 0.7))}
+                    onCommit={setMmrLambda}
                     disabled={!enableMmr}
                   />
                 </div>
@@ -894,39 +879,36 @@ export function RetrievalSubtab() {
                   <label>
                     Min Score (vector) <TooltipIcon name="MIN_SCORE_VECTOR" />
                   </label>
-                  <input
-                    type="number"
+                  <NumberField
                     min={0}
                     max={1}
                     step={0.01}
                     value={minScoreVector}
-                    onChange={(e) => setMinScoreVector(clampInputNumber(e.target, 0.0))}
+                    onCommit={setMinScoreVector}
                   />
                 </div>
                 <div className="input-group">
                   <label>
                     Min Score (sparse) <TooltipIcon name="MIN_SCORE_SPARSE" />
                   </label>
-                  <input
-                    type="number"
+                  <NumberField
                     min={0}
                     max={10}
                     step={0.01}
                     value={minScoreSparse}
-                    onChange={(e) => setMinScoreSparse(clampInputNumber(e.target, 0.0))}
+                    onCommit={setMinScoreSparse}
                   />
                 </div>
                 <div className="input-group">
                   <label>
                     Min Score (graph) <TooltipIcon name="MIN_SCORE_GRAPH" />
                   </label>
-                  <input
-                    type="number"
+                  <NumberField
                     min={0}
                     max={10}
                     step={0.01}
                     value={minScoreGraph}
-                    onChange={(e) => setMinScoreGraph(clampInputNumber(e.target, 0.0))}
+                    onCommit={setMinScoreGraph}
                   />
                 </div>
               </div>
@@ -978,12 +960,11 @@ export function RetrievalSubtab() {
                   <label>
                     RRF K <TooltipIcon name="FUSION_RRF_K" />
                   </label>
-                  <input
-                    type="number"
+                  <NumberField
                     min={1}
                     max={200}
                     value={fusionRrfK}
-                    onChange={(e) => setFusionRrfK(clampInputNumber(e.target, 60))}
+                    onCommit={setFusionRrfK}
                     disabled={fusionMethod !== 'rrf'}
                   />
                 </div>
@@ -991,13 +972,12 @@ export function RetrievalSubtab() {
                   <label>
                     Vector Weight <TooltipIcon name="FUSION_VECTOR_WEIGHT" />
                   </label>
-                  <input
-                    type="number"
+                  <NumberField
                     min={0}
                     max={1}
                     step={0.05}
                     value={fusionVectorWeight}
-                    onChange={(e) => setFusionVectorWeight(clampInputNumber(e.target, 0.4))}
+                    onCommit={setFusionVectorWeight}
                     disabled={fusionMethod !== 'weighted'}
                   />
                 </div>
@@ -1005,13 +985,12 @@ export function RetrievalSubtab() {
                   <label>
                     Sparse Weight <TooltipIcon name="FUSION_SPARSE_WEIGHT" />
                   </label>
-                  <input
-                    type="number"
+                  <NumberField
                     min={0}
                     max={1}
                     step={0.05}
                     value={fusionSparseWeight}
-                    onChange={(e) => setFusionSparseWeight(clampInputNumber(e.target, 0.3))}
+                    onCommit={setFusionSparseWeight}
                     disabled={fusionMethod !== 'weighted'}
                   />
                 </div>
@@ -1019,13 +998,12 @@ export function RetrievalSubtab() {
                   <label>
                     Graph Weight <TooltipIcon name="FUSION_GRAPH_WEIGHT" />
                   </label>
-                  <input
-                    type="number"
+                  <NumberField
                     min={0}
                     max={1}
                     step={0.05}
                     value={fusionGraphWeight}
-                    onChange={(e) => setFusionGraphWeight(clampInputNumber(e.target, 0.3))}
+                    onCommit={setFusionGraphWeight}
                     disabled={fusionMethod !== 'weighted'}
                   />
                 </div>
@@ -1043,39 +1021,36 @@ export function RetrievalSubtab() {
                   <label>
                     Chunk Summary Bonus <TooltipIcon name="CHUNK_SUMMARY_BONUS" />
                   </label>
-                  <input
-                    type="number"
+                  <NumberField
                     min={0}
                     max={1}
                     step={0.01}
                     value={cardBonus}
-                    onChange={(e) => setCardBonus(clampInputNumber(e.target, 0.08))}
+                    onCommit={setCardBonus}
                   />
                 </div>
                 <div className="input-group">
                   <label>
                     Filename Boost (Exact) <TooltipIcon name="FILENAME_BOOST_EXACT" />
                   </label>
-                  <input
-                    type="number"
+                  <NumberField
                     min={0}
                     max={5}
                     step={0.1}
                     value={filenameBoostExact}
-                    onChange={(e) => setFilenameBoostExact(clampInputNumber(e.target, 1.5))}
+                    onCommit={setFilenameBoostExact}
                   />
                 </div>
                 <div className="input-group">
                   <label>
                     Filename Boost (Partial) <TooltipIcon name="FILENAME_BOOST_PARTIAL" />
                   </label>
-                  <input
-                    type="number"
+                  <NumberField
                     min={0}
                     max={5}
                     step={0.1}
                     value={filenameBoostPartial}
-                    onChange={(e) => setFilenameBoostPartial(clampInputNumber(e.target, 1.2))}
+                    onCommit={setFilenameBoostPartial}
                   />
                 </div>
               </div>
@@ -1123,65 +1098,60 @@ export function RetrievalSubtab() {
                   <label>
                     GUI <TooltipIcon name="LAYER_BONUS_GUI" />
                   </label>
-                  <input
-                    type="number"
+                  <NumberField
                     min={0}
                     max={0.5}
                     step={0.01}
                     value={layerBonusGui}
-                    onChange={(e) => setLayerBonusGui(clampInputNumber(e.target, 0.15))}
+                    onCommit={setLayerBonusGui}
                   />
                 </div>
                 <div className="input-group">
                   <label>
                     Retrieval <TooltipIcon name="LAYER_BONUS_RETRIEVAL" />
                   </label>
-                  <input
-                    type="number"
+                  <NumberField
                     min={0}
                     max={0.5}
                     step={0.01}
                     value={layerBonusRetrieval}
-                    onChange={(e) => setLayerBonusRetrieval(clampInputNumber(e.target, 0.15))}
+                    onCommit={setLayerBonusRetrieval}
                   />
                 </div>
                 <div className="input-group">
                   <label>
                     Indexer <TooltipIcon name="LAYER_BONUS_INDEXER" />
                   </label>
-                  <input
-                    type="number"
+                  <NumberField
                     min={0}
                     max={0.5}
                     step={0.01}
                     value={layerBonusIndexer}
-                    onChange={(e) => setLayerBonusIndexer(clampInputNumber(e.target, 0.15))}
+                    onCommit={setLayerBonusIndexer}
                   />
                 </div>
                 <div className="input-group">
                   <label>
                     Vendor Penalty <TooltipIcon name="VENDOR_PENALTY" />
                   </label>
-                  <input
-                    type="number"
+                  <NumberField
                     min={-0.5}
                     max={0}
                     step={0.01}
                     value={vendorPenalty}
-                    onChange={(e) => setVendorPenalty(clampInputNumber(e.target, -0.1))}
+                    onCommit={setVendorPenalty}
                   />
                 </div>
                 <div className="input-group">
                   <label>
                     Freshness Bonus <TooltipIcon name="FRESHNESS_BONUS" />
                   </label>
-                  <input
-                    type="number"
+                  <NumberField
                     min={0}
                     max={0.3}
                     step={0.01}
                     value={freshnessBonus}
-                    onChange={(e) => setFreshnessBonus(clampInputNumber(e.target, 0.05))}
+                    onCommit={setFreshnessBonus}
                   />
                 </div>
               </div>
@@ -1339,39 +1309,36 @@ export function RetrievalSubtab() {
                   <label>
                     Temperature <TooltipIcon name="GEN_TEMPERATURE" />
                   </label>
-                  <input
-                    type="number"
+                  <NumberField
                     min={0}
                     max={2}
                     step={0.01}
                     value={genTemperature}
-                    onChange={(e) => setGenTemperature(clampInputNumber(e.target, 0.0))}
+                    onCommit={setGenTemperature}
                   />
                 </div>
                 <div className="input-group">
                   <label>
                     Max Tokens <TooltipIcon name="GEN_MAX_TOKENS" />
                   </label>
-                  <input
-                    type="number"
+                  <NumberField
                     min={100}
                     max={8192}
                     step={1}
                     value={genMaxTokens}
-                    onChange={(e) => setGenMaxTokens(clampInputNumber(e.target, 512))}
+                    onCommit={setGenMaxTokens}
                   />
                 </div>
                 <div className="input-group">
                   <label>
                     Top P <TooltipIcon name="GEN_TOP_P" />
                   </label>
-                  <input
-                    type="number"
+                  <NumberField
                     min={0}
                     max={1}
                     step={0.01}
                     value={genTopP}
-                    onChange={(e) => setGenTopP(clampInputNumber(e.target, 1.0))}
+                    onCommit={setGenTopP}
                   />
                 </div>
               </div>
@@ -1388,12 +1355,11 @@ export function RetrievalSubtab() {
                   <label>
                     GEN Timeout <TooltipIcon name="GEN_TIMEOUT" />
                   </label>
-                  <input
-                    type="number"
+                  <NumberField
                     min={10}
                     max={900}
                     value={genTimeout}
-                    onChange={(e) => setGenTimeout(clampInputNumber(e.target, 600))}
+                    onCommit={setGenTimeout}
                   />
                 </div>
               </div>
@@ -1483,12 +1449,11 @@ export function RetrievalSubtab() {
                       <label>
                         Hydration Max Chars <TooltipIcon name="HYDRATION_MAX_CHARS" />
                       </label>
-                      <input
-                        type="number"
+                      <NumberField
                         min={200}
                         max={20000}
                         value={hydrationMaxChars || retrievalHydrationMaxChars}
-                        onChange={(e) => setUnifiedHydrationMaxChars(clampInputNumber(e.target, 2000))}
+                        onCommit={setUnifiedHydrationMaxChars}
                       />
                     </div>
                   </div>
@@ -1505,12 +1470,11 @@ export function RetrievalSubtab() {
                       <label>
                         Eval Final K <TooltipIcon name="EVAL_FINAL_K" />
                       </label>
-                      <input
-                        type="number"
+                      <NumberField
                         min={1}
                         max={100}
                         value={evalFinalK}
-                        onChange={(e) => setEvalFinalK(clampInputNumber(e.target, 5))}
+                        onCommit={setEvalFinalK}
                       />
                     </div>
                     <div className="input-group">
@@ -1565,51 +1529,47 @@ export function RetrievalSubtab() {
                       <label>
                         Confidence Top1 <TooltipIcon name="CONF_TOP1" />
                       </label>
-                      <input
-                        type="number"
+                      <NumberField
                         min={0}
                         max={1}
                         step={0.01}
                         value={confTop1}
-                        onChange={(e) => setConfTop1(clampInputNumber(e.target, 0.62))}
+                        onCommit={setConfTop1}
                       />
                     </div>
                     <div className="input-group">
                       <label>
                         Confidence Avg5 <TooltipIcon name="CONF_AVG5" />
                       </label>
-                      <input
-                        type="number"
+                      <NumberField
                         min={0}
                         max={1}
                         step={0.01}
                         value={confAvg5}
-                        onChange={(e) => setConfAvg5(clampInputNumber(e.target, 0.55))}
+                        onCommit={setConfAvg5}
                       />
                     </div>
                     <div className="input-group">
                       <label>
                         Confidence Any <TooltipIcon name="CONF_ANY" />
                       </label>
-                      <input
-                        type="number"
+                      <NumberField
                         min={0}
                         max={1}
                         step={0.01}
                         value={confAny}
-                        onChange={(e) => setConfAny(clampInputNumber(e.target, 0.55))}
+                        onCommit={setConfAny}
                       />
                     </div>
                     <div className="input-group">
                       <label>
                         Multi Query M <TooltipIcon name="MULTI_QUERY_M" />
                       </label>
-                      <input
-                        type="number"
+                      <NumberField
                         min={1}
                         max={20}
                         value={multiQueryM}
-                        onChange={(e) => setMultiQueryM(clampInputNumber(e.target, 4))}
+                        onCommit={setMultiQueryM}
                       />
                     </div>
                   </div>
@@ -1619,37 +1579,34 @@ export function RetrievalSubtab() {
                       <label>
                         LangGraph Final K <TooltipIcon name="LANGGRAPH_FINAL_K" />
                       </label>
-                      <input
-                        type="number"
+                      <NumberField
                         min={1}
                         max={100}
                         value={langgraphFinalK}
-                        onChange={(e) => setLanggraphFinalK(clampInputNumber(e.target, 20))}
+                        onCommit={setLanggraphFinalK}
                       />
                     </div>
                     <div className="input-group">
                       <label>
                         LangGraph Max Rewrites <TooltipIcon name="LANGGRAPH_MAX_QUERY_REWRITES" />
                       </label>
-                      <input
-                        type="number"
+                      <NumberField
                         min={0}
                         max={10}
                         value={langgraphMaxQueryRewrites}
-                        onChange={(e) => setLanggraphMaxQueryRewrites(clampInputNumber(e.target, 2))}
+                        onCommit={setLanggraphMaxQueryRewrites}
                       />
                     </div>
                     <div className="input-group">
                       <label>
                         Fallback Confidence <TooltipIcon name="FALLBACK_CONFIDENCE" />
                       </label>
-                      <input
-                        type="number"
+                      <NumberField
                         min={0}
                         max={1}
                         step={0.01}
                         value={fallbackConfidence}
-                        onChange={(e) => setFallbackConfidence(clampInputNumber(e.target, 0.55))}
+                        onCommit={setFallbackConfidence}
                       />
                     </div>
                   </div>
@@ -1666,62 +1623,57 @@ export function RetrievalSubtab() {
                       <label>
                         RRF K Div <TooltipIcon name="RRF_K_DIV" />
                       </label>
-                      <input
-                        type="number"
+                      <NumberField
                         min={1}
                         max={200}
                         value={rrfKDiv}
-                        onChange={(e) => setRrfKDiv(clampInputNumber(e.target, 60))}
+                        onCommit={setRrfKDiv}
                       />
                     </div>
                     <div className="input-group">
                       <label>
                         Retrieval BM25 Weight <TooltipIcon name="BM25_WEIGHT" />
                       </label>
-                      <input
-                        type="number"
+                      <NumberField
                         min={0}
                         max={1}
                         step={0.01}
                         value={retrievalBm25Weight}
-                        onChange={(e) => setRetrievalBm25Weight(clampInputNumber(e.target, 0.3))}
+                        onCommit={setRetrievalBm25Weight}
                       />
                     </div>
                     <div className="input-group">
                       <label>
                         Retrieval Vector Weight <TooltipIcon name="VECTOR_WEIGHT" />
                       </label>
-                      <input
-                        type="number"
+                      <NumberField
                         min={0}
                         max={1}
                         step={0.01}
                         value={retrievalVectorWeight}
-                        onChange={(e) => setRetrievalVectorWeight(clampInputNumber(e.target, 0.7))}
+                        onCommit={setRetrievalVectorWeight}
                       />
                     </div>
                     <div className="input-group">
                       <label>
                         TopK Dense <TooltipIcon name="TOPK_DENSE" />
                       </label>
-                      <input
-                        type="number"
+                      <NumberField
                         min={1}
                         max={200}
                         value={topkDense}
-                        onChange={(e) => setTopkDense(clampInputNumber(e.target, 75))}
+                        onCommit={setTopkDense}
                       />
                     </div>
                     <div className="input-group">
                       <label>
                         TopK Sparse <TooltipIcon name="TOPK_SPARSE" />
                       </label>
-                      <input
-                        type="number"
+                      <NumberField
                         min={1}
                         max={200}
                         value={topkSparse}
-                        onChange={(e) => setTopkSparse(clampInputNumber(e.target, 75))}
+                        onCommit={setTopkSparse}
                       />
                     </div>
                   </div>
@@ -1763,23 +1715,21 @@ export function RetrievalSubtab() {
                     </div>
                     <div className="input-group">
                       <label>Max Entries</label>
-                      <input
-                        type="number"
+                      <NumberField
                         min={100}
                         max={500000}
                         value={semanticCacheMaxEntries}
-                        onChange={(e) => setSemanticCacheMaxEntries(clampInputNumber(e.target, 5000))}
+                        onCommit={setSemanticCacheMaxEntries}
                         disabled={!semanticCacheEnabled}
                       />
                     </div>
                     <div className="input-group">
                       <label>Min Query Chars</label>
-                      <input
-                        type="number"
+                      <NumberField
                         min={1}
                         max={200}
                         value={semanticCacheMinQueryChars}
-                        onChange={(e) => setSemanticCacheMinQueryChars(clampInputNumber(e.target, 3))}
+                        onCommit={setSemanticCacheMinQueryChars}
                         disabled={!semanticCacheEnabled}
                       />
                     </div>
@@ -1788,37 +1738,34 @@ export function RetrievalSubtab() {
                   <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
                     <div className="input-group">
                       <label>Similarity Threshold (Search)</label>
-                      <input
-                        type="number"
+                      <NumberField
                         min={0}
                         max={1}
                         step={0.01}
                         value={semanticCacheThresholdSearch}
-                        onChange={(e) => setSemanticCacheThresholdSearch(clampInputNumber(e.target, 0.9))}
+                        onCommit={setSemanticCacheThresholdSearch}
                         disabled={!semanticCacheEnabled}
                       />
                     </div>
                     <div className="input-group">
                       <label>Similarity Threshold (Answer)</label>
-                      <input
-                        type="number"
+                      <NumberField
                         min={0}
                         max={1}
                         step={0.01}
                         value={semanticCacheThresholdAnswer}
-                        onChange={(e) => setSemanticCacheThresholdAnswer(clampInputNumber(e.target, 0.93))}
+                        onCommit={setSemanticCacheThresholdAnswer}
                         disabled={!semanticCacheEnabled}
                       />
                     </div>
                     <div className="input-group">
                       <label>Similarity Threshold (Chat)</label>
-                      <input
-                        type="number"
+                      <NumberField
                         min={0}
                         max={1}
                         step={0.01}
                         value={semanticCacheThresholdChat}
-                        onChange={(e) => setSemanticCacheThresholdChat(clampInputNumber(e.target, 0.95))}
+                        onCommit={setSemanticCacheThresholdChat}
                         disabled={!semanticCacheEnabled}
                       />
                     </div>
@@ -1827,34 +1774,31 @@ export function RetrievalSubtab() {
                   <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
                     <div className="input-group">
                       <label>TTL Seconds (Search)</label>
-                      <input
-                        type="number"
+                      <NumberField
                         min={10}
                         max={86400}
                         value={semanticCacheTtlSearch}
-                        onChange={(e) => setSemanticCacheTtlSearch(clampInputNumber(e.target, 900))}
+                        onCommit={setSemanticCacheTtlSearch}
                         disabled={!semanticCacheEnabled}
                       />
                     </div>
                     <div className="input-group">
                       <label>TTL Seconds (Answer)</label>
-                      <input
-                        type="number"
+                      <NumberField
                         min={10}
                         max={86400}
                         value={semanticCacheTtlAnswer}
-                        onChange={(e) => setSemanticCacheTtlAnswer(clampInputNumber(e.target, 1800))}
+                        onCommit={setSemanticCacheTtlAnswer}
                         disabled={!semanticCacheEnabled}
                       />
                     </div>
                     <div className="input-group">
                       <label>TTL Seconds (Chat)</label>
-                      <input
-                        type="number"
+                      <NumberField
                         min={10}
                         max={86400}
                         value={semanticCacheTtlChat}
-                        onChange={(e) => setSemanticCacheTtlChat(clampInputNumber(e.target, 600))}
+                        onCommit={setSemanticCacheTtlChat}
                         disabled={!semanticCacheEnabled}
                       />
                     </div>
@@ -1863,12 +1807,11 @@ export function RetrievalSubtab() {
                   <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
                     <div className="input-group">
                       <label>Chat History Window</label>
-                      <input
-                        type="number"
+                      <NumberField
                         min={0}
                         max={50}
                         value={semanticCacheChatHistoryWindow}
-                        onChange={(e) => setSemanticCacheChatHistoryWindow(clampInputNumber(e.target, 6))}
+                        onCommit={setSemanticCacheChatHistoryWindow}
                         disabled={!semanticCacheEnabled}
                       />
                     </div>
@@ -1890,13 +1833,12 @@ export function RetrievalSubtab() {
                     </div>
                     <div className="input-group">
                       <label>Max Temperature for Write</label>
-                      <input
-                        type="number"
+                      <NumberField
                         min={0}
                         max={2}
                         step={0.05}
                         value={semanticCacheMaxTemperatureForWrite}
-                        onChange={(e) => setSemanticCacheMaxTemperatureForWrite(clampInputNumber(e.target, 0.5))}
+                        onCommit={setSemanticCacheMaxTemperatureForWrite}
                         disabled={!semanticCacheEnabled}
                       />
                     </div>
@@ -1985,25 +1927,23 @@ export function RetrievalSubtab() {
                       <label>
                         Trace Sampling Rate <TooltipIcon name="TRACE_SAMPLING_RATE" />
                       </label>
-                      <input
-                        type="number"
+                      <NumberField
                         min={0}
                         max={1}
                         step={0.01}
                         value={traceSamplingRate}
-                        onChange={(e) => setTraceSamplingRate(clampInputNumber(e.target, 1.0))}
+                        onCommit={setTraceSamplingRate}
                       />
                     </div>
                     <div className="input-group">
                       <label>
                         Trace Retention <TooltipIcon name="TRACE_RETENTION" />
                       </label>
-                      <input
-                        type="number"
+                      <NumberField
                         min={1}
                         max={1000}
                         value={traceRetention}
-                        onChange={(e) => setTraceRetention(clampInputNumber(e.target, 50))}
+                        onCommit={setTraceRetention}
                       />
                     </div>
                   </div>
@@ -2079,12 +2019,11 @@ export function RetrievalSubtab() {
                       <label>
                         Alert Webhook Timeout <TooltipIcon name="ALERT_WEBHOOK_TIMEOUT" />
                       </label>
-                      <input
-                        type="number"
+                      <NumberField
                         min={1}
                         max={60}
                         value={alertWebhookTimeout}
-                        onChange={(e) => setAlertWebhookTimeout(clampInputNumber(e.target, 5))}
+                        onCommit={setAlertWebhookTimeout}
                       />
                     </div>
                     <div className="input-group">

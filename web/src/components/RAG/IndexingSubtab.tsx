@@ -30,7 +30,7 @@ import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { confirmDialog } from '@/components/ui/confirmDialog';
 import { indexingApi } from '@/api';
 import { formatBytes, formatCurrency, formatDuration, formatNumber } from '@/utils/formatters';
-import { clampNumber } from '@/utils/numbers';
+import { NumberField } from '@/components/ui/NumberField';
 import type {
   ChatModelInfo,
   ChatModelsResponse,
@@ -2961,14 +2961,13 @@ export function IndexingSubtab() {
                           Image scale
                           <TooltipIcon name="FIGURES_IMAGES_SCALE" />
                         </label>
-                        <input
+                        <NumberField
                           data-testid="figures-images-scale"
-                          type="number"
                           min={1}
                           max={4}
                           step={0.5}
                           value={figuresImagesScale}
-                          onChange={(e) => setFiguresImagesScale(clampNumber(e.target.value, { min: 1, max: 4, step: 0.5, fallback: 2.0 }))}
+                          onCommit={setFiguresImagesScale}
                           style={{ width: '100%' }}
                         />
                       </div>
@@ -2977,14 +2976,13 @@ export function IndexingSubtab() {
                           Min area fraction
                           <TooltipIcon name="FIGURES_MIN_AREA_FRACTION" />
                         </label>
-                        <input
+                        <NumberField
                           data-testid="figures-min-area-fraction"
-                          type="number"
                           min={0}
                           max={1}
                           step={0.01}
                           value={figuresMinAreaFraction}
-                          onChange={(e) => setFiguresMinAreaFraction(clampNumber(e.target.value, { min: 0, max: 1, step: 0.01, fallback: 0.02 }))}
+                          onCommit={setFiguresMinAreaFraction}
                           style={{ width: '100%' }}
                         />
                       </div>
@@ -2993,14 +2991,13 @@ export function IndexingSubtab() {
                           Max completion tokens
                           <TooltipIcon name="FIGURES_MAX_COMPLETION_TOKENS" />
                         </label>
-                        <input
+                        <NumberField
                           data-testid="figures-max-completion-tokens"
-                          type="number"
                           min={64}
                           max={8000}
                           step={1}
                           value={figuresMaxCompletionTokens}
-                          onChange={(e) => setFiguresMaxCompletionTokens(clampNumber(e.target.value, { min: 64, max: 8000, step: 1, fallback: 2500 }))}
+                          onCommit={setFiguresMaxCompletionTokens}
                           style={{ width: '100%' }}
                         />
                       </div>
@@ -3012,14 +3009,13 @@ export function IndexingSubtab() {
                           Concurrency
                           <TooltipIcon name="FIGURES_CONCURRENCY" />
                         </label>
-                        <input
+                        <NumberField
                           data-testid="figures-concurrency"
-                          type="number"
                           min={1}
                           max={16}
                           step={1}
                           value={figuresConcurrency}
-                          onChange={(e) => setFiguresConcurrency(clampNumber(e.target.value, { min: 1, max: 16, step: 1, fallback: 4 }))}
+                          onCommit={setFiguresConcurrency}
                           style={{ width: '100%' }}
                         />
                       </div>
@@ -3028,14 +3024,13 @@ export function IndexingSubtab() {
                           Timeout (s)
                           <TooltipIcon name="FIGURES_TIMEOUT_S" />
                         </label>
-                        <input
+                        <NumberField
                           data-testid="figures-timeout-s"
-                          type="number"
                           min={5}
                           max={600}
                           step={1}
                           value={figuresTimeoutS}
-                          onChange={(e) => setFiguresTimeoutS(clampNumber(e.target.value, { min: 5, max: 600, step: 1, fallback: 90 }))}
+                          onCommit={setFiguresTimeoutS}
                           style={{ width: '100%' }}
                         />
                       </div>
