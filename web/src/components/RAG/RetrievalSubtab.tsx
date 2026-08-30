@@ -104,6 +104,15 @@ const SECTION_DESC_STYLE: CSSProperties = {
   marginBottom: 12,
 };
 
+// Reason shown when a dependent control is inert because its parent is off.
+// >=12px per the legibility floor (do not reuse the 11px description tier here).
+const INERT_NOTE_STYLE: CSSProperties = {
+  fontSize: 12,
+  color: 'var(--fg-muted)',
+  marginTop: 6,
+  lineHeight: 1.4,
+};
+
 const PUBLIC_BROWSER_LINK_HINT = 'Browser links use this; ingestion/tracking uses the local URL.';
 
 export function RetrievalSubtab() {
@@ -470,25 +479,8 @@ export function RetrievalSubtab() {
             </select>
           </div>
 
-          <div className="input-group" data-testid="retrieval-generation-alias">
-            <label>{productionModelRoutingLocked ? 'Non-chat generation alias' : 'Generation Alias'}</label>
-            <ChatModelPicker
-              value={genModel}
-              onChange={setGenModel}
-              models={generationModels}
-              valueMode="id"
-              disabled={productionModelRoutingLocked}
-              ariaDescribedBy={productionModelRoutingLocked ? 'retrieval-generation-alias-lock-note' : undefined}
-            />
-            {productionModelRoutingLocked ? (
-              <div
-                id="retrieval-generation-alias-lock-note"
-                style={{ color: 'var(--fg-muted)', fontSize: 11, marginTop: 5, lineHeight: 1.4 }}
-              >
-                Chat uses its own model picker. This non-chat answer pipeline is locked by the production deployment.
-              </div>
-            ) : null}
-          </div>
+          {/* Generation alias lives once, in Generation > Answer Routing (with the
+              HTTP/MCP overrides and the chat-prompt link). It was duplicated here. */}
 
           <div className="input-group">
             <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -930,6 +922,11 @@ export function RetrievalSubtab() {
                     onCommit={setMmrLambda}
                     disabled={!enableMmr}
                   />
+                  {!enableMmr ? (
+                    <div style={INERT_NOTE_STYLE} data-testid="mmr-lambda-inert-note">
+                      Not used while MMR is off.
+                    </div>
+                  ) : null}
                 </div>
                 <div className="input-group" />
               </div>
@@ -1067,6 +1064,11 @@ export function RetrievalSubtab() {
                     disabled={fusionMethod !== 'weighted'}
                   />
                 </div>
+              </div>
+              <div style={INERT_NOTE_STYLE} data-testid="fusion-inert-note">
+                {fusionMethod === 'rrf'
+                  ? 'Vector / Sparse / Graph weights are not used by the "rrf" method (they apply only to "weighted").'
+                  : 'RRF K is not used by the "weighted" method (it applies only to "rrf").'}
               </div>
             </div>
 
@@ -1666,6 +1668,11 @@ export function RetrievalSubtab() {
                   <div style={SECTION_DESC_STYLE}>
                     Configure semantic cache policy for retrieval, answer generation, and chat generation.
                   </div>
+                  {!semanticCacheEnabled ? (
+                    <div style={{ ...INERT_NOTE_STYLE, marginTop: 0, marginBottom: 10 }} data-testid="semantic-cache-inert-note">
+                      Cache is off — the settings below are not used until Cache Enabled is on.
+                    </div>
+                  ) : null}
 
                   <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 16 }}>
                     <div className="input-group">
