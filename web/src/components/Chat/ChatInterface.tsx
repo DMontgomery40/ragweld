@@ -1,9 +1,5 @@
 import type React from 'react';
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import {
   AssistantRuntimeProvider,
   AuiIf,
@@ -12,6 +8,7 @@ import {
   useAuiState,
   useExternalStoreRuntime,
 } from '@assistant-ui/react';
+import { AssistantMarkdown } from '@/components/ui/AssistantMarkdown';
 import { ChatHistorySidebar } from '@/components/Chat/ChatHistorySidebar';
 import { ModelPicker } from '@/components/Chat/ModelPicker';
 import { SourceDropdown } from '@/components/Chat/SourceDropdown';
@@ -109,119 +106,6 @@ function emitRunComplete(runId?: string, startedAtMs?: number, endedAtMs?: numbe
     // ignore event dispatch failures
   }
 }
-
-const AssistantMarkdown = memo(function AssistantMarkdown({ content }: { content: string }) {
-  return (
-    <div className="chat-markdown" style={{ fontSize: '13px', lineHeight: '1.7', minWidth: 0, overflowWrap: 'anywhere' }}>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          code({ inline, className, children, ...props }: React.HTMLAttributes<HTMLElement> & { inline?: boolean }) {
-            const match = /language-(\w+)/.exec(className || '');
-            const codeString = String(children).replace(/\n$/, '');
-            return !inline && match ? (
-              <div style={{ margin: '12px 0', borderRadius: '8px', overflow: 'hidden' }}>
-                <div
-                  style={{
-                    background: '#1e1e2e',
-                    padding: '6px 12px',
-                    fontSize: '10px',
-                    color: '#888',
-                    borderBottom: '1px solid #333',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                  }}
-                >
-                  <span>{match[1]}</span>
-                  <button
-                    type="button"
-                    onClick={() => navigator.clipboard.writeText(codeString)}
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      color: '#888',
-                      cursor: 'pointer',
-                      fontSize: '10px',
-                    }}
-                  >
-                    Copy
-                  </button>
-                </div>
-                <SyntaxHighlighter
-                  style={oneDark as any}
-                  language={match[1]}
-                  PreTag="div"
-                  customStyle={{
-                    margin: 0,
-                    padding: '12px',
-                    fontSize: '12px',
-                    background: '#1e1e2e',
-                    maxWidth: '100%',
-                    overflowX: 'auto',
-                  }}
-                  {...props}
-                >
-                  {codeString}
-                </SyntaxHighlighter>
-              </div>
-            ) : (
-              <code
-                style={{
-                  background: 'rgba(0,0,0,0.3)',
-                  padding: '2px 6px',
-                  borderRadius: '4px',
-                  fontSize: '12px',
-                  fontFamily: 'monospace',
-                }}
-                {...props}
-              >
-                {children}
-              </code>
-            );
-          },
-          p({ children }) {
-            return <p style={{ margin: '0 0 12px 0' }}>{children}</p>;
-          },
-          ul({ children }) {
-            return <ul style={{ margin: '8px 0', paddingLeft: '20px' }}>{children}</ul>;
-          },
-          ol({ children }) {
-            return <ol style={{ margin: '8px 0', paddingLeft: '20px' }}>{children}</ol>;
-          },
-          li({ children }) {
-            return <li style={{ marginBottom: '4px' }}>{children}</li>;
-          },
-          a({ href, children }) {
-            return (
-              <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--link)', textDecoration: 'underline' }}>
-                {children}
-              </a>
-            );
-          },
-          blockquote({ children }) {
-            return (
-              <blockquote
-                style={{
-                  borderLeft: '3px solid var(--accent)',
-                  margin: '12px 0',
-                  padding: '8px 16px',
-                  background: 'rgba(0,0,0,0.2)',
-                  borderRadius: '0 8px 8px 0',
-                  fontStyle: 'italic',
-                }}
-              >
-                {children}
-              </blockquote>
-            );
-          },
-        }}
-      >
-        {content}
-      </ReactMarkdown>
-    </div>
-  );
-});
 
 type ChatComposerProps = {
   blockedReason?: string | null;
