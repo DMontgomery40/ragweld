@@ -808,6 +808,7 @@ curl -X PUT "http://localhost:58012/api/config" \
 | `/api/graph/{id}/communities` | GET | List detected communities |
 | `/api/graph/{id}/stats` | GET | Graph stats (entity/rel/community counts) |
 | `/api/graph/{id}/entity?entity_id=` | GET | Fetch a single entity |
+| `/api/graph/{id}/entity/relationships?entity_id=` | GET | Outgoing relationships of one entity (404 when the corpus has no promoted graph) |
 | `/api/graph/{id}/entity/neighbors?entity_id=` | GET | Entity neighborhood subgraph |
 | `/api/graph/{id}/query` | POST | Read-only Cypher query (debug) |
 

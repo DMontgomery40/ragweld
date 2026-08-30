@@ -155,23 +155,23 @@ export function RetrievalSubtab() {
       setGraphReadiness(null);
       return;
     }
-    let cancelled = false;
-    void (async () => {
-      try {
-        const response = await fetch(`/api/graph/${encodeURIComponent(corpus)}/stats`);
+    // Through `api()` and an AbortController like every other request in this file, not a
+    // hand-rolled absolute fetch that sidesteps base-URL resolution (review F-06).
+    const controller = new AbortController();
+    fetch(api(`graph/${encodeURIComponent(corpus)}/stats`), { signal: controller.signal })
+      .then((response) => {
         if (!response.ok) throw new Error(String(response.status));
-        const stats: GraphStats = await response.json();
-        if (!cancelled) setGraphReadiness(stats);
-      } catch {
+        return response.json();
+      })
+      .then((stats) => setGraphReadiness(stats as GraphStats))
+      .catch((cause) => {
+        if (cause instanceof DOMException && cause.name === 'AbortError') return;
         // Readiness is advisory: if it cannot be read, the card says nothing rather than
         // guessing that the graph is empty.
-        if (!cancelled) setGraphReadiness(null);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [activeRepo]);
+        setGraphReadiness(null);
+      });
+    return () => controller.abort();
+  }, [activeRepo, api]);
 
   // --- Retrieval ----------------------------------------------------------
   const [rrfKDiv, setRrfKDiv] = useConfigField<number>('retrieval.rrf_k_div', 60);
