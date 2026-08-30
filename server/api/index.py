@@ -314,6 +314,36 @@ _SEMANTIC_KG_CALLS_PER_SECOND = 1.0
 
 
 
+
+async def _anchor_registry_root(repo_id: str, root: Path) -> None:
+    """Rewrite a relative ``corpora.path`` to the root this process actually resolved.
+
+    A relative row means every reader in every subsystem resolves it against its own CWD, and
+    nothing else fixes it: ``promote_staging_index`` writes ``root_path`` only when the active
+    corpus row does not exist yet, so an existing relative row survives every successful run
+    unchanged. Anchoring it here, at the one moment the resolved root is known and about to be
+    walked, is what stops the relative string outliving the run that used it.
+
+    Only a genuinely relative stored path is touched, and only to the value this run indexes, so
+    an absolute row is never rewritten and a corpus is never repointed at a different directory.
+    """
+    cfg_global = await load_scoped_config(repo_id=None)
+    postgres = PostgresClient(cfg_global.indexing.postgres_url)
+    try:
+        await postgres.connect()
+        row = await postgres.get_corpus(repo_id)
+        stored = str((row or {}).get("path") or "").strip()
+        if not stored or Path(stored).is_absolute():
+            return
+        await postgres.update_corpus(repo_id, path=str(root))
+    except Exception:
+        # Best effort: an unreachable registry must not stop a run whose root already resolved.
+        return
+    finally:
+        with contextlib.suppress(Exception):
+            await postgres.disconnect()
+
+
 def _resolve_corpus_root(repo_path: str) -> Path:
     """Absolute corpus root for a registered path, relative or not.
 
@@ -3950,6 +3980,12 @@ async def start_index(request: IndexRequest) -> IndexStatus:
         raise HTTPException(
             status_code=400, detail=f"repo_path is not a readable directory: {request.repo_path}"
         )
+    # Resolve ONCE, then carry it. Validating the resolved root and then handing the raw request
+    # on meant the run walked whatever the relative path meant to the process CWD. From here on
+    # `request` names the absolute root, so the walk, the staged corpus row and the manifest all
+    # agree, and nothing downstream has to know the difference.
+    request = request.model_copy(update={"repo_path": str(root)})
+    await _anchor_registry_root(request.repo_id, root)
     global _LAST_STARTED_REPO
 
     started_at = datetime.now(UTC)
