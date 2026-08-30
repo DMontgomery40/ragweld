@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import 'dockview/dist/styles/dockview.css';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { LineageMeta } from '@/components/ui/LineageMeta';
+import { NumberField } from '@/components/ui/NumberField';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useActiveRepo } from '@/stores/useRepoStore';
 import { useConfigField, useNotification, useReranker } from '@/hooks';
@@ -1354,52 +1355,52 @@ export function TrainingStudio() {
                 </div>
                 <div className="input-group">
                   <label>Triplets min count <TooltipIcon name="TRIPLETS_MIN_COUNT" /></label>
-                  <input
-                    type="number"
+                  <NumberField
+                    configPath="training.triplets_min_count"
                     min={10}
                     max={10000}
                     value={tripletsMinCount}
-                    onChange={(e) => setTripletsMinCount(parseInt(e.target.value || '10', 10))}
+                    onCommit={setTripletsMinCount}
                   />
                 </div>
                 <div className="input-group">
                   <label>Epochs <TooltipIcon name="RERANKER_TRAIN_EPOCHS" /></label>
-                  <input type="number" min={1} max={20} value={epochs} onChange={(e) => setEpochs(parseInt(e.target.value || '1', 10))} />
+                  <NumberField data-testid="training-studio-epochs" configPath="training.reranker_train_epochs" min={1} max={20} value={epochs} onCommit={setEpochs} />
                 </div>
                 <div className="input-group">
                   <label>Batch <TooltipIcon name="RERANKER_TRAIN_BATCH" /></label>
-                  <input type="number" min={1} max={128} value={trainBatch} onChange={(e) => setTrainBatch(parseInt(e.target.value || '1', 10))} />
+                  <NumberField configPath="training.reranker_train_batch" min={1} max={128} value={trainBatch} onCommit={setTrainBatch} />
                 </div>
                 <div className="input-group">
                   <label>Warmup ratio <TooltipIcon name="RERANKER_WARMUP_RATIO" /></label>
-                  <input
-                    type="number"
+                  <NumberField
+                    configPath="training.reranker_warmup_ratio"
                     min={0}
                     max={0.5}
                     step={0.01}
                     value={warmupRatio}
-                    onChange={(e) => setWarmupRatio(parseFloat(e.target.value || '0'))}
+                    onCommit={setWarmupRatio}
                   />
                 </div>
                 <div className="input-group">
                   <label>Learning rate <TooltipIcon name="RERANKER_TRAIN_LR" /></label>
-                  <input
-                    type="number"
+                  <NumberField
+                    configPath="training.reranker_train_lr"
                     min={0.000001}
                     max={0.001}
                     step={0.000001}
                     value={trainLr}
-                    onChange={(e) => setTrainLr(parseFloat(e.target.value || '0.00002'))}
+                    onCommit={setTrainLr}
                   />
                 </div>
                 <div className="input-group">
                   <label>Telemetry interval <TooltipIcon name="LEARNING_RERANKER_TELEMETRY_INTERVAL_STEPS" /></label>
-                  <input
-                    type="number"
+                  <NumberField
+                    configPath="training.learning_reranker_telemetry_interval_steps"
                     min={1}
                     max={20}
                     value={telemetryIntervalSteps}
-                    onChange={(e) => setTelemetryIntervalSteps(parseInt(e.target.value || '2', 10))}
+                    onCommit={setTelemetryIntervalSteps}
                   />
                 </div>
               </div>
@@ -1409,23 +1410,23 @@ export function TrainingStudio() {
                 <div className="studio-form-grid two">
                   <div className="input-group">
                     <label>LoRA rank <TooltipIcon name="LEARNING_RERANKER_LORA_RANK" /></label>
-                    <input type="number" min={1} max={128} value={loraRank} onChange={(e) => setLoraRank(parseInt(e.target.value || '16', 10))} />
+                    <NumberField configPath="training.learning_reranker_lora_rank" min={1} max={128} value={loraRank} onCommit={setLoraRank} />
                   </div>
                   <div className="input-group">
                     <label>LoRA alpha <TooltipIcon name="LEARNING_RERANKER_LORA_ALPHA" /></label>
-                    <input type="number" min={1} max={512} step={1} value={loraAlpha} onChange={(e) => setLoraAlpha(parseFloat(e.target.value || '32'))} />
+                    <NumberField configPath="training.learning_reranker_lora_alpha" min={1} max={512} step={1} value={loraAlpha} onCommit={setLoraAlpha} />
                   </div>
                   <div className="input-group">
                     <label>LoRA dropout <TooltipIcon name="LEARNING_RERANKER_LORA_DROPOUT" /></label>
-                    <input type="number" min={0} max={0.5} step={0.01} value={loraDropout} onChange={(e) => setLoraDropout(parseFloat(e.target.value || '0.05'))} />
+                    <NumberField configPath="training.learning_reranker_lora_dropout" min={0} max={0.5} step={0.01} value={loraDropout} onCommit={setLoraDropout} />
                   </div>
                   <div className="input-group">
                     <label>Negative ratio <TooltipIcon name="LEARNING_RERANKER_NEGATIVE_RATIO" /></label>
-                    <input type="number" min={1} max={20} value={negativeRatio} onChange={(e) => setNegativeRatio(parseInt(e.target.value || '5', 10))} />
+                    <NumberField configPath="training.learning_reranker_negative_ratio" min={1} max={20} value={negativeRatio} onCommit={setNegativeRatio} />
                   </div>
                   <div className="input-group">
                     <label>Grad accum steps <TooltipIcon name="LEARNING_RERANKER_GRAD_ACCUM_STEPS" /></label>
-                    <input type="number" min={1} max={128} value={gradAccumSteps} onChange={(e) => setGradAccumSteps(parseInt(e.target.value || '8', 10))} />
+                    <NumberField configPath="training.learning_reranker_grad_accum_steps" min={1} max={128} value={gradAccumSteps} onCommit={setGradAccumSteps} />
                   </div>
                   <div className="input-group">
                     <label className="toggle">
@@ -1444,11 +1445,11 @@ export function TrainingStudio() {
                   </div>
                   <div className="input-group">
                     <label>Promote epsilon <TooltipIcon name="LEARNING_RERANKER_PROMOTE_EPSILON" /></label>
-                    <input type="number" min={0} max={1} step={0.001} value={promoteEpsilon} onChange={(e) => setPromoteEpsilon(parseFloat(e.target.value || '0'))} />
+                    <NumberField configPath="training.learning_reranker_promote_epsilon" min={0} max={1} step={0.001} value={promoteEpsilon} onCommit={setPromoteEpsilon} />
                   </div>
                   <div className="input-group">
                     <label>Unload idle sec <TooltipIcon name="LEARNING_RERANKER_UNLOAD_AFTER_SEC" /></label>
-                    <input type="number" min={0} max={86400} value={unloadAfterSec} onChange={(e) => setUnloadAfterSec(parseInt(e.target.value || '0', 10))} />
+                    <NumberField configPath="training.learning_reranker_unload_after_sec" min={0} max={86400} value={unloadAfterSec} onCommit={setUnloadAfterSec} />
                   </div>
                   <div className="input-group">
                     <label>LoRA target modules <TooltipIcon name="LEARNING_RERANKER_LORA_TARGET_MODULES" /></label>
@@ -1510,15 +1511,15 @@ export function TrainingStudio() {
                   </div>
                   <div className="input-group">
                     <label>Left panel % <TooltipIcon name="LEARNING_RERANKER_STUDIO_LEFT_PANEL_PCT" /></label>
-                    <input type="number" min={15} max={35} value={studioLeftPct} onChange={(e) => setStudioLeftPct(parseInt(e.target.value || '20', 10))} />
+                    <NumberField configPath="ui.learning_reranker_studio_left_panel_pct" min={15} max={35} value={studioLeftPct} onCommit={setStudioLeftPct} />
                   </div>
                   <div className="input-group">
                     <label>Right panel % <TooltipIcon name="LEARNING_RERANKER_STUDIO_RIGHT_PANEL_PCT" /></label>
-                    <input type="number" min={20} max={45} value={studioRightPct} onChange={(e) => setStudioRightPct(parseInt(e.target.value || '30', 10))} />
+                    <NumberField configPath="ui.learning_reranker_studio_right_panel_pct" min={20} max={45} value={studioRightPct} onCommit={setStudioRightPct} />
                   </div>
                   <div className="input-group">
                     <label>Bottom panel % <TooltipIcon name="LEARNING_RERANKER_STUDIO_BOTTOM_PANEL_PCT" /></label>
-                    <input type="number" min={18} max={45} value={studioBottomPct} onChange={(e) => setStudioBottomPct(parseInt(e.target.value || '28', 10))} />
+                    <NumberField configPath="ui.learning_reranker_studio_bottom_panel_pct" min={18} max={45} value={studioBottomPct} onCommit={setStudioBottomPct} />
                   </div>
                   <div className="input-group">
                     <label>Renderer <TooltipIcon name="LEARNING_RERANKER_VISUALIZER_RENDERER" /></label>
@@ -1546,19 +1547,19 @@ export function TrainingStudio() {
                   </div>
                   <div className="input-group">
                     <label>Max points <TooltipIcon name="LEARNING_RERANKER_VISUALIZER_MAX_POINTS" /></label>
-                    <input type="number" min={1000} max={50000} value={visualizerMaxPoints} onChange={(e) => setVisualizerMaxPoints(parseInt(e.target.value || '10000', 10))} />
+                    <NumberField configPath="ui.learning_reranker_visualizer_max_points" min={1000} max={50000} value={visualizerMaxPoints} onCommit={setVisualizerMaxPoints} />
                   </div>
                   <div className="input-group">
                     <label>Target FPS <TooltipIcon name="LEARNING_RERANKER_VISUALIZER_TARGET_FPS" /></label>
-                    <input type="number" min={30} max={144} value={visualizerTargetFps} onChange={(e) => setVisualizerTargetFps(parseInt(e.target.value || '60', 10))} />
+                    <NumberField configPath="ui.learning_reranker_visualizer_target_fps" min={30} max={144} value={visualizerTargetFps} onCommit={setVisualizerTargetFps} />
                   </div>
                   <div className="input-group">
                     <label>Tail sec <TooltipIcon name="LEARNING_RERANKER_VISUALIZER_TAIL_SECONDS" /></label>
-                    <input type="number" min={1} max={30} step={0.5} value={visualizerTailSeconds} onChange={(e) => setVisualizerTailSeconds(parseFloat(e.target.value || '8'))} />
+                    <NumberField configPath="ui.learning_reranker_visualizer_tail_seconds" min={1} max={30} step={0.5} value={visualizerTailSeconds} onCommit={setVisualizerTailSeconds} />
                   </div>
                   <div className="input-group">
                     <label>Motion intensity <TooltipIcon name="LEARNING_RERANKER_VISUALIZER_MOTION_INTENSITY" /></label>
-                    <input type="number" min={0} max={2} step={0.05} value={visualizerMotionIntensity} onChange={(e) => setVisualizerMotionIntensity(parseFloat(e.target.value || '1'))} />
+                    <NumberField configPath="ui.learning_reranker_visualizer_motion_intensity" min={0} max={2} step={0.05} value={visualizerMotionIntensity} onCommit={setVisualizerMotionIntensity} />
                   </div>
                   <div className="input-group">
                     <label className="toggle">

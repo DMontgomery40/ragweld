@@ -5747,7 +5747,12 @@ class TrainingConfig(BaseModel):
 
     learning_reranker_lora_alpha: float = Field(
         default=32.0,
-        gt=0.0,
+        # An alpha of 0 disables LoRA outright (a degenerate adapter, not merely a small one);
+        # the UI has advertised a minimum of 1 since this control existed. Was `gt=0.0`, which
+        # a `NumberField`'s inclusive HTML `min` cannot represent exactly
+        # (`test_every_number_field_advertises_its_pydantic_bounds`) -- `ge=1.0` matches the
+        # UI's existing, genuine invariant instead of inventing a new one.
+        ge=1.0,
         le=512.0,
         description="LoRA alpha for MLX Qwen3 learning reranker",
     )
@@ -5848,7 +5853,10 @@ class TrainingConfig(BaseModel):
 
     ragweld_agent_lora_alpha: float = Field(
         default=32.0,
-        gt=0.0,
+        # Same reasoning as TrainingConfig.learning_reranker_lora_alpha above: an alpha of 0
+        # disables LoRA outright, the UI has always advertised a minimum of 1, and `ge=1.0` is
+        # the inclusive-bound form `NumberField` can represent exactly (was `gt=0.0`).
+        ge=1.0,
         le=512.0,
         description="LoRA alpha for ragweld agent MLX fine-tuning.",
     )
