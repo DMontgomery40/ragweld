@@ -4,15 +4,9 @@ import { useActiveRepo } from '@/stores/useRepoStore';
 import { showToast } from '@/utils/toast';
 import type { LineageRef } from '@/types/generated';
 import type { LineageAliasName } from '@/services/LineageService';
+import { TruncatedId, truncateId } from '@/components/ui/TruncatedId';
 
 const ALIASES: LineageAliasName[] = ['baseline', 'canary', 'current', 'promoted'];
-
-function shortId(value: string | null | undefined): string {
-  const text = String(value || '').trim();
-  if (!text) return '—';
-  if (text.length <= 28) return text;
-  return `${text.slice(0, 12)}...${text.slice(-12)}`;
-}
 
 export function LineageMeta({
   bundleId,
@@ -85,7 +79,7 @@ export function LineageMeta({
     setSavingAlias(alias);
     try {
       await lineageService.setAlias(alias, bundleId, scope || undefined);
-      showToast(`Lineage alias "${alias}" now points at ${shortId(bundleId)}`, 'success');
+      showToast(`Lineage alias "${alias}" now points at ${truncateId(bundleId)}`, 'success');
       // The write belonged to `scope`; if the component moved on, its own
       // scope-change effect already fetched the right aliases.
       if (scope === scopeRef.current) await refreshAliases();
@@ -116,22 +110,22 @@ export function LineageMeta({
       </div>
       {inputBundleId ? (
         <div style={{ fontSize: '12px', color: 'var(--fg-muted)' }}>
-          input bundle: <span className="studio-mono">{shortId(inputBundleId)}</span>
+          input bundle: <TruncatedId value={inputBundleId} className="studio-mono" testId="lineage-copy-input-bundle" />
         </div>
       ) : null}
       {bundleId ? (
         <div style={{ fontSize: '12px', color: 'var(--fg-muted)' }}>
-          current bundle: <span className="studio-mono">{shortId(bundleId)}</span>
+          current bundle: <TruncatedId value={bundleId} className="studio-mono" testId="lineage-copy-current-bundle" />
         </div>
       ) : null}
       {lineageRef ? (
         <div style={{ fontSize: '12px', color: 'var(--fg-muted)' }}>
-          version: <span className="studio-mono">{lineageRef.kind}:{shortId(lineageRef.version_id)}</span>
+          version: <span className="studio-mono">{lineageRef.kind}:</span><TruncatedId value={lineageRef.version_id} className="studio-mono" testId="lineage-copy-version" />
         </div>
       ) : null}
       {modelArtifactRef ? (
         <div style={{ fontSize: '12px', color: 'var(--fg-muted)' }}>
-          model artifact: <span className="studio-mono">{shortId(modelArtifactRef.version_id)}</span>
+          model artifact: <TruncatedId value={modelArtifactRef.version_id} className="studio-mono" testId="lineage-copy-model-artifact" />
         </div>
       ) : null}
       {canAlias ? (
@@ -151,7 +145,7 @@ export function LineageMeta({
                     pointsHere
                       ? `"${alias}" already points at this bundle`
                       : aliasTargets[alias]
-                        ? `"${alias}" currently points at ${shortId(aliasTargets[alias])}; click to move it here`
+                        ? `"${alias}" currently points at ${truncateId(aliasTargets[alias])}; click to move it here`
                         : `"${alias}" is unset; click to point it at this bundle`
                   }
                   style={
@@ -173,7 +167,7 @@ export function LineageMeta({
             <div style={{ fontSize: '11.5px', color: 'var(--fg-muted)' }}>
               {ALIASES.filter((a) => aliasTargets[a]).map((a) => (
                 <span key={a} style={{ marginRight: '12px' }}>
-                  {a} → <span className="studio-mono">{shortId(aliasTargets[a])}</span>
+                  {a} → <TruncatedId value={aliasTargets[a]} className="studio-mono" />
                 </span>
               ))}
             </div>

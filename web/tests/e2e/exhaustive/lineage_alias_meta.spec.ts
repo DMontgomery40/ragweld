@@ -80,6 +80,24 @@ test('lineage alias controls write, persist and stay scoped to the active corpus
     expect(canary).toHaveLength(1);
     expect(canary[0].bundle_id).toEqual(runBundle);
 
+    // M-112: the middle-truncated bundle id in the LINEAGE panel stays operable
+    // -- its copy control carries the FULL id (also the hover value), and one
+    // click copies the whole id to the clipboard, not the truncated display.
+    await page.context().grantPermissions(['clipboard-write']);
+    const copyBundle = page.getByTestId('lineage-copy-current-bundle');
+    await expect(copyBundle).toBeVisible();
+    // The copy control targets the WHOLE id (also the hover value), not the
+    // truncated display, and the truncated text really is shorter than the full.
+    expect(await copyBundle.getAttribute('aria-label')).toContain(runBundle);
+    const shownId = (await copyBundle.locator('xpath=preceding-sibling::span[1]').innerText()).trim();
+    expect(runBundle.startsWith(shownId.split('...')[0])).toBeTruthy();
+    expect(shownId.length).toBeLessThan(runBundle.length);
+    // Copying succeeds (the success toast only appears when writeText resolves).
+    await copyBundle.click();
+    await expect(
+      page.locator('.toast.toast-success').filter({ hasText: 'copied to the clipboard' }),
+    ).toBeVisible({ timeout: 30_000 });
+
     // Scope: the alias belongs to this corpus only.
     expect(canaryOf(await listAliases(request, other.corpusId))).toEqual([]);
 
