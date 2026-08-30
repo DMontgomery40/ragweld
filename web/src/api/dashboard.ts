@@ -25,6 +25,7 @@ import type {
   ObservabilityIncidentsResponse,
   ObservabilityStatusResponse,
   PromptObservabilitySummaryResponse,
+  ReadinessStatus,
   RerankerLogsResponse,
   TracesLatestResponse,
 } from '@/types/generated';
@@ -47,6 +48,7 @@ export type {
   ObservabilityIncidentsResponse,
   ObservabilityStatusResponse,
   PromptObservabilitySummaryResponse,
+  ReadinessStatus,
   TracesLatestResponse,
 };
 
@@ -56,6 +58,22 @@ export type {
 
 export async function getHealth(): Promise<HealthStatus> {
   const { data } = await apiClient.get<HealthStatus>(api('/health'));
+  return data;
+}
+
+/**
+ * The per-dependency readiness breakdown behind the top-bar health pill.
+ *
+ * `/api/ready` answers 200 when every required dependency is ready and **503** when one is
+ * not (the payload is the same shape either way -- the breakdown is exactly what an operator
+ * opens the pill to see in the not-ready case), so 503 is accepted as a status rather than
+ * thrown. Any other status still rejects. This is a global infrastructure probe, so it is
+ * intentionally unscoped by corpus.
+ */
+export async function getReadiness(): Promise<ReadinessStatus> {
+  const { data } = await apiClient.get<ReadinessStatus>(api('/ready'), {
+    validateStatus: (s) => s === 200 || s === 503,
+  });
   return data;
 }
 
@@ -114,7 +132,6 @@ export interface Trace {
   timestamp: string;
   query: string;
   repo?: string;
-  duration_ms?: number;
   [key: string]: any;
 }
 
@@ -132,16 +149,14 @@ export async function getTraces(limit: number = 50): Promise<Trace[]> {
         return kind === 'chat' || kind === 'search' || kind === 'query';
       })
       .map((row) => {
-        const startedAtMs = typeof row?.started_at_ms === 'number' ? row.started_at_ms : undefined;
-        const endedAtMs = typeof row?.ended_at_ms === 'number' ? row.ended_at_ms : undefined;
-        const durationMs =
-          typeof startedAtMs === 'number' && typeof endedAtMs === 'number'
-            ? Math.max(0, endedAtMs - startedAtMs)
-            : undefined;
+        // The query log records no per-request timing (no started/ended/latency field is
+        // written by the search or chat log writers), so there is nothing here to compute a
+        // duration from. The Monitoring table dropped its Duration column accordingly (M-139);
+        // this mapper must not resurrect a field nothing populates.
         const timestamp =
           (typeof row?.ts === 'string' && row.ts) ||
           (typeof row?.timestamp === 'string' && row.timestamp) ||
-          (typeof startedAtMs === 'number' ? new Date(startedAtMs).toISOString() : new Date().toISOString());
+          new Date().toISOString();
         const query =
           (typeof row?.query === 'string' && row.query) ||
           (typeof row?.query_raw === 'string' && row.query_raw) ||
@@ -153,7 +168,6 @@ export async function getTraces(limit: number = 50): Promise<Trace[]> {
           timestamp,
           query,
           repo,
-          duration_ms: durationMs,
           ...row,
         } as Trace;
       })

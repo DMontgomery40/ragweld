@@ -6,6 +6,7 @@ import { useHealthStore } from '@/stores';
 import { TabBar } from './components/Navigation/TabBar';
 import { TabRouter } from './components/Navigation/TabRouter';
 import { Breadcrumbs } from './components/Navigation/Breadcrumbs';
+import { HealthPill } from './components/Navigation/HealthPill';
 import { CorpusParamGuard, DocumentTitle } from './components/Navigation/RouteGuards';
 
 // Right panel (Dock / Settings)
@@ -27,14 +28,15 @@ import { useRepoStore } from '@/stores/useRepoStore';
 const HEALTH_POLL_INTERVAL_MS = 30_000;
 
 function App() {
-  const [healthDisplay, setHealthDisplay] = useState('—');
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [showCorpusRegistry, setShowCorpusRegistry] = useState(false);
   const activeRepo = useRepoStore((state) => state.activeRepo);
   const corpusName = useRepoStore(
     (state) => state.repos.find((repo) => repo.corpus_id === state.activeRepo)?.name,
   );
-  const { status, checkHealth } = useHealthStore();
+  // The pill (HealthPill) reads status from the store; App keeps the visibility-aware poll
+  // that feeds it so the top bar reflects live health without the pill being open.
+  const checkHealth = useHealthStore((s) => s.checkHealth);
   const navigate = useNavigate();
   const isEmbed = new URLSearchParams(window.location.search).get('embed') === '1';
 
@@ -122,14 +124,6 @@ function App() {
       stopPolling();
     };
   }, [checkHealth]);
-
-  useEffect(() => {
-    if (status) {
-      const isOk = status.ok || status.status === 'healthy';
-      const timestamp = status.ts ? new Date(status.ts).toLocaleTimeString() : new Date().toLocaleTimeString();
-      setHealthDisplay(isOk ? `OK @ ${timestamp}` : 'Not OK');
-    }
-  }, [status]);
 
   // Show loading screen while app initializes
   if (!isInitialized) {
@@ -244,8 +238,7 @@ function App() {
             <option value="dark">Dark</option>
             <option value="light">Light</option>
           </select>
-          <button id="btn-health" onClick={checkHealth}>Health</button>
-          <span id="health-status">{healthDisplay}</span>
+          <HealthPill />
         </div>
       </div>
 

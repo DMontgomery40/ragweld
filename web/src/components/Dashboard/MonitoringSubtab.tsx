@@ -239,7 +239,7 @@ export function MonitoringSubtab() {
           Recent Query Traces
         </h3>
         <p className="small" style={{ color: 'var(--fg-muted)', marginBottom: '16px', lineHeight: '1.6' }}>
-          Last 10 search queries with timing and metadata. For detailed analysis, use the dedicated Analytics tab.
+          The last 10 search and chat queries. For detailed analysis, use the dedicated Analytics tab.
         </p>
 
         {loading ? (
@@ -310,19 +310,6 @@ export function MonitoringSubtab() {
                   >
                     Repo
                   </th>
-                  <th
-                    style={{
-                      padding: '12px',
-                      textAlign: 'right',
-                      fontSize: '11.5px',
-                      fontWeight: '600',
-                      color: 'var(--fg-muted)',
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.5px'
-                    }}
-                  >
-                    Duration
-                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -340,8 +327,10 @@ export function MonitoringSubtab() {
                       e.currentTarget.style.background = 'transparent';
                     }}
                   >
-                    <td style={{ padding: '12px', fontSize: '11.5px', color: 'var(--fg-muted)' }}>
-                      {new Date(trace.timestamp).toLocaleTimeString()}
+                    <td style={{ padding: '12px', fontSize: '11.5px', color: 'var(--fg-muted)', whiteSpace: 'nowrap' }}>
+                      {/* Date + time, not time alone: these rows span more than one day and a
+                          bare "6:33:18 AM" made the list look like it ran backwards (M-140). */}
+                      {new Date(trace.timestamp).toLocaleString()}
                     </td>
                     <td
                       style={{
@@ -359,17 +348,6 @@ export function MonitoringSubtab() {
                     </td>
                     <td style={{ padding: '12px', fontSize: '11.5px', color: 'var(--link)' }}>
                       {trace.repo || 'default'}
-                    </td>
-                    <td
-                      style={{
-                        padding: '12px',
-                        textAlign: 'right',
-                        fontSize: '11.5px',
-                        fontFamily: "'SF Mono', monospace",
-                        color: 'var(--ok)'
-                      }}
-                    >
-                      {trace.duration_ms ? `${trace.duration_ms}ms` : '—'}
                     </td>
                   </tr>
                 ))}
