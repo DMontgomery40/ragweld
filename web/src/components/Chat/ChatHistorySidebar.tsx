@@ -1,4 +1,7 @@
 import type { ChatSession } from '@/components/Chat/chatSessions';
+import { useRepoStore } from '@/stores/useRepoStore';
+
+const RECALL_CORPUS_ID = 'recall_default';
 
 type ChatHistorySidebarProps = {
   sessions: ChatSession[];
@@ -15,6 +18,8 @@ export function ChatHistorySidebar({
   onNewChat,
   onDeleteChat,
 }: ChatHistorySidebarProps) {
+  const repos = useRepoStore((state) => state.repos);
+  const corpusName = (id: string): string => repos.find((repo) => repo.corpus_id === id)?.name || id;
   return (
     <div
       style={{
@@ -45,6 +50,13 @@ export function ChatHistorySidebar({
           const updatedAt = Number(session.updated_at || 0);
           const title = String(session.title || '').trim() || 'New chat';
           const messageCount = Array.isArray(session.messages) ? session.messages.length : 0;
+          const corpusIds = (session.sources?.corpus_ids ?? []).map(String);
+          const realCorpora = corpusIds.filter((cid) => cid && cid !== RECALL_CORPUS_ID);
+          const recallOn = corpusIds.includes(RECALL_CORPUS_ID);
+          // In a multi-corpus product a past chat is unreadable without knowing which corpus it
+          // was about (B-27); recall is a source, shown separately, not counted as a corpus.
+          const corpusBadges: string[] = realCorpora.map(corpusName);
+          if (recallOn) corpusBadges.push('Recall');
 
           return (
             <button
@@ -75,11 +87,39 @@ export function ChatHistorySidebar({
               >
                 {title}
               </div>
+              {corpusBadges.length > 0 ? (
+                <div
+                  data-testid="chat-history-corpora"
+                  style={{ marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap' }}
+                >
+                  {corpusBadges.map((label) => (
+                    <span
+                      key={label}
+                      title={label}
+                      style={{
+                        maxWidth: '100%',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        color: 'var(--accent-text)',
+                        background: 'var(--bg-elev2)',
+                        border: '1px solid var(--line)',
+                        borderRadius: '999px',
+                        padding: '2px 8px',
+                      }}
+                    >
+                      {label}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
               <div
                 style={{
-                  fontSize: '11px',
+                  fontSize: '11.5px',
                   color: 'var(--fg-muted)',
-                  marginTop: 4,
+                  marginTop: 6,
                   display: 'flex',
                   gap: 8,
                   flexWrap: 'wrap',
