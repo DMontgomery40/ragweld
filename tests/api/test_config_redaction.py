@@ -26,6 +26,16 @@ from server.services.config_store import save_config as save_scoped_config
 REAL_DSN = "postgresql://ragweld_user:s3cr3t-p4ssw0rd@db.internal:5432/tribrid_rag"
 REAL_HEADERS = "Authorization=Bearer abc123,X-Scope-OrgID=1"
 
+# Derived from the two constants above, never re-spelled. A hand-written second copy of a
+# secret drifts the moment the fixture changes, and a "this value must not appear" net that
+# is looking for a string nothing produces any more still reads as a passing test -- the
+# worst failure mode a security check has. Parsed independently of
+# `server/config_redaction`'s own helpers, so a bug there cannot make the assertions agree
+# with it.
+REAL_DSN_PASSWORD = REAL_DSN.partition("://")[2].partition("@")[0].partition(":")[2]
+REAL_HEADER_VALUE = REAL_HEADERS.split(",")[0].partition("=")[2]
+REAL_HEADER_TOKEN = REAL_HEADER_VALUE.split()[-1]
+
 
 async def _stored_config():
     return await load_scoped_config(repo_id=None)
@@ -52,7 +62,7 @@ async def test_get_config_withholds_the_dsn_password_and_keeps_the_rest(
     body = (await client.get("/api/config")).json()
     dsn = body["indexing"]["postgres_url"]
 
-    assert "s3cr3t-p4ssw0rd" not in dsn
+    assert REAL_DSN_PASSWORD not in dsn
     assert dsn == f"postgresql://ragweld_user:{SECRET_REDACTED}@db.internal:5432/tribrid_rag"
     # Everything an operator legitimately needs to read stays readable.
     assert "ragweld_user" in dsn and "db.internal:5432" in dsn and "tribrid_rag" in dsn
@@ -65,7 +75,7 @@ async def test_get_config_withholds_only_the_authorization_header(
     body = (await client.get("/api/config")).json()
     headers = body["tracing"]["otlp_headers"]
 
-    assert "abc123" not in headers
+    assert REAL_HEADER_TOKEN not in headers
     assert headers == f"Authorization={SECRET_REDACTED},X-Scope-OrgID=1"
 
 
@@ -75,8 +85,8 @@ async def test_no_credential_appears_anywhere_in_the_config_payload(
 ) -> None:
     """A whole-payload sweep, so a new credential-shaped field cannot slip past."""
     raw = (await client.get("/api/config")).text
-    assert "s3cr3t-p4ssw0rd" not in raw
-    assert "abc123" not in raw
+    assert REAL_DSN_PASSWORD not in raw
+    assert REAL_HEADER_TOKEN not in raw
 
 
 @pytest.mark.asyncio
@@ -97,7 +107,7 @@ async def test_putting_the_redacted_document_back_keeps_the_stored_credentials(
 
     stored = await _stored_config()
     assert stored.indexing.postgres_url == (
-        "postgresql://ragweld_user:s3cr3t-p4ssw0rd@db.example:5432/tribrid_rag"
+        f"postgresql://ragweld_user:{REAL_DSN_PASSWORD}@db.example:5432/tribrid_rag"
     )
     assert stored.tracing.otlp_headers == REAL_HEADERS
 
@@ -438,7 +448,7 @@ async def test_no_api_route_ships_a_credential_to_the_browser(
         # `_is_placeholder`'s prose rule deliberately lets through.
         body = response.text
         leaked += [
-            literal for literal in ("s3cr3t-p4ssw0rd", "Bearer abc123") if literal in body
+            literal for literal in (REAL_DSN_PASSWORD, REAL_HEADER_VALUE) if literal in body
         ]
         if leaked:
             exposures[path] = leaked
@@ -519,8 +529,8 @@ async def test_a_run_record_does_not_ship_the_credential_it_pinned(
     assert detail.status_code == 200, detail.text
     body = detail.json()
 
-    assert "s3cr3t-p4ssw0rd" not in detail.text
-    assert "abc123" not in detail.text
+    assert REAL_DSN_PASSWORD not in detail.text
+    assert REAL_HEADER_TOKEN not in detail.text
     assert not _exposed_credentials(body), "the run detail ships a DSN password"
 
     nested = body["config_snapshot"]["indexing"]["postgres_url"]
@@ -667,7 +677,7 @@ def test_the_sweep_matcher_catches_a_header_credential_and_ignores_prose() -> No
     what it must catch, and the two prose forms actually served today that it must not.
     """
     # What it must catch: an unredacted OTLP_HEADERS value, in either shape it appears in.
-    assert _exposed_credentials({"OTLP_HEADERS": "Authorization=Bearer abc123,X-Scope-OrgID=1"})
+    assert _exposed_credentials({"OTLP_HEADERS": REAL_HEADERS})
     assert _exposed_credentials({"config": {"OTLP_HEADERS": "Authorization: Bearer sk-live-9f2"}})
     assert _exposed_credentials(["Authorization=hunter2-plus"])
 
@@ -679,6 +689,25 @@ def test_the_sweep_matcher_catches_a_header_credential_and_ignores_prose() -> No
     assert _exposed_credentials({"d": "Authorization=Bearer ...,X-Scope-OrgID=1"}) == []
 
     # And the DSN half still works, including the marker case.
-    assert _exposed_credentials({"u": REAL_DSN}) == ["s3cr3t-p4ssw0rd"]
+    assert _exposed_credentials({"u": REAL_DSN}) == [REAL_DSN_PASSWORD]
     assert _exposed_credentials({"u": f"postgresql://u:{SECRET_REDACTED}@h:5432/d"}) == []
+
+
+def test_the_fixture_secrets_are_actually_derivable() -> None:
+    """The derivation is load-bearing, so it is asserted rather than assumed.
+
+    Every "this must not appear" check in this file looks for `REAL_DSN_PASSWORD` /
+    `REAL_HEADER_TOKEN`. If a change to `REAL_DSN` or `REAL_HEADERS` broke the parsing, the
+    nets would search for an empty or wrong string, match nothing, and pass -- reporting
+    safety they had not checked.
+    """
+    assert REAL_DSN_PASSWORD == "s3cr3t-p4ssw0rd"
+    assert REAL_DSN_PASSWORD in REAL_DSN
+    assert REAL_HEADER_VALUE == "Bearer abc123"
+    assert REAL_HEADER_TOKEN == "abc123"
+    assert REAL_HEADER_VALUE in REAL_HEADERS
+
+    # And each is a credential the matcher recognises, not an artefact of the split.
+    assert _exposed_credentials({"u": REAL_DSN}) == [REAL_DSN_PASSWORD]
+    assert _exposed_credentials({"h": REAL_HEADERS})
 
