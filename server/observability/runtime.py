@@ -453,6 +453,12 @@ def start_request_observation(
     """Observe a route that begins and ends inside one task.
 
     A streaming route does not: use `start_streaming_observation` there.
+
+    Only `Exception` sets the ERROR status. `start_as_current_span`, which this replaced,
+    used `set_status_on_exception` for `BaseException`, so a client disconnect
+    (`asyncio.CancelledError`) used to mark the request failed. It is not a failure of the
+    request, and marking it one puts noise on every cancelled stream in Tempo; the span
+    still ends either way.
     """
     observation = _build_observation(
         config=config,
