@@ -15,7 +15,15 @@ import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
+from prometheus_client import (
+    CONTENT_TYPE_LATEST,
+    REGISTRY,
+    Counter,
+    Gauge,
+    Histogram,
+    generate_latest,
+)
+from prometheus_client.core import GaugeMetricFamily
 
 # --------------------------------------------------------------------------------------
 # Core request/search metrics
@@ -370,24 +378,9 @@ EVAL_RUNS_TOTAL = Counter(
     "Total number of persisted Eval Analysis runs.",
 )
 
-EVAL_LAST_TOP1_ACCURACY = Gauge(
-    "tribrid_eval_last_top1_accuracy",
-    "Top-1 accuracy of the most recently persisted eval run.",
-)
-
-EVAL_LAST_TOPK_ACCURACY = Gauge(
-    "tribrid_eval_last_topk_accuracy",
-    "Top-K accuracy of the most recently persisted eval run.",
-)
-
 PROMPTFOO_RUNS_TOTAL = Counter(
     "tribrid_promptfoo_runs_total",
     "Total number of persisted Promptfoo regression runs.",
-)
-
-PROMPTFOO_LAST_PASS_RATIO = Gauge(
-    "tribrid_promptfoo_last_pass_ratio",
-    "Pass ratio (passed/total) of the most recent Promptfoo run.",
 )
 
 BENCHMARK_RUNS_TOTAL = Counter(
@@ -395,10 +388,58 @@ BENCHMARK_RUNS_TOTAL = Counter(
     "Total number of persisted Benchmark comparison runs.",
 )
 
-BENCHMARK_LAST_AVG_LATENCY_MS = Gauge(
-    "tribrid_benchmark_last_avg_latency_ms",
-    "Mean per-model latency (ms) of the most recent benchmark run.",
-)
+
+class LatestMLQualityCollector:
+    """Scrape-time view of the newest persisted eval / Promptfoo / benchmark run.
+
+    These four series used to be `Gauge`s set from the request that completed a
+    run, which made them process-local: every API restart re-exported them at
+    0 until the next run landed, and Grafana rendered that as a green 0%.
+    A collector reads the persisted runs instead, so a freshly started process
+    already reports the truth, and a metric with no persisted run behind it is
+    **not exported at all** — the only encoding of "no data" Prometheus has.
+    A plain gauge cannot express it: it can only say zero.
+    """
+
+    def collect(self):  # noqa: ANN201 - prometheus_client's collector protocol
+        try:
+            # Imported lazily: `ml_quality` reaches into the API and lineage
+            # layers, which import this module.
+            from server.observability.ml_quality import latest_quality_values
+
+            values = latest_quality_values()
+        except Exception:
+            # A scrape must never fail wholesale because the run store is
+            # unreadable; the absent series is the honest answer.
+            return
+        for name, documentation, value in (
+            (
+                "tribrid_eval_last_top1_accuracy",
+                "Top-1 accuracy of the most recently persisted eval run.",
+                values.eval_top1_accuracy,
+            ),
+            (
+                "tribrid_eval_last_topk_accuracy",
+                "Top-K accuracy of the most recently persisted eval run.",
+                values.eval_topk_accuracy,
+            ),
+            (
+                "tribrid_promptfoo_last_pass_ratio",
+                "Pass ratio (passed/total) of the most recently persisted Promptfoo run.",
+                values.promptfoo_pass_ratio,
+            ),
+            (
+                "tribrid_benchmark_last_avg_latency_ms",
+                "Mean per-model latency (ms) of the most recently persisted benchmark run.",
+                values.benchmark_average_latency_ms,
+            ),
+        ):
+            if value is None:
+                continue
+            yield GaugeMetricFamily(name, documentation, value=float(value))
+
+
+REGISTRY.register(LatestMLQualityCollector())
 
 # --------------------------------------------------------------------------------------
 # Indexing metrics

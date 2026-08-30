@@ -296,8 +296,6 @@ def _record_eval_run_metrics(run: EvalRun) -> None:
     must not live inside the save helper.
     """
     metrics.EVAL_RUNS_TOTAL.inc()
-    metrics.EVAL_LAST_TOP1_ACCURACY.set(float(run.top1_accuracy))
-    metrics.EVAL_LAST_TOPK_ACCURACY.set(float(run.topk_accuracy))
 
 
 async def _resolve_ragas_answer_route(cfg: TriBridConfig) -> Any:
@@ -660,8 +658,6 @@ def _save_promptfoo_run(run: PromptfooRun) -> None:
         run.model_dump_json(by_alias=True, indent=2), encoding="utf-8"
     )
     metrics.PROMPTFOO_RUNS_TOTAL.inc()
-    if run.total:
-        metrics.PROMPTFOO_LAST_PASS_RATIO.set(float(run.passed) / float(run.total))
 
 
 def _load_promptfoo_runs(repo_id: str) -> list[PromptfooRun]:

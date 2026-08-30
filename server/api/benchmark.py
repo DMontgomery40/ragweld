@@ -165,9 +165,6 @@ async def benchmark_run(
 
     # ML-quality metrics for the Eval/Benchmark/Prompt dashboard.
     metrics.BENCHMARK_RUNS_TOTAL.inc()
-    latencies = [float(item.latency_ms) for item in (run.results or []) if item.latency_ms is not None]
-    if latencies:
-        metrics.BENCHMARK_LAST_AVG_LATENCY_MS.set(sum(latencies) / len(latencies))
 
     if repo_id:
         version = capture_benchmark_run_version(run=run)
