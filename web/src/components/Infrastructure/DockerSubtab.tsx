@@ -18,6 +18,7 @@ const SERVICE_LABELS: Record<RagweldDockerService, string> = {
   tempo: 'Tempo',
   caddy: 'Caddy Secure Ingress',
   authelia: 'Authelia Authentication',
+  'authelia-redis': 'Authelia Session Store',
   cloudflared: 'Cloudflare Tunnel',
   alloy: 'Grafana Alloy',
   litellm: 'LiteLLM Gateway',
@@ -35,7 +36,7 @@ const SERVICE_LABELS: Record<RagweldDockerService, string> = {
   'langfuse-minio': 'Langfuse MinIO',
 };
 
-const DEPLOYMENT_ONLY_SERVICES: ReadonlySet<RagweldDockerService> = new Set(['caddy', 'authelia', 'cloudflared']);
+const DEPLOYMENT_ONLY_SERVICES: ReadonlySet<RagweldDockerService> = new Set(['caddy', 'authelia', 'authelia-redis', 'cloudflared']);
 
 // Kept in step with ServicesSubtab: one absent container must not be "Missing"
 // on one page and "expected" on the other.

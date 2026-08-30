@@ -44,6 +44,7 @@ _DOCKER_SERVICES = frozenset(
         "tempo",
         "caddy",
         "authelia",
+        "authelia-redis",
         "cloudflared",
         "alloy",
         "mimir",

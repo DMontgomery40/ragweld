@@ -19,6 +19,7 @@ export const RAGWELD_DOCKER_SERVICES = [
   'tempo',
   'caddy',
   'authelia',
+  'authelia-redis',
   'cloudflared',
   'alloy',
   'mimir',

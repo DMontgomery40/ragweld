@@ -537,19 +537,25 @@ def test_docker_service_allowlists_match_frontend_and_managed_compose_services()
         *managed_services_by_name,
         "caddy",
         "authelia",
+        "authelia-redis",
         "cloudflared",
     }
     managed_services = set(managed_services_by_name)
     expected_labels = {
         "caddy": "Caddy Secure Ingress",
         "authelia": "Authelia Authentication",
+        # Authelia's session store: added for persistent sessions, and a managed
+        # compose service, so it has to appear in every allowlist like the rest.
+        "authelia-redis": "Authelia Session Store",
         "cloudflared": "Cloudflare Tunnel",
     }
 
     for service_name, label in expected_labels.items():
         assert managed_services_by_name[service_name]["labels"]["io.ragweld.managed"] == "true"
-        assert f"{service_name}: '{label}'" in docker_subtab_source
-        assert f"{service_name}: '{label}'" in services_subtab_source
+        # A hyphenated service id has to be a quoted object key in TypeScript.
+        entries = (f"{service_name}: '{label}'", f"'{service_name}': '{label}'")
+        assert any(entry in docker_subtab_source for entry in entries), service_name
+        assert any(entry in services_subtab_source for entry in entries), service_name
 
     secure_ingress_group = re.search(
         r"title:\s*'Secure Ingress'.*?services:\s*\[(.*?)\]",
@@ -560,6 +566,7 @@ def test_docker_service_allowlists_match_frontend_and_managed_compose_services()
     assert set(re.findall(r"'([^']+)'", secure_ingress_group.group(1))) == {
         "caddy",
         "authelia",
+        "authelia-redis",
         "cloudflared",
     }
 
@@ -581,7 +588,7 @@ def test_secure_ingress_ui_contract_marks_missing_services_deployment_only() -> 
 
     deployment_only_set = (
         "const DEPLOYMENT_ONLY_SERVICES: ReadonlySet<RagweldDockerService> = "
-        "new Set(['caddy', 'authelia', 'cloudflared']);"
+        "new Set(['caddy', 'authelia', 'authelia-redis', 'cloudflared']);"
     )
     deployment_only_detail = (
         "Created by the Proxmox deployment overlay; not expected in the default local topology."

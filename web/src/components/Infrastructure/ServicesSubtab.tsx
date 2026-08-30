@@ -49,8 +49,8 @@ const SERVICE_GROUPS: Array<{
   {
     title: 'Secure Ingress',
     description:
-      'Public edge ingress, authentication, and tunnel services for protected operator access in the Proxmox deployment overlay.',
-    services: ['caddy', 'authelia', 'cloudflared'],
+      'Public edge ingress, authentication, and tunnel services for protected operator access in the Proxmox deployment overlay. Authelia keeps its sessions in its own Redis, so an operator signed out unexpectedly should look there first.',
+    services: ['caddy', 'authelia', 'authelia-redis', 'cloudflared'],
   },
   {
     title: 'Gateway and serving',
@@ -95,6 +95,7 @@ const SERVICE_LABELS: Record<RagweldDockerService, string> = {
   tempo: 'Tempo',
   caddy: 'Caddy Secure Ingress',
   authelia: 'Authelia Authentication',
+  'authelia-redis': 'Authelia Session Store',
   cloudflared: 'Cloudflare Tunnel',
   alloy: 'Grafana Alloy',
   litellm: 'LiteLLM Gateway',
@@ -112,7 +113,7 @@ const SERVICE_LABELS: Record<RagweldDockerService, string> = {
   'langfuse-minio': 'Langfuse MinIO',
 };
 
-const DEPLOYMENT_ONLY_SERVICES: ReadonlySet<RagweldDockerService> = new Set(['caddy', 'authelia', 'cloudflared']);
+const DEPLOYMENT_ONLY_SERVICES: ReadonlySet<RagweldDockerService> = new Set(['caddy', 'authelia', 'authelia-redis', 'cloudflared']);
 
 function isKnownService(value: string | null | undefined): value is RagweldDockerService {
   return RAGWELD_DOCKER_SERVICES.includes(value as RagweldDockerService);
