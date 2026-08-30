@@ -1424,6 +1424,15 @@ export interface IndexingConfig {
   /** Optional local embedding throughput override for index-time estimates (tokens/sec). */
   estimated_tokens_per_second_local?: number | null; // default: None
   figures?: IndexingFiguresConfig;
+  estimate?: IndexingEstimateConfig;
+}
+
+/** Floors under the pre-run estimate's sample, so it refuses to guess rather than guess wrong.  The estimate is the consent gate: an operator approves a run from the numbers in it. A sample that covers a negligible share of the corpus can be extrapolated to any number at all -- one cold run measured 8 bytes of 8.5 MB and reported 15,437 tokens for a 3,531,477-token corpus -- so below these floors the endpoint returns no point estimate at all. */
+export interface IndexingEstimateConfig {
+  /** Smallest share of the corpus's bytes a sample may cover and still be extrapolated to a point estimate. Below this the estimate reports an insufficient sample. */
+  min_sample_fraction?: number; // default: 0.05
+  /** Files that must be measured in every format group present. A group that measured nothing contributes neither tokens, chunks, nor its one-chunk-per-file floor, so the corpus total would silently omit it. */
+  min_files_per_format?: number; // default: 1
 }
 
 /** Figure/chart/drawing description during indexing (Docling picture enrichment via the gateway). */
@@ -4010,8 +4019,8 @@ export interface IndexEstimate {
   sampled_files: number;
   /** Bytes covered by the sampled files */
   sampled_bytes: number;
-  /** 'warming' means the estimator's tokenizer is still loading and NOTHING was measured: every count below is zero and the client must ask again. The estimate answers immediately in that state rather than blocking past its own timeout. */
-  status?: "ready" | "warming";
+  /** Only 'ready' carries numbers. 'warming' means the estimator's tokenizer is still loading; 'insufficient_sample' means it measured too little of the corpus to extrapolate honestly. In BOTH non-ready states every count below is zero -- not a small estimate, no estimate -- and the client must ask again rather than show them or open a confirmation on them. */
+  status?: "ready" | "warming" | "insufficient_sample";
   /** Rough seconds until the estimator is ready, when status is 'warming'. */
   warmup_seconds_remaining?: number | null;
   /** Wall-clock seconds this estimate spent sampling. The first call in a fresh process pays for loading the tokenizer, so the UI can say how long the measurement took. */

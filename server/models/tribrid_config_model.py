@@ -4536,6 +4536,36 @@ class ChunkingConfig(BaseModel):
 ChunkFigurePromptProfile = Literal["technical_figure", "schematic"]
 
 
+class IndexingEstimateConfig(BaseModel):
+    """Floors under the pre-run estimate's sample, so it refuses to guess rather than guess wrong.
+
+    The estimate is the consent gate: an operator approves a run from the numbers in it. A sample
+    that covers a negligible share of the corpus can be extrapolated to any number at all -- one
+    cold run measured 8 bytes of 8.5 MB and reported 15,437 tokens for a 3,531,477-token corpus --
+    so below these floors the endpoint returns no point estimate at all.
+    """
+
+    min_sample_fraction: float = Field(
+        default=0.05,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Smallest share of the corpus's bytes a sample may cover and still be extrapolated "
+            "to a point estimate. Below this the estimate reports an insufficient sample."
+        ),
+    )
+    min_files_per_format: int = Field(
+        default=1,
+        ge=1,
+        le=1000,
+        description=(
+            "Files that must be measured in every format group present. A group that measured "
+            "nothing contributes neither tokens, chunks, nor its one-chunk-per-file floor, so "
+            "the corpus total would silently omit it."
+        ),
+    )
+
+
 class IndexingFiguresConfig(BaseModel):
     """Figure/chart/drawing description during indexing (Docling picture enrichment via the gateway)."""
 
@@ -4703,6 +4733,7 @@ class IndexingConfig(BaseModel):
         description="Optional local embedding throughput override for index-time estimates (tokens/sec).",
     )
     figures: IndexingFiguresConfig = Field(default_factory=IndexingFiguresConfig)
+    estimate: IndexingEstimateConfig = Field(default_factory=IndexingEstimateConfig)
 
 
 # =============================================================================

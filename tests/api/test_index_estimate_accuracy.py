@@ -234,83 +234,109 @@ async def test_the_warmup_moves_the_load_off_the_estimate() -> None:
     )
 
 
-# A cold estimate must ANSWER, not block. The probe drives the real endpoint through the real
-# ASGI app in a fresh interpreter, so the tokenizer really is unloaded on the first call.
-_WARMING_PROBE = r"""
-import asyncio, json, time, sys
+# A cold estimate must never publish a number it did not measure. The probe drives the real
+# endpoint through the real ASGI app in a fresh interpreter, so the tokenizer really is unloaded
+# on the first call, and it compares the COLD numbers against the WARM ones from the same
+# process -- latency proved nothing here: the old cold test passed precisely because the
+# estimate bailed out early and returned 15,437 tokens for a 3,531,477-token corpus.
+_COLD_NUMBERS_PROBE = r"""
+import asyncio, json, sys
 
 async def main():
     import httpx
     from server.main import app
-    from server.indexing.estimate import sampler_is_warm, warm_sampler
-    from server.services.config_store import get_config
-    from server.indexing.chunker import Chunker
+    from server.indexing.estimate import sampler_is_warm
 
     repo_id, root = sys.argv[1], sys.argv[2]
     payload = {"corpus_id": repo_id, "repo_path": root}
     transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        cold_was_warm = sampler_is_warm()
-        started = time.monotonic()
-        first = await client.post("/api/index/estimate", json=payload)
-        first_seconds = time.monotonic() - started
-        first_body = first.json()
-
-        # The endpoint kicks the warm-up off in the background; wait for it the way the browser
-        # does, then ask again.
-        cfg = await get_config(repo_id=repo_id)
-        await asyncio.to_thread(warm_sampler, Chunker(cfg.chunking, cfg.tokenization))
-        second = await client.post("/api/index/estimate", json=payload)
-        second_body = second.json()
+    calls = []
+    async with httpx.AsyncClient(transport=transport, base_url="http://test", timeout=600) as client:
+        was_cold = not sampler_is_warm()
+        # Ask until it stops saying "not measured", exactly as the browser client does.
+        for _ in range(90):
+            response = await client.post("/api/index/estimate", json=payload)
+            body = response.json()
+            calls.append({
+                "status": body.get("status"),
+                "http": response.status_code,
+                "total_files": body.get("total_files"),
+                "tokens": body.get("estimated_total_tokens"),
+                "chunks": body.get("estimated_total_chunks"),
+                "sampled_files": body.get("sampled_files"),
+                "sampled_bytes": body.get("sampled_bytes"),
+                "low": body.get("estimated_tokens_low"),
+                "high": body.get("estimated_tokens_high"),
+            })
+            if body.get("status") == "ready":
+                break
+            await asyncio.sleep(2)
+        warm = (await client.post("/api/index/estimate", json=payload)).json()
 
     print(json.dumps({
-        "cold_was_warm": cold_was_warm,
-        "first_status": first_body.get("status"),
-        "first_seconds": first_seconds,
-        "first_remaining": first_body.get("warmup_seconds_remaining"),
-        "first_files": first_body.get("total_files"),
-        "first_chunks": first_body.get("estimated_total_chunks"),
-        "second_status": second_body.get("status"),
-        "second_chunks": second_body.get("estimated_total_chunks"),
-        "second_tokens": second_body.get("estimated_total_tokens"),
+        "was_cold": was_cold,
+        "calls": calls,
+        "warm_tokens": warm.get("estimated_total_tokens"),
+        "warm_chunks": warm.get("estimated_total_chunks"),
+        "warm_low": warm.get("estimated_tokens_low"),
+        "warm_high": warm.get("estimated_tokens_high"),
     }))
 
 asyncio.run(main())
 """
 
 
-@pytest.mark.integration
-async def test_a_cold_estimate_answers_warming_instead_of_blocking() -> None:
-    """The operator's first Index Now after a restart gets an answer, not a 30 s gamble."""
-    await _require_widest_corpus()
-
+def _run_probe(source: str, *args: str) -> dict:
     import json
     import os
     import subprocess
     import sys
 
     completed = subprocess.run(
-        [sys.executable, "-c", _WARMING_PROBE, WIDEST_CORPUS, WIDEST_ROOT],
+        [sys.executable, "-c", source, *args],
         capture_output=True,
         text=True,
         env=os.environ.copy(),
-        timeout=300,
+        timeout=600,
         check=False,
     )
     if completed.returncode != 0:
-        pytest.skip(f"warming probe could not run here: {completed.stderr.strip()[-300:]}")
-    result = json.loads(completed.stdout.strip().splitlines()[-1])
+        pytest.skip(f"probe could not run here: {completed.stderr.strip()[-300:]}")
+    return json.loads(completed.stdout.strip().splitlines()[-1])
 
-    assert result["cold_was_warm"] is False, "the probe process was not cold; it proves nothing"
-    # Answers fast, and says why it has no numbers.
-    assert result["first_status"] == "warming"
-    assert result["first_seconds"] < 2.0, f"the warming answer took {result['first_seconds']:.1f}s"
-    assert result["first_chunks"] == 0
-    assert float(result["first_remaining"] or 0) > 0
-    # It still counted what is cheap to count, so the wait is not information-free.
-    assert int(result["first_files"]) > 0
 
-    # Once warm, the same request is a real estimate.
-    assert result["second_status"] == "ready"
-    assert int(result["second_chunks"]) > 0
-    assert int(result["second_tokens"]) > 0
+@pytest.mark.integration
+async def test_a_cold_estimate_never_publishes_a_number_it_did_not_measure() -> None:
+    """The consent gate must not lie on the first click after a restart.
+
+    Before the floor, a cold first estimate measured 6 files totalling 8 bytes of 8.5 MB, then
+    the byte-ratio estimator scaled them up: 15,437 tokens with a confident band, for a corpus
+    whose real run indexes 3,531,477. Every non-ready answer now carries zeros, and the eventual
+    ready answer has to agree with the warm one.
+    """
+    await _require_widest_corpus()
+
+    result = _run_probe(_COLD_NUMBERS_PROBE, WIDEST_CORPUS, WIDEST_ROOT)
+    assert result["was_cold"] is True, "the probe process was not cold; it proves nothing"
+
+    calls = result["calls"]
+    assert calls, "the probe made no calls"
+    assert calls[-1]["status"] == "ready", f"never became ready: {calls}"
+
+    # Every answer before the ready one carries NO counts at all -- not a small estimate.
+    for call in calls[:-1]:
+        assert call["status"] in {"warming", "insufficient_sample"}
+        assert call["http"] == 200
+        for field in ("total_files", "tokens", "chunks", "sampled_files", "sampled_bytes"):
+            assert call[field] == 0, f"{call['status']} answer carried {field}={call[field]}"
+
+    # THE assertion: the cold-path numbers agree with the warm ones.
+    ready, warm_tokens = calls[-1], int(result["warm_tokens"])
+    assert warm_tokens > 0
+    assert int(ready["low"]) <= warm_tokens <= int(ready["high"]), (
+        f"the cold estimate's band {ready['low']}-{ready['high']} excludes the warm result "
+        f"{warm_tokens}"
+    )
+    ratio = int(ready["tokens"]) / warm_tokens
+    assert 0.5 <= ratio <= 2.0, f"cold {ready['tokens']} vs warm {warm_tokens} (ratio {ratio:.2f})"
+    assert int(ready["sampled_bytes"]) > 0

@@ -1045,16 +1045,22 @@ export function IndexingSubtab() {
         const deadline = Date.now() + ESTIMATE_WARMUP_DEADLINE_MS;
         for (;;) {
           estimate = await indexingApi.estimate(body);
-          if (estimate.status !== 'warming') break;
+          // Only 'ready' carries numbers. Both other states carry zeros by construction, so
+          // they must never reach the dialog or the summary line -- an operator approving a
+          // run from "0 chunks" is exactly the failure the consent gate exists to prevent.
+          if (estimate.status === 'ready') break;
           if (Date.now() >= deadline) {
             throw new Error(
-              'the estimator is still preparing after ' +
-                `${Math.round(ESTIMATE_WARMUP_DEADLINE_MS / 1000)}s`
+              estimate.status === 'insufficient_sample'
+                ? (estimate.assumptions?.[0] ?? 'the estimator could not measure enough of this corpus')
+                : `the estimator is still preparing after ${Math.round(ESTIMATE_WARMUP_DEADLINE_MS / 1000)}s`
             );
           }
           const remaining = Math.max(0, Number(estimate.warmup_seconds_remaining ?? 0));
           setEstimateWarmup(
-            `Preparing the estimator (about ${Math.max(1, Math.ceil(remaining))}s)…`
+            estimate.status === 'insufficient_sample'
+              ? 'Measuring more of the corpus…'
+              : `Preparing the estimator (about ${Math.max(1, Math.ceil(remaining))}s)…`
           );
           await new Promise((resolve) =>
             setTimeout(resolve, Math.min(ESTIMATE_WARMUP_POLL_MS, Math.max(1000, remaining * 1000)))

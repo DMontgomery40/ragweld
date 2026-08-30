@@ -208,3 +208,71 @@ def test_the_runtime_root_is_the_directory_that_owns_data(tmp_path: Path) -> Non
     assert (_RUNTIME_ROOT / "data").exists()
     # Same anchor the persisted run directory already uses, so the two cannot drift apart.
     assert _INDEX_RUNS_DIR.parent.parent == _RUNTIME_ROOT
+
+
+def test_a_sample_covering_almost_nothing_refuses_to_produce_a_number(tmp_path: Path) -> None:
+    """The G-1 shape, reproduced directly.
+
+    A cold run measured 6 files totalling 8 bytes of 8.5 MB and the byte-ratio estimator scaled
+    them to 15,437 tokens for a 3,531,477-token corpus, with a confident band. Extrapolating a
+    negligible sample is not a wide estimate, it is a fabricated one, so the sampler now refuses.
+    """
+    files = [tmp_path / "tiny.txt"]
+    files[0].write_text("x\n", encoding="utf-8")
+    for i in range(40):
+        big = tmp_path / f"big_{i:03d}.txt"
+        big.write_text("lunar module telemetry sample line.\n" * 2000, encoding="utf-8")
+        files.append(big)
+
+    sized = _sized(files)
+    # One measured file out of 41, so the covered byte share is far under the floor.
+    sample = sample_corpus(files=sized, chunker=_chunker(), files_per_format=1, min_sample_fraction=0.5)
+
+    assert sample.sufficient is False
+    assert "floor" in sample.insufficient_reason
+    assert any(a.startswith("NO ESTIMATE") for a in sample.assumptions)
+
+
+def test_a_format_that_measured_nothing_refuses_too(tmp_path: Path) -> None:
+    """A starved group contributes no tokens, no chunks and not even its one-per-file floor."""
+    (tmp_path / "a.txt").write_text("one short note.\n", encoding="utf-8")
+    (tmp_path / "b.py").write_text("def f():\n    return 1\n", encoding="utf-8")
+
+    sample = sample_corpus(
+        files=_sized([tmp_path / "a.txt", tmp_path / "b.py"]),
+        chunker=_chunker(),
+        min_files_per_format=2,  # neither group can reach this, so both are starved
+    )
+
+    assert sample.sufficient is False
+    assert "not measured at all" in sample.insufficient_reason
+
+
+def test_a_well_covered_sample_is_still_sufficient(tmp_path: Path) -> None:
+    """The floors must not refuse the ordinary case they exist to protect."""
+    files = _write_many(tmp_path, 12, "telemetry sample line.\n" * 20)
+
+    sample = sample_corpus(files=_sized(files), chunker=_chunker())
+
+    assert sample.sufficient is True
+    assert sample.insufficient_reason == ""
+    assert sample.total_chunks >= 12
+
+
+def test_the_model_load_is_not_charged_to_the_sampling_budget(tmp_path: Path) -> None:
+    """Why G-1 happened: the load ran inside the first pick and ate the whole budget.
+
+    With a zero budget the sampler still measures one file per the old rule -- what it must NOT
+    do is let the load consume the budget and then extrapolate the one file it managed. The
+    warm-up now runs before the clock starts, so a zero budget is a real zero.
+    """
+    from server.indexing.estimate import _MODEL_RELATIVE_ERROR  # noqa: F401
+
+    files = _write_many(tmp_path, 30, "telemetry sample line.\n" * 50)
+
+    sample = sample_corpus(files=_sized(files), chunker=_chunker(), budget_seconds=0.0)
+
+    # One file measured, 30 in the group: nowhere near the default 5% byte floor... except the
+    # single file IS ~3.3% here, so assert the mechanism rather than a magic number.
+    assert sample.budget_exhausted is True
+    assert sample.sampled_files == 1

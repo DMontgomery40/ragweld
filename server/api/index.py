@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, Literal, TypeVar
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from neo4j_graphrag.experimental.components.types import Neo4jGraph, Neo4jRelationship
@@ -327,32 +327,37 @@ _SEMANTIC_KG_CALLS_PER_SECOND = 1.0
 
 # The estimate samples the corpus through the real tokenizer, which loads its model on first
 # use. Warming it off the request path is what keeps the first Index Now after a restart inside
-# the client's timeout; it is kicked off from the first corpus-status read the Indexing tab
-# makes, so the operator is already on the tab by the time it matters. Fire and forget, once per
-# process, and a failure is not the caller's problem.
-_SAMPLER_WARMED = False
+# the client's timeout; it is kicked off from the status reads the Dashboard and the Indexing
+# tab make, so the load is usually done before the operator can click. Whether the sampler IS
+# warm is read from the tokenizer's caches (sampler_is_warm), never from this flag -- this only
+# stops two warm-ups being scheduled at once, and is cleared when the attempt ends so a failed
+# warm-up is retried rather than latched.
+_SAMPLER_WARMING = False
 
 
 def _warm_sampler_in_background(cfg: TriBridConfig) -> None:
-    global _SAMPLER_WARMED
-    if _SAMPLER_WARMED:
+    global _SAMPLER_WARMING
+    if _SAMPLER_WARMING or sampler_is_warm():
         return
-    if _TASKS:
-        # Never warm while a run is in flight. The warm-up and the indexer would both be
-        # importing `transformers` for the first time from different threads, and one of them
-        # gets the half-initialised module: observed as the indexer failing with "cannot import
-        # name 'AutoTokenizer' from 'transformers'". Warming is only useful before a run anyway,
-        # and a run loads the tokenizer itself, so sampler_is_warm() goes true without us.
-        # Returns without latching, so the next idle read tries again.
-        return
-    _SAMPLER_WARMED = True
 
     async def _warm() -> None:
-        with contextlib.suppress(Exception):
+        global _SAMPLER_WARMING
+        try:
             await asyncio.to_thread(warm_sampler, Chunker(cfg.chunking, cfg.tokenization))
+        except Exception:
+            # A warm-up that failed must be retryable: latching on the attempt would leave the
+            # process paying the cold cost on every estimate for ever.
+            logger.warning("estimator warm-up failed; it will be retried", exc_info=True)
+        finally:
+            _SAMPLER_WARMING = False
 
-    with contextlib.suppress(RuntimeError):
-        asyncio.get_running_loop().create_task(_warm())
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    # Set only once the task is definitely scheduled, and cleared when it finishes either way.
+    _SAMPLER_WARMING = True
+    loop.create_task(_warm())
 
 
 def _resolve_corpus_root(repo_path: str) -> Path:
@@ -1843,6 +1848,13 @@ async def _run_index(
         ignore_patterns.append(f"*{ext}")
 
     chunker = Chunker(cfg.chunking, cfg.tokenization)
+    # Take the tokenizer through the SAME lock the estimator's warm-up uses. Two threads
+    # importing `transformers` for the first time leave one holding the half-initialised module
+    # ("cannot import name 'AutoTokenizer'"), and guarding the warm-up on "is a run scheduled"
+    # only narrowed that window -- a run starting between the check and the warm thread's import
+    # still raced. Whichever side gets the lock does the import; the other waits. Idempotent and
+    # a few hundred microseconds once loaded.
+    await asyncio.to_thread(warm_sampler, chunker)
     # Enforce a strict max file size before reading/chunking.
     # LAW sources:
     # - cfg.chunking.max_indexable_file_size (bytes)
@@ -3707,6 +3719,50 @@ async def _background_index_job(
         _clear_runtime_state_for_repo(repo_id, queue=queue)
 
 
+
+def _unmeasured_estimate(
+    *,
+    repo_id: str,
+    root: Path,
+    cfg: TriBridConfig,
+    status: Literal["warming", "insufficient_sample"],
+    warmup_remaining: float | None,
+    reason: str,
+) -> IndexEstimate:
+    """An estimate that carries no numbers, because none were measured.
+
+    Every count is zero, including the file inventory: a warming answer that reported
+    "794 files, 0 chunks" is one careless render away from reading as an empty corpus, and this
+    payload's whole job is to be unmistakable for a result.
+    """
+    return IndexEstimate(
+        repo_id=repo_id,
+        repo_path=str(root),
+        total_files=0,
+        total_size_bytes=0,
+        skipped_large_files=0,
+        estimated_total_tokens=0,
+        estimated_total_chunks=0,
+        estimated_tokens_low=0,
+        estimated_tokens_high=0,
+        estimated_chunks_low=0,
+        estimated_chunks_high=0,
+        estimate_relative_error=0.0,
+        sampled_files=0,
+        sampled_bytes=0,
+        status=status,
+        warmup_seconds_remaining=warmup_remaining,
+        elapsed_seconds=0.0,
+        embedding_backend="provider"
+        if str(getattr(cfg.embedding, "embedding_backend", "") or "") == "provider"
+        else "deterministic",
+        embedding_provider=str(getattr(cfg.embedding, "embedding_type", "") or ""),
+        embedding_model=str(getattr(cfg.embedding, "effective_model", "") or ""),
+        skip_dense=bool(getattr(cfg.indexing, "skip_dense", False)),
+        assumptions=[reason],
+    )
+
+
 @router.post("/index/estimate", response_model=IndexEstimate)
 async def estimate_index(request: IndexRequest) -> IndexEstimate:
     """Estimate indexing cost/time for a corpus before running the indexer."""
@@ -3807,31 +3863,13 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
     # nothing is started -- the consent gate is untouched, it simply has not opened yet.
     if not sampler_is_warm():
         _warm_sampler_in_background(cfg)
-        return IndexEstimate(
+        return _unmeasured_estimate(
             repo_id=repo_id,
-            repo_path=str(root),
-            total_files=int(total_files),
-            total_size_bytes=int(total_bytes),
-            skipped_large_files=int(skipped_large_files),
-            estimated_total_tokens=0,
-            estimated_total_chunks=0,
-            estimated_tokens_low=0,
-            estimated_tokens_high=0,
-            estimated_chunks_low=0,
-            estimated_chunks_high=0,
-            estimate_relative_error=0.0,
-            sampled_files=0,
-            sampled_bytes=0,
+            root=root,
+            cfg=cfg,
             status="warming",
-            warmup_seconds_remaining=warmup_seconds_remaining(),
-            elapsed_seconds=0.0,
-            embedding_backend="provider"
-            if str(getattr(cfg.embedding, "embedding_backend", "") or "") == "provider"
-            else "deterministic",
-            embedding_provider=str(getattr(cfg.embedding, "embedding_type", "") or ""),
-            embedding_model=str(getattr(cfg.embedding, "effective_model", "") or ""),
-            skip_dense=bool(getattr(cfg.indexing, "skip_dense", False)),
-            assumptions=["the estimator's tokenizer is still loading; nothing was measured"],
+            warmup_remaining=warmup_seconds_remaining(),
+            reason="the estimator's tokenizer is still loading; nothing was measured",
         )
 
     # Measured, not a byte ratio: a sample of every format is extracted and run through the
@@ -3852,8 +3890,22 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
                 getattr(cfg.indexing, "parquet_extract_include_column_names", True)
             ),
         ),
+        min_sample_fraction=float(cfg.indexing.estimate.min_sample_fraction),
+        min_files_per_format=int(cfg.indexing.estimate.min_files_per_format),
     )
     elapsed_seconds = time.monotonic() - sampling_started
+    if not sample.sufficient:
+        # Measured too little to extrapolate. The consent gate shows no number rather than a
+        # confidently-banded wrong one -- a cold run once measured 8 bytes of 8.5 MB and
+        # reported 15,437 tokens for a 3,531,477-token corpus.
+        return _unmeasured_estimate(
+            repo_id=repo_id,
+            root=root,
+            cfg=cfg,
+            status="insufficient_sample",
+            warmup_remaining=None,
+            reason=f"no estimate: {sample.insufficient_reason}",
+        )
     est_tokens = sample.total_tokens
     est_chunks = sample.total_chunks
 

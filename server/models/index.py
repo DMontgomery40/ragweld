@@ -285,12 +285,14 @@ class IndexEstimate(BaseModel):
         ge=0, description="Files opened, extracted and chunked to produce the estimate"
     )
     sampled_bytes: int = Field(ge=0, description="Bytes covered by the sampled files")
-    status: Literal["ready", "warming"] = Field(
+    status: Literal["ready", "warming", "insufficient_sample"] = Field(
         default="ready",
         description=(
-            "'warming' means the estimator's tokenizer is still loading and NOTHING was "
-            "measured: every count below is zero and the client must ask again. The estimate "
-            "answers immediately in that state rather than blocking past its own timeout."
+            "Only 'ready' carries numbers. 'warming' means the estimator's tokenizer is still "
+            "loading; 'insufficient_sample' means it measured too little of the corpus to "
+            "extrapolate honestly. In BOTH non-ready states every count below is zero -- not a "
+            "small estimate, no estimate -- and the client must ask again rather than show them "
+            "or open a confirmation on them."
         ),
     )
     warmup_seconds_remaining: float | None = Field(

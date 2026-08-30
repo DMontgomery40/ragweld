@@ -114,6 +114,10 @@ class CorpusSample:
     formats: tuple[str, ...]
     budget_exhausted: bool
     assumptions: tuple[str, ...]
+    # False when the sample is too thin to extrapolate. The caller must then publish NO point
+    # estimate -- the numbers above are meaningless, not merely uncertain.
+    sufficient: bool = True
+    insufficient_reason: str = ""
 
     @classmethod
     def empty(cls) -> CorpusSample:
@@ -130,6 +134,8 @@ class CorpusSample:
             formats=(),
             budget_exhausted=False,
             assumptions=(),
+            sufficient=True,
+            insufficient_reason="",
         )
 
 
@@ -372,6 +378,8 @@ def sample_corpus(
     budget_seconds: float = _SAMPLE_BUDGET_SECONDS,
     files_per_format: int = _SAMPLE_FILES_PER_FORMAT,
     parquet: ParquetBounds | None = None,
+    min_sample_fraction: float = 0.05,
+    min_files_per_format: int = 1,
 ) -> CorpusSample:
     """Estimate a corpus's chunk and token totals by measuring a sample of its files.
 
@@ -387,6 +395,13 @@ def sample_corpus(
     for path, size in files:
         groups.setdefault(path.suffix.lower(), []).append((path, max(0, int(size))))
 
+    # Load the tokenizer BEFORE the clock starts. It costs ~26 s in a fresh process, and
+    # charging that to the sampling budget is what made a cold estimate measure 8 bytes of
+    # 8.5 MB and then extrapolate them: the first pick blew the budget, every later pick was
+    # skipped, and the byte-ratio estimator scaled the remainder up regardless. The budget is
+    # for measuring, not for loading.
+    warm_sampler(chunker)
+
     started = time.monotonic()
     total_tokens = 0.0
     total_chunks = 0.0
@@ -399,6 +414,8 @@ def sample_corpus(
     budget_exhausted = False
     saw_pdf = False
     saw_converted = False
+    total_bytes_all = sum(max(0, int(size)) for _path, size in files)
+    starved_formats: list[str] = []
 
     for ext, items in sorted(groups.items()):
         items.sort(key=lambda item: item[1])
@@ -441,6 +458,10 @@ def sample_corpus(
         elif ext in _HTML_SUFFIXES or ext in _OFFICE_PARTS:
             saw_converted = True
 
+        if measured_files < min_files_per_format:
+            # A group that measured nothing contributes neither tokens, chunks nor its
+            # one-chunk-per-file floor, so the corpus total would silently omit it entirely.
+            starved_formats.append(ext or "(no extension)")
         if measured_bytes <= 0:
             continue
         scale = float(group_bytes) / float(measured_bytes)
@@ -455,6 +476,22 @@ def sample_corpus(
     relative_error = min(
         _MAX_RELATIVE_ERROR, _MODEL_RELATIVE_ERROR + _sampling_error(partial_densities)
     )
+
+    # Floors. Extrapolating a negligible sample produces a number with a confident-looking band
+    # and no relationship to the corpus, which on this surface is worse than no number at all:
+    # the estimate is the consent gate.
+    covered = (float(sampled_bytes) / float(total_bytes_all)) if total_bytes_all > 0 else 1.0
+    reason = ""
+    if starved_formats:
+        reason = (
+            f"{len(starved_formats)} file format(s) were not measured at all "
+            f"({', '.join(sorted(set(starved_formats))[:5])})"
+        )
+    elif covered < min_sample_fraction:
+        reason = (
+            f"the sample covered {covered * 100:.2f}% of the corpus's bytes, below the "
+            f"{min_sample_fraction * 100:.0f}% floor"
+        )
 
     tokens = int(round(total_tokens))
     chunks = int(round(total_chunks))
@@ -479,6 +516,9 @@ def sample_corpus(
             f"sampling stopped at the {budget_seconds:g}s budget; the rest is extrapolated"
         )
 
+    if reason:
+        assumptions.append(f"NO ESTIMATE: {reason}")
+
     return CorpusSample(
         total_tokens=tokens,
         total_chunks=chunks,
@@ -492,4 +532,6 @@ def sample_corpus(
         formats=tuple(sorted(groups)),
         budget_exhausted=budget_exhausted,
         assumptions=tuple(assumptions),
+        sufficient=not reason,
+        insufficient_reason=reason,
     )
