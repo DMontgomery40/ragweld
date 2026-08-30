@@ -126,9 +126,10 @@ def build_figure_pipeline_options(figures: Any, gateway: FigureGateway | None) -
             # the library default of 0.0 every prediction "meets" the floor and the long tail
             # (e.g. a real chart scoring 1e-7 on "logo") denies every picture, unconditionally,
             # whenever ``skip_classes`` is non-empty. ``skip_classes`` is documented as "never
-            # sent for description" for the figure's own class, i.e. its majority prediction, so
-            # 0.5 is the protocol invariant that makes the deny check mean that: a denied class
-            # must be the majority prediction, not merely present somewhere in the tail.
+            # sent for description" for the figure's own class, i.e. a confident (>= 50%)
+            # prediction, so 0.5 is the protocol invariant that makes the deny check mean that:
+            # a denied class must be a confident (>= 50%) prediction, not merely present
+            # somewhere in the tail.
             classification_min_confidence=0.5,
             # The pipeline raster scale governs the stored picture; this one governs the
             # crop actually sent to the vision alias. Both follow the operator's setting.
@@ -346,7 +347,7 @@ def _read_with_docling(
     from docling_core.types.doc import PictureItem
     from docling_core.types.doc.document import DescriptionAnnotation, PictureMeta
 
-    from server.indexing.figure_serializer import make_markdown_serializer
+    from server.indexing.figure_serializer import _non_blank, make_markdown_serializer
 
     try:
         result = (converter or _docling_converter()).convert(str(path))
@@ -363,20 +364,34 @@ def _read_with_docling(
     pictures = [p for p, _ in doc.iterate_items() if isinstance(p, PictureItem)]
 
     def _description_text(p: Any) -> str | None:
-        """The picture's raw description text from either shape, or ``None`` if the vision
-        call was never attempted for this picture (no description object of any shape).
+        """The picture's resolved description text, or ``None`` if the vision call was never
+        attempted for this picture (no description object of any shape).
 
-        A description can live in the current ``item.meta`` shape (live enrichment, and any
-        fixture that sets meta directly) or the deprecated ``item.annotations`` shape (fixtures
-        built against the older API); setting meta alone does not populate annotations, so both
-        must be checked or meta-only pictures would be miscounted as never-attempted.
+        Mirrors ``RagweldPictureSerializer.serialize``'s exact fallback order -- meta text
+        first, falling back to a non-blank legacy ``DescriptionAnnotation`` only when the meta
+        text is blank -- via the same ``_non_blank`` helper, so this triage can never disagree
+        with which spans actually get a ``FigureAnnotation``. A description can live in the
+        current ``item.meta`` shape (live enrichment, and any fixture that sets meta directly)
+        or the deprecated ``item.annotations`` shape (fixtures built against the older API);
+        setting meta alone does not populate annotations, so both are checked or a meta-only
+        picture with a blank meta text but a real legacy annotation would be miscounted as
+        failed instead of described.
         """
-        if isinstance(p.meta, PictureMeta) and p.meta.description is not None:
-            return p.meta.description.text
-        for a in p.get_annotations():
-            if isinstance(a, DescriptionAnnotation):
-                return a.text
-        return None
+        has_meta_description = isinstance(p.meta, PictureMeta) and p.meta.description is not None
+        text = _non_blank(p.meta.description.text) if has_meta_description else None
+        has_annotation = False
+        if text is None:
+            for a in p.get_annotations():
+                if isinstance(a, DescriptionAnnotation):
+                    has_annotation = True
+                    text = _non_blank(a.text)
+                    if text is not None:
+                        break
+        if text is not None:
+            return text
+        if has_meta_description or has_annotation:
+            return ""  # attempted (a description object exists), but nothing non-blank
+        return None  # never attempted
 
     described = 0
     failed = 0
@@ -388,7 +403,7 @@ def _read_with_docling(
             described += 1
         else:
             failed += 1  # attempted, gateway returned nothing
-    skipped = max(0, len(pictures) - described - failed)
+    skipped = len(pictures) - described - failed  # every picture lands in exactly one count
     return ExtractedDocument(
         text=full,
         extraction="docling",

@@ -1042,6 +1042,54 @@ def _resolve_figure_route(cfg: TriBridConfig, *, as_http: bool = True) -> Figure
     )
 
 
+def figure_run_summary_event(
+    *, describe: bool, described: int, failed: int, undescribed: int
+) -> dict[str, str] | None:
+    """The end-of-run figure summary event, or ``None`` when there is nothing to report.
+
+    A picture lands in exactly one of three counts (see ``_read_with_docling``): ``described``
+    (the vision call returned non-blank text), ``failed`` (the vision call was attempted --
+    Docling absorbs the per-picture failure and returns empty text rather than raising -- but
+    the gateway returned nothing), or ``undescribed`` (the picture never reached the vision call
+    at all: area threshold, classification deny-list, or ``describe`` off).
+
+    Returns ``None`` when all three counts are zero (no pictures were ever processed this run,
+    e.g. no figures were detected in any document); the caller is expected to gate on
+    ``cfg.indexing.figures.enabled`` before calling this at all, since there is nothing figure-
+    related to report when the feature is off.
+
+    The event escalates to a warning only when ``describe`` was requested and nothing was
+    described despite at least one picture being attempted or skipped -- the one shape that
+    means the vision alias never actually described anything, whether every picture failed,
+    was skipped, or both. A ``failed > 0`` warning gets a distinct hint from an all-skipped
+    one: a failure means the vision call WAS attempted (and billed) and came back empty, which
+    points at the gateway/alias/route or the completion-token budget, not at the area threshold
+    or classification deny-list that produces an all-skipped run.
+    """
+    if described == 0 and failed == 0 and undescribed == 0:
+        return None
+    described_nothing = describe and described == 0 and (failed + undescribed) > 0
+    if described_nothing and failed > 0:
+        hint = (
+            " (description was enabled but the vision alias returned empty descriptions; "
+            "check the gateway, the alias, and indexing.figures.max_completion_tokens)"
+        )
+    elif described_nothing:
+        hint = " (description was enabled but no figure was described; check the vision alias)"
+    else:
+        hint = ""
+    return {
+        "type": "warning" if described_nothing else "log",
+        "message": (
+            "Figure summary: "
+            f"figures_described={described} "
+            f"figures_failed={failed} "
+            f"figures_undescribed={undescribed}"
+            + hint
+        ),
+    }
+
+
 def _detect_local_hardware_class() -> str:
     machine = str(platform.machine() or "").strip().lower()
     is_apple_silicon = sys.platform == "darwin" and machine in {"arm64", "aarch64"}
@@ -2374,49 +2422,15 @@ async def _run_index_body(
         )
 
     # Reported independently of GraphRAG: figures can be enabled with semantic KG off.
-    # A picture lands in exactly one of three counts (see _read_with_docling): described (the
-    # vision call returned non-blank text), failed (the vision call was attempted -- Docling
-    # absorbs the per-picture failure and returns empty text rather than raising -- but the
-    # gateway returned nothing), or undescribed/skipped (the picture never reached the vision
-    # call at all: area threshold, classification deny-list, or describe off).
     if event_queue is not None and cfg.indexing.figures.enabled:
-        # Describing nothing at all when descriptions were requested is reported as a warning,
-        # not a log line, because it is the one shape that means the vision alias never
-        # actually described anything -- whether every picture failed, was skipped, or both.
-        described_nothing = (
-            cfg.indexing.figures.describe
-            and figures_described_total == 0
-            and (figures_failed_total + figures_undescribed_total) > 0
+        figure_event = figure_run_summary_event(
+            describe=cfg.indexing.figures.describe,
+            described=figures_described_total,
+            failed=figures_failed_total,
+            undescribed=figures_undescribed_total,
         )
-        if described_nothing and figures_failed_total > 0:
-            # Distinct from the all-skipped case: the vision call WAS attempted (billed) and
-            # came back empty, which points at the gateway/alias/route or the completion-token
-            # budget rather than at the area threshold or classification deny-list.
-            hint = (
-                " (description was enabled but the vision alias returned empty descriptions; "
-                "check the gateway, the alias, and indexing.figures.max_completion_tokens)"
-            )
-        elif described_nothing:
-            hint = (
-                " (description was enabled but no figure was described; check the "
-                "vision alias)"
-            )
-        else:
-            hint = ""
-        _emit_event(
-            event_queue,
-            {
-                "type": "warning" if described_nothing else "log",
-                "message": (
-                    "Figure summary: "
-                    f"figures_described={figures_described_total} "
-                    f"figures_failed={figures_failed_total} "
-                    f"figures_undescribed={figures_undescribed_total}"
-                    + hint
-                ),
-            },
-            drop_oldest=True,
-        )
+        if figure_event is not None:
+            _emit_event(event_queue, figure_event, drop_oldest=True)
 
     if total_chunks == 0:
         raise RuntimeError(

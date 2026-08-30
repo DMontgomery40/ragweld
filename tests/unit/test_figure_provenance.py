@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from docling.document_converter import DocumentConverter
 from docling_core.types.doc import PictureItem
 from docling_core.types.doc.document import (
+    DescriptionAnnotation,
     DescriptionMetaField,
     PictureClassificationMetaField,
     PictureClassificationPrediction,
@@ -17,7 +20,12 @@ from docling_core.types.doc.document import (
 from server.indexing.chunker import Chunker
 from server.indexing.figure_serializer import make_markdown_serializer
 from server.indexing.provenance import stamp_provenance
-from server.indexing.text_extractors import ExtractedDocument, SourceSpan, _build_source_map
+from server.indexing.text_extractors import (
+    ExtractedDocument,
+    SourceSpan,
+    _build_source_map,
+    _read_with_docling,
+)
 from server.models.index import Chunk, FigureAnnotation, PageRegion
 from server.models.tribrid_config_model import TriBridConfig
 from tests.fixtures.pdf_builder import apollo_figure_pages
@@ -127,3 +135,36 @@ def test_a_chunk_that_only_brushes_a_figure_stays_a_text_chunk() -> None:
 def test_extracted_document_counts_default_to_zero() -> None:
     doc = ExtractedDocument(text="x", extraction="direct", kind="text")
     assert (doc.figures_described, doc.figures_failed, doc.figures_skipped) == (0, 0, 0)
+
+
+def test_blank_meta_description_falls_back_to_a_non_blank_annotation() -> None:
+    """``_read_with_docling``'s triage must mirror the serializer's exact fallback order (meta
+    text first, a non-blank legacy annotation only when the meta text is blank) so the counts
+    and the spans can never disagree: a picture whose meta description is blank but whose
+    legacy ``DescriptionAnnotation`` carries real text must be counted as described, not
+    failed, and its span must carry the resulting ``FigureAnnotation``.
+    """
+    doc = DocumentConverter().convert(str(apollo_figure_pages())).document
+    pictures = [p for p, _ in doc.iterate_items() if isinstance(p, PictureItem) and p.prov]
+    pic = pictures[0]
+    pic.meta = PictureMeta(description=DescriptionMetaField(text="", created_by="test"))
+    pic.annotations.append(
+        DescriptionAnnotation(
+            text="A real fallback description of the landing gear strut and footpad.",
+            provenance="test",
+        )
+    )
+
+    class _FixedDocConverter:
+        """Hands back the already-converted (and mutated) document instead of reconverting."""
+
+        def convert(self, _path: str) -> Any:
+            return SimpleNamespace(document=doc)
+
+    extracted = _read_with_docling(apollo_figure_pages(), converter=_FixedDocConverter())
+    assert extracted is not None
+    assert extracted.figures_described == 1, "the non-blank legacy annotation must count as described"
+    assert extracted.figures_failed == 0
+    assert extracted.figures_skipped == len(pictures) - 1, "the other, untouched picture stays skipped"
+    figure_spans = [s for s in extracted.spans if s.figure is not None]
+    assert figure_spans and "landing gear strut" in figure_spans[0].figure.summary
