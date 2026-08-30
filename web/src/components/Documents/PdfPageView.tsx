@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { documentPageUrl } from '@/api/documents';
+import { FigureBadge } from '@/components/Documents/FigureBadge';
 import { RegionOverlay } from '@/components/Documents/RegionOverlay';
-import { distinctRegionPages, regionsForPage } from '@/components/Documents/sourceLabels';
+import { distinctRegionPages, figureBadgeLabel, regionsForPage } from '@/components/Documents/sourceLabels';
 import type { ChunkMatch, PageSize } from '@/types/generated';
 
 type Props = {
@@ -33,6 +34,7 @@ export function PdfPageView({ corpusId, path, pageCount, pageSizes, source }: Pr
     return Math.min(Math.max(start, 1), Math.max(pageCount, 1));
   });
   const [loaded, setLoaded] = useState(false);
+  const isFigure = figureBadgeLabel(source) !== null;
   const regions = regionsForPage(prov, page);
   const size = pageSizes[page - 1] ?? pageSizes[0];
   const aspect = size ? `${size.width} / ${size.height}` : '612 / 792';
@@ -115,7 +117,10 @@ export function PdfPageView({ corpusId, path, pageCount, pageSizes, source }: Pr
         </div>
         <details style={{ marginTop: '12px' }} open>
           <summary style={{ cursor: 'pointer', fontSize: '12.5px', fontWeight: 700, color: 'var(--fg)' }}>
-            Cited text
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+              {isFigure ? 'Figure description' : 'Cited text'}
+              <FigureBadge source={source} testId="document-figure-badge" />
+            </span>
           </summary>
           <pre
             data-testid="document-cited-text"

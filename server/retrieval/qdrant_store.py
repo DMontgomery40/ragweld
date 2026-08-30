@@ -57,6 +57,12 @@ _PAYLOAD_META_KEYS = (
     "char_start",
     "char_end",
     "kind",
+    # Figure chunks (``server/indexing/provenance.py``). Without these the dense and sparse
+    # legs read back a figure description as ordinary page text: only the graph leg hydrates
+    # full metadata from Postgres, so the citation UI would have nothing to mark. Present on
+    # figure chunks only, and only once a corpus is re-indexed with figures enabled.
+    "chunk_kind",
+    "figure",
 )
 
 _SPARSE_DOC_EMBEDDERS: dict[str, Any] = {}

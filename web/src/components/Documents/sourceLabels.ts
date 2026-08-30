@@ -41,6 +41,26 @@ export function corpusIdOf(source: ChunkMatch): string {
   return typeof raw === 'string' ? raw.trim() : '';
 }
 
+/**
+ * Local view model for `Chunk.metadata["figure"]` (the indexer's `FigureAnnotation`).
+ * `ChunkMatch.metadata` is `Record<string, unknown>` on the wire, so this stays a local
+ * read shape — it is not a generated contract and must not be treated as one.
+ */
+type FigureMetadataView = { kind?: unknown };
+
+/**
+ * "Figure", or "Figure · chart" when the vision model named a kind, for a citation whose
+ * chunk is a figure description rather than page text. Null for every other citation.
+ */
+export function figureBadgeLabel(source: ChunkMatch): string | null {
+  if (source.metadata?.chunk_kind !== 'figure') return null;
+  const raw = source.metadata?.figure;
+  const figure: FigureMetadataView | null =
+    typeof raw === 'object' && raw !== null && !Array.isArray(raw) ? (raw as FigureMetadataView) : null;
+  const kind = typeof figure?.kind === 'string' ? figure.kind.trim() : '';
+  return kind && kind !== 'other' ? `Figure · ${kind}` : 'Figure';
+}
+
 export function charSpanOf(source: ChunkMatch): { start: number; end: number } | null {
   const start = source.metadata?.char_start;
   const end = source.metadata?.char_end;

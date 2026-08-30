@@ -4,7 +4,7 @@ import { Sidepanel } from '@/components/Sidepanel';
 import { DockPickerModal } from '@/components/Dock/DockPickerModal';
 import { DockView } from '@/components/Dock/DockView';
 import { DocumentViewer } from '@/components/Documents/DocumentViewer';
-import { formatSourceLocation } from '@/components/Documents/sourceLabels';
+import { figureBadgeLabel, formatSourceLocation } from '@/components/Documents/sourceLabels';
 import { DOCK_DEFAULT_MODE_BY_PATH } from '@/config/dockCatalog';
 import { getRouteByPath } from '@/config/routes';
 import { useDockStore } from '@/stores';
@@ -169,7 +169,8 @@ export function DockPanel() {
     if (mode === 'document') {
       if (!activeDocument) return 'Source';
       const name = activeDocument.source.file_path.split('/').pop() || activeDocument.source.file_path;
-      return `Source: ${name} · ${formatSourceLocation(activeDocument.source)}`;
+      const figureSuffix = figureBadgeLabel(activeDocument.source) === null ? '' : ' · Figure';
+      return `Source: ${name} · ${formatSourceLocation(activeDocument.source)}${figureSuffix}`;
     }
     if (!docked) return 'Dock';
     return `Dock: ${formatDockTitle(docked)}`;

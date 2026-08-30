@@ -1,4 +1,5 @@
 import { documentPageUrl } from '@/api/documents';
+import { FigureBadge } from '@/components/Documents/FigureBadge';
 import { RegionOverlay } from '@/components/Documents/RegionOverlay';
 import { corpusIdOf, formatSourceLocation, hasPageRegions, regionsForPage } from '@/components/Documents/sourceLabels';
 import { useDockStore } from '@/stores/useDockStore';
@@ -92,8 +93,11 @@ export function SourceList({ sources, legacyCitations, webCitations }: Props) {
                 <span style={{ fontWeight: 700, fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   [{number}] {fileName}
                 </span>
-                <span style={{ color: 'var(--fg-muted)' }}>
-                  {formatSourceLocation(source)} · {corpusName(corpusId)}
+                <span style={{ color: 'var(--fg-muted)', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                  <span>
+                    {formatSourceLocation(source)} · {corpusName(corpusId)}
+                  </span>
+                  <FigureBadge source={source} testId="chat-citation-figure-badge" />
                 </span>
                 <span style={{ color: 'var(--fg-muted)' }}>score {Number(source.score || 0).toFixed(3)}</span>
               </span>
@@ -113,6 +117,7 @@ export function SourceList({ sources, legacyCitations, webCitations }: Props) {
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12.5px', color: 'var(--link)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               [{number}] {source.file_path}:{source.start_line}-{source.end_line}
             </span>
+            <FigureBadge source={source} testId="chat-citation-figure-badge" />
             <span style={{ color: 'var(--fg-muted)', whiteSpace: 'nowrap' }}>
               {source.provenance?.extraction === 'docling' ? `${formatSourceLocation(source)} · ` : ''}
               score {Number(source.score || 0).toFixed(3)}

@@ -14,7 +14,7 @@ import pytest
 from server.config import load_config
 from server.db.postgres import PostgresClient
 from server.indexing.generations import build_generation
-from server.models.index import Chunk, ChunkProvenance
+from server.models.index import Chunk, ChunkProvenance, FigureAnnotation, PageRegion
 from server.retrieval.qdrant_store import (
     QdrantChunkStore,
     QdrantCollectionMissingError,
@@ -486,5 +486,90 @@ async def test_a_generation_is_never_recreated_over_an_existing_collection() -> 
             await store.create_generation(corpus_id, embedding_dim=4, physical=first)
         assert await store.count_points(first) == 2
         assert (await store.status(corpus_id, physical=first)).points == 2
+    finally:
+        await store.delete_corpus(corpus_id)
+
+
+async def test_figure_chunk_metadata_survives_the_payload_round_trip() -> None:
+    """A figure description reads back as a figure on the dense and sparse legs.
+
+    The citation UI marks figures from ``metadata["chunk_kind"]`` and ``metadata["figure"]``.
+    Only the graph leg hydrates chunks from Postgres, so those keys have to travel in the
+    Qdrant payload or a figure hit is indistinguishable from ordinary page text.
+    """
+    store = QdrantChunkStore(load_config())
+    corpus_id = f"qdrant-figure-{uuid.uuid4().hex[:8]}"
+    figure = FigureAnnotation(
+        kind="chart",
+        summary="Bar chart of monthly rainfall against the thirty-year mean",
+        labels=["rainfall (mm)", "1991-2020 mean"],
+    )
+    chunk = Chunk(
+        chunk_id="fig-1",
+        content=figure.summary,
+        file_path="docs/rainfall-report.pdf",
+        start_line=1,
+        end_line=2,
+        token_count=len(figure.summary.split()),
+        embedding=[1.0, 0.0, 0.0, 0.0],
+        metadata={
+            "chunk_ordinal": 0,
+            "chunk_kind": "figure",
+            "figure": figure.model_dump(mode="json"),
+            "figure_class": "chart",
+        },
+        provenance=ChunkProvenance(
+            extraction="docling",
+            page_start=7,
+            page_end=7,
+            regions=[PageRegion(page=7, left=0.12, top=0.30, right=0.88, bottom=0.62)],
+        ),
+    )
+    try:
+        generation = await store.create_generation(corpus_id, embedding_dim=4)
+        assert await store.write_chunks(corpus_id, generation, [chunk], embedding_dim=4) == 1
+
+        dense = await store.vector_search(corpus_id, [1.0, 0.0, 0.0, 0.0], 3, physical=generation)
+        sparse = await store.sparse_search(
+            corpus_id, "monthly rainfall bar chart", 3, physical=generation
+        )
+        assert [m.chunk_id for m in dense] == ["fig-1"]
+        assert [m.chunk_id for m in sparse] == ["fig-1"]
+
+        for match in dense + sparse:
+            assert match.metadata["chunk_kind"] == "figure"
+            assert match.metadata["figure"]["kind"] == "chart"
+            assert match.metadata["figure"]["summary"] == figure.summary
+            assert match.metadata["figure"]["labels"] == list(figure.labels)
+            # Not carried: nothing downstream reads the local classifier's own class.
+            assert "figure_class" not in match.metadata
+            assert match.provenance is not None and match.provenance.page_start == 7
+    finally:
+        await store.delete_corpus(corpus_id)
+
+
+async def test_non_figure_chunk_carries_no_figure_metadata() -> None:
+    """Ordinary chunks stay unmarked: the badge must not appear on page text."""
+    store = QdrantChunkStore(load_config())
+    corpus_id = f"qdrant-no-figure-{uuid.uuid4().hex[:8]}"
+    try:
+        generation = await store.create_generation(corpus_id, embedding_dim=4)
+        await store.write_chunks(
+            corpus_id,
+            generation,
+            [
+                _chunk(
+                    "plain",
+                    "the mooring was serviced in March",
+                    embedding=[1.0, 0, 0, 0],
+                    ordinal=0,
+                )
+            ],
+            embedding_dim=4,
+        )
+        hits = await store.vector_search(corpus_id, [1.0, 0.0, 0.0, 0.0], 3, physical=generation)
+        assert [m.chunk_id for m in hits] == ["plain"]
+        assert "chunk_kind" not in hits[0].metadata
+        assert "figure" not in hits[0].metadata
     finally:
         await store.delete_corpus(corpus_id)
