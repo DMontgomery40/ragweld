@@ -18,6 +18,7 @@ import re
 
 import pytest
 from fastapi.routing import APIRoute
+from httpx import ASGITransport, AsyncClient
 from starlette.routing import Match
 
 from server.api.graph import (
@@ -125,3 +126,67 @@ def test_no_route_is_shadowed_by_a_greedy_path_parameter() -> None:
         resolved, _ = _resolve(sample, method=method)
         assert resolved is not None, f"{route.path} matches nothing for {sample}"
         assert resolved is route, f"{route.path} is shadowed: {sample} resolves to {resolved.path}"
+
+
+# --- The same contract, asserted through a real request to the whole FastAPI app ---------
+#
+# Resolving `router.routes` proves the ordering inside this router. These two go through
+# `server.main.app`, so they also cover the `/api` mount and any middleware that could
+# rewrite the path. The discriminator needs no database: a request to an entity route with
+# NO `entity_id` is rejected by validation (422) BEFORE the endpoint body opens a client.
+# Under the greedy-`{entity_id:path}` ordering this file exists to prevent,
+# `/api/graph/{c}/entity/neighbors` instead resolved to the bare-entity endpoint with
+# entity_id="neighbors", which is a satisfied signature - it would reach the database and
+# answer 404/503, never 422.
+
+
+def _missing_field_names(payload: dict) -> set[str]:
+    return {str(item.get("loc", [])[-1]) for item in payload.get("detail", []) if item.get("loc")}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("suffix", ["", "/neighbors", "/relationships"])
+async def test_entity_routes_require_the_entity_id_query_parameter(suffix: str) -> None:
+    from server.main import app
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get(f"/api/graph/{CORPUS}/entity{suffix}")
+
+    assert response.status_code == 422, (
+        f"/entity{suffix} without entity_id answered {response.status_code}; a status other "
+        "than 422 means the request was routed to a different endpoint whose signature it "
+        f"satisfied. Body: {response.text[:200]}"
+    )
+    assert "entity_id" in _missing_field_names(response.json())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("entity_id", [CODE_ENTITY_ID, METHOD_ENTITY_ID, PLAIN_ENTITY_ID])
+async def test_entity_ids_with_slashes_bind_on_the_neighbors_endpoint(entity_id: str) -> None:
+    """A `/`- and `::`-bearing id must bind through the whole stack, not just this router.
+
+    `max_hops` is the probe: it belongs to the neighbors endpoint and to no other, and
+    sending it unparseable makes validation reject THAT field and answer before any store
+    is opened. So a 422 whose only complaint is `max_hops` proves two things at once - the
+    request reached the neighbors endpoint, and `entity_id` bound cleanly. Under the greedy
+    ordering this file exists to prevent, the same URL resolved to the bare-entity endpoint,
+    which has no `max_hops`, would have ignored it, and would have gone to the database.
+    """
+    from server.main import app
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get(
+            f"/api/graph/{CORPUS}/entity/neighbors",
+            params={"entity_id": entity_id, "max_hops": "not-a-number"},
+        )
+
+    assert response.status_code == 422, (
+        f"expected validation to reject max_hops at the neighbors endpoint, got "
+        f"{response.status_code}: {response.text[:200]}"
+    )
+    invalid = _missing_field_names(response.json())
+    assert invalid == {"max_hops"}, (
+        f"{entity_id!r} did not bind cleanly; validation complained about {invalid}"
+    )

@@ -15,6 +15,7 @@
 // M-63  the inline panel has labels, zoom and pan
 // M-64  wheel zoom is real, and there is a readout that proves it
 // M-65  Table view shows tables, and its empty state does not loop
+// M-66  Retrieval's graph-leg card says whether this corpus has an entity graph
 // M-149 hub labels are drawn above the nodes; the graph can be exported
 import { expect, test, type Page } from '@playwright/test';
 import { API_BASE, activateCorpusInBrowser } from './corpus_fixture';
@@ -44,9 +45,18 @@ async function vizCounts(page: Page): Promise<{ nodes: number; edges: number }> 
 
 async function zoomLevel(page: Page, testId: string): Promise<number> {
   const text = await page.getByTestId(testId).innerText();
+  expect(text, 'the zoom readout must never show NaN').not.toContain('NaN');
   const value = Number(text.replace('%', '').trim());
   expect(Number.isFinite(value), `unreadable zoom level: ${text}`).toBe(true);
   return value;
+}
+
+/** Wait for the fit-to-view transform to settle into a readable number. */
+async function settledZoom(page: Page, testId: string): Promise<number> {
+  await expect
+    .poll(async () => (await page.getByTestId(testId).innerText()).trim(), { timeout: 30_000 })
+    .toMatch(/^[\d.]+%$/);
+  return zoomLevel(page, testId);
 }
 
 async function searchEntities(page: Page, term: string): Promise<void> {
@@ -179,7 +189,7 @@ test.describe('Graph Explorer on the ragweld_code code graph', () => {
     expect(box!.width, 'the inline visualization must have real width').toBeGreaterThan(250);
     expect(box!.height).toBeGreaterThan(300);
     await page.waitForTimeout(2500); // let the simulation settle: a frame diff must mean zoom
-    const before = await zoomLevel(page, 'graph-zoom-level');
+    const before = await settledZoom(page, 'graph-zoom-level');
     await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
     await page.mouse.wheel(0, -600);
     await expect
@@ -222,7 +232,7 @@ test.describe('Graph Explorer on the ragweld_code code graph', () => {
     expect(labelInk, 'hub label text must be painted on the canvas').toBeGreaterThan(200);
 
     // M-64 in the modal: wheel zoom and the +/- controls both move the readout.
-    const modalBefore = await zoomLevel(page, 'graph-fullscreen-zoom-level');
+    const modalBefore = await settledZoom(page, 'graph-fullscreen-zoom-level');
     const modalCanvas = await page.getByTestId('graph-fullscreen-canvas').locator('canvas').boundingBox();
     await page.mouse.move(modalCanvas!.x + modalCanvas!.width / 2, modalCanvas!.y + modalCanvas!.height / 2);
     await page.mouse.wheel(0, -600);
@@ -320,5 +330,45 @@ test.describe('Graph Explorer on a corpus with no entity graph', () => {
     });
     expect(missing.status()).toBe(404);
     expect((await missing.json()).detail).toContain(CODE_ENTITY_ID);
+  });
+});
+
+
+test.describe('Retrieval graph-leg readiness', () => {
+  // M-66 (C-43): Graph reported 0 entities / 0 relationships / 0 communities for
+  // `nasa-apollo-11` while Retrieval for the SAME corpus showed ENABLE GRAPH SEARCH on,
+  // GRAPH TOP-K 30, GRAPH WEIGHT 0.3 and EXPAND VIA ENTITIES on, with nothing to suggest
+  // the entity half of the leg could not fire. The card now states the corpus's readiness.
+  async function openGraphLeg(page: Page, baseURL: string | undefined, corpusId: string) {
+    await activateCorpusInBrowser(page, corpusId);
+    await page.goto(
+      new URL(`rag?subtab=retrieval&corpus=${encodeURIComponent(corpusId)}`, baseURL).toString(),
+      { waitUntil: 'domcontentloaded' }
+    );
+    await page.getByTestId('retrieval-card-search_paths').click();
+    await expect(page.getByTestId('retrieval-graph-readiness')).toBeVisible({ timeout: 60_000 });
+  }
+
+  test('a corpus with no entity graph says so on the graph-leg card', async ({ page, baseURL }) => {
+    const stats = await (await page.request.get(`${API_BASE}/graph/${NO_ENTITY_CORPUS}/stats`)).json();
+    expect(stats.total_entities).toBe(0);
+    expect(stats.total_chunks).toBeGreaterThan(0);
+
+    await openGraphLeg(page, baseURL, NO_ENTITY_CORPUS);
+    const readiness = page.getByTestId('retrieval-graph-readiness');
+    await expect(readiness).toContainText('no entity graph');
+    await expect(readiness).toContainText('entity expansion cannot contribute');
+    await expect(readiness).toContainText(String(stats.total_chunks).replace(/\B(?=(\d{3})+(?!\d))/g, ','));
+  });
+
+  test('a corpus with an entity graph reports its real counts', async ({ page, baseURL }) => {
+    const stats = await (await page.request.get(`${API_BASE}/graph/${CODE_CORPUS}/stats`)).json();
+    expect(stats.total_entities).toBeGreaterThan(0);
+
+    await openGraphLeg(page, baseURL, CODE_CORPUS);
+    const readiness = page.getByTestId('retrieval-graph-readiness');
+    await expect(readiness).toContainText('Graph ready');
+    await expect(readiness).not.toContainText('no entity graph');
+    await expect(readiness).toContainText(String(stats.total_entities).replace(/\B(?=(\d{3})+(?!\d))/g, ','));
   });
 });

@@ -161,8 +161,12 @@ const controlButtonStyle: React.CSSProperties = {
   cursor: 'pointer',
 };
 
-/** Zoom as a percentage the operator can actually read at both ends of the range. */
+/** Zoom as a percentage the operator can actually read at both ends of the range.
+ *  ForceGraph2D's zoomToFit divides by the node bounding box, so it reports a
+ *  non-finite k while the graph is empty or the canvas has no area; the readout must
+ *  never print "NaN%" at the operator. */
 function formatZoom(k: number): string {
+  if (!Number.isFinite(k) || k <= 0) return '-';
   const percent = k * 100;
   if (percent >= 100) return `${Math.round(percent)}%`;
   if (percent >= 10) return `${percent.toFixed(0)}%`;
@@ -331,6 +335,15 @@ export function GraphSubtab() {
   // confirm it happened, and the inline panel offered no zoom at all (M-63, M-64).
   const [vizZoom, setVizZoom] = useState(1);
   const [fullscreenZoom, setFullscreenZoom] = useState(1);
+
+  /** Ignore the non-finite transforms zoomToFit reports before the graph has an extent. */
+  const recordZoom = useCallback(
+    (setter: (k: number) => void) => (transform: { k: number }) => {
+      const k = Number(transform?.k);
+      if (Number.isFinite(k) && k > 0) setter(k);
+    },
+    []
+  );
 
   // Compute node degrees for importance-based labeling
   const nodeDegreeMap = useMemo(() => {
@@ -741,8 +754,9 @@ export function GraphSubtab() {
   const stepZoom = useCallback((ref: React.MutableRefObject<any>, factor: number) => {
     const graph = ref.current;
     if (!graph?.zoom) return;
-    const next = Math.max(0.05, Math.min(40, Number(graph.zoom()) * factor));
-    graph.zoom(next, 200);
+    const current = Number(graph.zoom());
+    if (!Number.isFinite(current) || current <= 0) return;
+    graph.zoom(Math.max(0.005, Math.min(40, current * factor)), 200);
   }, []);
 
   const exportBaseName = useMemo(() => {
@@ -1606,7 +1620,7 @@ export function GraphSubtab() {
                   linkWidth={1}
                   backgroundColor="rgba(0,0,0,0)"
                   onRenderFramePost={paintInlineLabels}
-                  onZoom={(t: { k: number }) => setVizZoom(t.k)}
+                  onZoom={recordZoom(setVizZoom)}
                   enableZoomInteraction={true}
                   enablePanInteraction={true}
                   onNodeClick={(n: any) => {
@@ -1797,7 +1811,7 @@ export function GraphSubtab() {
                       ctx.fill();
                     }}
                     onRenderFramePost={paintFullscreenLabels}
-                    onZoom={(t: { k: number }) => setFullscreenZoom(t.k)}
+                    onZoom={recordZoom(setFullscreenZoom)}
                     linkColor={() => 'rgba(255, 255, 255, 0.12)'}
                     linkWidth={1.5}
                     backgroundColor="rgba(0,0,0,0)"

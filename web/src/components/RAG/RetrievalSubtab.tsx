@@ -14,7 +14,7 @@ import { NumberField } from '@/components/ui/NumberField';
 import { useAPI, useConfig, useConfigField } from '@/hooks';
 import { tracesApi } from '@/api';
 import { useRepoStore } from '@/stores/useRepoStore';
-import type { ChatModelInfo, ChatModelsResponse, TracesLatestResponse } from '@/types/generated';
+import type { ChatModelInfo, ChatModelsResponse, GraphStats, TracesLatestResponse } from '@/types/generated';
 
 type RetrievalCardId = 'search_paths' | 'fusion_scoring' | 'generation' | 'ops_tracing';
 type OpsTracingViewId = 'runtime_compatibility' | 'observability_integrations';
@@ -149,6 +149,30 @@ export function RetrievalSubtab() {
     return () => controller.abort();
   }, [activeRepo, api]);
 
+  useEffect(() => {
+    const corpus = String(activeRepo || '').trim();
+    if (!corpus) {
+      setGraphReadiness(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch(`/api/graph/${encodeURIComponent(corpus)}/stats`);
+        if (!response.ok) throw new Error(String(response.status));
+        const stats: GraphStats = await response.json();
+        if (!cancelled) setGraphReadiness(stats);
+      } catch {
+        // Readiness is advisory: if it cannot be read, the card says nothing rather than
+        // guessing that the graph is empty.
+        if (!cancelled) setGraphReadiness(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeRepo]);
+
   // --- Retrieval ----------------------------------------------------------
   const [rrfKDiv, setRrfKDiv] = useConfigField<number>('retrieval.rrf_k_div', 60);
   const [langgraphFinalK, setLanggraphFinalK] = useConfigField<number>('retrieval.langgraph_final_k', 20);
@@ -194,6 +218,11 @@ export function RetrievalSubtab() {
   const [sparseBm25B, setSparseBm25B] = useConfigField<number>('sparse_search.bm25_b', 0.4);
 
   // --- Graph search -------------------------------------------------------
+  // M-66: the graph leg's settings say nothing about whether this corpus HAS a graph.
+  // Graph reported 0 entities / 0 relationships for nasa-apollo-11 while this card showed
+  // graph search on, top-k 30, weight 0.3 and entity expansion enabled, with nothing to
+  // suggest the entity half could not fire.
+  const [graphReadiness, setGraphReadiness] = useState<GraphStats | null>(null);
   const [graphMode, setGraphMode] = useConfigField<'chunk' | 'entity'>('graph_search.mode', 'chunk');
   const [graphSearchEnabled, setGraphSearchEnabled] = useConfigField<boolean>('graph_search.enabled', true);
   const [chunkNeighborWindow, setChunkNeighborWindow] = useConfigField<number>('graph_search.chunk_neighbor_window', 1);
@@ -701,6 +730,42 @@ export function RetrievalSubtab() {
 
                 <div style={INNER_PANEL_STYLE}>
                   <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--fg)', marginBottom: 10 }}>Graph Leg</div>
+                  {graphReadiness ? (
+                    <div
+                      style={{
+                        marginBottom: 10,
+                        padding: '9px 11px',
+                        borderRadius: 8,
+                        border: '1px solid var(--line)',
+                        background:
+                          (graphReadiness.total_entities ?? 0) === 0
+                            ? 'rgba(var(--warn-rgb), 0.12)'
+                            : 'rgba(var(--accent-rgb), 0.07)',
+                        fontSize: 11.5,
+                        lineHeight: 1.5,
+                        color: 'var(--fg)',
+                      }}
+                      data-testid="retrieval-graph-readiness"
+                    >
+                      {(graphReadiness.total_entities ?? 0) === 0 ? (
+                        <>
+                          <strong>This corpus has no entity graph.</strong> Entity mode and entity expansion cannot
+                          contribute for it; only chunk mode can, over{' '}
+                          {(graphReadiness.total_chunks ?? 0).toLocaleString()} chunk nodes. Enable Semantic KG or
+                          code-entity indexing in RAG &gt; Indexing and re-index to populate it.
+                        </>
+                      ) : (
+                        <>
+                          Graph ready: {(graphReadiness.total_entities ?? 0).toLocaleString()} entities,{' '}
+                          {(graphReadiness.total_relationships ?? 0).toLocaleString()} relationships,{' '}
+                          {(graphReadiness.total_communities ?? 0).toLocaleString()} communities.
+                          {(graphReadiness.total_relationships ?? 0) === 0
+                            ? ' With no relationships, entity expansion has nothing to walk.'
+                            : ''}
+                        </>
+                      )}
+                    </div>
+                  ) : null}
                   <div className="input-group">
                     <label>
                       Graph Top-K <TooltipIcon name="GRAPH_SEARCH_TOP_K" />
