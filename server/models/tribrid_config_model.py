@@ -374,9 +374,29 @@ class MCPHTTPTransportStatus(BaseModel):
     host_allowed: bool = Field(
         default=True,
         description=(
-            "Whether the advertised URL's host passes the transport's own Host check. "
-            "False means a client following this URL is answered 421 by DNS rebinding "
-            "protection until the host is added to `config.mcp.allowed_hosts`."
+            "Whether the host a client would actually use passes the transport's own Host "
+            "check. False means that client is answered 421 by DNS rebinding protection "
+            "until the host is added to `config.mcp.allowed_hosts`. When "
+            "`public_base_url` is still the unconfigured loopback default this is "
+            "evaluated for the PUBLIC host the request arrived on, not for the loopback "
+            "address the URL names -- the loopback is always allowed, so evaluating it "
+            "would report a reachable endpoint to an operator who cannot reach it."
+        ),
+    )
+    public_base_url_configured: bool = Field(
+        default=True,
+        description=(
+            "False when `config.mcp.public_base_url` is still the model default while the "
+            "request reached the API from somewhere other than loopback -- i.e. the "
+            "deployment is proxied and nobody has set the public origin, so the "
+            "advertised URL is a loopback address no client on that origin can reach."
+        ),
+    )
+    request_host: str = Field(
+        default="",
+        description=(
+            "The host this status request arrived on (X-Forwarded-Host, else Host). "
+            "Reported so the workbench can name the value an operator should configure."
         ),
     )
 

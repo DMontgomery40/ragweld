@@ -1637,8 +1637,12 @@ export interface MCPHTTPTransportStatus {
   running: boolean;
   /** The canonical URL to point an MCP client at, built from `config.mcp.public_base_url` and the mount path. The server owns this string: the workbench used to assemble `http://{host}:{port}{path}` itself, which advertised plain HTTP on port 80 for a deployment that is HTTPS-only. */
   url: string;
-  /** Whether the advertised URL's host passes the transport's own Host check. False means a client following this URL is answered 421 by DNS rebinding protection until the host is added to `config.mcp.allowed_hosts`. */
+  /** Whether the host a client would actually use passes the transport's own Host check. False means that client is answered 421 by DNS rebinding protection until the host is added to `config.mcp.allowed_hosts`. When `public_base_url` is still the unconfigured loopback default this is evaluated for the PUBLIC host the request arrived on, not for the loopback address the URL names -- the loopback is always allowed, so evaluating it would report a reachable endpoint to an operator who cannot reach it. */
   host_allowed?: boolean; // default: True
+  /** False when `config.mcp.public_base_url` is still the model default while the request reached the API from somewhere other than loopback -- i.e. the deployment is proxied and nobody has set the public origin, so the advertised URL is a loopback address no client on that origin can reach. */
+  public_base_url_configured?: boolean; // default: True
+  /** The host this status request arrived on (X-Forwarded-Host, else Host). Reported so the workbench can name the value an operator should configure. */
+  request_host?: string; // default: ""
 }
 
 /** One tool registered on the embedded MCP server. */

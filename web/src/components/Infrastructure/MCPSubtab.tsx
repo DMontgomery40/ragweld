@@ -84,7 +84,23 @@ export function MCPSubtab() {
                 <a href={httpHref} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--link)', textDecoration: 'none' }} data-testid="mcp-http-url">
                   {httpHref}
                 </a>
-                {http.host_allowed === false ? (
+                {http.public_base_url_configured === false ? (
+                  <div
+                    role="alert"
+                    data-testid="mcp-public-url-unconfigured"
+                    style={{ marginTop: '8px', color: 'var(--err)', fontSize: '12px', lineHeight: 1.5 }}
+                  >
+                    Public URL not configured — this page reached the API from{' '}
+                    <span className="mono">{http.request_host}</span>, but{' '}
+                    <span className="mono">config.mcp.public_base_url</span> is still the
+                    loopback default, so the URL above names an address no client on that
+                    origin can reach. Set{' '}
+                    <span className="mono">mcp.public_base_url</span> to{' '}
+                    <span className="mono">https://{http.request_host}</span> and add{' '}
+                    <span className="mono">{http.request_host}</span> to{' '}
+                    <span className="mono">mcp.allowed_hosts</span>.
+                  </div>
+                ) : http.host_allowed === false ? (
                   <div
                     role="alert"
                     data-testid="mcp-host-not-allowed"
