@@ -62,6 +62,17 @@ export const useConfigStore = create<ConfigStore>((set) => {
   const timersByCorpus: Record<string, Record<string, ReturnType<typeof setTimeout>>> = {};
   const DEBOUNCE_MS = 300;
 
+  // One GET /api/config per corpus in flight at a time. Several hooks call `loadConfig`
+  // on the same mount (app init, `useConfig`'s mount effect, the corpus-changed
+  // listener) and each one used to issue its own request: a single dashboard load spent
+  // four round trips fetching the identical document (M-129).
+  //
+  // This shares the request, it does not cache the answer: the entry is dropped the
+  // moment the load settles, so the next caller always goes to the server. A caller
+  // that arrives while patches are still queued for this corpus never joins -- the
+  // shared load already ran its flush, and joining it would drop the newer edits.
+  const inFlightLoadByCorpus: Record<string, Promise<void>> = {};
+
   const getActiveCorpusId = (): string => {
     try {
       const u = new URL(window.location.href);
@@ -180,18 +191,11 @@ export const useConfigStore = create<ConfigStore>((set) => {
     }, DEBOUNCE_MS);
   };
 
-  return ({
-  config: null,
-  persisted: null,
-  loading: false,
-  error: null,
-  saving: false,
-
-  loadConfig: async () => {
+  /** The real load. `loadConfig` wraps it so concurrent callers share one request. */
+  const loadConfigOnce = async (corpusKey: string): Promise<void> => {
     // Critical: do NOT cancel optimistic patches here. Flush them before loading so
     // debounced saves are not lost and GET does not overwrite local updates.
-    
-    const corpusKey = String(getActiveCorpusId() || '');
+
 
     // Capture optimistic updates BEFORE flushing (flush will clear pendingByCorpus for this corpus)
     const optimisticUpdates = { ...(pendingByCorpus[corpusKey] || {}) } as Record<string, Record<string, unknown>>;
@@ -205,11 +209,11 @@ export const useConfigStore = create<ConfigStore>((set) => {
     } catch (error) {
       flushError = error instanceof Error ? error.message : 'Failed to save configuration';
     }
-    
+
     set({ loading: true, error: flushError });
     try {
       const config = await configApi.load();
-      
+
       // Merge server config with optimistic updates that were pending before flush,
       // but only when flush succeeded. If flush failed, show persisted server state.
       const mergedConfig = { ...config } as any;
@@ -221,7 +225,7 @@ export const useConfigStore = create<ConfigStore>((set) => {
           }
         }
       }
-      
+
       set({ config: mergedConfig as TriBridConfig, persisted: config, loading: false, error: flushError });
     } catch (error) {
       const loadError = error instanceof Error ? error.message : 'Failed to load configuration';
@@ -229,6 +233,28 @@ export const useConfigStore = create<ConfigStore>((set) => {
         loading: false,
         error: flushError ? `${flushError} | ${loadError}` : loadError,
       });
+    }
+  };
+
+  return ({
+  config: null,
+  persisted: null,
+  loading: false,
+  error: null,
+  saving: false,
+
+  loadConfig: async () => {
+    const sharedCorpusKey = String(getActiveCorpusId() || '');
+    const hasQueuedPatches = Object.keys(pendingByCorpus[sharedCorpusKey] || {}).length > 0;
+    const shared = inFlightLoadByCorpus[sharedCorpusKey];
+    if (shared && !hasQueuedPatches) return shared;
+
+    const run = loadConfigOnce(sharedCorpusKey);
+    inFlightLoadByCorpus[sharedCorpusKey] = run;
+    try {
+      await run;
+    } finally {
+      if (inFlightLoadByCorpus[sharedCorpusKey] === run) delete inFlightLoadByCorpus[sharedCorpusKey];
     }
   },
 

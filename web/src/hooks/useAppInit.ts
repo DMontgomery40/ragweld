@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useRepoStore } from '@/stores/useRepoStore';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { modelsApi } from '@/api';
 import { initFaroFromConfig } from '@/observability/faro';
 import { UiHelpers } from '@/utils/uiHelpers';
 
@@ -25,15 +24,12 @@ export function useAppInit() {
         // (Prevents config load from using stale/invalid localStorage corpus_id.)
         await loadRepos().catch((err: unknown) => console.warn('Failed to load repos:', err));
 
-        // Load config + models in parallel after corpora are available
-        await Promise.all([
-          loadConfig().catch((err: unknown) => console.warn('Failed to load config:', err)),
-
-          // Best-effort: warm the models list (cost estimation, model pickers, etc.)
-          modelsApi.listAll()
-            .then(() => {})
-            .catch((err: unknown) => console.warn('Failed to load models:', err)),
-        ]);
+        // Load config once the corpora are available. There is deliberately no models
+        // warm-up here: `useModels` keeps its own per-corpus cache and shares its
+        // in-flight request, and a bare `modelsApi.listAll()` populates neither -- it was
+        // one more `/api/models` round trip per load that no picker could ever read
+        // (M-129).
+        await loadConfig().catch((err: unknown) => console.warn('Failed to load config:', err));
 
         // Frontend RUM: ships errors/web-vitals to the Alloy Faro collector
         // when the loaded config carries a collector endpoint. If the config

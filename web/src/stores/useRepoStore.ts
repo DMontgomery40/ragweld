@@ -48,6 +48,14 @@ const getApiBase = (): string => {
   }
 };
 
+// One GET /api/corpora in flight at a time. The old guard returned early when a load
+// was already running, so the second caller resolved *before* the corpus list existed
+// and carried on with an empty registry; app init awaits `loadRepos()` precisely so the
+// corpus scope is settled before config loads (M-129). Sharing the promise makes every
+// caller wait for the same answer. It is not a cache: the entry is dropped as soon as
+// the load settles, so the next call always goes to the server.
+let inFlightRepoLoad: Promise<void> | null = null;
+
 export const useRepoStore = create<RepoStore>((set, get) => ({
   repos: [],
   activeRepo: '',
@@ -57,12 +65,8 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
   initialized: false,
 
   loadRepos: async () => {
-    // Prevent concurrent loads - if already loading, skip
-    const { loading } = get();
-    if (loading) {
-      return;
-    }
-
+    if (inFlightRepoLoad) return inFlightRepoLoad;
+    const run = (async () => {
     set({ loading: true, error: null });
     try {
       const apiBase = getApiBase();
@@ -128,6 +132,13 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
         error: error instanceof Error ? error.message : 'Failed to load repositories',
         initialized: true  // Mark as initialized even on error to prevent retry loops
       });
+    }
+    })();
+    inFlightRepoLoad = run;
+    try {
+      await run;
+    } finally {
+      if (inFlightRepoLoad === run) inFlightRepoLoad = null;
     }
   },
 

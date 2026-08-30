@@ -9,6 +9,7 @@ import { IndexDisplayPanels } from './IndexDisplayPanels';
 import { useDockerStore } from '@/stores/useDockerStore';
 import { StatusIndicator } from '@/components/ui/StatusIndicator';
 import { useRepoStore } from '@/stores/useRepoStore';
+import { useHealthStore } from '@/stores/useHealthStore';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import type { IndexRunSummary } from '@/types/generated';
 
@@ -68,7 +69,12 @@ export function SystemStatusSubtab() {
         // autotuneData, // HIDDEN - Pro feature
         dockerData
       ] = await Promise.allSettled([
-        DashAPI.getHealth(),
+        // Health goes through the shared store, not a second `/health` client: the top
+        // bar probes health on the same mount, and two uncoordinated clients meant every
+        // dashboard load spent three round trips on one endpoint (M-129). The store
+        // shares an in-flight probe, so co-timed callers collapse to one request while a
+        // later poll or a click on Health still asks the server.
+        useHealthStore.getState().checkHealth(),
         DashAPI.getMCPStatus(),
         // DashAPI.getAutotuneStatus(), // HIDDEN - Pro feature
         DashAPI.getDockerStatus()
@@ -76,8 +82,8 @@ export function SystemStatusSubtab() {
 
       // Health
       if (healthData.status === 'fulfilled') {
-        const h = healthData.value;
-        setHealth(`${h.status}`);
+        const h = useHealthStore.getState().status;
+        setHealth(h ? `${h.status}` : (useHealthStore.getState().error ?? 'unknown'));
       }
 
       // MCP

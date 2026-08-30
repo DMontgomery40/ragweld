@@ -6,6 +6,13 @@ import type {
   TriBridConfig,
 } from '@/types/generated';
 
+// The field registry is derived from the registered Pydantic models and carries no
+// corpus scope, yet two independent consumers (the Ctrl+K index and the Admin config
+// control plane) each fetched it on mount, and every remount refetched (M-129).
+// Shared while in flight, never cached: the entry is cleared as soon as the request
+// settles, so a remount after the answer arrived still asks the server.
+let inFlightRegistry: Promise<ConfigRegistryResponse> | null = null;
+
 export const configApi = {
   /**
    * Load full TriBrid configuration (tribrid_config.json)
@@ -66,8 +73,15 @@ export const configApi = {
    * Load the registry-driven config field/integration metadata.
    */
   async registry(): Promise<ConfigRegistryResponse> {
-    const { data } = await apiClient.get<ConfigRegistryResponse>(api('/config/registry'));
-    return data;
+    if (inFlightRegistry) return inFlightRegistry;
+    const run = apiClient
+      .get<ConfigRegistryResponse>(api('/config/registry'))
+      .then(({ data }) => data)
+      .finally(() => {
+        if (inFlightRegistry === run) inFlightRegistry = null;
+      });
+    inFlightRegistry = run;
+    return run;
   },
 
   /**

@@ -37,12 +37,11 @@ export function useApplyButton() {
     !!storeState.persisted &&
     JSON.stringify(storeState.config) !== JSON.stringify(storeState.persisted);
 
-  // Ensure config is loaded on mount
-  useEffect(() => {
-    if (!storeState.config && !storeState.saving) {
-      useConfigStore.getState().loadConfig().catch(() => {});
-    }
-  }, [storeState.config, storeState.saving]);
+  // No load here. `useAppInit` owns initialization and deliberately awaits `loadRepos()`
+  // first so the corpus scope is canonical before config is fetched; this hook mounts
+  // from the same component, so its own eager load raced ahead of that ordering and
+  // fetched `/api/config` a second time under whatever corpus id localStorage happened
+  // to hold (M-129). The button only observes the store.
 
   const handleApply = useCallback(async () => {
     setIsSaving(true);
