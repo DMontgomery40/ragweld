@@ -25,6 +25,7 @@ from server.observability.profiling import profiling_state
 from server.observability.runtime import (
     langfuse_client_blockers,
     langfuse_ingestion_state,
+    langfuse_sign_in_hint,
     normalize_tracing_mode,
 )
 
@@ -560,7 +561,15 @@ async def build_observability_status(config: TriBridConfig, *, repo_id: str | No
                 f"; ingestion: {_langfuse_ingestion_detail(config)}"
             ),
             url=langfuse_public_url or None,
-            links=_make_links("Langfuse", langfuse_public_url, "Langfuse base URL.", kind="langfuse"),
+            links=_make_links(
+                "Langfuse",
+                langfuse_public_url,
+                # Every Langfuse link states the membership requirement, not just
+                # the per-trace one: Langfuse enforces project membership on the
+                # signed-in browser identity, which no server-side check covers.
+                f"Langfuse base URL. {langfuse_sign_in_hint(config.tracing)}",
+                kind="langfuse",
+            ),
         ),
         _decorate_component(
             failure_threshold=failure_threshold,

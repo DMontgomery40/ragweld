@@ -295,6 +295,15 @@ export function ObservabilityOperatorDeck({
             {`Langfuse trace link withheld: ${langfuseTraceNotice}`}
           </div>
         ) : null}
+        {langfuseAccess?.exists ? (
+          // Visible, not hover-only: the API can prove Langfuse holds the trace,
+          // but not that this operator's Langfuse account may read it. Saying so
+          // before the click is the whole difference from the dead end the
+          // drive hit.
+          <div className="obs-banner obs-banner-subtle" data-testid="obs-langfuse-access-note">
+            {langfuseAccess.sign_in_hint}
+          </div>
+        ) : null}
 
         {deckLinks.length ? (
           <div className="obs-link-group">

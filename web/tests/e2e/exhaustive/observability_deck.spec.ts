@@ -117,4 +117,43 @@ test.describe('Observability operator deck', () => {
     await expect(page.getByText('In this app', { exact: true })).toBeVisible();
     await expect(page.getByTestId('open-grafana')).toHaveText(/read-only, anonymous/);
   });
+
+  test('every Langfuse link says why it may not open for this account', async ({ page, baseURL, request }) => {
+    const status = await request.get(`${API_BASE}/observability/status`);
+    const statusPayload = await status.json();
+    const langfuse = statusPayload.components.find((item: { id: string }) => item.id === 'langfuse');
+    test.skip(!langfuse?.enabled, 'Langfuse is not enabled on this deployment');
+
+    await page.goto(new URL('infrastructure?subtab=monitoring', baseURL).toString());
+
+    // Always true: Langfuse enforces project membership on the signed-in browser
+    // identity, and no server-side check can stand in for it. Every Langfuse
+    // link carries that, whether or not a run has produced a trace yet.
+    const chip = page.getByTestId('obs-external-link-langfuse').first();
+    await expect(chip).toBeVisible();
+    const tooltip = String(await chip.getAttribute('title'));
+    expect(tooltip).toContain('member');
+    expect(tooltip).toContain('project');
+    expect(tooltip).toContain('do not have access to this trace');
+
+    // And when a run has produced a trace, the deck states it on screen rather
+    // than only on hover - either as the requirement, or as the reason the
+    // per-trace link was withheld.
+    const latest = await request.get(`${API_BASE}/traces/latest`);
+    const traceId = String((await latest.json())?.trace?.trace_id || '').trim();
+    if (!traceId) return;
+
+    const access = await request.get(`${API_BASE}/observability/langfuse/trace/${traceId}`);
+    const payload = await access.json();
+    if (payload.exists) {
+      const note = page.getByTestId('obs-langfuse-access-note');
+      await expect(note).toBeVisible();
+      await expect(note).toContainText('member');
+      await expect(note).toContainText(String(payload.project));
+    } else {
+      const withheld = page.getByTestId('obs-langfuse-trace-notice');
+      await expect(withheld).toBeVisible();
+      await expect(withheld).toContainText('withheld');
+    }
+  });
 });
