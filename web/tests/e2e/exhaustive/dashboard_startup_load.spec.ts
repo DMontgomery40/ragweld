@@ -123,3 +123,49 @@ test.describe('Recent index runs panel', () => {
     await expect(page.getByTestId('dash-recent-run-recall_default')).toHaveCount(0);
   });
 });
+
+// M-15: the Recent Alerts panel rendered the bare string "Failed to load" because
+// GET /api/webhooks/alertmanager/status has never existed on the server. These tests
+// drive the real panel against the real Alertmanager the API is configured with.
+test.describe('Dashboard monitoring alerts panel', () => {
+  test('renders what Alertmanager holds, never "Failed to load"', async ({ page, baseURL, request }) => {
+    const direct = await request.get(`${API_BASE}/observability/alerts`);
+    expect(direct.status(), await direct.text()).toBe(200);
+    const payload = await direct.json();
+
+    const statuses: number[] = [];
+    page.on('response', (response) => {
+      if (new URL(response.url()).pathname.endsWith('/observability/alerts')) {
+        statuses.push(response.status());
+      }
+    });
+
+    await page.goto(new URL('dashboard?subtab=monitoring', baseURL).toString());
+    const panel = page.getByTestId('dash-alerts-panel');
+    await expect(panel).toBeVisible();
+
+    expect(statuses).not.toContain(404);
+    await expect(panel).not.toContainText('Failed to load');
+    await expect(page.getByTestId('dash-alerts-error')).toHaveCount(0);
+
+    // Non-vacuous: the panel shows exactly the alerts Alertmanager is holding.
+    const rows = page.getByTestId('dash-alert-row');
+    await expect(rows).toHaveCount(payload.alerts.length);
+    if (payload.alerts.length > 0) {
+      await expect(panel).toContainText(String(payload.alerts[0].name));
+      await expect(panel).toContainText(`${payload.firing_count} firing of ${payload.total_count}`);
+    } else {
+      await expect(page.getByTestId('dash-alerts-empty')).toBeVisible();
+    }
+  });
+
+  test('offers a route to the real monitoring surface', async ({ page, baseURL }) => {
+    await page.goto(new URL('dashboard?subtab=monitoring', baseURL).toString());
+    const link = page.getByTestId('dash-alerts-monitoring-link');
+    await expect(link).toBeVisible();
+
+    await link.click();
+    await page.waitForURL(/\/infrastructure\?subtab=monitoring(?:&|$)/);
+    await expect(page.getByTestId('alert-rules-panel')).toBeVisible();
+  });
+});
