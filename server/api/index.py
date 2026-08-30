@@ -282,7 +282,16 @@ def _load_run_summary(repo_id: str, run_id: str) -> IndexRunSummary | None:
         return None
 
 
-def _load_latest_run_summary(repo_id: str) -> IndexRunSummary | None:
+def _load_latest_run_summary(
+    repo_id: str, statuses: tuple[str, ...] | None = None
+) -> IndexRunSummary | None:
+    """The most recently written run summary, optionally restricted to certain statuses.
+
+    Unrestricted is what a run-state reader wants: an operator asking about the latest run
+    wants the failure, not the last success. ``statuses=("complete",)`` is what a reader of the
+    *live index* wants -- the live generation is the last one that committed, and starting a
+    re-index writes an ``indexing`` summary immediately, which would otherwise shadow it.
+    """
     repo_dir = _repo_runs_dir(repo_id)
     if not repo_dir.exists():
         return None
@@ -293,9 +302,11 @@ def _load_latest_run_summary(repo_id: str) -> IndexRunSummary | None:
     )
     for p in candidates:
         try:
-            return IndexRunSummary.model_validate_json(p.read_text())
+            summary = IndexRunSummary.model_validate_json(p.read_text())
         except Exception:
             continue
+        if statuses is None or str(summary.status) in statuses:
+            return summary
     return None
 
 
@@ -1251,6 +1262,77 @@ def _figure_run_totals(
         failed=max(0, int(failed or 0)),
         undescribed=max(0, int(undescribed or 0)),
         cost_usd=cost,
+    )
+
+
+def _status_costs(
+    *,
+    cfg: TriBridConfig,
+    total_tokens: int,
+    total_chunks: int,
+    latest_run: IndexRunSummary | None,
+) -> DashboardIndexCosts:
+    """What the corpus's index has cost, recomputed from live stats, config and the run record.
+
+    Embedding and semantic KG are re-derived from what is in the stores right now (they scale
+    with chunks and tokens, which survive the run). The figure spend cannot be: nothing in
+    Postgres or Qdrant records how many pictures went to the vision alias, so it is read off the
+    latest run summary, which is where ``_publish_complete`` wrote it.
+
+    ``total_cost`` sums exactly the phases that apply, and an applicable component with no known
+    price makes the total unknown rather than silently counting as zero -- understating spend is
+    the same failure as omitting the component, only quieter.
+    """
+    skip_dense = bool(getattr(cfg.indexing, "skip_dense", False))
+    embedding_backend = str(
+        getattr(cfg.embedding, "embedding_backend", "deterministic") or "deterministic"
+    ).strip()
+    embedding_cost: float | None
+    if skip_dense or embedding_backend != "provider":
+        embedding_cost = 0.0
+    else:
+        embedding_cost = _estimate_embedding_cost_usd(
+            provider=cfg.embedding.embedding_type,
+            model=cfg.embedding.effective_model,
+            total_tokens=int(total_tokens),
+        )
+
+    semantic_kg_enabled = bool(cfg.graph_indexing.semantic_kg_enabled)
+    semantic_kg_cost: float | None = None
+    if semantic_kg_enabled:
+        semantic_model, semantic_provider_hint = _resolve_semantic_kg_model_and_provider(cfg)
+        semantic_kg_cost = _estimate_semantic_kg_cost_usd(
+            provider_hint=semantic_provider_hint,
+            model=semantic_model,
+            chunks_in_scope=min(
+                int(total_chunks), max(0, int(cfg.graph_indexing.semantic_kg_max_chunks or 0))
+            ),
+            enrich_max_chars=int(cfg.enrichment.enrich_max_chars or 1000),
+        )
+
+    figures_described = max(0, int(getattr(latest_run, "figures_described", 0) or 0))
+    figure_cost = (
+        getattr(latest_run, "figure_description_cost_usd", None) if figures_described > 0 else None
+    )
+
+    components: list[float | None] = [embedding_cost]
+    if semantic_kg_enabled:
+        components.append(semantic_kg_cost)
+    if figures_described > 0:
+        components.append(figure_cost)
+    total_cost: float | None = (
+        None
+        if any(component is None for component in components)
+        else sum(float(component) for component in components)  # type: ignore[arg-type]
+    )
+
+    return DashboardIndexCosts(
+        total_tokens=int(total_tokens),
+        embedding_cost=embedding_cost,
+        semantic_kg_cost=semantic_kg_cost,
+        figure_description_cost=figure_cost,
+        figures_described=figures_described,
+        total_cost=total_cost,
     )
 
 
@@ -3655,10 +3737,6 @@ async def get_dashboard_index_status(
     embedding_model = cfg.embedding.effective_model
     embedding_provider = cfg.embedding.embedding_type
     embedding_dim = int(cfg.embedding.embedding_dim)
-    skip_dense = bool(getattr(cfg.indexing, "skip_dense", False))
-    embedding_backend = str(
-        getattr(cfg.embedding, "embedding_backend", "deterministic") or "deterministic"
-    ).strip()
     total_tokens = 0
     total_chunks = 0
     try:
@@ -3674,35 +3752,20 @@ async def get_dashboard_index_status(
         total_chunks = 0
         total_tokens = 0
 
-    embedding_cost: float | None
-    if skip_dense or embedding_backend != "provider":
-        embedding_cost = 0.0
-    else:
-        embedding_cost = _estimate_embedding_cost_usd(
-            provider=embedding_provider,
-            model=embedding_model,
-            total_tokens=total_tokens,
-        )
-
-    semantic_kg_cost: float | None = None
-    total_cost: float | None = embedding_cost
-    semantic_kg_enabled = bool(cfg.graph_indexing.semantic_kg_enabled)
-    if semantic_kg_enabled:
-        semantic_model, semantic_provider_hint = _resolve_semantic_kg_model_and_provider(cfg)
-        semantic_chunks = min(
-            total_chunks, max(0, int(cfg.graph_indexing.semantic_kg_max_chunks or 0))
-        )
-        semantic_kg_cost = _estimate_semantic_kg_cost_usd(
-            provider_hint=semantic_provider_hint,
-            model=semantic_model,
-            chunks_in_scope=semantic_chunks,
-            enrich_max_chars=int(cfg.enrichment.enrich_max_chars or 1000),
-        )
-        total_cost = (
-            None
-            if embedding_cost is None or semantic_kg_cost is None
-            else float(embedding_cost) + float(semantic_kg_cost)
-        )
+    # The figure spend is only on the run record: no store reports how many pictures were
+    # described. The LAST COMMITTED run, not the newest one: the chunks and tokens above come
+    # from the live generation, and a re-index writes an `indexing` summary (zero figures, by
+    # design) the moment it starts, which would otherwise blank the figure line for the whole
+    # run and leave it blank for good if that run errored. Read-only -- the cost card never
+    # finalizes or rewrites a run.
+    await _flush_run_events()
+    latest_run = await asyncio.to_thread(_load_latest_run_summary, repo_id, ("complete",))
+    costs = _status_costs(
+        cfg=cfg,
+        total_tokens=total_tokens,
+        total_chunks=total_chunks,
+        latest_run=latest_run,
+    )
 
     storage_breakdown = await _compute_dashboard_storage_breakdown(repo_id=repo_id)
 
@@ -3717,12 +3780,7 @@ async def get_dashboard_index_status(
             dimensions=embedding_dim,
             precision="float32",
         ),
-        costs=DashboardIndexCosts(
-            total_tokens=total_tokens,
-            embedding_cost=embedding_cost,
-            semantic_kg_cost=semantic_kg_cost,
-            total_cost=total_cost,
-        ),
+        costs=costs,
         storage_breakdown=storage_breakdown,
         keywords_count=keywords_count,
         total_storage=int(storage_breakdown.total_storage_bytes),

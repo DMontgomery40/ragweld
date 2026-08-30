@@ -546,7 +546,11 @@ export interface DashboardIndexCosts {
   embedding_cost?: number | null; // default: None
   /** Estimated GraphRAG semantic extraction cost (USD) when enabled. */
   semantic_kg_cost?: number | null; // default: None
-  /** Estimated total indexing cost (USD): embedding + semantic KG (when applicable). */
+  /** Ceiling on the vision-call cost (USD) of the latest run's figure descriptions, as that run recorded it; null when no run described a figure or its alias is unpriced. */
+  figure_description_cost?: number | null; // default: None
+  /** Figures the latest indexing run described. */
+  figures_described?: number; // default: 0
+  /** Estimated total indexing cost (USD): embedding + semantic KG + figure description (each when applicable); null when any applicable component has no known price. */
   total_cost?: number | null; // default: None
 }
 

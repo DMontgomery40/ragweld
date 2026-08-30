@@ -95,6 +95,10 @@ export function IndexDisplayPanels() {
     Number(costs.total_tokens || 0) > 0 ||
     costs.embedding_cost != null ||
     costs.semantic_kg_cost != null ||
+    // A figures-only corpus (deterministic embeddings, no semantic KG) has real spend and
+    // nothing else to show it: leaving figures out of this predicate hides the whole card.
+    costs.figure_description_cost != null ||
+    Number(costs.figures_described || 0) > 0 ||
     costs.total_cost != null;
 
   const storageCards = [
@@ -115,6 +119,19 @@ export function IndexDisplayPanels() {
     },
     ...(costs.semantic_kg_cost != null
       ? [{ label: 'Semantic KG Cost', value: `$${Number(costs.semantic_kg_cost || 0).toFixed(4)}` }]
+      : []),
+    // The label says "ceiling" because the run record prices the full completion budget per
+    // figure; a real description spends only part of it. Total Cost inherits that ceiling.
+    ...(costs.figure_description_cost != null
+      ? [
+          {
+            label: 'Figure Descriptions (ceiling)',
+            value: `$${Number(costs.figure_description_cost || 0).toFixed(4)}`
+          }
+        ]
+      : []),
+    ...(Number(costs.figures_described || 0) > 0
+      ? [{ label: 'Figures Described', value: Number(costs.figures_described || 0).toLocaleString() }]
       : []),
     ...(costs.total_cost != null
       ? [{ label: 'Total Cost', value: `$${Number(costs.total_cost || 0).toFixed(4)}` }]

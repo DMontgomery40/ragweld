@@ -124,10 +124,24 @@ class DashboardIndexCosts(BaseModel):
         ge=0.0,
         description="Estimated GraphRAG semantic extraction cost (USD) when enabled.",
     )
+    figure_description_cost: float | None = Field(
+        default=None,
+        ge=0.0,
+        description=(
+            "Ceiling on the vision-call cost (USD) of the latest run's figure descriptions, "
+            "as that run recorded it; null when no run described a figure or its alias is unpriced."
+        ),
+    )
+    figures_described: int = Field(
+        default=0, ge=0, description="Figures the latest indexing run described."
+    )
     total_cost: float | None = Field(
         default=None,
         ge=0.0,
-        description="Estimated total indexing cost (USD): embedding + semantic KG (when applicable).",
+        description=(
+            "Estimated total indexing cost (USD): embedding + semantic KG + figure description "
+            "(each when applicable); null when any applicable component has no known price."
+        ),
     )
 
 
