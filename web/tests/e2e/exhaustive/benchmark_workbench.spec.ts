@@ -17,14 +17,18 @@ test.describe.serial('benchmark workbench (read-only)', () => {
     const initialCount = await checkboxes.count();
     expect(initialCount, 'expected the catalog to load some models').toBeGreaterThan(1);
 
-    // The list scrolls within its own box instead of growing the page and pushing Run off
-    // screen (B-14): a real max-height and its own vertical scroll.
-    const listStyle = await page.getByTestId('benchmark-model-list').evaluate((el) => {
-      const cs = getComputedStyle(el);
-      return { maxHeight: cs.maxHeight, overflowY: cs.overflowY };
+    // The outcome B-14 is about: scrolling through the models must NOT push Run off screen.
+    // Scroll the model list to its bottom, then assert the Run button is still in the viewport.
+    await page.getByTestId('benchmark-model-list').evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
     });
-    expect(listStyle.maxHeight).not.toBe('none');
-    expect(['auto', 'scroll']).toContain(listStyle.overflowY);
+    const runBox = await page.getByTestId('benchmark-run').boundingBox();
+    const viewport = page.viewportSize();
+    expect(runBox, 'Run button should be laid out').not.toBeNull();
+    if (runBox && viewport) {
+      expect(runBox.y, 'Run stays on screen after scrolling the model list').toBeGreaterThanOrEqual(0);
+      expect(runBox.y + runBox.height, 'Run bottom stays within the viewport').toBeLessThanOrEqual(viewport.height);
+    }
 
     // Filtering narrows the list; a nonsense query yields an explicit empty message.
     await page.getByTestId('benchmark-model-filter').fill('zzzz-not-a-real-model-zzzz');
