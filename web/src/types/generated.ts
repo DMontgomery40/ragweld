@@ -1427,10 +1427,10 @@ export interface IndexingConfig {
   estimate?: IndexingEstimateConfig;
 }
 
-/** Floors under the pre-run estimate's sample, so it refuses to guess rather than guess wrong.  The estimate is the consent gate: an operator approves a run from the numbers in it. A sample that covers a negligible share of the corpus can be extrapolated to any number at all -- one cold run measured 8 bytes of 8.5 MB and reported 15,437 tokens for a 3,531,477-token corpus -- so below these floors the endpoint returns no point estimate at all. */
+/** Floors under the pre-run estimate's sample, so it refuses to guess rather than guess wrong.  The estimate is the consent gate: an operator approves a run from the numbers in it. One cold run measured 8 bytes of 8.5 MB and reported 15,437 tokens for a 3,531,477-token corpus, so below these floors the endpoint returns no point estimate at all.  Neither floor is a share of bytes. Sampling 1.31% of a corpus of 2,000 similar files gives an accurate estimate, and any byte floor strict enough to catch the cold case would refuse every format group of more than a few hundred files. What actually distinguishes the two is whether a group was measured at all, and whether the measured spread leaves the band meaningless. */
 export interface IndexingEstimateConfig {
-  /** Smallest share of the corpus's bytes a sample may cover and still be extrapolated to a point estimate. Below this the estimate reports an insufficient sample. */
-  min_sample_fraction?: number; // default: 0.05
+  /** Widest error band that may still be published as a point estimate. The band is computed from the measured spread of tokens-per-byte, so it saturates exactly when the sample says nothing about the corpus -- which is the honest signal, unlike a share-of-bytes floor that would refuse 2,000 similar small files whose estimate is accurate. */
+  max_relative_error?: number; // default: 0.9
   /** Files that must be measured in every format group present. A group that measured nothing contributes neither tokens, chunks, nor its one-chunk-per-file floor, so the corpus total would silently omit it. */
   min_files_per_format?: number; // default: 1
 }
