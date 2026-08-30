@@ -314,6 +314,14 @@ class IndexRunConflictDetail(BaseModel):
     owner: str = Field(description="Worker that holds the fence (host:pid)")
     started_at: datetime = Field(description="When the holding run started")
     heartbeat_at: datetime = Field(description="Last heartbeat of the holding run")
+    phase: Literal["building", "retiring"] = Field(
+        default="building",
+        description="Fence phase of the holding run: building the index, or retiring the previous generation",
+    )
+    stage: str | None = Field(
+        default=None,
+        description="What the holding run last reported doing (its most recent run-log event), when it has logged one",
+    )
     message: str = Field(description="Stable, non-sensitive conflict summary")
     operator_hint: str = Field(description="What the operator can do next")
 

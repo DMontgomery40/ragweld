@@ -4,10 +4,9 @@ import type {
   IndexRequest,
   IndexStats,
   IndexStatus,
-  IndexRunConflictResponse,
-  PersistedStateCorruptDetail,
 } from '@/types/generated';
 import { TerminalService } from '@/services/TerminalService';
+import { describeIndexRunConflict } from '@/utils/indexRunConflict';
 
 type UseIndexingState = {
   status: IndexStatus | null;
@@ -39,27 +38,13 @@ type StopOptions = {
  */
 function describeIndexStartFailure(status: number, body: string): string {
   if (status === 409) {
-    // Every fence conflict is the typed envelope (IndexRunConflictResponse); an
-    // unparseable 409 is a contract failure and is reported as such, never
-    // rendered from raw text.
-    let parsed: IndexRunConflictResponse | null = null;
-    try {
-      parsed = JSON.parse(body) as IndexRunConflictResponse;
-    } catch {
-      parsed = null;
-    }
-    const d = parsed?.detail;
-    if (d?.code === 'index_run_in_progress') {
-      return `${d.message} Run ${d.run_id} on ${d.owner} started ${new Date(d.started_at).toLocaleTimeString()} (last heartbeat ${new Date(d.heartbeat_at).toLocaleTimeString()}). ${d.operator_hint}`;
-    }
-    if (d?.code === 'index_fence_corrupt') {
-      return `${d.message} ${d.operator_hint}`;
-    }
-    const corrupt = parsed?.detail as PersistedStateCorruptDetail | undefined;
-    if (corrupt?.code === 'persisted_state_corrupt') {
-      return `${corrupt.message} ${corrupt.operator_hint}`;
-    }
-    return 'Index request conflicted (409) but the response was not a typed envelope; check the API contract.';
+    // Every fence conflict is the typed envelope (IndexRunConflictResponse), rendered by
+    // the shared helper that the corpus-delete refusal uses too; an unparseable 409 is a
+    // contract failure and is reported as such, never rendered from raw text.
+    return (
+      describeIndexRunConflict(body) ??
+      'Index request conflicted (409) but the response was not a typed envelope; check the API contract.'
+    );
   }
   return body || `Index request failed (${status})`;
 }

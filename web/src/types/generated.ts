@@ -1292,6 +1292,10 @@ export interface IndexRunConflictDetail {
   started_at: string;
   /** Last heartbeat of the holding run */
   heartbeat_at: string;
+  /** Fence phase of the holding run: building the index, or retiring the previous generation */
+  phase?: "building" | "retiring"; // default: "building"
+  /** What the holding run last reported doing (its most recent run-log event), when it has logged one */
+  stage?: string | null; // default: None
   /** Stable, non-sensitive conflict summary */
   message: string;
   /** What the operator can do next */

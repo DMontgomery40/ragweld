@@ -794,7 +794,7 @@ async def _stop_without_local_task(repo_id: str) -> IndexStatus:
         if not fence.is_stale(
             now=await pg.database_now(), lease_seconds=cfg.indexing.index_run_lease_seconds
         ):
-            raise _index_run_conflict(repo_id, fence)
+            raise await index_run_conflict(repo_id, fence)
         manifest = await pg.get_generation(repo_id)
         # Only the manifest's run id proves the dead run committed (a collection id
         # among the retained ones is not ownership); reclaim itself never drops a
@@ -928,15 +928,45 @@ def _fence_corrupt_conflict(repo_id: str, exc: IndexFenceCorruptError) -> HTTPEx
     return HTTPException(status_code=409, detail=detail.model_dump(mode="json"))
 
 
-def _index_run_conflict(repo_id: str, fence: IndexRunFence) -> HTTPException:
+def _latest_run_stage(repo_id: str, run_id: str) -> str | None:
+    """The last thing a run reported doing, or None when it has logged nothing.
+
+    Blocking (it drains the event writer and reads the run's JSONL log), so callers on the
+    event loop hand it to a thread.
+    """
+    _flush_run_events_sync()
+    events = _load_run_events(repo_id, run_id, limit=1)
+    if not events:
+        return None
+    return str(events[-1].message or "").strip() or None
+
+
+async def index_run_conflict(
+    repo_id: str, fence: IndexRunFence, *, operator_hint: str | None = None
+) -> HTTPException:
+    """The typed 409 for a corpus a live index run holds, saying what that run is doing.
+
+    Shared by every route that refuses a fenced corpus (index start/stop/delete here, corpus
+    delete in `server.api.repos`) so there is one shape of this conflict rather than a second
+    hand-built copy of the same detail.
+
+    A conflict that names only the run leaves the operator unable to tell an actively
+    converting run from a wedged one -- which is exactly the state of a run queued behind
+    the process-wide document extractor. The holding run's own latest event is published as
+    `stage`; `operator_hint` differs per route because the next move does.
+    """
+    stage = await asyncio.to_thread(_latest_run_stage, repo_id, fence.run_id)
     detail = IndexRunConflictDetail(
         corpus_id=repo_id,
         run_id=fence.run_id,
         owner=fence.owner,
         started_at=fence.started_at,
         heartbeat_at=fence.heartbeat_at,
+        phase=fence.phase,
+        stage=stage,
         message=f"Corpus {repo_id} is fenced by index run {fence.run_id}.",
-        operator_hint=(
+        operator_hint=operator_hint
+        or (
             "Wait for that run to finish or stop it on the worker that owns it "
             f"({fence.owner}); a fence whose heartbeat is older than "
             "indexing.index_run_lease_seconds is taken over automatically."
@@ -3809,7 +3839,7 @@ async def start_index(request: IndexRequest) -> IndexStatus:
             with contextlib.suppress(Exception):
                 await postgres.disconnect()
         if claim.held_by is not None:
-            raise _index_run_conflict(request.repo_id, claim.held_by)
+            raise await index_run_conflict(request.repo_id, claim.held_by)
         if claim.taken_over is not None and claim.taken_over_committed:
             # The previous holder committed and then died before releasing: its
             # staged resources ARE the live generation. Finalize its run record;
@@ -4275,7 +4305,8 @@ async def delete_index(corpus_id: str) -> dict[str, Any]:
                 repo_id, lease_seconds=cfg.indexing.index_run_lease_seconds
             )
         except IndexFenceHeldError as exc:
-            raise _index_run_conflict(repo_id, exc.fence) from exc
+            conflict = await index_run_conflict(repo_id, exc.fence)
+            raise conflict from exc
         except IndexFenceCorruptError as exc:
             raise _fence_corrupt_conflict(repo_id, exc) from exc
         except Exception as exc:

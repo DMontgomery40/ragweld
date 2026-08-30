@@ -12,6 +12,7 @@
 import { create } from 'zustand';
 import type { Corpus, CorpusCreateRequest, CorpusUpdateRequest } from '@/types/generated';
 import { resolveAPIBase } from '@/api/client';
+import { describeIndexRunConflict } from '@/utils/indexRunConflict';
 
 // Re-export for backward compatibility with existing components
 export type Repository = Corpus;
@@ -228,7 +229,12 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
     });
     if (!response.ok) {
       const detail = await response.text().catch(() => '');
-      throw new Error(detail || `Failed to delete corpus (${response.status})`);
+      // A corpus held by a live index run is refused with the typed fence envelope. Raw
+      // `{"detail":{...}}` JSON told the operator nothing about which run held it or what
+      // that run was doing, which is the whole question when a delete is refused.
+      throw new Error(
+        describeIndexRunConflict(detail) || detail || `Failed to delete corpus (${response.status})`
+      );
     }
 
     // Refresh list after deletion

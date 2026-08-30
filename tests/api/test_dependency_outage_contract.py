@@ -291,3 +291,110 @@ asyncio.run(main())
     serialized = json.dumps(payload["ready"][1])
     assert "127.0.0.1:1" not in serialized
     assert "secret" not in serialized
+
+
+def test_corpus_delete_409_names_the_run_that_holds_the_corpus() -> None:
+    """A 409 that only says "a run holds this" is not actionable.
+
+    Deleting a corpus while an index run holds its fence is refused, and the operator's next
+    move depends entirely on which run that is and what it is doing: a run converting a
+    scanned PDF has to be waited out, a run queued behind the document extractor points at a
+    third corpus, and a run whose lease has lapsed is taken over on its own. The detail
+    therefore carries the run id, when it started, its fence phase and the last thing it
+    reported doing.
+
+    Both delete routes must document the envelope: the operator UI calls `/api/corpora/{id}`,
+    while `/api/repos/{id}` is the same handler under its older path.
+    """
+    from server.main import app
+
+    schema = app.openapi()
+    for path in ("/api/repos/{corpus_id}", "/api/corpora/{corpus_id}"):
+        body = schema["paths"][path]["delete"]["responses"]["409"]["content"]["application/json"][
+            "schema"
+        ]
+        refs = (
+            [body["$ref"]] if "$ref" in body else [item["$ref"] for item in body.get("anyOf", [])]
+        )
+        assert {r.rsplit("/", 1)[-1] for r in refs} == {"IndexRunConflictResponse"}, (path, body)
+
+    properties = schema["components"]["schemas"]["IndexRunConflictDetail"]["properties"]
+    for field in ("run_id", "started_at", "phase", "stage"):
+        assert field in properties, sorted(properties)
+        assert properties[field].get("description"), field
+
+
+def test_the_fence_conflict_detail_reports_what_the_holding_run_is_doing(tmp_path: Path) -> None:
+    """The stage comes off the holding run's real log, not a guess about its fence."""
+    import asyncio
+    from datetime import UTC, datetime
+
+    import server.api.index as index_api
+    from server.api.index import _append_run_event, index_run_conflict
+    from server.indexing.generations import IndexRunFence
+    from server.models.index import IndexRunConflictDetail
+
+    started = datetime(2026, 8, 30, 9, 15, tzinfo=UTC)
+    fence = IndexRunFence(
+        run_id="7be21c04-2f9a-4a1b-9f0e-1d2c3b4a5e6f",
+        owner="ragweld:4711",
+        started_at=started,
+        heartbeat_at=datetime(2026, 8, 30, 9, 41, tzinfo=UTC),
+        phase="building",
+    )
+    old_runs_dir = index_api._INDEX_RUNS_DIR
+    index_api._INDEX_RUNS_DIR = tmp_path
+    try:
+        _append_run_event(
+            "nasa-apollo-11",
+            fence.run_id,
+            {
+                "type": "log",
+                "message": "Converting apollo-11-mission-report.pdf: still running (600s elapsed)",
+            },
+        )
+        conflict = asyncio.run(
+            index_run_conflict("nasa-apollo-11", fence, operator_hint="Stop that index run.")
+        )
+    finally:
+        index_api._INDEX_RUNS_DIR = old_runs_dir
+
+    assert conflict.status_code == 409
+    detail = IndexRunConflictDetail.model_validate(conflict.detail)
+    assert detail.run_id == fence.run_id
+    assert detail.started_at == started
+    assert detail.phase == "building"
+    assert detail.stage == "Converting apollo-11-mission-report.pdf: still running (600s elapsed)"
+    assert detail.operator_hint == "Stop that index run."
+
+
+def test_the_fence_conflict_detail_reports_no_stage_for_a_run_that_logged_nothing(
+    tmp_path: Path,
+) -> None:
+    """A run with an empty log gets a null stage, never an invented one."""
+    import asyncio
+    from datetime import UTC, datetime
+
+    import server.api.index as index_api
+    from server.api.index import index_run_conflict
+    from server.indexing.generations import IndexRunFence
+    from server.models.index import IndexRunConflictDetail
+
+    fence = IndexRunFence(
+        run_id="0d3f9a71-1111-2222-3333-444455556666",
+        owner="ragweld:4711",
+        started_at=datetime(2026, 8, 30, 9, 15, tzinfo=UTC),
+        heartbeat_at=datetime(2026, 8, 30, 9, 15, tzinfo=UTC),
+        phase="retiring",
+    )
+    old_runs_dir = index_api._INDEX_RUNS_DIR
+    index_api._INDEX_RUNS_DIR = tmp_path
+    try:
+        conflict = asyncio.run(index_run_conflict("nasa-apollo-11", fence))
+    finally:
+        index_api._INDEX_RUNS_DIR = old_runs_dir
+
+    detail = IndexRunConflictDetail.model_validate(conflict.detail)
+    assert detail.stage is None
+    assert detail.phase == "retiring"
+    assert "index_run_lease_seconds" in detail.operator_hint

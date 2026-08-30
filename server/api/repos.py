@@ -16,6 +16,7 @@ from server.api.dependency_errors import (
     raise_neo4j_unavailable_if_applicable,
     raise_postgres_unavailable_if_applicable,
 )
+from server.api.index import index_run_conflict
 from server.config import load_config
 from server.db.neo4j import Neo4jClient
 from server.db.postgres import PostgresClient
@@ -31,7 +32,6 @@ from server.indexing.loader import FileLoader
 from server.lineage.registry import delete_repo_lineage
 from server.models.index import (
     IndexDeletionIncompleteResponse,
-    IndexRunConflictDetail,
     IndexRunConflictResponse,
     IndexStats,
 )
@@ -376,16 +376,16 @@ async def delete_repo(corpus_id: str) -> dict[str, Any]:
             intent="delete_corpus",  # only the registry row's removal ends this tombstone
         )
     except IndexFenceHeldError as exc:
-        detail = IndexRunConflictDetail(
-            corpus_id=repo_id,
-            run_id=exc.fence.run_id,
-            owner=exc.fence.owner,
-            started_at=exc.fence.started_at,
-            heartbeat_at=exc.fence.heartbeat_at,
-            message=f"Corpus {repo_id} is fenced by index run {exc.fence.run_id}.",
-            operator_hint="Stop that index run (or wait for its lease to expire) before deleting the corpus.",
+        # One builder for this conflict (it also reports what the holding run is doing), so
+        # the delete refusal and the index-start refusal cannot drift apart.
+        conflict = await index_run_conflict(
+            repo_id,
+            exc.fence,
+            operator_hint=(
+                "Stop that index run (or wait for its lease to expire) before deleting the corpus."
+            ),
         )
-        raise HTTPException(status_code=409, detail=detail.model_dump(mode="json")) from exc
+        raise conflict from exc
     except DeletionIncompleteError:
         raise
     except Exception as exc:
@@ -424,6 +424,20 @@ async def delete_repo(corpus_id: str) -> dict[str, Any]:
     return {"ok": True}
 
 
-@router.delete("/corpora/{corpus_id}")
+@router.delete(
+    "/corpora/{corpus_id}",
+    # The operator UI deletes through this path, so it documents the same refusals as the
+    # handler it delegates to rather than publishing an untyped 409 the client cannot read.
+    responses={
+        409: {
+            "model": IndexRunConflictResponse,
+            "description": "A live index run holds this corpus; stop it first.",
+        },
+        503: {
+            "model": DependencyUnavailableResponse | IndexDeletionIncompleteResponse,
+            "description": "External cleanup failed; the deletion tombstone stays for the next attempt.",
+        },
+    },
+)
 async def delete_corpus(corpus_id: str) -> dict[str, Any]:
     return await delete_repo(corpus_id)
