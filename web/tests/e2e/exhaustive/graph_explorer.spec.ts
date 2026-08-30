@@ -277,6 +277,23 @@ test.describe('Graph Explorer on the ragweld_code code graph', () => {
     await expect(page.getByTestId('graph-export-entities')).toBeVisible();
     await expect(page.getByTestId('graph-export-relationships')).toBeVisible();
     await expect(page.getByTestId('graph-export-png')).toHaveCount(0);
+    // N-03: a disabled export must LOOK disabled. `controlButtonStyle` sets an explicit
+    // color and background, which override the UA stylesheet's greying.
+    const relStyle = await page.getByTestId('graph-export-relationships').evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return { disabled: (el as HTMLButtonElement).disabled, color: cs.color, cursor: cs.cursor };
+    });
+    const enabledStyle = await page.getByTestId('graph-export-entities').evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return { disabled: (el as HTMLButtonElement).disabled, color: cs.color, cursor: cs.cursor };
+    });
+    expect(enabledStyle.disabled).toBe(false);
+    if (relStyle.disabled) {
+      expect(relStyle.color, 'a disabled export must not look identical to a live one').not.toBe(
+        enabledStyle.color
+      );
+      expect(relStyle.cursor).toBe('not-allowed');
+    }
     const tableCsv = page.waitForEvent('download');
     await page.getByTestId('graph-export-relationships').click();
     expect((await tableCsv).suggestedFilename()).toMatch(/-relationships\.csv$/);

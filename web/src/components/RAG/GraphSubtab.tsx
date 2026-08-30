@@ -150,6 +150,23 @@ function toCsv(headers: string[], rows: unknown[][]): string {
   return [headers, ...rows].map((row) => row.map(csvCell).join(',')).join('\n') + '\n';
 }
 
+/** A disabled control must LOOK disabled. `controlButtonStyle` sets an explicit color and
+ *  background, which override the user-agent stylesheet's greying, so the export buttons
+ *  looked live on an empty graph and simply did nothing when clicked (review N-03). The
+ *  muted state is a real colour pair, not `opacity` on text: the legibility floor forbids
+ *  fading type, and this tier still clears 4.5:1 on the elevated ground. */
+function controlStyle(disabled: boolean): React.CSSProperties {
+  if (!disabled) return controlButtonStyle;
+  return {
+    ...controlButtonStyle,
+    color: 'var(--fg-muted)',
+    background: 'transparent',
+    borderColor: 'var(--line)',
+    borderStyle: 'dashed',
+    cursor: 'not-allowed',
+  };
+}
+
 const controlButtonStyle: React.CSSProperties = {
   padding: '6px 10px',
   background: 'var(--bg-elev2)',
@@ -1140,7 +1157,7 @@ export function GraphSubtab() {
         {viewMode === 'viz' ? (
           <button
             type="button"
-            style={controlButtonStyle}
+            style={controlStyle(!filteredEntities.length)}
             onClick={() => exportPng(vizCanvasRef.current)}
             disabled={!filteredEntities.length}
             data-testid="graph-export-png"
@@ -1151,7 +1168,7 @@ export function GraphSubtab() {
         ) : null}
         <button
           type="button"
-          style={controlButtonStyle}
+          style={controlStyle(!filteredEntities.length)}
           onClick={exportEntitiesCsv}
           disabled={!filteredEntities.length}
           data-testid="graph-export-entities"
@@ -1161,7 +1178,7 @@ export function GraphSubtab() {
         </button>
         <button
           type="button"
-          style={controlButtonStyle}
+          style={controlStyle(!filteredRelationships.length)}
           onClick={exportRelationshipsCsv}
           disabled={!filteredRelationships.length}
           data-testid="graph-export-relationships"
@@ -1171,7 +1188,7 @@ export function GraphSubtab() {
         </button>
         <button
           type="button"
-          style={controlButtonStyle}
+          style={controlStyle(!filteredEntities.length)}
           onClick={exportJson}
           disabled={!filteredEntities.length}
           data-testid="graph-export-json"
