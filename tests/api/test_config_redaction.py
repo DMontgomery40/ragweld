@@ -274,16 +274,58 @@ async def test_the_advertised_mcp_host_is_one_the_transport_actually_accepts() -
 # component is the marker.
 _DSN_WITH_PASSWORD = re.compile(r"[a-zA-Z0-9+.-]+://[^/@\s\"']*:([^@/\s\"']+)@")
 
+# A header credential does not look like a DSN, so the shape check has to cover it
+# separately or an unredacted `OTLP_HEADERS` would sail through a DSN-only sweep.
+_BEARER_TOKEN = re.compile(r"(?i)\bbearer\s+([^\s,\"';]+)")
+_AUTHORIZATION_VALUE = re.compile(r"(?i)\bauthorization\s*[=:]\s*([^,\"';]+)")
+
+# Documentation is not a leak. `MCPConfig.require_api_key`'s description is served by
+# `/api/config/registry` and reads "Authorization: Bearer $MCP_API_KEY"; a matcher that
+# cannot tell that from a real token would fail on prose and teach everyone to ignore it.
+_PLACEHOLDER_HINTS = ("...", "\u2026", "$", "<", "{", "*")
+
+
+def _is_placeholder(token: str) -> bool:
+    """True for anything that is documentation rather than a credential.
+
+    Two classes, both observed on the live wire: templated placeholders
+    (`Bearer $MCP_API_KEY`) and English prose (the phrase "bearer token" appears in
+    `/api/config/readiness` and in a registry field description). A matcher that flags
+    either one cries wolf, and a sweep everyone learns to ignore protects nothing.
+
+    The prose rule is "purely alphabetic": a real credential carries digits or symbols.
+    An all-letters secret would slip past the SHAPE net, which is why the sweep also
+    checks the seeded literals exactly -- see `test_no_api_route_ships_a_credential...`.
+    """
+    value = token.strip()
+    if not value or value == SECRET_REDACTED:
+        return True
+    if any(hint in value for hint in _PLACEHOLDER_HINTS):
+        return True
+    return value.isalpha()
+
 
 def _exposed_credentials(payload: object) -> list[str]:
-    """Every DSN password in `payload` that is not the redaction marker."""
+    """Every credential-shaped value in `payload` that is not the redaction marker.
+
+    Two shapes, because the two secrets this API withholds look nothing alike: a DSN
+    password inside a connection string, and an authorization header value.
+    """
     found: list[str] = []
 
     def walk(node: object) -> None:
         if isinstance(node, str):
             found.extend(
-                m.group(1) for m in _DSN_WITH_PASSWORD.finditer(node) if m.group(1) != SECRET_REDACTED
+                m.group(1)
+                for m in _DSN_WITH_PASSWORD.finditer(node)
+                if m.group(1) != SECRET_REDACTED
             )
+            for pattern in (_BEARER_TOKEN, _AUTHORIZATION_VALUE):
+                found.extend(
+                    m.group(1).strip()
+                    for m in pattern.finditer(node)
+                    if not _is_placeholder(m.group(1).replace("Bearer", "").replace("bearer", ""))
+                )
         elif isinstance(node, dict):
             for value in node.values():
                 walk(value)
@@ -309,38 +351,107 @@ def _no_parameter_get_routes() -> list[str]:
     return sorted(paths)
 
 
+@pytest.fixture
+async def sweep_corpus_id(client: AsyncClient) -> AsyncGenerator[str, None]:
+    """A corpus the scoped routes will accept, so the sweep actually reaches them.
+
+    Read-only, and taken through the API rather than an internal helper: an existing
+    corpus is used rather than provisioned, because the routes that need one are
+    corpus-scoped reads and any registered corpus satisfies them. Without this, 24 of the
+    64 routes answered 422 for a missing `corpus_id` and were never inspected --
+    including `/api/agent/train/runs` and `/api/reranker/train/runs`, two of the families
+    this very file is about.
+    """
+    try:
+        listing = await client.get("/api/corpora")
+    except Exception:
+        yield ""
+        return
+    if listing.status_code >= 400:
+        yield ""
+        return
+    rows = listing.json()
+    if not isinstance(rows, list):
+        yield ""
+        return
+    yield next((str(row.get("corpus_id") or "") for row in rows if row.get("corpus_id")), "")
+
+
+# How many routes may remain uninspectable. Measured, not guessed: with a corpus seeded the
+# sweep reaches 55 of 64 (it reached 40 before the retry). The 9 it cannot are honest --
+# 404 where the environment simply has no such record (`/api/eval/results` with no runs,
+# the reranker log/profile downloads), 503 from `/api/ready` when a dependency is down, and
+# 422 from routes needing a parameter that is not a corpus (`run_id` on the three stream
+# routes, `keys` on `/api/secrets/check`).
+#
+# A ceiling, not an exact match: the count moves between 9 and 11 run to run as transient
+# service state changes what answers (`/api/ready` is 503 while a dependency is down, the
+# docker and Loki probes come and go). It is set well below the 24 that were skipped before
+# the corpus retry, so a change that regresses to the old coverage fails here -- and well
+# above the observed band, so a passing suite is not a coin flip.
+_MAX_UNINSPECTABLE_ROUTES = 16
+
+
 @pytest.mark.asyncio
 async def test_no_api_route_ships_a_credential_to_the_browser(
-    client: AsyncClient, seeded_secrets
+    client: AsyncClient, seeded_secrets, sweep_corpus_id: str
 ) -> None:
     """The sweep IS the invariant: a new carrier fails this without anyone listing it.
 
-    An earlier version of this check walked a hand-written list of a dozen routes and
-    concluded "every other route carries no DSN". It was wrong -- the eval, synthetic,
-    reranker and agent run records pin a config snapshot and serve it -- and a list could
-    never have found that, because the next carrier is always the one not on the list. So
-    this enumerates the app's own routing table instead.
+    An earlier version walked a hand-written list of a dozen routes and concluded "every
+    other route carries no DSN". It was wrong -- the eval, synthetic, reranker and agent
+    run records pin a config snapshot and serve it -- and a list could never have found
+    that, because the next carrier is always the one not on the list. So this enumerates
+    the app's own routing table, retries anything that needs a corpus with one, and
+    reports what it still could not reach rather than quietly counting it as clean.
     """
     exposures: dict[str, list[str]] = {}
+    inspected: list[str] = []
+    uninspectable: dict[str, int] = {}
+
     for path in _no_parameter_get_routes():
-        try:
-            response = await client.get(path)
-        except Exception:
-            # A route that cannot answer in this environment cannot leak in it either.
+        response = None
+        for params in ({}, {"corpus_id": sweep_corpus_id} if sweep_corpus_id else None):
+            if params is None:
+                continue
+            try:
+                candidate = await client.get(path, params=params)
+            except Exception:
+                continue
+            response = candidate
+            if candidate.status_code < 400:
+                break
+        if response is None or response.status_code >= 400:
+            uninspectable[path] = response.status_code if response is not None else 0
             continue
-        if response.status_code >= 400:
-            continue
+
+        inspected.append(path)
         try:
             payload = response.json()
         except ValueError:
             payload = response.text
         leaked = _exposed_credentials(payload)
+        # Exact net alongside the shape net: the fixture's own secrets, whatever shape
+        # they take. This is what would catch an all-alphabetic credential that
+        # `_is_placeholder`'s prose rule deliberately lets through.
+        body = response.text
+        leaked += [
+            literal for literal in ("s3cr3t-p4ssw0rd", "Bearer abc123") if literal in body
+        ]
         if leaked:
             exposures[path] = leaked
 
     assert not exposures, (
-        "these GET routes ship a DSN password to the browser: "
-        + ", ".join(sorted(exposures))
+        "these GET routes ship a credential to the browser: "
+        + ", ".join(f"{path} ({len(v)})" for path, v in sorted(exposures.items()))
+    )
+
+    # Coverage is part of the invariant. A sweep that silently inspects half the surface
+    # is the same false comfort as the hand-written list it replaced.
+    assert len(uninspectable) <= _MAX_UNINSPECTABLE_ROUTES, (
+        f"the sweep reached only {len(inspected)} of "
+        f"{len(inspected) + len(uninspectable)} routes; uninspectable: "
+        + ", ".join(f"{path}->{code}" for path, code in sorted(uninspectable.items()))
     )
 
 
@@ -522,4 +633,29 @@ async def test_the_advertised_url_is_the_same_however_the_public_base_is_spelled
         assert seen[0] == seen[1] == "https://mcp-spelling.example/mcp/", seen
     finally:
         await save_scoped_config(original, repo_id=None)
+
+
+def test_the_sweep_matcher_catches_a_header_credential_and_ignores_prose() -> None:
+    """The header net asserted directly, because nothing on the wire leaks one today.
+
+    Removing `_BEARER_TOKEN` / `_AUTHORIZATION_VALUE` leaves the route sweep green -- no
+    current route ships a header credential, which is the point of the fix. That makes the
+    matcher's own behaviour untested unless it is exercised here, so this pins both halves:
+    what it must catch, and the two prose forms actually served today that it must not.
+    """
+    # What it must catch: an unredacted OTLP_HEADERS value, in either shape it appears in.
+    assert _exposed_credentials({"OTLP_HEADERS": "Authorization=Bearer abc123,X-Scope-OrgID=1"})
+    assert _exposed_credentials({"config": {"OTLP_HEADERS": "Authorization: Bearer sk-live-9f2"}})
+    assert _exposed_credentials(["Authorization=hunter2-plus"])
+
+    # What it must not: the marker, and the prose that `/api/config/readiness` and the
+    # registry field descriptions really serve.
+    assert _exposed_credentials({"OTLP_HEADERS": f"Authorization={SECRET_REDACTED}"}) == []
+    assert _exposed_credentials({"d": "Require `Authorization: Bearer $MCP_API_KEY` for MCP."}) == []
+    assert _exposed_credentials({"d": "Supply a bearer token for the collector."}) == []
+    assert _exposed_credentials({"d": "Authorization=Bearer ...,X-Scope-OrgID=1"}) == []
+
+    # And the DSN half still works, including the marker case.
+    assert _exposed_credentials({"u": REAL_DSN}) == ["s3cr3t-p4ssw0rd"]
+    assert _exposed_credentials({"u": f"postgresql://u:{SECRET_REDACTED}@h:5432/d"}) == []
 
