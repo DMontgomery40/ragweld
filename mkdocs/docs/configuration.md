@@ -198,3 +198,6 @@ async function patchFusion() {
 
 ??? info "Where values come from"
     All defaults live in Pydantic `Field(default=...)` initializers. UI sliders and inputs read min/max from the same model. The server enforces the same constraints.
+
+!!! note "UI numeric controls are clamped to the same model"
+    Every numeric config control in the UI is a clamped `NumberField` whose advertised min/max match the Pydantic field it writes — the UI cannot accept a value the `PATCH /api/config/{section}` would reject, and a bound the model does not have is caught by a test against the model itself (`tests/unit/test_clean_start_defaults.py`) rather than surfacing later as an unattributed `422`. If you tighten a `ge`/`le` in Pydantic, regenerate the TypeScript types and the UI clamp follows automatically.

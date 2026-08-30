@@ -50,6 +50,7 @@
 | `/api/ready` fails | DB services not reachable | Start Docker services (`./start.sh`), check Postgres/Neo4j containers |
 | Indexing errors on a file | Unsupported encoding or giant binary | Exclude the file type; reindex |
 | Search is slow | Large candidate sizes, slow provider calls, graph enabled | Start with `/api/search`, disable graph, reduce top-k; then tune |
+| Deleting a corpus returns 409 | A live index run holds the corpus fence | The error names the run and its latest step; stop it (**RAG → Indexing → Stop**) or wait for its lease to lapse, then retry |
 
 ## “My corpus indexed, but results look wrong”
 

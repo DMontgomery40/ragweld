@@ -46,6 +46,14 @@
 !!! note "Runs are observable regardless of who started them"
     Every indexing run is recorded against the corpus and can be polled by any client — the UI, a CI job that started the run via `POST /api/index`, or a scheduled automation. The **RAG → Indexing** tab polls `/api/index/{corpus_id}/status` and, when it finds a run it did not start itself, mirrors its progress bar, current file, event log, and Stop button, marking the run "started outside this tab". This means an indexing job kicked off by an API call or a schedule is never invisible in the workbench.
 
+!!! note "A 409 fence conflict names the run and what it is doing"
+    Starting, stopping, or deleting an index on a corpus whose fence is held answers the typed `IndexRunConflictResponse`. Alongside `run_id`, `owner`, `started_at` and `heartbeat_at`, the detail carries:
+
+    - `phase` — the holding run's fence phase: `building` while it indexes, `retiring` while it retires the previous generation.
+    - `stage` — what the holding run last reported doing (its most recent `log`/`progress` run event, e.g. `Converting apollo-11-mission-report.pdf: still running (600s elapsed)`), or `null` when the run has logged nothing yet. The stage is read from the tail of the holding run's event log — never the full file — and the reader deliberately does not drain the live write queue, so it can lag by at most a moment and never hangs the response.
+
+    The same builder serves the corpus-delete refusal (`DELETE /api/repos/{corpus_id}` and `DELETE /api/corpora/{corpus_id}`, both of which document the `409` in their OpenAPI responses), so the delete refusal and the index-start refusal cannot drift apart.
+
 ```mermaid
 flowchart LR
     Start["POST /api/index"] --> Worker["Indexer"]
@@ -71,6 +79,9 @@ flowchart LR
     `total_cost_usd` sums whichever components apply and is `null` when any applicable component has no catalog price. When figures are off (or the corpus has no PDFs), the figure fields stay `null` — the estimate never shows a `$0` figure cost that isn't really zero. The **RAG → Indexing** tab renders the breakdown as `Embed $X + Semantic KG $Y + Figures $Z (~N figures)`.
 
     Time is itemized the same way: `estimated_seconds_figures` appears whenever the figure count does — the measured ~20 s per vision call divided by `indexing.figures.concurrency`, folded into the total time range — so the tab's `Embed ~X + Semantic KG ~Y + Figures ~Z` breakdown never double-counts the figure phase into the embedding line.
+
+!!! tip "Semantic KG cost is priced through the gateway alias"
+    `semantic_kg_cost_usd` resolves its model through the same `gateway_alias` lookup the figure price uses — the alias the run would actually call (`graph_indexing.semantic_kg_llm_model`, else the gateway default). A catalog `model` id such as `z-ai/glm-5.3-flash` is not an alias (aliases may not contain a `/`), so resolving by model id would price nothing at all; the default `ragweld-local` alias is a real, priced catalog row at $0/$0, so a default-config corpus reports a true zero rather than an unknown total.
 
 === "Python"
 ```python

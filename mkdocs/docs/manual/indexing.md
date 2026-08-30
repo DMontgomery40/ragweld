@@ -311,6 +311,42 @@ flowchart LR
 
     If you'd rather check programmatically, the run summary and events are plain GETs: `/api/index/{corpus_id}/runs/latest` and `/api/index/{corpus_id}/runs/{run_id}/events?limit=500`.
 
+## When a run goes quiet: the document extractor queue
+
+Docling conversion (rich documents and PDFs — the same path that powers the figure descriptions above) is serialized **process-wide**: only one index run converts at a time, and a second run's files queue behind it while its status still reads `indexing`. On a busy box that wait can stretch for many minutes, so the run log now narrates both silences instead of leaving a queued run looking like a hang:
+
+- **Queued waits.** After roughly 15 seconds waiting on the extractor, the run logs `Waiting for the document extractor: another index run is converting (<corpus> run <run id>) — queued Ns`, and repeats the notice every ~60 seconds with the **measured** elapsed wait (not a repeated constant, so a 20-minute queue never reads as "queued 15s" twenty times). The acquisition itself is logged too (`Document extractor acquired after Ns`), so the gap is accounted for.
+- **Long conversions.** One scanned PDF can hold the extractor for tens of minutes. Past roughly 60 seconds inside a single conversion, the run logs `Converting <file>: still running (Ns elapsed)` every ~60 seconds until the conversion finishes — a slow file never reads as a wedged worker.
+
+*Concept diagram (the process-wide extractor lock only — the full fused pipeline is on the [generated retrieval-pipeline page](../reference/architecture/retrieval-pipeline.md)):*
+
+```mermaid
+flowchart LR
+  subgraph s_runs["Index runs (per-corpus fence)"]
+    RA["Run A\n(scanned PDF)"]
+    RB["Run B\n(queued)"]
+  end
+  subgraph s_lock["Process-wide Docling extractor\n(server/api/index.py)"]
+    L["Extraction lock\n(one conversion at a time)"]
+  end
+  subgraph s_log["Run log (JSONL events)"]
+    WAIT["Run B:\n'Waiting for the document extractor...'\nrepeats with the measured elapsed wait"]
+    ACQ["Run B:\n'Document extractor acquired after Ns'"]
+    BEAT["Run A:\n'Converting file:\nstill running (Ns elapsed)'"]
+  end
+  RA -->|"acquires"| L
+  RB -->|"waits on"| L
+  RB -->|"every ~60s while waiting"| WAIT
+  RB -->|"once free"| ACQ
+  L -->|"held by A, conversion otherwise silent"| BEAT
+```
+
+??? question "Indexing looks hung: status is `indexing`, nothing is progressing"
+    - Open the run's event log (**RAG → Indexing** terminal pane, or `GET /api/index/{corpus_id}/runs/{run_id}/events`).
+    - `Waiting for the document extractor … — queued Ns`: your run is healthy and waiting its turn behind another corpus's Docling conversion. The notices repeat with the measured elapsed wait, so a long queue stays visible.
+    - `Converting <file>: still running (Ns elapsed)`: the conversion itself is alive — large scanned PDFs are simply slow. Compare the elapsed time against the corpus before intervening.
+    - Neither message and no recent events: make a second request (start/stop/delete); it answers `409` naming the holding run's id, its fence phase (`building` or `retiring`) and the last step that run reported. A fence whose heartbeat is older than `indexing.index_run_lease_seconds` is treated as crashed and taken over automatically.
+
 ## Reindexing safely
 
 Common reasons to reindex:
