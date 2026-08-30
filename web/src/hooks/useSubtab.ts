@@ -97,8 +97,10 @@ export function useSubtab<T extends string = string>({
     if (isDockContext) return;
     if (!allowed.length) return;
     const typed = String(raw || '').trim();
+    // Clearing on a valid slug too, so pasting the same bad slug a second time in one
+    // mount is announced again rather than silently corrected.
     if (!typed || isValid) {
-      if (!typed) announcedSubtab.current = null;
+      announcedSubtab.current = null;
       return;
     }
     const key = `${routePath}:${typed}`;

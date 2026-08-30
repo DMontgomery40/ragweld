@@ -370,3 +370,55 @@ def test_no_raw_accent_used_as_text_color() -> None:
         "the text-contrast floor on its own; use --accent-text for text "
         "instead:\n" + "\n".join(violations)
     )
+
+
+MICRO_INTERACTIONS_CSS = TOKENS_CSS.parent / "micro-interactions.css"
+
+# The app-shell tab stops (top bar + sidebar) must not paint their focus ring in a
+# translucent token. `--ring` is `rgba(..., 0.2)` in dark and `rgba(..., 0.15)` in light,
+# so `box-shadow: 0 0 0 3px var(--ring)` composited to almost nothing over the panel and
+# the first tab stops of every page looked unfocused (M-136). `--accent-text` is the
+# opaque replacement, and it already carries a 4.5:1 floor against every surface above.
+APP_SHELL_FOCUS_SELECTOR = "#global-search:focus-visible"
+
+
+def _app_shell_focus_block() -> str:
+    css = MICRO_INTERACTIONS_CSS.read_text(encoding="utf-8")
+    assert APP_SHELL_FOCUS_SELECTOR in css, (
+        f"{MICRO_INTERACTIONS_CSS.name} no longer carries the app-shell focus rule "
+        f"({APP_SHELL_FOCUS_SELECTOR}); the top bar's focus ring is unguarded."
+    )
+    start = css.index(APP_SHELL_FOCUS_SELECTOR)
+    open_brace = css.index("{", start)
+    return css[open_brace : css.index("}", open_brace)]
+
+
+def test_the_ring_token_really_is_translucent() -> None:
+    """Guard the premise: if `--ring` were opaque the next test would prove nothing."""
+    tokens_css = TOKENS_CSS.read_text(encoding="utf-8")
+    ring_values = re.findall(r"--ring:\s*([^;]+);", tokens_css)
+    assert len(ring_values) >= 2, f"expected a --ring per theme, found {ring_values}"
+    for value in ring_values:
+        assert "rgba(" in value, f"--ring is no longer translucent: {value.strip()}"
+
+
+def test_the_app_shell_focus_ring_is_painted_in_an_opaque_token() -> None:
+    block = _app_shell_focus_block()
+    assert "var(--ring)" not in block, (
+        "the app-shell focus ring is painted in --ring, a translucent token that "
+        "composites to nothing over the panel:\n" + block.strip()
+    )
+    used = set(re.findall(r"var\((--[a-z0-9-]+)\)", block))
+    assert used, f"the app-shell focus rule paints no token at all:\n{block.strip()}"
+    opaque_text_tokens = {f"--{name}" for name, _floor in TEXT_TOKEN_FLOORS}
+    assert used <= opaque_text_tokens, (
+        "the app-shell focus ring must use a token this suite already holds to a "
+        f"contrast floor; it uses {sorted(used - opaque_text_tokens)}"
+    )
+
+
+def test_the_app_shell_focus_ring_is_at_least_two_pixels() -> None:
+    block = _app_shell_focus_block()
+    widths = [int(w) for w in re.findall(r"(\d+)px", block)]
+    assert widths, f"the app-shell focus rule declares no size:\n{block.strip()}"
+    assert max(widths) >= 2, f"the app-shell focus ring is thinner than 2px:\n{block.strip()}"

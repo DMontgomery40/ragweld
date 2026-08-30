@@ -12,7 +12,7 @@ import './HelpGlossary.css';
 // "Advanced" -- so the buckets bore no relation to the data, one chip swallowed most of the
 // glossary, and no filter reached the rest (M-133).
 const CATEGORY_ICONS: Record<string, string> = {
-  general: 'GEN',
+  general: 'CORE',
   infrastructure: 'INF',
   models: 'MOD',
   embedding: 'EMB',

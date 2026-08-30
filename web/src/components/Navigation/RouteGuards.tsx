@@ -55,7 +55,12 @@ export function CorpusParamGuard() {
     if (activeRepo) params.set('corpus', activeRepo);
     else params.delete('corpus');
     const search = params.toString();
-    navigate({ pathname: location.pathname, search: search ? `?${search}` : '' }, { replace: true });
+    const next = search ? `?${search}` : '';
+    // Bail when the correction is a no-op. This effect is keyed on `location.search`, so
+    // navigating to an identical search would re-fire it forever -- which is exactly what
+    // happens if `activeRepo` is itself a value the registry does not contain.
+    if (next === (location.search || '')) return;
+    navigate({ pathname: location.pathname, search: next }, { replace: true });
   }, [activeRepo, initialized, location.pathname, location.search, navigate, repos]);
 
   return null;

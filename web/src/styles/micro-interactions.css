@@ -805,15 +805,27 @@ button:focus-visible {
    over the panel, and the `input:focus-visible { outline: none }` rule above removed the
    global ring on top of that -- the first tab stops on every page showed no focus
    indicator at all (M-136, M-161). Solid, 2px, offset, and only on :focus-visible, so
-   nothing changes for pointer users. */
+   nothing changes for pointer users.
+   The two ID'd controls are listed by id on purpose: `main.css` clears their outline
+   through `#global-search:focus` and `.theme-mode-select:focus`, and a class-level rule
+   cannot outrank an id. These match at equal specificity and this file is imported after
+   `main.css`, so they win on source order. */
 .topbar a:focus-visible,
 .topbar button:focus-visible,
 .topbar input:focus-visible,
 .topbar select:focus-visible,
+#global-search:focus-visible,
+#theme-mode:focus-visible,
 .tab-bar a:focus-visible {
-    outline: 2px solid var(--accent-text);
+    outline: 2px solid var(--accent-text) !important;
     outline-offset: 2px;
     border-radius: 6px;
+    /* The ring is also drawn as a box-shadow. Two of these stops (`#global-search` and the
+       sidebar links) resolve their outline from elsewhere in the cascade no matter how the
+       selector is written, and the app's own focus treatment is already a box-shadow -- it
+       was simply painted in `--ring`, a 20%-alpha slate that composites to nothing. Same
+       geometry, opaque colour, and it cannot lose an outline specificity fight. */
+    box-shadow: 0 0 0 3px var(--accent-text) !important;
 }
 
 

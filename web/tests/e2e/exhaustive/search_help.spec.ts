@@ -61,6 +61,37 @@ test.describe('help, search and keyboard access', () => {
     await page.keyboard.press('Escape');
     await expect(dialog).toHaveCount(0);
     await expect(trigger).toBeFocused();
+
+    // Every top-bar tab stop shows a real focus ring. `--ring` is a 20%-alpha slate and a
+    // blanket `input:focus-visible { outline: none }` removed the global outline, so the
+    // first tab stops of the page had no visible indicator at all.
+    await page.locator('.topbar button').first().focus();
+    for (let i = 0; i < 4; i += 1) {
+      const ring = await page.evaluate(() => {
+        const el = document.activeElement as HTMLElement | null;
+        if (!el) return null;
+        const cs = getComputedStyle(el);
+        // A ring counts if it is a >=2px outline OR a >=2px box-shadow in a fully opaque
+        // colour. `rgba(...)` in a shadow means a translucent ring, which is exactly the
+        // 20%-alpha `--ring` that made these stops look unfocused.
+        const shadow = cs.boxShadow || 'none';
+        const opaqueSpread = /rgb\(\d+,\s*\d+,\s*\d+\)[^,]*?\b([2-9]|\d{2,})px\b/.test(shadow);
+        return {
+          id: el.id || el.tagName,
+          inTopbar: Boolean(el.closest('.topbar')),
+          outline: `${cs.outlineStyle} ${cs.outlineWidth}`,
+          shadow,
+          visible:
+            (cs.outlineStyle !== 'none' && parseFloat(cs.outlineWidth || '0') >= 2) || opaqueSpread,
+        };
+      });
+      if (!ring?.inTopbar) break;
+      expect(
+        ring.visible,
+        `${ring.id} has no visible focus ring (outline: ${ring.outline}, box-shadow: ${ring.shadow})`
+      ).toBe(true);
+      await page.keyboard.press('Tab');
+    }
   });
 
   test('M-161: the palette exposes listbox semantics and a result count', async ({ page, baseURL }) => {
@@ -157,6 +188,11 @@ test.describe('help, search and keyboard access', () => {
       els.map((el) => (el.getAttribute('data-testid') || '').replace('glossary-chip-', ''))
     );
     expect(chipIds.length).toBeGreaterThan(6);
+    // One badge per category: two chips sharing a code is a badge that identifies nothing.
+    const badges = await chips.evaluateAll((els) =>
+      els.map((el) => (el.querySelector('[aria-hidden="true"]')?.textContent || '').trim())
+    );
+    expect(new Set(badges).size, `duplicate category badges: ${badges.join(', ')}`).toBe(badges.length);
     let summed = 0;
     for (const id of chipIds) summed += await readCount(`glossary-count-${id}`);
     expect(summed, 'the category chips must account for every term').toBe(await readCount('glossary-count-all'));
