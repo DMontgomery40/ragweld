@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { getRouteByPath } from '@/config/routes';
+import { showToast } from '@/utils/toast';
 
 export type UseSubtabOptions<T extends string = string> = {
   /**
@@ -85,6 +86,33 @@ export function useSubtab<T extends string = string>({
     },
     [allowed.length, allowedSet, defaultSubtab, isDockContext, location.pathname, location.search, navigate, param, replaceOnChange]
   );
+
+  // A slug the operator actually typed (or followed from a runbook, doc or bookmark)
+  // and that this route does not have used to be swallowed: the URL was rewritten to
+  // the default subtab with no notice, so `?subtab=reranker` looked exactly like a
+  // working link to Reranker while showing Data Quality (M-126, M-159/X-03). Announce
+  // it once per bad value; an absent param is not a mistake and stays silent.
+  const announcedSubtab = useRef<string | null>(null);
+  useEffect(() => {
+    if (isDockContext) return;
+    if (!allowed.length) return;
+    const typed = String(raw || '').trim();
+    if (!typed || isValid) {
+      if (!typed) announcedSubtab.current = null;
+      return;
+    }
+    const key = `${routePath}:${typed}`;
+    if (announcedSubtab.current === key) return;
+    announcedSubtab.current = key;
+    const route = getRouteByPath(routePath);
+    const landing =
+      (route?.subtabs ?? []).find((s) => s.id === String(defaultSubtab))?.title || String(defaultSubtab);
+    const known = (route?.subtabs ?? []).map((s) => s.id).join(', ');
+    showToast(
+      `No "${typed}" tab on ${route?.label || routePath}. Showing ${landing}. Valid values: ${known}.`,
+      'error'
+    );
+  }, [allowed.length, defaultSubtab, isDockContext, isValid, raw, routePath]);
 
   // Ensure the URL always contains a valid ?subtab=... for deep-linking.
   useEffect(() => {

@@ -50,4 +50,83 @@ test.describe('app shell', () => {
     await expect(rail.locator('input[type="checkbox"]')).toHaveCount(0);
     await expect(rail.locator('input[type="file"]')).toHaveCount(0);
   });
+
+  test('M-125: an unknown /web path says so instead of rendering a blank page', async ({ page, baseURL }) => {
+    await activateCorpusInBrowser(page, corpusId);
+    await gotoWeb(page, baseURL, 'this-route-does-not-exist');
+    const notFound = page.getByTestId('route-not-found');
+    await expect(notFound).toBeVisible();
+    await expect(notFound).toContainText('this-route-does-not-exist');
+    // The sidebar stays reachable and there is a way home.
+    await expect(page.getByTestId('tab-bar')).toBeVisible();
+    await notFound.getByTestId('route-not-found-home').click();
+    await expect(page).toHaveURL(/\/dashboard(\?|$)/);
+  });
+
+  test('M-126: an unknown ?subtab= is corrected with a visible notice', async ({ page, baseURL }) => {
+    await activateCorpusInBrowser(page, corpusId);
+    await gotoWeb(page, baseURL, 'rag?subtab=reranker');
+    // It still lands somewhere usable...
+    await expect(page).toHaveURL(/subtab=data-quality/);
+    // ...but it must not do so silently: the operator is told which slug was wrong.
+    const toast = page.locator('.toast, [data-testid="toast"], [role="status"], [role="alert"]').filter({ hasText: 'reranker' });
+    await expect(toast.first()).toBeVisible({ timeout: 10_000 });
+  });
+
+  test('M-127: an unknown ?corpus= is named in a notice and dropped from the URL', async ({ page, baseURL }) => {
+    await activateCorpusInBrowser(page, corpusId);
+    await gotoWeb(page, baseURL, 'dashboard?subtab=system&corpus=does-not-exist');
+    const toast = page.locator('.toast, [data-testid="toast"], [role="status"], [role="alert"]').filter({ hasText: 'does-not-exist' });
+    await expect(toast.first()).toBeVisible({ timeout: 15_000 });
+    await expect(page).not.toHaveURL(/corpus=does-not-exist/);
+  });
+
+  test('M-128: browser Back walks the dashboard subtabs', async ({ page, baseURL }) => {
+    await activateCorpusInBrowser(page, corpusId);
+    await gotoWeb(page, baseURL, 'dashboard?subtab=system');
+    await expect(page).toHaveURL(/subtab=system/);
+    await page.locator('#dashboard-subtabs [data-subtab="monitoring"]').click();
+    await expect(page).toHaveURL(/subtab=monitoring/);
+    await page.locator('#dashboard-subtabs [data-subtab="storage"]').click();
+    await expect(page).toHaveURL(/subtab=storage/);
+    await page.goBack();
+    await expect(page).toHaveURL(/subtab=monitoring/);
+    await page.goBack();
+    await expect(page).toHaveURL(/subtab=system/);
+  });
+
+  test('M-159: the document title names the route, the subtab and the corpus', async ({ page, baseURL }) => {
+    await activateCorpusInBrowser(page, corpusId);
+    await gotoWeb(page, baseURL, 'dashboard?subtab=storage');
+    await expect(page).toHaveTitle(new RegExp(`^Dashboard . Storage . ${corpusId} . ragweld$`));
+    await page.locator('#dashboard-subtabs [data-subtab="glossary"]').click();
+    await expect(page).toHaveTitle(new RegExp(`^Dashboard . Glossary . ${corpusId} . ragweld$`));
+    await gotoWeb(page, baseURL, 'this-route-does-not-exist');
+    await expect(page).toHaveTitle(/^Page not found/);
+  });
+
+  test('M-129: one request per resource on a page load', async ({ page, baseURL }) => {
+    await activateCorpusInBrowser(page, corpusId);
+    const seen: string[] = [];
+    page.on('request', (req) => {
+      const u = new URL(req.url());
+      if (u.pathname.startsWith('/api/')) seen.push(u.pathname);
+    });
+    await gotoWeb(page, baseURL, 'dashboard?subtab=system');
+    await expect(page.getByTestId('tab-bar')).toBeVisible();
+    await page.waitForTimeout(6000);
+    const count = (p: string) => seen.filter((x) => x === p).length;
+    const report = JSON.stringify(
+      Object.fromEntries([...new Set(seen)].map((p) => [p, count(p)])),
+      null,
+      2
+    );
+    expect(count('/api/config'), `duplicate GET /api/config\n${report}`).toBeLessThanOrEqual(1);
+    expect(count('/api/corpora'), `duplicate GET /api/corpora\n${report}`).toBeLessThanOrEqual(1);
+    expect(count('/api/config/registry'), `duplicate GET /api/config/registry\n${report}`).toBeLessThanOrEqual(1);
+    expect(count('/api/index/stats'), `duplicate GET /api/index/stats\n${report}`).toBeLessThanOrEqual(1);
+    expect(count('/api/health'), `duplicate GET /api/health\n${report}`).toBeLessThanOrEqual(1);
+    expect(count('/api/models'), `duplicate GET /api/models\n${report}`).toBeLessThanOrEqual(1);
+  });
 });
+

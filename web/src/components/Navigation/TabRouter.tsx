@@ -7,6 +7,7 @@ import { createElement, isValidElement } from 'react';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { SubtabErrorFallback } from '@/components/ui/SubtabErrorFallback';
 import GrafanaEmbed from '@/pages/GrafanaEmbed';
+import { NotFound } from './NotFound';
 
 export function TabRouter() {
   return (
@@ -60,6 +61,9 @@ export function TabRouter() {
           <Route key={route.path} path={route.path} element={wrappedElement} />
         );
       })}
+      {/* Catch-all. Without it an unknown path rendered an empty content area with no
+          signal that the route was wrong (M-125). */}
+      <Route path="*" element={<NotFound />} />
     </Routes>
   );
 }

@@ -6,6 +6,7 @@ import { useHealthStore } from '@/stores';
 import { TabBar } from './components/Navigation/TabBar';
 import { TabRouter } from './components/Navigation/TabRouter';
 import { Breadcrumbs } from './components/Navigation/Breadcrumbs';
+import { CorpusParamGuard, DocumentTitle } from './components/Navigation/RouteGuards';
 
 // Right panel (Dock / Settings)
 import { DockPanel } from './components/Dock/DockPanel';
@@ -146,6 +147,7 @@ function App() {
   if (isEmbed) {
     return (
       <div className="app-embed-root">
+        <DocumentTitle />
         <div className="app-embed-scroll">
           <ErrorBoundary
             context="embed-tab-router"
@@ -169,6 +171,8 @@ function App() {
 
   return (
     <>
+      <DocumentTitle />
+      <CorpusParamGuard />
       {/* Topbar */}
       <div className="topbar">
         <button 
