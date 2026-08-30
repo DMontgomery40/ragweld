@@ -5,6 +5,24 @@ import {
 } from '@/api/docker';
 import { useNotification } from '@/hooks/useNotification';
 import { useDockerStore } from '@/stores/useDockerStore';
+import { confirmDialog } from '@/components/ui/confirmDialog';
+
+// Data and ingress tiers: stopping or restarting one takes a store or the front door offline
+// for every corpus and operator, and dependent services fail while it is down. A stop/restart
+// here demands a typed confirmation, not a single click among equal-weight buttons (E-47).
+const CRITICAL_SERVICES: ReadonlySet<RagweldDockerService> = new Set([
+  'postgres',
+  'neo4j',
+  'qdrant',
+  'caddy',
+  'authelia',
+  'authelia-redis',
+  'cloudflared',
+  'langfuse-postgres',
+  'langfuse-clickhouse',
+  'langfuse-redis',
+  'langfuse-minio',
+]);
 
 const SERVICE_LABELS: Record<RagweldDockerService, string> = {
   postgres: 'PostgreSQL',
@@ -90,6 +108,30 @@ export function DockerSubtab() {
     service: RagweldDockerService,
     operation: 'start' | 'stop' | 'restart',
   ) => {
+    // `start` brings a service up (non-destructive); `stop`/`restart` take it down and must be
+    // confirmed with the exact service named. Core data/ingress services additionally require the
+    // operator to type the service key so a stray click cannot take a store offline.
+    if (operation === 'stop' || operation === 'restart') {
+      const label = SERVICE_LABELS[service];
+      const critical = CRITICAL_SERVICES.has(service);
+      const consequence =
+        operation === 'stop'
+          ? `Stopping ${label} takes it offline for every corpus and operator until it is started again`
+          : `Restarting ${label} interrupts it while it bounces`;
+      const proceed = await confirmDialog({
+        title: `${operation === 'stop' ? 'Stop' : 'Restart'} ${label}`,
+        message: critical
+          ? `${consequence}. This is a core data or ingress service — dependent services will error while it is down. Continue?`
+          : `${consequence}. Continue?`,
+        confirmLabel: `${operation === 'stop' ? 'Stop' : 'Restart'} ${label}`,
+        cancelLabel: 'Cancel',
+        danger: true,
+        requireTyped: critical
+          ? { expected: service, label: `Type "${service}" to ${operation} this core service` }
+          : undefined,
+      });
+      if (!proceed) return;
+    }
     const actionKey = `${service}:${operation}`;
     setAction(actionKey);
     try {
@@ -224,14 +266,29 @@ export function DockerSubtab() {
                   )}
                   {container && running && (
                     <>
-                      <button className="small-button" disabled={busy} onClick={() => void runAction(service, 'restart')}>
-                        Restart
-                      </button>
-                      <button className="small-button" disabled={busy} onClick={() => void runAction(service, 'stop')}>
-                        Stop
-                      </button>
+                      {/* Logs is the primary, non-destructive control and leads the row; the
+                          lifecycle controls follow, weighted as danger and pushed to the right
+                          so a stop/restart is never the default target (E-47). */}
                       <button className="small-button" disabled={busy} onClick={() => void showLogs(service)}>
                         Logs
+                      </button>
+                      <button
+                        className="small-button"
+                        disabled={busy}
+                        onClick={() => void runAction(service, 'restart')}
+                        title={`Restart ${SERVICE_LABELS[service]}`}
+                        style={{ marginLeft: 'auto', borderColor: 'var(--warn)', color: 'var(--warn)' }}
+                      >
+                        Restart
+                      </button>
+                      <button
+                        className="small-button"
+                        disabled={busy}
+                        onClick={() => void runAction(service, 'stop')}
+                        title={`Stop ${SERVICE_LABELS[service]}`}
+                        style={{ borderColor: 'var(--err)', color: 'var(--err)' }}
+                      >
+                        Stop
                       </button>
                     </>
                   )}

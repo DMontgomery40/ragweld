@@ -5,6 +5,7 @@ import { SECRET_REDACTED } from '@/api/secrets';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { useConfig, useConfigField } from '@/hooks';
 import { useRepoStore } from '@/stores/useRepoStore';
+import { confirmDialog } from '@/components/ui/confirmDialog';
 
 export function PathsSubtab() {
   const { loading: configLoading, flushPendingPatches } = useConfig();
@@ -50,6 +51,32 @@ export function PathsSubtab() {
   }, [activeCorpus]);
 
   async function saveConfig() {
+    // One button commits two unrelated things: the database connection settings (Postgres DSN,
+    // Neo4j URI/user/database, mode, prefix, auto-create) AND the active corpus's metadata
+    // (name, path, description). Editing a corpus description here also rewrites the live
+    // backend's database endpoints in the same write (E-52), so confirm what is about to change
+    // — naming the specific corpus — before saving.
+    const corpusMetaChanged =
+      !!activeCorpus &&
+      (corpusName !== String(activeCorpus.name || '') ||
+        corpusPath !== String(activeCorpus.path || '') ||
+        corpusDescription !== String(activeCorpus.description || ''));
+    const corpusLabel = activeCorpus ? `"${activeCorpus.name || activeCorpus.corpus_id}"` : 'the active corpus';
+    const proceed = await confirmDialog({
+      title: 'Save database and corpus settings',
+      message:
+        `Saving here writes the database connection settings (Postgres DSN, Neo4j URI, user, ` +
+        `database, mode, prefix, auto-create) that the live backend uses for every corpus` +
+        (corpusMetaChanged
+          ? `, AND the metadata for corpus ${corpusLabel} (name, path, description).`
+          : `. No corpus metadata changed.`) +
+        ` Rewiring the database endpoints affects the whole backend. Save these settings?`,
+      confirmLabel: 'Save settings',
+      cancelLabel: 'Cancel',
+      danger: true,
+    });
+    if (!proceed) return;
+
     setSaving(true);
     setActionMessage('Saving configuration...');
 

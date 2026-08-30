@@ -11,6 +11,7 @@ import { useState, useEffect } from 'react';
 import Editor from '@monaco-editor/react';
 import { useConfigField } from '@/hooks';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
+import { confirmDialog } from '@/components/ui/confirmDialog';
 
 // Default intent matrix (must match Pydantic defaults in tribrid_config_model.py)
 const DEFAULT_INTENT_MATRIX: Record<string, Record<string, number>> = {
@@ -96,7 +97,21 @@ export function IntentMatrixEditor() {
     }
   };
 
-  const handleReset = () => {
+  const handleReset = async () => {
+    // Reset discards the operator's entire hand-authored matrix (C-27). Confirm with the
+    // consequence spelled out; the danger dialog focuses Cancel so a stray Enter keeps the
+    // matrix rather than destroying it.
+    const proceed = await confirmDialog({
+      title: 'Reset intent matrix to defaults',
+      message:
+        'This replaces the entire intent matrix you have authored with the built-in defaults. ' +
+        'Every custom intent-to-layer bonus multiplier is discarded and cannot be recovered. ' +
+        'Reset to defaults?',
+      confirmLabel: 'Reset to defaults',
+      cancelLabel: 'Keep my matrix',
+      danger: true,
+    });
+    if (!proceed) return;
     setMatrix(DEFAULT_INTENT_MATRIX);
     setEditorValue(JSON.stringify(DEFAULT_INTENT_MATRIX, null, 2));
     setJsonError(null);
@@ -115,7 +130,15 @@ export function IntentMatrixEditor() {
             type="button"
             data-testid="intent-matrix-reset"
             onClick={handleReset}
-            style={EDITOR_ACTION_BUTTON_STYLE}
+            title="Discard your custom matrix and restore the built-in defaults"
+            style={{
+              ...EDITOR_ACTION_BUTTON_STYLE,
+              // Weighted as a destructive action and pushed away from Apply so it is not one
+              // mis-click from the save button (C-27).
+              marginRight: 'auto',
+              border: '1px solid var(--error, #e5484d)',
+              color: 'var(--error, #e5484d)',
+            }}
           >
             Reset to Default
           </button>

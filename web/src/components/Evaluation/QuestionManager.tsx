@@ -90,11 +90,17 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ className = ''
     }
   };
 
-  const handleDeleteEntry = async (entryId: string) => {
+  const handleDeleteEntry = async (entryId: string, question?: string) => {
+    const q = String(question || '').trim();
+    const quoted = q ? `"${q.length > 120 ? `${q.slice(0, 117)}…` : q}"` : 'this eval entry';
     const proceed = await confirmDialog({
       title: 'Delete eval entry',
-      message: 'Delete this eval entry?',
-      confirmLabel: 'Delete',
+      message:
+        `Delete ${quoted} from the eval dataset. This removes the question and its expected ` +
+        `evidence; eval and promptfoo runs already computed against it keep their results, but ` +
+        `no future run will include it. This cannot be undone.`,
+      confirmLabel: 'Delete entry',
+      cancelLabel: 'Keep entry',
       danger: true,
     });
     if (!proceed) return;
@@ -389,7 +395,7 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ className = ''
                         Edit
                       </button>
                       <button
-                        onClick={() => entry.entry_id && handleDeleteEntry(entry.entry_id)}
+                        onClick={() => entry.entry_id && handleDeleteEntry(entry.entry_id, entry.question)}
                         style={{
                           padding: '4px 8px',
                           background: 'transparent',
