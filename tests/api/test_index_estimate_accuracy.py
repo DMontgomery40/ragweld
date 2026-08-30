@@ -10,13 +10,11 @@ epstein-files-public by 4.5x on chunks in the other direction.
 
 from __future__ import annotations
 
-import time
-
 import pytest
 
 from server.db.postgres import PostgresClient
 from server.indexing.chunker import Chunker
-from server.indexing.estimate import sample_corpus, warm_sampler
+from server.indexing.estimate import sample_corpus
 from server.indexing.loader import FileLoader
 from server.services.config_store import CorpusNotFoundError
 from server.services.config_store import get_config as load_scoped_config
