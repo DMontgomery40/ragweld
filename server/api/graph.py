@@ -4,9 +4,9 @@ import contextlib
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from server.api.dependency_errors import (
     MANIFEST_READER_UNAVAILABLE_RESPONSES,
@@ -21,6 +21,11 @@ from server.services.config_store import CorpusNotFoundError
 from server.services.config_store import get_config as load_scoped_config
 
 router = APIRouter(tags=["graph"], responses=MANIFEST_READER_UNAVAILABLE_RESPONSES)
+
+
+def _entity_missing_detail(entity_id: str) -> str:
+    """A 404 the operator can act on: which id was looked up, not a bare 'not found'."""
+    return f"Entity not found in this corpus graph: {entity_id}"
 
 
 @dataclass(frozen=True)
@@ -91,43 +96,49 @@ async def list_entities(
         return await scope.neo4j.list_entities(scope.graph_repo_id, entity_type, limit, query=q)
 
 
-@router.get("/graph/{corpus_id}/entity/{entity_id:path}", response_model=Entity)
-async def get_entity(corpus_id: str, entity_id: str) -> Entity:
+# Entity ids are corpus-relative source paths (`server/retrieval/rerank.py::Reranker`), so
+# they carry `/` and `::`. They travel as a QUERY parameter, never as a path segment: a
+# `{entity_id:path}` segment is greedy and swallows the `/neighbors` and `/relationships`
+# suffixes of its own sibling routes, which is how every code entity 404ed.
+EntityIdQuery = Annotated[str, Query(min_length=1, description="Entity id within the corpus graph")]
+
+
+@router.get("/graph/{corpus_id}/entity", response_model=Entity)
+async def get_entity(corpus_id: str, entity_id: EntityIdQuery) -> Entity:
     async with _graph_client(corpus_id, boundary="Graph entity API") as scope:
         neo4j = scope.neo4j
         if scope.graph_repo_id is None:
-            raise HTTPException(status_code=404, detail="Entity not found")
+            raise HTTPException(status_code=404, detail=_entity_missing_detail(entity_id))
         ent = await neo4j.get_entity(scope.graph_repo_id, entity_id)
         if ent is None:
-            raise HTTPException(status_code=404, detail="Entity not found")
+            raise HTTPException(status_code=404, detail=_entity_missing_detail(entity_id))
         return ent
 
 
-@router.get(
-    "/graph/{corpus_id}/entity/{entity_id:path}/relationships", response_model=list[Relationship]
-)
-async def get_entity_relationships(corpus_id: str, entity_id: str) -> list[Relationship]:
+@router.get("/graph/{corpus_id}/entity/relationships", response_model=list[Relationship])
+async def get_entity_relationships(corpus_id: str, entity_id: EntityIdQuery) -> list[Relationship]:
     async with _graph_client(corpus_id, boundary="Graph relationships API") as scope:
         neo4j = scope.neo4j
         if scope.graph_repo_id is None:
-            return []
+            raise HTTPException(status_code=404, detail=_entity_missing_detail(entity_id))
         return await neo4j.get_relationships(scope.graph_repo_id, entity_id)
 
 
-@router.get(
-    "/graph/{corpus_id}/entity/{entity_id:path}/neighbors", response_model=GraphNeighborsResponse
-)
+@router.get("/graph/{corpus_id}/entity/neighbors", response_model=GraphNeighborsResponse)
 async def get_entity_neighbors(
-    corpus_id: str, entity_id: str, max_hops: int = 2, limit: int = 200
+    corpus_id: str,
+    entity_id: EntityIdQuery,
+    max_hops: int = 2,
+    limit: int = 200,
 ) -> GraphNeighborsResponse:
     async with _graph_client(corpus_id, boundary="Graph neighbors API") as scope:
         neo4j = scope.neo4j
         repo_id = scope.graph_repo_id
         if repo_id is None:
-            raise HTTPException(status_code=404, detail="Entity not found")
+            raise HTTPException(status_code=404, detail=_entity_missing_detail(entity_id))
         out = await neo4j.get_entity_neighbors(repo_id, entity_id, max_hops=max_hops, limit=limit)
         if out is None:
-            raise HTTPException(status_code=404, detail="Entity not found")
+            raise HTTPException(status_code=404, detail=_entity_missing_detail(entity_id))
         return out
 
 

@@ -7,6 +7,19 @@
 import { create } from 'zustand';
 import type { Entity, Relationship, Community, GraphStats } from '@/types/generated';
 
+/**
+ * Outcome of the last entity expansion. Local UI state, not a wire contract.
+ * `null` means nothing has been expanded; a `failed` entry keeps the operator's
+ * results on screen and lets the details pane say what actually went wrong
+ * instead of looping "select an entity to load its neighborhood" (M-01, M-65).
+ */
+export interface EntityExpansion {
+  entityId: string;
+  status: 'ok' | 'failed';
+  /** Server `detail` when the expansion failed; empty on success. */
+  detail: string;
+}
+
 interface GraphStore {
   // State
   entities: Entity[];
@@ -17,6 +30,7 @@ interface GraphStore {
   selectedCommunity: Community | null;
   isLoading: boolean;
   error: string | null;
+  expansion: EntityExpansion | null;
   viewMode: 'viz' | 'table';
 
   // Filter state
@@ -33,6 +47,7 @@ interface GraphStore {
   setSelectedCommunity: (community: Community | null) => void;
   setIsLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
+  setExpansion: (expansion: EntityExpansion | null) => void;
   setViewMode: (mode: 'viz' | 'table') => void;
   setVisibleEntityTypes: (types: string[]) => void;
   setVisibleRelationTypes: (types: string[]) => void;
@@ -53,6 +68,7 @@ export const useGraphStore = create<GraphStore>()((set) => ({
   selectedCommunity: null,
   isLoading: false,
   error: null,
+  expansion: null,
   viewMode: 'viz',
   visibleEntityTypes: defaultEntityTypes,
   visibleRelationTypes: defaultRelationTypes,
@@ -67,6 +83,7 @@ export const useGraphStore = create<GraphStore>()((set) => ({
   setSelectedCommunity: (selectedCommunity) => set({ selectedCommunity }),
   setIsLoading: (isLoading) => set({ isLoading }),
   setError: (error) => set({ error }),
+  setExpansion: (expansion) => set({ expansion }),
   setViewMode: (viewMode) => set({ viewMode }),
   setVisibleEntityTypes: (visibleEntityTypes) => set({ visibleEntityTypes }),
   setVisibleRelationTypes: (visibleRelationTypes) => set({ visibleRelationTypes }),
@@ -81,6 +98,7 @@ export const useGraphStore = create<GraphStore>()((set) => ({
       selectedCommunity: null,
       isLoading: false,
       error: null,
+      expansion: null,
       viewMode: state.viewMode,
       visibleEntityTypes: defaultEntityTypes,
       visibleRelationTypes: defaultRelationTypes,

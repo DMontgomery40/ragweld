@@ -620,7 +620,7 @@ docker compose --project-name ragweld exec neo4j cypher-shell -u neo4j -p passwo
 ### Graph inspection (UI + Neo4j Browser)
 
 - **UI (recommended)**: `RAG → Graph` shows graph stats, communities, entity search, and entity neighborhood subgraphs.
-  - Endpoints: `/api/graph/{corpus_id}/stats`, `/api/graph/{corpus_id}/entities`, `/api/graph/{corpus_id}/entity/{entity_id}/neighbors`, `/api/graph/{corpus_id}/communities`, `/api/graph/{corpus_id}/community/{community_id}/members`
+  - Endpoints: `/api/graph/{corpus_id}/stats`, `/api/graph/{corpus_id}/entities`, `/api/graph/{corpus_id}/entity/neighbors?entity_id=`, `/api/graph/{corpus_id}/communities`, `/api/graph/{corpus_id}/community/{community_id}/members`
 - **Neo4j Browser**: http://localhost:7474 (neo4j/password)
 - Useful Cypher examples:
 
@@ -807,8 +807,8 @@ curl -X PUT "http://localhost:58012/api/config" \
 | `/api/graph/{id}/entities` | GET | List entities in the graph |
 | `/api/graph/{id}/communities` | GET | List detected communities |
 | `/api/graph/{id}/stats` | GET | Graph stats (entity/rel/community counts) |
-| `/api/graph/{id}/entity/{entity_id}` | GET | Fetch a single entity |
-| `/api/graph/{id}/entity/{entity_id}/neighbors` | GET | Entity neighborhood subgraph |
+| `/api/graph/{id}/entity?entity_id=` | GET | Fetch a single entity |
+| `/api/graph/{id}/entity/neighbors?entity_id=` | GET | Entity neighborhood subgraph |
 | `/api/graph/{id}/query` | POST | Read-only Cypher query (debug) |
 
 ### Tracing & Debugging
