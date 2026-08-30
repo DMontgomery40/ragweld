@@ -1075,7 +1075,11 @@ def figure_run_summary_event(
             "check the gateway, the alias, and indexing.figures.max_completion_tokens)"
         )
     elif described_nothing:
-        hint = " (description was enabled but no figure was described; check the vision alias)"
+        hint = (
+            " (description was enabled but every picture was filtered out before the vision "
+            "call; check indexing.figures.skip_classes, indexing.figures.min_area_fraction "
+            "and indexing.figures.classify)"
+        )
     else:
         hint = ""
     return {
@@ -1175,7 +1179,11 @@ def _estimate_semantic_kg_cost_usd(
 
 
 _FIGURE_INPUT_TOKENS = 1200  # image at images_scale 2 (~800) + prompt (~400)
-_FIGURES_PER_PAGE_HEURISTIC = 0.6
+# Recalibrated against the measured Phase 1 run on the Apollo 11 Mission Report: Docling
+# detected 140 pictures across 359 scanned pages (0.39/page). The prior 0.6 overshot the
+# figure count by 54%. The per-figure price stays a ceiling: it charges the FULL
+# max_completion_tokens budget as output, while a real reply spends only part of it.
+_FIGURES_PER_PAGE_HEURISTIC = 0.4
 
 
 def _estimate_figure_description_cost_usd(
@@ -1215,14 +1223,21 @@ def _estimate_figures(cfg: TriBridConfig, pdf_paths: list[Path]) -> tuple[int | 
     """Estimated figure count and description cost for one indexing estimate.
 
     Returns ``(None, None)`` when figure description is off (either the feature flag or the
-    per-figure describe step) or there are no PDFs in scope — the estimate then omits the
-    figure line entirely rather than showing a $0 figure cost that isn't really zero.
+    per-figure describe step), when there are no PDFs in scope, or when the heuristic rounds to
+    no figures at all — the estimate then omits the figure line entirely rather than showing a
+    $0 figure cost that isn't really zero.
+
+    That last case is reachable: at 0.4 figures/page a document of one or two pages rounds to
+    zero, and a short PDF plainly can still contain a figure. Quoting "$0.00" there would be the
+    one number this function exists to avoid printing.
     """
     figures_cfg = cfg.indexing.figures
     if not figures_cfg.enabled or not figures_cfg.describe or not pdf_paths:
         return None, None
     pages = _count_pdf_pages(pdf_paths)
     estimated_figures = int(round(pages * _FIGURES_PER_PAGE_HEURISTIC))
+    if estimated_figures <= 0:
+        return None, None
     figure_cost = _estimate_figure_description_cost_usd(
         alias=figures_cfg.vision_model,
         figures=estimated_figures,
@@ -3322,7 +3337,9 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
         assumptions.append(f"skips files > {max_indexable_bytes} bytes")
     if estimated_figures is not None:
         assumptions.append(
-            f"figures≈{_FIGURES_PER_PAGE_HEURISTIC} per PDF page; {_FIGURE_INPUT_TOKENS} input tokens per figure"
+            f"figures≈{_FIGURES_PER_PAGE_HEURISTIC} per PDF page "
+            f"(ceiling: {_FIGURE_INPUT_TOKENS} input tokens + the full max_completion_tokens "
+            "budget per figure)"
         )
 
     if skip_dense:

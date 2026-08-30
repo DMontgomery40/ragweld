@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 from docling.datamodel.pipeline_options import PdfPipelineOptions, PictureDescriptionApiOptions
 
+from server.indexing import text_extractors
 from server.indexing.text_extractors import (
     FigureGateway,
     _docling_converter,
@@ -14,6 +15,23 @@ from server.indexing.text_extractors import (
 )
 from server.models.tribrid_config_model import IndexingFiguresConfig
 from tests.fixtures.pdf_builder import apollo_figure_pages
+
+
+@pytest.fixture
+def owned_converter_cache():
+    """Give the test sole ownership of the module-global enrichment converter cache.
+
+    ``_FIGURE_CONVERTERS`` lives for the process, so eviction order is otherwise at the mercy
+    of whatever earlier tests in this module left in it (and this test's own churn would
+    perturb them back). Save, clear, and restore under the real lock -- no mocking.
+    """
+    with text_extractors._DOCLING_CONVERTER_LOCK:
+        saved = text_extractors._FIGURE_CONVERTERS.copy()
+        text_extractors._FIGURE_CONVERTERS.clear()
+    yield
+    with text_extractors._DOCLING_CONVERTER_LOCK:
+        text_extractors._FIGURE_CONVERTERS.clear()
+        text_extractors._FIGURE_CONVERTERS.update(saved)
 
 
 def test_disabled_config_uses_the_plain_cached_converter() -> None:
@@ -76,12 +94,51 @@ def test_describe_without_a_gateway_fails_closed() -> None:
         build_figure_pipeline_options(figures, None)
 
 
-def test_converters_are_cached_per_options_signature() -> None:
+def test_converters_are_cached_per_options_signature(owned_converter_cache) -> None:
     a = IndexingFiguresConfig(enabled=True, describe=False)
     b = IndexingFiguresConfig(enabled=True, describe=False)
     c = IndexingFiguresConfig(enabled=True, describe=False, images_scale=1.5)
     assert docling_converter_for(a, None) is docling_converter_for(b, None)
     assert docling_converter_for(a, None) is not docling_converter_for(c, None)
+
+
+def test_converter_cache_is_bounded_and_evicts_the_oldest_inserted(owned_converter_cache) -> None:
+    """The enrichment cache is capped: a DocumentConverter pins its own initialised layout,
+    OCR and classifier pipelines for as long as it is referenced, so an unbounded dict keyed by
+    the per-corpus figures signature would accumulate one full set of pipelines per distinct
+    corpus configuration for the life of the process.
+
+    Eviction is FIFO by insertion, deliberately not LRU: the sequence below hits ``a`` after
+    inserting ``b``, so an LRU cache would evict ``b`` while a FIFO one evicts ``a``. Building
+    a converter is cheap (Docling initialises its pipelines on the first ``convert`` call, not
+    at construction), so nothing here converts anything.
+    """
+    a = IndexingFiguresConfig(enabled=True, describe=False, images_scale=1.0)
+    b = IndexingFiguresConfig(enabled=True, describe=False, images_scale=1.5)
+    c = IndexingFiguresConfig(enabled=True, describe=False, images_scale=2.5)
+
+    first_a = docling_converter_for(a, None)
+    first_b = docling_converter_for(b, None)
+    assert docling_converter_for(a, None) is first_a, "a cache hit must not rebuild"
+    assert len(text_extractors._FIGURE_CONVERTERS) == 2
+
+    first_c = docling_converter_for(c, None)  # the third distinct signature must evict one
+    assert len(text_extractors._FIGURE_CONVERTERS) == 2
+    assert text_extractors._FIGURE_CONVERTER_CACHE_SIZE == 2
+
+    # ``a`` was inserted first, so ``a`` is the one dropped -- even though it was hit most
+    # recently. ``b`` and ``c`` are still the same objects.
+    assert docling_converter_for(b, None) is first_b
+    assert docling_converter_for(c, None) is first_c
+    reborn_a = docling_converter_for(a, None)
+    assert reborn_a is not first_a, "the evicted signature must build a NEW converter"
+    assert len(text_extractors._FIGURE_CONVERTERS) == 2, "the cache never grows past its cap"
+
+    # The plain singleton is a separate global; enrichment eviction never touches it.
+    plain = _docling_converter()
+    assert docling_converter_for(IndexingFiguresConfig(enabled=False), None) is plain
+    assert all(conv is not plain for conv in text_extractors._FIGURE_CONVERTERS.values())
+    assert _docling_converter() is plain
 
 
 def test_enrichment_converter_still_accepts_every_format_the_plain_one_does() -> None:
@@ -153,7 +210,7 @@ def test_unreachable_vision_gateway_yields_failed_pictures_not_an_exception() ->
     """Pinned Docling behaviour: a dead vision endpoint does NOT fail the conversion.
 
     Docling absorbs the per-picture API failure and returns the document with its pictures
-    described as empty text (``figure_serializer._non_blank`` and this module's
+    described as empty text (``figure_serializer.non_blank`` and this module's
     ``_read_with_docling`` triage that as *failed*, not *described* -- the vision call was
     attempted and returned nothing, distinct from a picture that never reached the vision call
     at all, e.g. filtered by the area threshold or classification deny-list). That is why the

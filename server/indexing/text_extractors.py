@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import threading
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -139,7 +140,14 @@ def build_figure_pipeline_options(figures: Any, gateway: FigureGateway | None) -
     return opts
 
 
-_FIGURE_CONVERTERS: dict[str, Any] = {}
+# A DocumentConverter pins its own initialised layout/OCR/classifier pipelines for as long as
+# it is referenced, so this cache must be bounded: one entry per distinct figures signature
+# would otherwise grow without limit as corpora with different per-corpus figure settings are
+# indexed in the same process. Two entries is enough for the real access pattern (one corpus
+# indexing at a time, occasionally alternating with a second) while keeping the resident
+# pipeline count flat.
+_FIGURE_CONVERTER_CACHE_SIZE = 2
+_FIGURE_CONVERTERS: OrderedDict[str, Any] = OrderedDict()
 
 
 def docling_converter_for(figures: Any, gateway: FigureGateway | None) -> Any:
@@ -147,6 +155,13 @@ def docling_converter_for(figures: Any, gateway: FigureGateway | None) -> Any:
 
     The signature deliberately excludes the API key: it is a secret, and it is fixed for
     the life of the process (resolved from the environment at route resolution).
+
+    The enrichment cache holds at most ``_FIGURE_CONVERTER_CACHE_SIZE`` converters, evicting
+    the oldest *inserted* one (FIFO, not LRU: a hit deliberately does not refresh an entry's
+    age, so a long-running corpus cannot pin a converter forever). Eviction only drops the
+    cache's reference — a conversion already running against an evicted converter holds its
+    own reference and is unaffected; the object is collected once that call returns. The
+    plain ``_docling_converter()`` singleton is a separate global and is never evicted.
     """
     if figures is None or not bool(getattr(figures, "enabled", False)):
         return _docling_converter()
@@ -178,6 +193,8 @@ def docling_converter_for(figures: Any, gateway: FigureGateway | None) -> Any:
                 }
             )
             _FIGURE_CONVERTERS[signature] = converter
+            while len(_FIGURE_CONVERTERS) > _FIGURE_CONVERTER_CACHE_SIZE:
+                _FIGURE_CONVERTERS.popitem(last=False)  # oldest inserted
     return converter
 
 
@@ -325,15 +342,16 @@ def _read_with_docling(
     mojibake or drops the document with no error; with figures enabled that would turn one
     infrastructure failure into silent corpus-wide data loss, so the failure is raised.
 
-    Returns None when the document is unparseable or serializes to nothing. The returned text
-    is the whole-document markdown serialization, unmodified, so chunk char offsets index it
-    exactly.
+    Returns None when the document serializes to nothing, and — only when ``fail_closed`` is
+    False — when the document is unparseable. The returned text is the whole-document markdown
+    serialization, unmodified, so chunk char offsets index it exactly.
 
-    Only Docling's own conversion is guarded: a malformed/unsupported input is expected to fail
-    there, and that failure degrades to ``None`` (unparseable), never raises. Everything past
-    that point — building ragweld's own markdown serializer, serializing, the source map, the
-    figure counts — is ragweld's own code; a bug there must raise so a regression is visible
-    instead of silently degrading to "unparseable".
+    Only Docling's own conversion is guarded at all: a malformed/unsupported input is expected
+    to fail there, so that failure degrades to ``None`` (unparseable) under ``fail_closed=False``
+    and is re-raised under ``fail_closed=True``, per the paragraph above. Everything past that
+    point — building ragweld's own markdown serializer, serializing, the source map, the figure
+    counts — is ragweld's own code; a bug there must raise, under either setting, so a
+    regression is visible instead of silently degrading to "unparseable".
 
     Every picture is triaged into exactly one of three counts, in this priority order:
     ``figures_described`` (a description object is present and its text is non-blank -- the
@@ -347,7 +365,7 @@ def _read_with_docling(
     from docling_core.types.doc import PictureItem
     from docling_core.types.doc.document import DescriptionAnnotation, PictureMeta
 
-    from server.indexing.figure_serializer import _non_blank, make_markdown_serializer
+    from server.indexing.figure_serializer import make_markdown_serializer, non_blank
 
     try:
         result = (converter or _docling_converter()).convert(str(path))
@@ -369,7 +387,7 @@ def _read_with_docling(
 
         Mirrors ``RagweldPictureSerializer.serialize``'s exact fallback order -- meta text
         first, falling back to a non-blank legacy ``DescriptionAnnotation`` only when the meta
-        text is blank -- via the same ``_non_blank`` helper, so this triage can never disagree
+        text is blank -- via the same ``non_blank`` helper, so this triage can never disagree
         with which spans actually get a ``FigureAnnotation``. A description can live in the
         current ``item.meta`` shape (live enrichment, and any fixture that sets meta directly)
         or the deprecated ``item.annotations`` shape (fixtures built against the older API);
@@ -378,13 +396,13 @@ def _read_with_docling(
         failed instead of described.
         """
         has_meta_description = isinstance(p.meta, PictureMeta) and p.meta.description is not None
-        text = _non_blank(p.meta.description.text) if has_meta_description else None
+        text = non_blank(p.meta.description.text) if has_meta_description else None
         has_annotation = False
         if text is None:
             for a in p.get_annotations():
                 if isinstance(a, DescriptionAnnotation):
                     has_annotation = True
-                    text = _non_blank(a.text)
+                    text = non_blank(a.text)
                     if text is not None:
                         break
         if text is not None:

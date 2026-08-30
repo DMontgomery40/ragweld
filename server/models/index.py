@@ -244,7 +244,7 @@ class IndexEstimate(BaseModel):
     total_cost_usd: float | None = Field(
         default=None,
         ge=0.0,
-        description="Estimated total indexing cost (USD): embedding + semantic KG (when applicable).",
+        description="Estimated total indexing cost (USD): embedding + semantic KG + figure description (each when applicable).",
     )
     estimated_seconds_low: float | None = Field(
         default=None,

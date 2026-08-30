@@ -53,8 +53,11 @@ from server.indexing.figure_prompts import figure_block_markdown, parse_figure_r
 from server.models.index import FigureAnnotation
 
 
-def _non_blank(text: str | None) -> str | None:
+def non_blank(text: str | None) -> str | None:
     """``text`` if it has non-whitespace content, else ``None``.
+
+    Public because ``text_extractors._read_with_docling``'s picture triage imports it: the
+    counts and the spans must agree on what "described" means, so both call this one helper.
 
     A vision reply of ``""`` (the gateway returned nothing, or Docling's own API client
     swallowed a failed request) is not a description: it must be treated exactly like no
@@ -77,7 +80,7 @@ class RagweldPictureSerializer(MarkdownPictureSerializer):
     def serialize(self, *, item: PictureItem, doc_serializer: Any, doc: DoclingDocument, **kwargs: Any):  # type: ignore[override]
         meta = item.meta if isinstance(item.meta, PictureMeta) else None
         description_text: str | None = (
-            _non_blank(meta.description.text) if meta and meta.description else None
+            non_blank(meta.description.text) if meta and meta.description else None
         )
         cls: str | None = (
             meta.classification.get_main_prediction().class_name.replace("_", " ")
@@ -87,7 +90,7 @@ class RagweldPictureSerializer(MarkdownPictureSerializer):
         if description_text is None or cls is None:
             for ann in item.annotations:
                 if description_text is None and isinstance(ann, DescriptionAnnotation):
-                    description_text = _non_blank(ann.text)
+                    description_text = non_blank(ann.text)
                 elif cls is None and isinstance(ann, PictureClassificationData) and ann.predicted_classes:
                     cls = ann.predicted_classes[0].class_name.replace("_", " ")
 

@@ -12656,7 +12656,7 @@
     {
       "term": "Figures Min Area Fraction",
       "key": "FIGURES_MIN_AREA_FRACTION",
-      "definition": "Figures smaller than this fraction of the page area are not described (icons, logos, decorative marks).",
+      "definition": "Figures smaller than this fraction of the page area are not described (icons, logos, decorative marks). Applies only when describe is on (the threshold lives on the description step).",
       "category": "indexing",
       "related": [
         "FIGURES_ENABLED"
@@ -12667,7 +12667,7 @@
     {
       "term": "Figures Skip Classes",
       "key": "FIGURES_SKIP_CLASSES",
-      "definition": "Classifier classes that are never described. The skip applies when the classifier's confident (>= 50%) prediction is one of these classes -- e.g. logo, signature, icon -- not when a listed class merely appears somewhere in the classifier's full prediction list.",
+      "definition": "Classifier classes that are never described. The skip applies when the classifier's confident (>= 50%) prediction is one of these classes -- e.g. logo, signature, icon -- not when a listed class merely appears somewhere in the classifier's full prediction list. Has no effect unless classify is on.",
       "category": "indexing",
       "related": [
         "FIGURES_ENABLED"

@@ -263,6 +263,33 @@ That is the natural input to Phase 2: the page-image leg is meant to help exactl
 descriptions read alike. It should be gated on moving `precise_page_hit@3` above 16/20 on this dataset, which
 now exists as the concrete baseline the plan asked for.
 
+### Known gaps after Phase 1
+
+Phase 1 passes its bar; these are the things it knowingly does not do, recorded so the next
+slice starts from them rather than rediscovering them.
+
+- **Figure hits are not badged in search-result lists.** Spec §4.4 asks for a visible marker on
+  a result whose chunk is a figure chunk. The data is there — chunks carry
+  `metadata.chunk_kind == "figure"` and the parsed `figure` object — and the source-evidence
+  viewer already uses it, but no result-list surface renders a badge. Deferred to a follow-up
+  UI slice, which should land with a Playwright test that searches a figure question on
+  `nasa-apollo-11` and asserts the badge on the figure-chunk result.
+- **One figure page has no description of its own: Figure 5-13 (p.89).** Both chunks covering
+  that page carry the *adjacent* figure's annotation (see "What is still missing" above). It is
+  an extraction gap, not a ranking one, and the only one of the 20 dataset figure pages with
+  this shape.
+- **The cost estimate is a ceiling, not a forecast.** `_estimate_figures` prices every figure at
+  the full `max_completion_tokens` output budget plus a flat 1200 input tokens, and the
+  per-page count is a heuristic (recalibrated to 0.4 figures/PDF page from this run's measured
+  140 pictures / 359 pages). Real spend came in at a third of the estimate. The operator-facing
+  labels read `Figures <= $x` to say so; treat the number as an upper bound.
+- **Bisect hazard on `main`: the figure suite is knowingly red at `c63d03f1`.** That commit
+  floors `classification_min_confidence` so `skip_classes` means the majority class; it leaves
+  `test_unreachable_vision_gateway_yields_failed_pictures_not_an_exception` failing, because the
+  blank-reply-is-a-failure triage that test asserts only lands two commits later at `c39dd599`
+  ("Pins the new truth in the previously-red unreachable-gateway test"). Anything bisecting this
+  range over `tests/unit/test_figure_extraction_options.py` should skip `c63d03f1`.
+
 ### Reproducing
 
 ```bash

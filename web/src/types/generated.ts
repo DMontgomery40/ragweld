@@ -3888,7 +3888,7 @@ export interface IndexEstimate {
   estimated_figures?: number | null;
   /** Estimated vision-call cost (USD) to describe figures, from catalog pricing for indexing.figures.vision_model */
   figure_description_cost_usd?: number | null;
-  /** Estimated total indexing cost (USD): embedding + semantic KG (when applicable). */
+  /** Estimated total indexing cost (USD): embedding + semantic KG + figure description (each when applicable). */
   total_cost_usd?: number | null;
   /** Very rough low-end estimate for total indexing time (seconds) */
   estimated_seconds_low?: number | null;

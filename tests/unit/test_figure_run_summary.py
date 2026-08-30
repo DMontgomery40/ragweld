@@ -25,13 +25,22 @@ def test_all_failed_is_a_warning_with_the_gateway_alias_budget_hint() -> None:
     assert "max_completion_tokens" in event["message"]
 
 
-def test_all_skipped_is_a_warning_with_the_vision_alias_hint() -> None:
+def test_all_skipped_is_a_warning_naming_the_filters_that_caused_it() -> None:
+    """Nothing reached the vision call, so the alias is not the suspect: every picture was
+    filtered out beforehand by the class deny-list, the area threshold, or classify being off.
+    Naming the alias here would send the operator to the one setting that cannot be at fault.
+    """
     event = figure_run_summary_event(describe=True, described=0, failed=0, undescribed=4)
     assert event is not None
     assert event["type"] == "warning"
     assert "figures_described=0 figures_failed=0 figures_undescribed=4" in event["message"]
-    assert "no figure was described; check the vision alias" in event["message"]
+    assert "filtered out before the vision call" in event["message"]
+    assert "skip_classes" in event["message"]
+    assert "min_area_fraction" in event["message"]
+    assert "classify" in event["message"]
+    # The gateway-side hints belong to the all-failed branch only.
     assert "max_completion_tokens" not in event["message"]
+    assert "returned empty descriptions" not in event["message"]
 
 
 def test_mixed_with_at_least_one_described_is_info_not_warning() -> None:

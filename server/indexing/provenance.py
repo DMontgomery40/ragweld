@@ -64,8 +64,15 @@ def stamp_provenance(
         figure_spans = [span for span in overlapping if span.figure is not None]
         if not figure_spans or not isinstance(raw_start, int) or not isinstance(raw_end, int):
             continue
+        # Sum over the DISTINCT char ranges: ``_build_source_map`` emits one span per ``prov``
+        # entry of the same item, all carrying that item's single [char_start, char_end) range,
+        # so a figure spanning two pages (or two columns) would otherwise be counted twice and
+        # push a chunk it barely touches over the 50% bar. Deduplicating the identical ranges
+        # is exact for that construction; genuinely different, overlapping figure ranges would
+        # still be over-counted, which the source map does not produce today.
         covered = sum(
-            max(0, min(span.char_end, raw_end) - max(span.char_start, raw_start)) for span in figure_spans
+            max(0, min(end, raw_end) - max(start, raw_start))
+            for start, end in {(span.char_start, span.char_end) for span in figure_spans}
         )
         chunk_len = max(1, raw_end - raw_start)
         if covered * 2 >= chunk_len:

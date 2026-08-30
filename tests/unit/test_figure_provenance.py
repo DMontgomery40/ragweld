@@ -132,6 +132,38 @@ def test_a_chunk_that_only_brushes_a_figure_stays_a_text_chunk() -> None:
     assert chunk.metadata.get("chunk_kind") != "figure" and "figure" not in chunk.metadata
 
 
+def test_a_multi_prov_figure_does_not_double_count_its_own_coverage() -> None:
+    """``_build_source_map`` emits one span per ``prov`` entry, all carrying that item's single
+    [char_start, char_end) range, so a figure that spans two pages (or two columns) produces
+    two spans over the SAME characters. Summing them naively double-counts the coverage and
+    can push a chunk the figure barely touches over the 50% "this is a figure chunk" bar.
+    """
+    fig_text = "Figure: A short caption." + "y" * 96  # 120 chars = 30% of the chunk
+    prose = "x" * 280
+    full = prose + fig_text
+    assert len(full) == 400 and len(fig_text) == 120
+    figure = FigureAnnotation(summary="A short caption.")
+    # One item, two prov entries -> two spans, identical char range, different pages.
+    spans = tuple(
+        SourceSpan(
+            char_start=len(prose),
+            char_end=len(full),
+            region=PageRegion(page=page, left=0.1, top=0.1, right=0.9, bottom=0.5),
+            figure=figure,
+        )
+        for page in (1, 2)
+    )
+    chunk = Chunk(chunk_id="f:1-1:0", content=full, file_path="f", start_line=1, end_line=1, metadata={"char_start": 0, "char_end": len(full)})
+    stamp_provenance([chunk], extraction="docling", spans=spans)
+    assert chunk.provenance is not None
+    assert [r.page for r in chunk.provenance.regions] == [1, 2], "both prov regions still land"
+    assert chunk.metadata.get("chunk_kind") != "figure", (
+        "120 of 400 chars is 30% coverage, under the 50% bar -- counting the duplicated span "
+        "twice would read as 60% and wrongly mark a mostly-prose chunk as a figure chunk"
+    )
+    assert "figure" not in chunk.metadata and "figure_class" not in chunk.metadata
+
+
 def test_extracted_document_counts_default_to_zero() -> None:
     doc = ExtractedDocument(text="x", extraction="direct", kind="text")
     assert (doc.figures_described, doc.figures_failed, doc.figures_skipped) == (0, 0, 0)

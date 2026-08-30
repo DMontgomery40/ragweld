@@ -742,7 +742,7 @@ export function IndexingSubtab() {
                 semanticKgCostUsd == null ? null : `Semantic KG ${formatCurrency(Number(semanticKgCostUsd || 0))}`,
                 figureCostUsd == null
                   ? null
-                  : `Figures ${formatCurrency(Number(figureCostUsd || 0))}${estimate.estimated_figures != null ? ` (~${formatNumber(Number(estimate.estimated_figures))})` : ''}`,
+                  : `Figures ≤ ${formatCurrency(Number(figureCostUsd || 0))}${estimate.estimated_figures != null ? ` (~${formatNumber(Number(estimate.estimated_figures))})` : ''}`,
               ]
                 .filter(Boolean)
                 .join(' + ');
@@ -2991,7 +2991,7 @@ export function IndexingSubtab() {
                 )})`
               : ''}
             {indexEstimate.figure_description_cost_usd != null
-              ? ` + Figures ${formatCurrency(Number(indexEstimate.figure_description_cost_usd || 0))}`
+              ? ` + Figures ≤ ${formatCurrency(Number(indexEstimate.figure_description_cost_usd || 0))}`
               : ''}
             {' • '}
             {indexEstimate.estimated_seconds_low != null && indexEstimate.estimated_seconds_high != null
