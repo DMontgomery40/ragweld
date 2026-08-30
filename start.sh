@@ -329,25 +329,20 @@ fi
 
 if [[ -f .env ]]; then
   log "Loading environment from .env"
-  # Caller-provided environment variables win over .env: snapshot every variable
-  # name and value already exported before sourcing, then restore those exact
-  # names afterward. This makes .env fill in only the keys the caller did not
-  # already set (e.g. BACKEND_PORT=<caller value> must survive a .env that also
-  # sets BACKEND_PORT) instead of silently overwriting them.
-  declare -a __preexisting_env_keys
-  mapfile -t __preexisting_env_keys < <(compgen -e)
-  declare -A __preexisting_env_values=()
-  for __key in "${__preexisting_env_keys[@]}"; do
-    __preexisting_env_values["$__key"]="${!__key}"
-  done
+  # Caller-provided environment variables win over .env: snapshot every exported
+  # variable (name and value) before sourcing, then restore that exact snapshot
+  # afterward. This makes .env fill in only the keys the caller did not already
+  # set (e.g. BACKEND_PORT=<caller value> must survive a .env that also sets
+  # BACKEND_PORT) instead of silently overwriting them. Uses `export -p` + `eval`
+  # rather than `declare -A`/`mapfile` (bash 4+ only) -- this script also runs
+  # under macOS's bash 3.2.
+  __preexisting_env_snapshot="$(export -p)"
   set -a
   # shellcheck disable=SC1091
   source .env
   set +a
-  for __key in "${__preexisting_env_keys[@]}"; do
-    export "${__key}=${__preexisting_env_values[$__key]}"
-  done
-  unset __preexisting_env_keys __preexisting_env_values __key
+  eval "$__preexisting_env_snapshot"
+  unset __preexisting_env_snapshot
 fi
 
 # Upstream provider credentials belong to the LiteLLM container's private
