@@ -40,6 +40,20 @@ http://me.ragweld.com:58000 {
     handle /api/* {
         reverse_proxy 127.0.0.1:58012
     }
+    # The MCP Streamable HTTP transport is mounted inside the API process at
+    # `config.mcp.mount_path`. Without this the workbench advertises
+    # `https://<host>/mcp/` and Caddy answers 404 before the request reaches the API,
+    # so the endpoint never existed on the public origin at all (M-91).
+    #
+    # NOTE for the operator: this sits inside `require_owner_except_faro`, so a request
+    # without an Authelia session is redirected to the portal. An MCP client cannot
+    # complete an interactive login. To serve real MCP clients, either exempt this path
+    # from forward_auth and set `config.mcp.require_api_key = true` (the transport's own
+    # `Authorization: Bearer $MCP_API_KEY` check), or have the client carry a session
+    # cookie. Routed here as instructed; the auth choice is a deployment decision.
+    handle /mcp* {
+        reverse_proxy 127.0.0.1:58012
+    }
     handle /faro/collect {
         uri strip_prefix /faro
         reverse_proxy 127.0.0.1:52347
@@ -59,6 +73,20 @@ http://me.ragweld.com:58000 {
 http://ragweld.dtmont.com:58000 {
     import require_owner_except_faro
     handle /api/* {
+        reverse_proxy 127.0.0.1:58012
+    }
+    # The MCP Streamable HTTP transport is mounted inside the API process at
+    # `config.mcp.mount_path`. Without this the workbench advertises
+    # `https://<host>/mcp/` and Caddy answers 404 before the request reaches the API,
+    # so the endpoint never existed on the public origin at all (M-91).
+    #
+    # NOTE for the operator: this sits inside `require_owner_except_faro`, so a request
+    # without an Authelia session is redirected to the portal. An MCP client cannot
+    # complete an interactive login. To serve real MCP clients, either exempt this path
+    # from forward_auth and set `config.mcp.require_api_key = true` (the transport's own
+    # `Authorization: Bearer $MCP_API_KEY` check), or have the client carry a session
+    # cookie. Routed here as instructed; the auth choice is a deployment decision.
+    handle /mcp* {
         reverse_proxy 127.0.0.1:58012
     }
     handle /faro/collect {

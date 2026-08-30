@@ -17,7 +17,15 @@ PRODUCTION_EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
 PRODUCTION_GRAFANA_URL = "https://ragweld-grafana.dtmont.com"
 PRODUCTION_LANGFUSE_PUBLIC_URL = "https://ragweld-langfuse.dtmont.com"
 PRODUCTION_LANGFUSE_RUNTIME_URL = "http://127.0.0.1:53000"
-PRODUCTION_FARO_URL = "https://ragweld.dtmont.com/faro/collect"
+# The deployment's own public origin, spelled once. Every value below that has to agree
+# with it is derived rather than repeated: the Faro collector already encoded it, and the
+# MCP endpoint the workbench advertises has to be the same origin or an MCP client is sent
+# somewhere it cannot reach (M-91). Not taken from `tracing.langfuse_public_base_url` --
+# that is a different host (`ragweld-langfuse`), and deriving from it would advertise the
+# wrong one.
+PRODUCTION_PUBLIC_ORIGIN = "https://ragweld.dtmont.com"
+PRODUCTION_PUBLIC_HOST = PRODUCTION_PUBLIC_ORIGIN.split("://", 1)[1]
+PRODUCTION_FARO_URL = f"{PRODUCTION_PUBLIC_ORIGIN}/faro/collect"
 PRODUCTION_TRACE_STORE_PATH = "data/traces/workbench.json"
 PRODUCTION_FLYTE_ADMIN_URL = "http://127.0.0.1:30080"
 PRODUCTION_FLYTE_CONSOLE_URL = "https://ragweld-flyte.dtmont.com"
@@ -51,6 +59,15 @@ def _load_source(path: Path) -> TriBridConfig:
     return TriBridConfig.model_validate(payload)
 
 
+def _with_entry(values: list[str], entry: str) -> list[str]:
+    """Append `entry` without dropping what is already allowed, and without duplicating it.
+
+    The loopback entries stay: an operator on the box, and the health probes, still reach
+    the transport directly.
+    """
+    return list(values) if entry in values else [*values, entry]
+
+
 def _apply_production_defaults(config: TriBridConfig) -> TriBridConfig:
     config.generation.gen_model = PRODUCTION_MODEL_ALIAS
     config.generation.enrich_model = PRODUCTION_MODEL_ALIAS
@@ -77,6 +94,17 @@ def _apply_production_defaults(config: TriBridConfig) -> TriBridConfig:
     config.training.ragweld_agent_flyte_callback_base_url = PRODUCTION_FLYTE_CALLBACK_URL
     config.training.ragweld_agent_mlflow_tracking_url = PRODUCTION_MLFLOW_URL
     config.training.ragweld_agent_mlflow_console_base_url = PRODUCTION_MLFLOW_CONSOLE_URL
+    # MCP: the workbench advertises `public_base_url` + the mount path verbatim, and the
+    # transport refuses any Host it does not recognise (421). Both have to be set or the
+    # Infrastructure > MCP Servers page hands operators an address that does not work --
+    # before this the rendered config carried neither, so it advertised the loopback
+    # default and only loopback was allowed (M-91).
+    #
+    # `public_base_url` is the ORIGIN, not origin + "/mcp": the server appends
+    # `mcp.mount_path` itself, so including it here would advertise `/mcp/mcp/`.
+    config.mcp.public_base_url = PRODUCTION_PUBLIC_ORIGIN
+    config.mcp.allowed_hosts = _with_entry(config.mcp.allowed_hosts, PRODUCTION_PUBLIC_HOST)
+    config.mcp.allowed_origins = _with_entry(config.mcp.allowed_origins, PRODUCTION_PUBLIC_ORIGIN)
     config.evaluation.ragas_judge_model = PRODUCTION_MODEL_ALIAS
     config.evaluation.promptfoo_grader_model = PRODUCTION_MODEL_ALIAS
     return TriBridConfig.model_validate(config.model_dump(mode="json"))

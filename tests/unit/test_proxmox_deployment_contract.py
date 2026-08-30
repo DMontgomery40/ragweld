@@ -126,6 +126,17 @@ PRODUCTION_DEFAULTS = {
     ("training", "ragweld_agent_flyte_callback_base_url"): "http://172.17.0.1:58012",
     ("training", "ragweld_agent_mlflow_tracking_url"): "http://127.0.0.1:55500",
     ("training", "ragweld_agent_mlflow_console_base_url"): "https://ragweld-mlflow.dtmont.com",
+    # M-91: the workbench advertises `public_base_url` + the mount path verbatim and the
+    # transport refuses any Host it does not recognise, so the rendered config has to carry
+    # the public origin AND allow that host. `public_base_url` is the ORIGIN -- the server
+    # appends `mcp.mount_path` itself.
+    ("mcp", "public_base_url"): "https://ragweld.dtmont.com",
+    ("mcp", "allowed_hosts"): ["localhost:*", "127.0.0.1:*", "ragweld.dtmont.com"],
+    ("mcp", "allowed_origins"): [
+        "http://localhost:*",
+        "http://127.0.0.1:*",
+        "https://ragweld.dtmont.com",
+    ],
     ("evaluation", "ragas_judge_model"): "openai.gpt-5.6-terra",
     ("evaluation", "promptfoo_grader_model"): "openai.gpt-5.6-terra",
 }
@@ -286,7 +297,29 @@ def _assert_caddy_contract(source: str) -> None:
         assert "header_up X-Forwarded-Proto https" in auth_block
         assert block_targets(auth_block) == {"127.0.0.1:59091"}
 
+    def block_paths(block: str) -> set[str]:
+        """Every path this site block serves.
+
+        The target check below is necessary but not sufficient: a new public path that
+        proxies to an ALREADY allowed target passes it unnoticed, which is how the MCP
+        route was first added. The set of paths is pinned too, so opening a new one on the
+        public origin is a deliberate edit here.
+        """
+        return {
+            match.group(2)
+            for match in re.finditer(
+                r"^\s*(handle|handle_path)\s+(\S+)\s*\{", block, flags=re.MULTILINE
+            )
+        }
+
+    expected_app_paths = {"/api/*", "/mcp*", "/faro/collect", "/web/*"}
+
     me_block = blocks["http://me.ragweld.com:58000"]
+    assert block_paths(me_block) == expected_app_paths, block_paths(me_block)
+    # The MCP Streamable HTTP transport is mounted inside the API process; without this
+    # route Caddy answers 404 before the request reaches it, so the endpoint the workbench
+    # advertises does not exist on the public origin (M-91).
+    assert "handle /mcp* {" in me_block
     assert "handle /api/* {" in me_block
     assert "reverse_proxy 127.0.0.1:58012" in me_block
     assert "handle /faro/collect {" in me_block
@@ -303,7 +336,9 @@ def _assert_caddy_contract(source: str) -> None:
     assert block_targets(me_block) == {"127.0.0.1:58012", "127.0.0.1:52347"}
 
     temporary_app_block = blocks["http://ragweld.dtmont.com:58000"]
+    assert block_paths(temporary_app_block) == expected_app_paths, block_paths(temporary_app_block)
     for required_directive in (
+        "handle /mcp* {",
         "handle /api/* {",
         "reverse_proxy 127.0.0.1:58012",
         "handle /faro/collect {",
@@ -610,6 +645,50 @@ def test_proxmox_renderer_writes_validated_production_defaults_atomically(tmp_pa
     assert validated.model_dump(mode="json") == expected.model_dump(mode="json")
     assert output.stat().st_mode & 0o777 == 0o600
     assert sorted(path.name for path in tmp_path.iterdir()) == [output.name]
+
+
+def test_proxmox_render_makes_the_mcp_endpoint_reachable_on_the_public_origin(
+    tmp_path: Path,
+) -> None:
+    """M-91 end to end, on the document the deployment actually runs.
+
+    Three values have to agree or the Infrastructure > MCP Servers page hands an operator
+    an address that does not work:
+      * `public_base_url` must be the public ORIGIN -- the server appends `mount_path`
+        itself, so an origin that already ends in the mount path advertises `/mcp/mcp/`;
+      * the public host must be in `allowed_hosts`, or the transport answers 421;
+      * the public origin must be in `allowed_origins`, or a browser-originated call is
+        refused.
+    Before this, the rendered config carried none of them: it advertised the loopback
+    default, and only loopback was allowed.
+    """
+    output = tmp_path / "tribrid_config.production.json"
+    result = _run_renderer(source=SOURCE_CONFIG, output=output)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    rendered = TriBridConfig.model_validate(_read_config(output))
+    origin = "https://ragweld.dtmont.com"
+    host = "ragweld.dtmont.com"
+
+    assert rendered.mcp.public_base_url == origin
+    assert not rendered.mcp.public_base_url.rstrip("/").endswith(
+        rendered.mcp.mount_path.rstrip("/")
+    ), "public_base_url must not repeat the mount path the server appends"
+    assert host in rendered.mcp.allowed_hosts
+    assert origin in rendered.mcp.allowed_origins
+
+    # The loopback entries survive: the operator on the box and the health probes still
+    # reach the transport directly.
+    assert "127.0.0.1:*" in rendered.mcp.allowed_hosts
+    assert "http://127.0.0.1:*" in rendered.mcp.allowed_origins
+
+    # The URL the workbench will advertise, assembled the way the server assembles it.
+    advertised = f"{rendered.mcp.public_base_url.rstrip('/')}{rendered.mcp.mount_path.rstrip('/')}/"
+    assert advertised == f"{origin}/mcp/"
+
+    # ...and Caddy has to route that path to the API, or it 404s before arriving.
+    caddyfile = PROXMOX_CADDYFILE.read_text(encoding="utf-8")
+    assert "handle /mcp* {" in caddyfile
 
 
 def test_proxmox_renderer_preserves_existing_output_ownership(
