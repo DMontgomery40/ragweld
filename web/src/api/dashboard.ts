@@ -267,6 +267,13 @@ export async function getIndexStatus(corpusId: string): Promise<DashboardIndexSt
 /**
  * The latest persisted run for one corpus, or null when it has never been indexed.
  *
+ * `finalize=false`: a pure read of the stored summary. The default path reconciles a run
+ * stuck in `indexing` against the manifest and fence and REWRITES its summary, on top of a
+ * fence read, a scoped-config load and an event-queue flush per call. A listing that asks
+ * every corpus on every dashboard load must not do any of that, least of all mutate a run as
+ * a side effect of displaying it. Callers that need the reconciled answer (the Indexing tab
+ * watching its own run) keep the default.
+ *
  * A never-indexed corpus is an expected answer here, not a failure, so the 404 is accepted
  * as a status rather than thrown: the shared response interceptor console.errors every
  * rejection, and a dashboard listing every corpus would log one per unindexed corpus on
@@ -276,7 +283,7 @@ export async function getIndexStatus(corpusId: string): Promise<DashboardIndexSt
 export async function getLatestIndexRun(corpusId: string): Promise<IndexRunSummary | null> {
   const { status, data } = await apiClient.get<IndexRunSummary>(
     api(`/index/${encodeURIComponent(corpusId)}/runs/latest`),
-    { validateStatus: (s) => s === 200 || s === 404 },
+    { params: { finalize: false }, validateStatus: (s) => s === 200 || s === 404 },
   );
   return status === 404 ? null : data;
 }

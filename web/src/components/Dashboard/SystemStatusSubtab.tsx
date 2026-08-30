@@ -1,7 +1,7 @@
 // TriBridRAG - System Status Subtab
 // Real-time system health, status, and quick overview
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import * as DashAPI from '@/api/dashboard';
 import { QuickActions } from './QuickActions';
@@ -26,6 +26,8 @@ export function SystemStatusSubtab() {
     Array<{ corpusId: string; name: string; run: IndexRunSummary | null; error: string | null }>
   >([]);
   const [recentRunsLoading, setRecentRunsLoading] = useState(false);
+  // Guards the fan-out against out-of-order settles; see refreshRecentRuns.
+  const recentRunsGenerationRef = useRef(0);
 
   // Corpus-first state (Zustand store backed by Pydantic `Corpus`)
   const repos = useRepoStore((s) => s.repos);
@@ -137,15 +139,23 @@ export function SystemStatusSubtab() {
    * event queue. Mount and the explicit refresh action are enough.
    */
   const refreshRecentRuns = useCallback(async () => {
+    // Each fan-out claims a generation; only the newest one may publish. Corpus count varies
+    // and every request is a separate round trip, so an earlier slow fan-out can settle after
+    // a later fast one and repaint the panel with what the corpus list used to be.
+    const generation = recentRunsGenerationRef.current + 1;
+    recentRunsGenerationRef.current = generation;
+
     const corpora = Array.isArray(repos) ? repos : [];
     if (corpora.length === 0) {
       setRecentRuns([]);
+      setRecentRunsLoading(false);
       return;
     }
     setRecentRunsLoading(true);
     const settled = await Promise.allSettled(
       corpora.map((corpus) => DashAPI.getLatestIndexRun(corpus.corpus_id))
     );
+    if (recentRunsGenerationRef.current !== generation) return;
     setRecentRuns(
       corpora.map((corpus, i) => {
         const outcome = settled[i];

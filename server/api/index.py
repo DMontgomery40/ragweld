@@ -3910,10 +3910,33 @@ async def get_dashboard_index_stats(
         },
     },
 )
-async def get_latest_index_run(corpus_id: str) -> IndexRunSummary:
+async def get_latest_index_run(
+    corpus_id: str,
+    finalize: bool = Query(
+        default=True,
+        description=(
+            "Reconcile a persisted 'indexing' run against the manifest and fence before "
+            "answering, rewriting its summary when the run turns out to have finished. Pass "
+            "false for a pure read of the stored summary: no fence check, no scoped-config "
+            "load, no event flush and no write, for listings that poll many corpora."
+        ),
+    ),
+) -> IndexRunSummary:
     repo_id = str(corpus_id or "").strip()
     if not repo_id:
         raise HTTPException(status_code=422, detail="corpus_id is required")
+
+    if not finalize:
+        # Read-only branch: whatever is on disk, exactly as stored. A listing that asks every
+        # corpus for its latest run must not make N fence reads, N scoped-config loads and N
+        # event-queue flushes -- nor rewrite a run summary as a side effect of being displayed.
+        run = await asyncio.to_thread(_load_latest_run_summary, repo_id)
+        if run is None:
+            raise HTTPException(
+                status_code=404, detail=f"No persisted index runs found for repo_id={repo_id}"
+            )
+        return run
+
     # The row's index state must validate BEFORE any answer, the 404 included: a
     # malformed row is a typed 409 whether or not a summary exists.
     try:
