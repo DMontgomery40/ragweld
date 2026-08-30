@@ -1083,8 +1083,12 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
 
   const activateSession = useCallback(
     (session: ReturnType<typeof createChatSession>) => {
-      resetTransientChatState('session_change');
       const nextConversationId = String(session.conversation_id || '').trim() || createConversationId();
+      // Reloading the SAME conversation is a mirror of the docked instance, not a session
+      // change: it must not abort a request, clear the status bar, or silently drop the
+      // operator's per-conversation Top-K. Only an actual switch resets those.
+      const sameConversation = nextConversationId === conversationIdRef.current;
+      if (!sameConversation) resetTransientChatState('session_change');
       conversationIdRef.current = nextConversationId;
       setConversationId(nextConversationId);
       const restoredMessages = clampChatHistory(
@@ -1099,15 +1103,17 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
       setMessages(restoredMessages);
       modelOverrideRef.current = String(session.model_override || '').trim();
       setModelOverride(modelOverrideRef.current);
-      topKOverrideRef.current = null;
-      setTopKOverride(null);
       const sessionSources = (session.sources || defaultChatSources()) as ActiveSources;
       activeSourcesRef.current = sessionSources;
       setActiveSources(sessionSources);
-      setLastMatches([]);
-      setLastLatencyMs(null);
-      setLastRecallPlan(null);
-      notifyTrace([], false, 'clear');
+      if (!sameConversation) {
+        topKOverrideRef.current = null;
+        setTopKOverride(null);
+        setLastMatches([]);
+        setLastLatencyMs(null);
+        setLastRecallPlan(null);
+        notifyTrace([], false, 'clear');
+      }
     },
     [chatHistoryMax, notifyTrace, resetTransientChatState],
   );

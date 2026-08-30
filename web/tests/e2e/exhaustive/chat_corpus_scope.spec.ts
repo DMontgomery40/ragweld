@@ -257,3 +257,51 @@ test('the docked chat mirrors the live conversation instead of drifting into its
   await expect(pickers.nth(1).getByTestId(`source-corpus-${otherCorpusId}`)).toBeChecked({ timeout: 30_000 });
   await expect(pickers.nth(1).getByTestId(`source-corpus-${corpus.corpusId}`)).toBeChecked();
 });
+
+test('mirroring the same conversation does not drop the operator per-conversation Top-K', async ({
+  page,
+  request,
+}) => {
+  if (!corpus) throw new Error('corpus not provisioned');
+  await seedAnswerFromSearch(page, request, corpus.corpusId, 'What is the calibration interval?', {
+    topK: 5,
+    label: 'Corpus scope mirror-topk spec',
+  });
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      'tribrid-dock-storage',
+      JSON.stringify({
+        version: 0,
+        state: {
+          mode: 'dock',
+          docked: { path: '/chat', search: '?subtab=ui', label: 'Chat', icon: '', renderMode: 'native' },
+          lastDocked: null,
+        },
+      }),
+    );
+  });
+
+  await gotoChatWithGlobalCorpus(page, otherCorpusId);
+  const pickers = page.getByTestId('source-dropdown');
+  await expect.poll(async () => pickers.count(), { timeout: 60_000 }).toBe(2);
+
+  // Set Top-K in the first instance.
+  await page.getByTestId('chat-quick-settings').first().click();
+  const topK = page.getByTestId('chat-top-k').first();
+  await expect(topK).toBeVisible({ timeout: 30_000 });
+  await topK.fill('3');
+  await expect(topK).toHaveValue('3');
+
+  // Now make the OTHER instance write, which broadcasts a reload of the SAME conversation.
+  const otherPicker = pickers.nth(1);
+  if (!(await otherPicker.evaluate((el: HTMLDetailsElement) => el.open))) {
+    await otherPicker.locator('summary').click();
+  }
+  await otherPicker.getByTestId(`source-corpus-${otherCorpusId}`).check();
+  await expect(pickers.first().getByTestId(`source-corpus-${otherCorpusId}`)).toBeChecked({
+    timeout: 30_000,
+  });
+
+  // Mirroring one conversation into itself is not a session change: the setting survives.
+  await expect(topK).toHaveValue('3');
+});
