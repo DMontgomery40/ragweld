@@ -65,6 +65,25 @@ function isIndexingComponent(value: string | null): value is IndexingComponent {
   return value !== null && INDEXING_COMPONENT_IDS.has(value);
 }
 
+/**
+ * The operator-readable reason inside an API error.
+ *
+ * An axios rejection's own `message` is "Request failed with status code 422", which names
+ * nothing the operator can act on; the actionable sentence ("repo_path not found: data/recall")
+ * is in the response body's `detail`, either as a string or as a typed detail object.
+ */
+function errorDetail(error: unknown): string {
+  const body = (error as { response?: { data?: unknown } } | null)?.response?.data;
+  const detail = (body as { detail?: unknown } | null)?.detail;
+  if (typeof detail === 'string' && detail.trim()) return detail.trim();
+  if (detail && typeof detail === 'object') {
+    const message = (detail as { message?: unknown }).message;
+    if (typeof message === 'string' && message.trim()) return message.trim();
+  }
+  if (error instanceof Error && error.message.trim()) return error.message.trim();
+  return 'unknown error';
+}
+
 const FALLBACK_CHUNKING_STRATEGIES = [
   { id: 'fixed_tokens', label: 'Fixed tokens', description: 'Token-window chunking (best default for text corpora)' },
   { id: 'recursive', label: 'Recursive', description: 'Separator-based chunking packed by token target (docs/transcripts)' },
@@ -860,8 +879,20 @@ export function IndexingSubtab() {
 
   const handleStartIndex = useCallback(async () => {
     const rid = String(activeRepo || '').trim();
-    if (!rid) return;
-    if (!effectivePath.trim()) return;
+    if (!rid) {
+      setErrorBanner('No corpus is selected. Pick one in the corpus selector before indexing.');
+      return;
+    }
+    if (!effectivePath.trim()) {
+      // The path comes from the corpus registry, so an empty one means the registry has not
+      // loaded or does not hold this corpus. Returning quietly here is what made Index Now
+      // look dead: no dialog, no error, no toast.
+      setErrorBanner(
+        `No source path resolved for "${rid}". The corpus registry has no path for it — ` +
+          'reload the corpus list, or set the path override below.'
+      );
+      return;
+    }
 
     try {
       // Flush any pending debounced config patches so the backend reads
@@ -876,21 +907,27 @@ export function IndexingSubtab() {
 
       setErrorBanner(null);
       setEstimateLoading(true);
-      let estimate: IndexEstimate | null = null;
+      let estimate: IndexEstimate;
       try {
         estimate = await indexingApi.estimate(body);
         setIndexEstimate(estimate);
       } catch (e) {
-        estimate = null;
-        // Estimate failures should never block indexing; keep it best-effort.
-        terminalRef.current?.appendLine?.(
-          `\x1b[33m⚠ Index estimate unavailable: ${e instanceof Error ? e.message : 'unknown error'}\x1b[0m`
+        // The estimate IS the consent gate: it is the only place the operator sees the file
+        // count, the chunk count and what the run will cost before it spends anything. A run
+        // that starts without it is a run nobody agreed to, so a failed estimate stops here
+        // and says why.
+        setErrorBanner(
+          `Index estimate failed for "${rid}" (${effectivePath}): ` +
+            `${errorDetail(e)}. Indexing was not started.`
         );
+        return;
       } finally {
         setEstimateLoading(false);
       }
 
-      if (estimate) {
+      // Scope for the dialog copy. The estimate is always present here -- a failed one
+      // returned above rather than falling through to the run.
+      {
         const totalCostUsd = estimate.total_cost_usd ?? estimate.embedding_cost_usd;
         const embedCostUsd = estimate.embedding_cost_usd;
         const semanticKgCostUsd = estimate.semantic_kg_cost_usd;
@@ -1120,6 +1157,7 @@ export function IndexingSubtab() {
 
       {errorBanner && (
         <div
+          data-testid="index-error-banner"
           style={{
             background: 'rgba(var(--error-rgb), 0.1)',
             border: '1px solid var(--error)',
