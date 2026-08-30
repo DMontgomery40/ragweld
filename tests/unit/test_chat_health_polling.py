@@ -38,19 +38,22 @@ def _health_effect(source: str) -> str:
 
 def test_health_polling_is_bound_to_tab_visibility(app_source: str) -> None:
     effect = _health_effect(app_source)
-    assert "visibilitychange" in effect, "the health effect must react to visibilitychange"
-    assert "document.addEventListener('visibilitychange'" in effect
-    assert "document.removeEventListener('visibilitychange'" in effect, (
+    assert re.search(r"document\.addEventListener\(\s*['\"]visibilitychange['\"]", effect), (
+        "the health effect must react to visibilitychange"
+    )
+    assert re.search(r"document\.removeEventListener\(\s*['\"]visibilitychange['\"]", effect), (
         "the listener must be removed on unmount, or every remount adds another poller"
     )
-    assert "document.visibilityState === 'hidden'" in effect, (
+    assert re.search(r"document\.visibilityState\s*===\s*['\"]hidden['\"]", effect), (
         "the effect must branch on the hidden state, not merely listen for the event"
     )
 
 
 def test_a_hidden_tab_clears_the_interval_rather_than_leaving_it_running(app_source: str) -> None:
     effect = _health_effect(app_source)
-    hidden_branch = effect[effect.index("document.visibilityState === 'hidden'") :]
+    hidden_at = re.search(r"document\.visibilityState\s*===\s*['\"]hidden['\"]", effect)
+    assert hidden_at is not None
+    hidden_branch = effect[hidden_at.start() :]
     hidden_branch = hidden_branch[: hidden_branch.index("return;")]
     assert "stopPolling()" in hidden_branch, (
         "becoming hidden must stop the interval; slowing it down still costs the operator "
@@ -81,8 +84,15 @@ def test_health_polling_is_never_started_unconditionally(app_source: str) -> Non
 
 
 def test_the_interval_is_a_named_constant(app_source: str) -> None:
-    """So the cadence is legible and greppable rather than a bare 30000 in an effect."""
+    """So the cadence is legible and greppable rather than a bare number in an effect.
+
+    The VALUE is deliberately not asserted: this row's own fix direction invites changing
+    the cadence, and a test named for the constant must not be the thing that fails when
+    someone does.
+    """
     assert re.search(
-        r"const HEALTH_POLL_INTERVAL_MS = 30_000;", app_source
+        r"const HEALTH_POLL_INTERVAL_MS\s*=", app_source
     ), "HEALTH_POLL_INTERVAL_MS must be declared at module scope"
-    assert "setInterval(checkHealth, HEALTH_POLL_INTERVAL_MS)" in app_source
+    assert re.search(
+        r"setInterval\(\s*checkHealth\s*,\s*HEALTH_POLL_INTERVAL_MS\s*\)", app_source
+    ), "the interval must be driven by the named constant, not a literal"
