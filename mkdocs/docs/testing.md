@@ -1,3 +1,4 @@
+```markdown
 # Testing and Verification
 
 <div class="grid chunk_summaries" markdown>
@@ -147,14 +148,14 @@ A serial-mode spec that drives [figure descriptions](manual/indexing.md) end to 
 - [x] A real index describes the figures; the replayed run log (via the `indexing-show-logs` and `live-terminal-output` test ids) reports `figures_described ≥ 1`
 - [x] Figure citations carry the **Figure** badge, thumbnails box the figure region, and clicking one opens the page viewer with the **Figure description** panel
 - [x] The badge is conditional: ordinary citations in the same list carry none
-- [x] GUI contract: numeric fields clamp to Pydantic bounds, commit on blur (not per keystroke), Escape abandons the edit without emitting a PATCH, and two nested `indexing.figures.*` edits inside the debounce window deep-merge into one PATCH
+- [x] GUI contract: numeric fields clamp to Pydantic bounds, blur stages the edit (no per-keystroke writes), Escape abandons the staged edit without any write, and two nested `indexing.figures.*` edits stage into a single pending Apply
 
 !!! tip "Long-running indexes need an explicit deadline"
     `indexCorpus` in `corpus_fixture.ts` accepts a `timeoutMs` override. A Docling conversion of scanned pages plus per-figure vision calls can take tens of minutes on a loaded box — `figure_workflow.spec.ts` passes a 30-minute deadline explicitly rather than relying on the shared `EXHAUSTIVE_INDEX_TIMEOUT_MS` env default (5 minutes), so the spec cannot fail for whoever forgets the env var.
 
 ### The NumberField migration spec (`numberfield_migration.spec.ts`)
 
-One behavior, proven across every surface family that carries a config-bound numeric input: type a value past the field's Pydantic bound, Tab away, and (a) the box shows the clamped value, (b) the PATCH that actually reached the server carried the clamped value — the raw value appears in no request body — and (c) a fresh `GET /api/config` confirms the server persisted the clamped value, not the operator's typed one. No route mocking; the same zero-mock discipline as the rest of the exhaustive suite.
+One behavior, proven across every surface family that carries a config-bound numeric input, now under the staged commit model: type a value past the field's Pydantic bound, Tab away, and (a) the box shows the clamped value, (b) blur writes nothing — the change stages and the Apply count goes up by exactly one — (c) the Apply PUT of the whole config carries the clamped value and the raw value appears in no request body, and (d) a fresh `GET /api/config` confirms the server persisted the clamped value, not the operator's typed one. No route mocking; the same zero-mock discipline as the rest of the exhaustive suite.
 
 - [x] **Data Quality** — `enrichment.chunk_summaries_max`, probe `999999` → `1000`: the exact probe that previously reached the server unclamped and came back a 422 whose only signal was a raw error string
 - [x] **Chat Settings** — `chat.temperature`, `9` → `2`: deliberately not `chat.max_tokens`, which is a production-scoped global that the per-corpus config would reconcile away on read, making the persistence assertion fail for a reason unrelated to `NumberField`
@@ -162,7 +163,20 @@ One behavior, proven across every surface family that carries a config-bound num
 - [x] **Reranker Training Studio** — `training.reranker_train_epochs`, `999` → `20`, driven through the Inspector's "Paths + Config" tab
 - [x] **Storage Calculator** — the non-config calculator inputs survive blur unchanged (no step snapping) while min/max clamping still applies
 
-See [Configuration](configuration.md) for the full commit-on-blur behavior and the guard tests behind it.
+See [Configuration](configuration.md) for the full staged commit model and the guard tests behind it.
+
+### The staged commit model spec (`commit_model.spec.ts`)
+
+Proves the one commit model end to end against the real app and real API: selecting a chunking-strategy card fires no write at all — no PATCH, no PUT, well past the old 300 ms debounce window — the Apply button reflects the staged count (`Apply N changes` with a `data-dirty-count` attribute), and applying an index-invalidating change (chunking / embedding / tokenization) shows a confirmation that names the index and the section before any write. Cancelling that confirmation writes nothing, so the test mutates no config.
+
+### The dirty-count-on-load spec (`dirty_count_on_load.spec.ts`)
+
+Merely *visiting* a config surface must stage nothing. Under the staged model, a component that "self-heals" config in a mount effect would stage a permanent edit the operator never made — the footer would read "Apply 1 change" on a page they only opened, and Apply would PUT a mutation nobody intended. This drives every config-consuming surface (the RAG subtabs, Chat settings, Infrastructure → Paths, Grafana config, Admin) with no interaction and asserts the dirty count stays exactly `0` and no config write is issued on mount.
+
+### The destructive-safety spec (`destructive_safety.spec.ts`)
+
+Proves the shared confirm-dialog primitive's safety contracts: the delete-index dialog focuses the typed-confirmation input (never the destructive button), the confirm stays disabled until the corpus id is typed verbatim, and cancelling issues no `DELETE` — nothing is destroyed. A second scenario pins the other focus branch: a danger dialog with no typed gate (the Infrastructure → Paths save) focuses **Cancel**, so a stray Enter declines rather than destroys.
 
 ??? info "Artifacts"
     Temporary feature tests and results go in `.tests/`; permanent tests go under `tests/`.
+```

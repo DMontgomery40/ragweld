@@ -91,6 +91,9 @@ Two honesty rules in the drilldown:
 
 The eval dataset form has an optional **expected answer** field. Promptfoo regression entries are graded against it — an entry without an expected answer is skipped by the grader, so filling it in is what makes a question gradeable rather than merely retrievable. It round-trips through the dataset API and shows on the saved entry.
 
+!!! note "Deleting an eval entry confirms itself"
+    The delete button on a dataset row opens a danger dialog that names the question being removed, states that runs already computed against it keep their results while no future run will include it, and focuses **Keep entry** first — a stray Enter declines. Deleting is not undoable.
+
 ## Page-grounded figure retrieval (single-PDF corpora)
 
 The standard eval lane scores retrieval by `expected_paths`, which works when a corpus spans many files but is meaningless on a corpus that is one PDF: every match has the same path, so path-level MRR is 1.0 whatever the retriever does. For document corpora indexed with [figure descriptions](manual/indexing.md), use the page-grounded dataset and scorer instead — each question is grounded on the **pages** where the answer is printed. See [Figure grounding eval](guides/eval_figure_grounding.md).

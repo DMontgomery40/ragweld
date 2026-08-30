@@ -211,32 +211,36 @@ async function patchFusion() {
 
 ## How numeric fields behave in the UI
 
-Every numeric config control in the workbench is one component: `web/src/components/ui/NumberField.tsx`. It exists so the question "what happens when I type a value past the bound?" has exactly one answer on every surface — Chat settings, the RAG subtabs, both training studios, Eval run settings, Data Quality, Grafana config.
+Every numeric config control in the workbench is one component: `web/src/components/ui/NumberField.tsx`. It exists so the question "what happens when I type a value past the bound?" has exactly one answer on every surface — Chat settings, the RAG subtabs, both training studios, Eval run settings, Data Quality, Grafana config. And like every config edit in the workbench, its commit is **staged**: the edit lands in the working config and nothing reaches the server until the footer's **Apply** button writes the whole document.
 
-*Concept diagram (the commit-on-blur mechanism only — the read/patch config workflow itself is documented above):*
+*Concept diagram (the staged commit mechanism only — the read/patch config API itself is documented above):*
 
 ```mermaid
 flowchart LR
-    subgraph s_field["NumberField (web/src/components/ui/NumberField.tsx)"]
-        TYPED["Operator types\\na raw value"] --> BLUR["Blur / Tab / Enter\\n= commit"]
-        BLUR --> CLAMP["Clamp to min/max\\n(= the field's Pydantic ge/le)"]
-        CLAMP --> COMMIT["onCommit\\n(optimistic local update)"]
+    subgraph s_field["Config controls (web/src/components/ui/NumberField.tsx)"]
+        EDIT["Edit: blur / Tab / Enter\\nor a strategy-card click"] --> CLAMP["NumberField clamps to\\nPydantic ge/le at commit"]
+        CLAMP --> STAGE["stageSection / stageSectionReplace\\n(web/src/stores/useConfigStore.ts)"]
     end
-    COMMIT --> STORE["useConfigStore\\n(web/src/stores/useConfigStore.ts)"]
-    STORE --> PATCH["PATCH /api/config/{section}\\n(debounced, deep-merged)"]
-    PATCH --> SERVER["Section re-validated atomically\\n(server/api/config.py)"]
-    SERVER -->|"200"| SYNC["Server truth becomes\\nthe new persisted snapshot"]
-    SERVER -->|"422"| PARSE["parseConfigPatchErrors\\n(web/src/utils/configPatchErrors.ts)"]
-    PARSE --> REVERT["Revert the optimistic edits\\nthis PATCH wrote (leaf paths only)"]
-    PARSE --> ERR["fieldErrors[dotted path]\\nrendered under the field\\nas a role=alert"]
+    STAGE --> DIFF["changedConfigPaths\\n(web/src/utils/configDiff.ts)"]
+    DIFF --> FOOTER["Apply button:\\n'Apply N changes' + 'Saved' ack"]
+    DIFF --> WARN{"Index-invalidating\\nsection staged?\\n(chunking / embedding / tokenization)"}
+    WARN -->|"yes"| CONFIRM["Confirmation dialog names\\nthe sections and the re-index"]
+    WARN -->|"no"| APPLY["Apply: PUT /api/config\\none whole-config write"]
+    CONFIRM --> APPLY
+    APPLY --> SERVER["Whole config re-validated atomically\\n(server/api/config.py update_config)"]
+    SERVER -->|"200"| PERSISTED["persisted = saved config\\n'Saved' acknowledgement"]
+    SERVER -->|"422"| FIELDS["formatSaveError -> fieldErrors[dotted path]\\nrendered under the field, role=alert"]
+    SERVER -->|"409"| CONFLICT["Index-contract conflict message\\n+ 'Reload latest' button"]
 ```
 
 In practice:
 
-- **Typing is never saved.** The box holds raw text while you edit; nothing is sent until you blur, Tab, or Enter.
-- **The clamp happens at commit.** A value past the advertised min/max is corrected before it is applied, so the raw value never reaches the server — and a fresh `GET /api/config` confirms the persisted value is the clamped one.
-- **A rejected PATCH undoes itself.** The server validates the whole merged section atomically, so a `422` means nothing in that PATCH was saved. The store reverts exactly the leaf paths the rejected patch wrote (never the whole section, so a newer concurrent edit survives), rather than keeping a value the server refused and silently re-sending it on the next Apply.
-- **Errors render next to the field.** A `NumberField` with a `configPath` prop shows its own validation message under the box instead of only a generic footer error string. Errors are keyed by full dotted config path and are cleared as soon as that section's next PATCH lands, successful or not.
+- **Typing is never saved.** The box holds raw text while you edit; blurring, Tabbing, or pressing Enter stages the edit — it writes nothing.
+- **The clamp happens at staging.** A value past the advertised min/max is corrected before it is staged, so the raw value never reaches the server — the Apply PUT carries the clamped value, and a fresh `GET /api/config` confirms the persisted value is the clamped one.
+- **Apply is the only write.** The footer counts the staged leaf changes (`Apply 3 changes`) and shows a brief `Saved` acknowledgement after a successful write. Loading a corpus or switching corpora replaces both snapshots, so unapplied staged edits are dropped by design — apply before you leave a surface.
+- **A rejected PUT attributes to fields.** The whole config is validated atomically, so a `422` means nothing was saved. `web/src/utils/saveErrorMessage.ts` shapes the server's detail into per-field messages (never axios's raw status string), and a `NumberField` with a `configPath` prop renders its own message under the box as a `role=alert`.
+- **A 409 conflict offers a way out.** When the server refuses the write because it would invalidate the stored index contract, the footer shows the reason plus a **Reload latest** button that discards the staged edits and re-reads the server's current config.
+- **Index-invalidating changes warn before they write.** Staged edits under `chunking`, `embedding`, or `tokenization` mean the stored index no longer matches the config; Apply shows a confirmation naming those sections first. No side door commits them silently either: `flushPendingPatches` (used before Index Now and the Infrastructure → Paths save) throws until you Apply or discard.
 - **Fields that are not config values still clamp.** The Storage Calculator's inputs and ad-hoc request parameters (Synthetic Lab, the graph max-hops control) pass bounds but no `configPath` — they clamp, there is just nothing persisted to attribute a server error to.
 
 ??? note "One deliberate exception: Chat's Top-K override"

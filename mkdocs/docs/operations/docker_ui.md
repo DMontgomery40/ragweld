@@ -80,6 +80,14 @@ flowchart LR
   J --> K["docker logs --tail N"]
 ```
 
+## Lifecycle controls confirm before they act
+
+Stopping or restarting a service takes it down for every corpus and operator, so neither is a single click among equal-weight buttons:
+
+- **Logs leads the row.** The non-destructive control comes first; **Restart** (amber) and **Stop** (red) are weighted as danger and pushed to the right, so a destructive action is never the default target of a stray click.
+- **Every stop and restart confirms with the service named** — "Stopping PostgreSQL takes it offline for every corpus and operator until it is started again. Continue?"
+- **Core data and ingress services require typing the service key** before stop or restart: `postgres`, `neo4j`, `qdrant`, `caddy`, `authelia`, `authelia-redis`, `cloudflared`, and the Langfuse stores. The confirm button stays disabled until the typed key matches, so a stray click or Enter cannot take a store or the front door offline. `start` is non-destructive and needs no confirmation.
+
 ## Safe defaults and failure modes
 
 - **403 from a remote host** — controls are localhost-only by design. SSH-tunnel or run the workbench locally.
