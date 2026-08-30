@@ -319,7 +319,6 @@ export function StorageCalculatorSuite() {
                   <NumberField
                     value={calc1.repoSize}
                     onCommit={(next) => setCalc1({ ...calc1, repoSize: next })}
-                    step={0.1}
                     min={0.1}
                   />
                   <select
@@ -343,7 +342,6 @@ export function StorageCalculatorSuite() {
                   <NumberField
                     value={calc1.chunkSize}
                     onCommit={(next) => setCalc1({ ...calc1, chunkSize: next })}
-                    step={1}
                     min={0.001}
                   />
                   <select
@@ -368,7 +366,6 @@ export function StorageCalculatorSuite() {
                 <NumberField
                   value={calc1.embDim}
                   onCommit={(next) => setCalc1({ ...calc1, embDim: next })}
-                  step={1}
                   min={1}
                 />
               </div>
@@ -401,7 +398,6 @@ export function StorageCalculatorSuite() {
                 <NumberField
                   value={calc1.pgvectorOverhead}
                   onCommit={(next) => setCalc1({ ...calc1, pgvectorOverhead: next })}
-                  step={0.05}
                   min={1}
                 />
               </div>
@@ -413,9 +409,9 @@ export function StorageCalculatorSuite() {
                   </div>
                 </label>
                 <NumberField
+                  data-testid="storage-calc-hydration"
                   value={calc1.hydration}
                   onCommit={(next) => setCalc1({ ...calc1, hydration: next })}
-                  step={10}
                   min={0}
                   max={100}
                 />
@@ -433,7 +429,6 @@ export function StorageCalculatorSuite() {
                 <NumberField
                   value={calc1.replication}
                   onCommit={(next) => setCalc1({ ...calc1, replication: next })}
-                  step={1}
                   min={1}
                 />
               </div>
@@ -455,7 +450,6 @@ export function StorageCalculatorSuite() {
                   <NumberField
                     value={calc1.neo4jNodeCount}
                     onCommit={(next) => setCalc1({ ...calc1, neo4jNodeCount: next })}
-                    step={1000}
                     min={0}
                   />
                 </div>
@@ -469,7 +463,6 @@ export function StorageCalculatorSuite() {
                   <NumberField
                     value={calc1.neo4jRelCount}
                     onCommit={(next) => setCalc1({ ...calc1, neo4jRelCount: next })}
-                    step={1000}
                     min={0}
                   />
                 </div>
@@ -485,7 +478,6 @@ export function StorageCalculatorSuite() {
                   <NumberField
                     value={calc1.avgNodeBytes}
                     onCommit={(next) => setCalc1({ ...calc1, avgNodeBytes: next })}
-                    step={32}
                     min={64}
                   />
                 </div>
@@ -499,7 +491,6 @@ export function StorageCalculatorSuite() {
                   <NumberField
                     value={calc1.avgRelBytes}
                     onCommit={(next) => setCalc1({ ...calc1, avgRelBytes: next })}
-                    step={16}
                     min={32}
                   />
                 </div>
@@ -603,7 +594,6 @@ export function StorageCalculatorSuite() {
                   <NumberField
                     value={calc2.repoSize}
                     onCommit={(next) => setCalc2({ ...calc2, repoSize: next })}
-                    step={0.1}
                     min={0.1}
                   />
                   <select
@@ -627,7 +617,6 @@ export function StorageCalculatorSuite() {
                   <NumberField
                     value={calc2.targetSize}
                     onCommit={(next) => setCalc2({ ...calc2, targetSize: next })}
-                    step={0.5}
                     min={0.1}
                   />
                   <select
@@ -653,7 +642,6 @@ export function StorageCalculatorSuite() {
                   <NumberField
                     value={calc2.chunkSize}
                     onCommit={(next) => setCalc2({ ...calc2, chunkSize: next })}
-                    step={1}
                     min={0.001}
                   />
                   <select
@@ -675,7 +663,6 @@ export function StorageCalculatorSuite() {
                 <NumberField
                   value={calc2.embDim}
                   onCommit={(next) => setCalc2({ ...calc2, embDim: next })}
-                  step={1}
                   min={1}
                 />
               </div>
@@ -692,7 +679,6 @@ export function StorageCalculatorSuite() {
                 <NumberField
                   value={calc2.bm25pct}
                   onCommit={(next) => setCalc2({ ...calc2, bm25pct: next })}
-                  step={5}
                   min={0}
                   max={100}
                 />
@@ -707,7 +693,6 @@ export function StorageCalculatorSuite() {
                 <NumberField
                   value={calc2.cardspct}
                   onCommit={(next) => setCalc2({ ...calc2, cardspct: next })}
-                  step={5}
                   min={0}
                   max={100}
                 />
