@@ -175,8 +175,6 @@ export function RetrievalSubtab() {
   }, [activeRepo, api]);
 
   // --- Retrieval ----------------------------------------------------------
-  const [rrfKDiv, setRrfKDiv] = useConfigField<number>('retrieval.rrf_k_div', 60);
-  const [langgraphFinalK, setLanggraphFinalK] = useConfigField<number>('retrieval.langgraph_final_k', 20);
   const [multiQueryRewrites, setMultiQueryRewrites] = useConfigField<number>('retrieval.max_query_rewrites', 2);
   const [langgraphMaxQueryRewrites, setLanggraphMaxQueryRewrites] =
     useConfigField<number>('retrieval.langgraph_max_query_rewrites', 2);
@@ -188,8 +186,6 @@ export function RetrievalSubtab() {
   const [confAny, setConfAny] = useConfigField<number>('retrieval.conf_any', 0.55);
   const [evalMulti, setEvalMulti] = useConfigField<boolean>('retrieval.eval_multi', true);
   const [queryExpansionEnabled, setQueryExpansionEnabled] = useConfigField<boolean>('retrieval.query_expansion_enabled', true);
-  const [retrievalBm25Weight, setRetrievalBm25Weight] = useConfigField<number>('retrieval.bm25_weight', 0.3);
-  const [retrievalVectorWeight, setRetrievalVectorWeight] = useConfigField<number>('retrieval.vector_weight', 0.7);
   const [cardSearchEnabled, setCardSearchEnabled] = useConfigField<boolean>('retrieval.chunk_summary_search_enabled', true);
   const [maxChunksPerFile, setMaxChunksPerFile] = useConfigField<number>('retrieval.max_chunks_per_file', 3);
   const [dedupBy, setDedupBy] = useConfigField<'chunk_id' | 'file_path'>('retrieval.dedup_by', 'chunk_id');
@@ -202,8 +198,6 @@ export function RetrievalSubtab() {
   const [multiQueryM, setMultiQueryM] = useConfigField<number>('retrieval.multi_query_m', 4);
   const [useSemanticSynonyms, setUseSemanticSynonyms] = useConfigField<boolean>('retrieval.use_semantic_synonyms', true);
   const [synonymsPath, setSynonymsPath] = useConfigField<string>('retrieval.tribrid_synonyms_path', '');
-  const [topkDense, setTopkDense] = useConfigField<number>('retrieval.topk_dense', 75);
-  const [topkSparse, setTopkSparse] = useConfigField<number>('retrieval.topk_sparse', 75);
   const [retrievalHydrationMode, setRetrievalHydrationMode] = useConfigField<string>('retrieval.hydration_mode', 'lazy');
   const [retrievalHydrationMaxChars, setRetrievalHydrationMaxChars] = useConfigField<number>('retrieval.hydration_max_chars', 2000);
 
@@ -1643,17 +1637,6 @@ export function RetrievalSubtab() {
                   <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
                     <div className="input-group">
                       <label>
-                        LangGraph Final K <TooltipIcon name="LANGGRAPH_FINAL_K" />
-                      </label>
-                      <NumberField
-                        min={1}
-                        max={100}
-                        value={langgraphFinalK}
-                        onCommit={setLanggraphFinalK}
-                      />
-                    </div>
-                    <div className="input-group">
-                      <label>
                         LangGraph Max Rewrites <TooltipIcon name="LANGGRAPH_MAX_QUERY_REWRITES" />
                       </label>
                       <NumberField
@@ -1678,75 +1661,8 @@ export function RetrievalSubtab() {
                   </div>
                 </div>
 
-                <div style={{ ...SECTION_STYLE, marginBottom: 14 }} data-testid="retrieval-section-ops-retrieval-balance">
-                  <div style={SECTION_TITLE_STYLE}>3) Retrieval Balance</div>
-                  <div style={SECTION_DESC_STYLE}>
-                    Tune hybrid weighting and candidate fan-out for compatibility with existing retrieval/evaluation flows.
-                  </div>
-
-                  <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 16 }}>
-                    <div className="input-group">
-                      <label>
-                        RRF K Div <TooltipIcon name="RRF_K_DIV" />
-                      </label>
-                      <NumberField
-                        min={1}
-                        max={200}
-                        value={rrfKDiv}
-                        onCommit={setRrfKDiv}
-                      />
-                    </div>
-                    <div className="input-group">
-                      <label>
-                        Retrieval BM25 Weight <TooltipIcon name="BM25_WEIGHT" />
-                      </label>
-                      <NumberField
-                        min={0}
-                        max={1}
-                        step={0.01}
-                        value={retrievalBm25Weight}
-                        onCommit={setRetrievalBm25Weight}
-                      />
-                    </div>
-                    <div className="input-group">
-                      <label>
-                        Retrieval Vector Weight <TooltipIcon name="VECTOR_WEIGHT" />
-                      </label>
-                      <NumberField
-                        min={0}
-                        max={1}
-                        step={0.01}
-                        value={retrievalVectorWeight}
-                        onCommit={setRetrievalVectorWeight}
-                      />
-                    </div>
-                    <div className="input-group">
-                      <label>
-                        TopK Dense <TooltipIcon name="TOPK_DENSE" />
-                      </label>
-                      <NumberField
-                        min={10}
-                        max={200}
-                        value={topkDense}
-                        onCommit={setTopkDense}
-                      />
-                    </div>
-                    <div className="input-group">
-                      <label>
-                        TopK Sparse <TooltipIcon name="TOPK_SPARSE" />
-                      </label>
-                      <NumberField
-                        min={10}
-                        max={200}
-                        value={topkSparse}
-                        onCommit={setTopkSparse}
-                      />
-                    </div>
-                  </div>
-                </div>
-
                 <div style={SECTION_STYLE} data-testid="retrieval-section-ops-semantic-cache">
-                  <div style={SECTION_TITLE_STYLE}>4) Semantic Cache</div>
+                  <div style={SECTION_TITLE_STYLE}>3) Semantic Cache</div>
                   <div style={SECTION_DESC_STYLE}>
                     Configure semantic cache policy for retrieval, answer generation, and chat generation.
                   </div>

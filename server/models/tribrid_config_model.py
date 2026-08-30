@@ -3843,20 +3843,6 @@ class SyntheticArtifactPreviewResponse(BaseModel):
 class RetrievalConfig(BaseModel):
     """Configuration for retrieval and search parameters."""
 
-    rrf_k_div: int = Field(
-        default=60,
-        ge=1,
-        le=200,
-        description="RRF rank smoothing constant (higher = more weight to top ranks)"
-    )
-
-    langgraph_final_k: int = Field(
-        default=20,
-        ge=1,
-        le=100,
-        description="Number of final results to return in LangGraph pipeline"
-    )
-
     max_query_rewrites: int = Field(
         default=2,
         ge=1,
@@ -3889,7 +3875,10 @@ class RetrievalConfig(BaseModel):
         default=5,
         ge=1,
         le=50,
-        description="Top-k for evaluation runs"
+        description=(
+            "Final-k used only by the evaluation flow (server/api/eval.py); the live "
+            "retrieval pipeline uses retrieval.final_k. Distinct knob, not a duplicate."
+        ),
     )
 
     conf_top1: float = Field(
@@ -3921,20 +3910,6 @@ class RetrievalConfig(BaseModel):
     query_expansion_enabled: bool = Field(
         default=True,
         description="Enable synonym expansion"
-    )
-
-    bm25_weight: float = Field(
-        default=0.3,
-        ge=0.0,
-        le=1.0,
-        description="Weight for BM25 in hybrid search"
-    )
-
-    vector_weight: float = Field(
-        default=0.7,
-        ge=0.0,
-        le=1.0,
-        description="Weight for vector search"
     )
 
     chunk_summary_search_enabled: bool = Field(
@@ -4004,20 +3979,6 @@ class RetrievalConfig(BaseModel):
         description="Custom path to semantic_synonyms.json (default: data/semantic_synonyms.json)"
     )
 
-    topk_dense: int = Field(
-        default=75,
-        ge=10,
-        le=200,
-        description="Top-K for dense vector search"
-    )
-
-    topk_sparse: int = Field(
-        default=75,
-        ge=10,
-        le=200,
-        description="Top-K for sparse BM25 search"
-    )
-
     hydration_mode: str = Field(
         default="lazy",
         pattern="^(lazy|eager|none|off)$",
@@ -4032,14 +3993,9 @@ class RetrievalConfig(BaseModel):
     )
 
     # REMOVED: disable_rerank - use RERANKER_MODE='none' instead
-
-    @field_validator('rrf_k_div')
-    @classmethod
-    def validate_rrf_k_div(cls, v: int) -> int:
-        """Ensure RRF k_div is reasonable."""
-        if v < 10:
-            raise ValueError('rrf_k_div should be at least 10 for meaningful rank smoothing')
-        return v
+    # REMOVED: rrf_k_div, langgraph_final_k, bm25_weight, vector_weight, topk_dense,
+    # topk_sparse - dead duplicates of the authoritative fusion.* / vector_search.top_k /
+    # sparse_search.top_k knobs the pipeline actually reads (server/retrieval/fusion.py).
 
     @field_validator('hydration_mode', mode='before')
     @classmethod
@@ -4051,23 +4007,6 @@ class RetrievalConfig(BaseModel):
                 return 'none'
             return val
         return v
-
-    @model_validator(mode='after')
-    def validate_weights_sum_to_one(self) -> Self:
-        """Normalize BM25/vector weights to sum to 1.0 instead of hard failing."""
-        total = self.bm25_weight + self.vector_weight
-        if total <= 0:
-            # Reset to safe defaults
-            self.bm25_weight = 0.3
-            self.vector_weight = 0.7
-            return self
-        if not (0.99 <= total <= 1.01):
-            norm_bm25 = self.bm25_weight / total
-            norm_vector = self.vector_weight / total
-            # Clamp to [0,1] after normalization
-            self.bm25_weight = max(0.0, min(1.0, norm_bm25))
-            self.vector_weight = max(0.0, min(1.0, norm_vector))
-        return self
 
 
 class SemanticCacheConfig(BaseModel):
@@ -7004,8 +6943,6 @@ class TriBridConfig(BaseModel):
         """
         return {
             # Retrieval params (existing + new)
-            'RRF_K_DIV': self.retrieval.rrf_k_div,
-            'LANGGRAPH_FINAL_K': self.retrieval.langgraph_final_k,
             'MAX_QUERY_REWRITES': self.retrieval.max_query_rewrites,
             'LANGGRAPH_MAX_QUERY_REWRITES': self.retrieval.langgraph_max_query_rewrites,
             'MQ_REWRITES': self.retrieval.max_query_rewrites,  # Legacy alias
@@ -7017,14 +6954,10 @@ class TriBridConfig(BaseModel):
             'CONF_ANY': self.retrieval.conf_any,
             'EVAL_MULTI': self.retrieval.eval_multi,
             'QUERY_EXPANSION_ENABLED': self.retrieval.query_expansion_enabled,
-            'BM25_WEIGHT': self.retrieval.bm25_weight,
-            'VECTOR_WEIGHT': self.retrieval.vector_weight,
             'CHUNK_SUMMARY_SEARCH_ENABLED': self.retrieval.chunk_summary_search_enabled,
             'MULTI_QUERY_M': self.retrieval.multi_query_m,
             'USE_SEMANTIC_SYNONYMS': self.retrieval.use_semantic_synonyms,
             'TRIBRID_SYNONYMS_PATH': self.retrieval.tribrid_synonyms_path,
-            'TOPK_DENSE': self.retrieval.topk_dense,
-            'TOPK_SPARSE': self.retrieval.topk_sparse,
             # Semantic cache
             'SEMANTIC_CACHE_ENABLED': self.semantic_cache.enabled,
             'SEMANTIC_CACHE_MODE': self.semantic_cache.mode,
@@ -7369,8 +7302,6 @@ class TriBridConfig(BaseModel):
 
         return cls(
             retrieval=RetrievalConfig(
-                rrf_k_div=data.get('RRF_K_DIV', 60),
-                langgraph_final_k=data.get('LANGGRAPH_FINAL_K', 20),
                 max_query_rewrites=data.get('MAX_QUERY_REWRITES', data.get('MQ_REWRITES', 2)),
                 langgraph_max_query_rewrites=data.get(
                     'LANGGRAPH_MAX_QUERY_REWRITES',
@@ -7384,14 +7315,10 @@ class TriBridConfig(BaseModel):
                 conf_any=data.get('CONF_ANY', 0.55),
                 eval_multi=data.get('EVAL_MULTI', True),
                 query_expansion_enabled=data.get('QUERY_EXPANSION_ENABLED', True),
-                bm25_weight=data.get('BM25_WEIGHT', 0.3),
-                vector_weight=data.get('VECTOR_WEIGHT', 0.7),
                 chunk_summary_search_enabled=data.get('CHUNK_SUMMARY_SEARCH_ENABLED', True),
                 multi_query_m=data.get('MULTI_QUERY_M', 4),
                 use_semantic_synonyms=data.get('USE_SEMANTIC_SYNONYMS', True),
                 tribrid_synonyms_path=data.get('TRIBRID_SYNONYMS_PATH', ''),
-                topk_dense=data.get('TOPK_DENSE', 75),
-                topk_sparse=data.get('TOPK_SPARSE', 75),
                 hydration_mode=data.get('HYDRATION_MODE', 'lazy'),
                 hydration_max_chars=data.get('HYDRATION_MAX_CHARS', 2000),
                 # REMOVED: disable_rerank - use RERANKER_MODE='none' instead

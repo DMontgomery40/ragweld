@@ -2398,10 +2398,6 @@ export interface RerankingConfig {
 
 /** Configuration for retrieval and search parameters. */
 export interface RetrievalConfig {
-  /** RRF rank smoothing constant (higher = more weight to top ranks) */
-  rrf_k_div?: number; // default: 60
-  /** Number of final results to return in LangGraph pipeline */
-  langgraph_final_k?: number; // default: 20
   /** Maximum number of query rewrites for multi-query expansion */
   max_query_rewrites?: number; // default: 2
   /** Maximum number of query rewrites for LangGraph pipeline */
@@ -2410,7 +2406,7 @@ export interface RetrievalConfig {
   fallback_confidence?: number; // default: 0.55
   /** Default top-k for search results */
   final_k?: number; // default: 10
-  /** Top-k for evaluation runs */
+  /** Final-k used only by the evaluation flow (server/api/eval.py); the live retrieval pipeline uses retrieval.final_k. Distinct knob, not a duplicate. */
   eval_final_k?: number; // default: 5
   /** Confidence threshold for top-1 */
   conf_top1?: number; // default: 0.62
@@ -2422,10 +2418,6 @@ export interface RetrievalConfig {
   eval_multi?: boolean; // default: True
   /** Enable synonym expansion */
   query_expansion_enabled?: boolean; // default: True
-  /** Weight for BM25 in hybrid search */
-  bm25_weight?: number; // default: 0.3
-  /** Weight for vector search */
-  vector_weight?: number; // default: 0.7
   /** Enable chunk_summary-based retrieval */
   chunk_summary_search_enabled?: boolean; // default: True
   /** Max chunks to return per file_path (document-aware result shaping). */
@@ -2450,10 +2442,6 @@ export interface RetrievalConfig {
   use_semantic_synonyms?: boolean; // default: True
   /** Custom path to semantic_synonyms.json (default: data/semantic_synonyms.json) */
   tribrid_synonyms_path?: string; // default: ""
-  /** Top-K for dense vector search */
-  topk_dense?: number; // default: 75
-  /** Top-K for sparse BM25 search */
-  topk_sparse?: number; // default: 75
   /** Result hydration mode */
   hydration_mode?: string; // default: "lazy"
   /** Max characters for result hydration */
