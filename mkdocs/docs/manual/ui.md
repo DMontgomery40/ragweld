@@ -1,3 +1,4 @@
+```markdown
 # UI tour
 
 <div class="grid chunk_summaries" markdown>
@@ -100,6 +101,48 @@ Why this matters: if you pin a specific LiteLLM gateway alias for your conversat
     - `GET /api/chat/health` (default dev base `http://127.0.0.1:58012/api`) for provider readiness
     - The LiteLLM gateway service on port `54000` (see the [runtime topology](../reference/architecture/runtime-topology.md) for the full service map)
 
+### Top-bar health pill: the /api/ready breakdown in one click
+
+The top bar's **Health** control is now a pill: `OK · just now` or `Not OK · 2m ago`. The status word is backed by the same health probe the app runs every 30 seconds while the tab is visible, and the label shows **how stale the reading is** instead of a bare time-of-day — the underlying tooltip carries the full date and time of the last check.
+
+Clicking the pill is no longer a no-op: it opens a **component-status popover** backed by `GET /api/ready`'s dependency breakdown, with one row per required dependency (the databases, the LiteLLM gateway, the index manifests). Each row carries a ready/unavailable marker, a short non-sensitive detail line, and — when a dependency is down — an operator hint naming the fix.
+
+- **A 503 is a status, not an error.** `/api/ready` answers `200` when every required dependency is ready and `503` — with the same payload shape — when one is not, so the popover can always show *which* dependency is the problem instead of a generic failure. See [Health, Readiness, and Metrics API](../api_health.md).
+- **Escape closes the popover** and returns focus to the pill; a click outside dismisses it too.
+- **Open System Status** closes the popover and lands on **Dashboard → System Status** for the detailed view.
+
+*Concept diagram (the pill's data path only — the full service map is on the [generated runtime-topology page](../reference/architecture/runtime-topology.md)):*
+
+```mermaid
+flowchart LR
+  subgraph s_topbar["Top bar (web/src/components/Navigation/HealthPill.tsx)"]
+    PILL["Health pill\nstatus + staleness label"]
+    POPOVER["Readiness popover\none row per dependency"]
+  end
+  subgraph s_api["Backend (/api)"]
+    HEALTH["GET /api/health\nliveness probe (30s poll)"]
+    READY["GET /api/ready\n200 ready / 503 not ready\nsame ReadinessStatus payload"]
+    STORE["useHealthStore\nshared in-flight probe"]
+  end
+  subgraph s_deps["Dependencies probed"]
+    PG["Postgres"]
+    N4J["Neo4j"]
+    LIT["LiteLLM gateway"]
+    IDX["Index manifests"]
+  end
+  PILL -->|"click opens"| POPOVER
+  PILL --> STORE
+  STORE --> HEALTH
+  POPOVER -->|"loadReadiness()"| READY
+  READY --> PG
+  READY --> N4J
+  READY --> LIT
+  READY --> IDX
+```
+
+??? tip "If the pill says Not OK"
+    Open the popover first — it names the dependency and its operator hint (for example, start the database container, or bring the LiteLLM gateway up). For deeper diagnosis go to **Dashboard → System Status**, or check the raw endpoint directly: `curl -sS http://127.0.0.1:58012/api/ready | jq .`
+
 ### RAG → Data Quality reviews what it says it reviews
 
 The Data Quality subtab now fetches what it promises: chunk summaries load with the corpus, and a **Corpus keywords** panel lists the keywords stored on the corpus that weight retrieval. Empty states say why they are empty — "no build has been run for this corpus yet" versus "could not be loaded" versus "select a corpus" — instead of a blanket "No chunk summaries to show" for every corpus, indexed or not. **Generate keywords** fills the panel from what was persisted, so it survives a reload.
@@ -149,6 +192,15 @@ Runtime-managed corpora are excluded from this panel: the chat Recall corpus (`r
 !!! warning "If something looks empty"
     Most RAG panels depend on a **selected corpus** and a **completed index**. If you haven’t indexed yet, start at [Indexing](indexing.md).
 
+### Dashboard → System: cost cards that say what they mean
+
+The System subtab's index panel renders the per-corpus cost cards with the distinctions the underlying run record actually makes:
+
+- **A metered `$0.0000` says so.** An embedding cost of exactly zero with real tokens processed — a local or no-charge embedding model — renders as `$0.0000 (no charge)`, distinguishable from `N/A`, which means no meter ran at all.
+- **Semantic KG Cost always appears.** A phase that did not run reads `not run`, never a silently missing card that could be mistaken for `$0.00`.
+- **Total Cost carries its ceiling.** When figure descriptions contributed, the total is priced from the full per-figure completion budget, so it is labelled `≤ $X` — an upper bound, never presented as an exact charge. See [Indexing a corpus](indexing.md) for how the figure ceiling is computed.
+- **Byte figures are binary.** The panel's byte figures use KiB/MiB/GiB (the values are divided by 1024), matching the Storage subtab's labels.
+
 ### Dashboard → Monitoring: alerts read live from Alertmanager
 
 The Monitoring subtab's **Alerts** panel calls `GET /api/observability/alerts`, which reads Alertmanager's own alerts route on every refresh — so what you see is what Alertmanager is holding right now, with a firing count that excludes silenced and inhibited alerts.
@@ -158,6 +210,21 @@ The Monitoring subtab's **Alerts** panel calls `GET /api/observability/alerts`, 
 - **A failure is a typed error card** — if Alertmanager is unconfigured, unreachable, or answering with something other than alerts, the panel shows the API's own reason and operator hint (typically: set `tracing.alertmanager_base_url`), with a **Retry** button and a link into **Infrastructure → Monitoring**. It never falls back to a bare "Failed to load" or an empty list that would read as good news.
 
 Full alerting controls (Alertmanager endpoints, receivers, delivery policy) live in [Alert webhooks](../operations/webhooks.md).
+
+### Dashboard → Monitoring: Recent Query Traces
+
+Below the alerts panel, **Recent Query Traces** lists the last 10 search and chat queries — a date-and-time timestamp, the query text, and the corpus each ran against. The table deliberately has no Duration column: the query log records no per-request timing, so the table never shows a column it cannot populate (a column of `—` for every row would look like missing data). For latency work use `/api/metrics`, the trace viewer, or the Grafana dashboards rather than this table; the timestamps include the date, so a list spanning days cannot read as if it ran backwards.
+
+### Dashboard → Storage: byte tiles, count tiles, and the capacity planner
+
+The Storage subtab shows one tile per storage component, in two deliberately different formats:
+
+- **Byte tiles** (chunks, vectors, indexes, Postgres totals) carry a `% of total` share line and a background fill bar, because they are slices of a real byte total and the shares sum to roughly 100%.
+- **Count tiles** (Qdrant points, keywords) show only the tally — `1,315 points`, `247 keywords`. A count has no share of a byte total, so a percentage would always read 0.0% and the fill bar would be meaningless; neither is rendered.
+
+Byte figures are labelled in binary units (KiB / MiB / GiB) here and on **Dashboard → System Status**, because both divide by 1024 — the two subtabs agree on the same number under the same label.
+
+Below the live tiles sits the **Storage Calculator Suite**, a *hypothetical capacity planner* — editing its inputs never changes a stored index. When an indexed corpus is active, the planner seeds itself from that corpus (stored chunk bytes for corpus size, the mean chunk size across stored points, embedding dimensions from config) and says so in a banner naming the source of every prefilled number; with no indexed corpus it holds generic planning defaults and says that instead. The right-hand **Fit Analysis** panel's Corpus Size / Chunk Size / Embedding Dims fields are independent scenario inputs — editing them does not move the left panel — while Hydration %, Replication and HNSW overhead are read from the left panel.
 
 ## The single most important UI control: corpus selection
 
@@ -175,6 +242,7 @@ If you see “wrong results”, the most common cause is simply that you’re lo
 ??? tip "Where to check readiness"
     - **Dashboard → System Status**
     - `/api/ready` (raw endpoint)
+    - The top-bar **Health** pill — click it for the per-dependency readiness popover without leaving the page
 
 ??? tip "Where to find logs"
     - **Infrastructure → Docker** (if you’re running via Docker)
@@ -196,3 +264,5 @@ A handful of workbench-shell behaviors changed recently; none change any workflo
 - **Admin → Basic names its scope.** A banner shows which corpus the page writes to, and every field carries its `corpus`/`global` scope chip even in the trimmed Basic view — a save can no longer look like a global default when it is a per-corpus value.
 - **Credential fields explain themselves.** The Postgres DSN shows a "Password configured" chip and a note that `[redacted]` means "kept in the backend", and nested config fields read their units properly ("Timeout (seconds)", not "Timeout S"). See [Security](../security.md).
 - **Numeric fields commit on blur.** Every numeric config control clamps to its Pydantic bounds when you leave the field — a typed out-of-range value is corrected before anything is sent, and a rejected save shows its message under the field itself. See [Configuration](../configuration.md).
+- **The dock has one set of controls.** When nothing is docked, **Dock Chat** / **Dock Current** / **Choose…** live in the dock header and the empty body is guidance text — the duplicate control set in the empty body is gone. Docking the page you are on (which moves the main view to Chat) now announces it with a one-click undo toast instead of silently relocating the page.
+```

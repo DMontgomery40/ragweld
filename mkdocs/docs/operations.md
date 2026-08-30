@@ -29,6 +29,9 @@
 !!! tip "Readiness Gate"
     Gate traffic on `/api/ready`. It verifies DB connectivity before admitting load.
 
+!!! note "The top-bar Health pill reads these same endpoints"
+    In the workbench, the top-bar **Health** control polls `/api/health` every 30 seconds (while the tab is visible) and, on click, opens a popover backed by `GET /api/ready`'s per-dependency breakdown — one row per required dependency with a ready/unavailable marker, a short detail line, and an operator hint for anything that is down. A `503` is treated as a status, not an error: the payload shape is the same, so the popover can always name the dependency that is not ready. See [Health, Readiness, and Metrics API](api_health.md).
+
 !!! note "Container Logs"
     Use `/api/docker/services/{service}/logs` for ad-hoc log pulls (ragweld services only), or rely on Loki for aggregation.
 

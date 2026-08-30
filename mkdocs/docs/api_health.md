@@ -29,6 +29,9 @@
 !!! tip "Gate Traffic"
     Route production traffic only after readiness returns 200.
 
+!!! note "503 still carries the breakdown"
+    `/api/ready` answers `200` when every required dependency is ready and **`503`** when one is not — with the same `ReadinessStatus` payload either way, including the per-dependency map (databases, the LiteLLM gateway, index manifests) plus operator hints for anything down. The workbench's top-bar Health pill relies on this: it treats `503` as a status rather than an error and renders the breakdown in its popover, so a not-ready deployment still tells you *which* dependency is the problem. See the [UI tour](manual/ui.md).
+
 !!! note "Exporter"
     A Postgres exporter is included in the compose stack; scrape it alongside `/metrics`.
 

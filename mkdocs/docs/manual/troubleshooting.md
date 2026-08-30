@@ -42,6 +42,8 @@
     2. Confirm Postgres + Neo4j status
     3. Confirm “Ready” is green
 
+    The top-bar **Health** pill is a shortcut for the same question: click it for a per-dependency readiness popover (with an operator hint per down dependency) plus a jump to System Status, without navigating away.
+
 ## Symptom → likely cause → fix
 
 | Symptom | Likely cause | Fix |
