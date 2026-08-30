@@ -191,3 +191,50 @@ execution record):
 - **OpenCost**: not deployed — it requires a Kubernetes API server and the
   Colima profile runs the plain Docker runtime. It stays `disabled` in the
   status surface (empty base URL); do not report it healthy.
+
+## Langfuse trace deep links: what the API can and cannot promise
+
+Two different questions hide behind one "Langfuse trace" link, and they have
+different answers:
+
+1. **Does Langfuse hold this trace?** The API can answer that. `GET
+   /api/observability/langfuse/trace/{trace_id}` asks Langfuse with the
+   process's server keys (`LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY`)
+   against the **ingestion** base URL — `tracing.langfuse_base_url`, the
+   loopback listener — using `GET /api/public/v2/observations?traceId=...`.
+   One observation is proof the trace landed. Probing
+   `tracing.langfuse_public_base_url` instead would only ever get the API a
+   redirect to the auth provider, so the check would always fail.
+2. **May the operator's browser open it?** The API cannot answer that.
+   Langfuse enforces **project membership on the signed-in identity**, quite
+   separately from ingestion. An operator whose Langfuse account is not a
+   member of the `ragweld` project gets Langfuse's own error page — "You do
+   not have access to this trace" with a bare Sign In button — no matter what
+   the deck reports about Langfuse's health.
+
+So the product ships answer (1) and states (2): the deep link is offered only
+for a trace Langfuse confirms it holds, every Langfuse link carries a tooltip
+naming the project and the membership requirement
+(`langfuse_sign_in_hint()` in `server/observability/runtime.py`), and the
+Operator Deck shows why a link was withheld when Langfuse has no observation
+for the current trace.
+
+### Membership bootstrap is a deploy concern
+
+`LANGFUSE_INIT_*` provisions the org, the project and the API keys headlessly,
+but it does not grant a **human** account membership of that project, and
+nothing in the application should try to. The operator has to be a member of
+the `ragweld` project before per-trace deep links resolve for them:
+
+- Sign in to `https://ragweld-langfuse.dtmont.com` (Authelia fronts it; the
+  operator's SSO session passes, and Langfuse then asks for its own identity).
+- The account created by `LANGFUSE_INIT_USER_EMAIL` is the org owner. Sign in
+  as that account and invite the operator's account to the `Ragweld`
+  organization, then add it to the `ragweld` project, or set
+  `LANGFUSE_INIT_USER_EMAIL` to the operator's own address at provisioning
+  time so the first account is theirs.
+- Langfuse has no SSO-driven auto-provisioning configured on this deployment,
+  so an Authelia session alone never creates or elevates a Langfuse identity.
+
+Until that is done the links are correct and simply not openable by that
+operator; the API's existence check cannot and must not paper over it.

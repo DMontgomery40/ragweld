@@ -18,6 +18,7 @@ import type {
   EvalObservabilitySummaryResponse,
   HealthStatus,
   IndexRunSummary,
+  LangfuseTraceAccess,
   LokiStatus,
   MCPStatusResponse,
   ObservabilityCatalogResponse,
@@ -40,6 +41,7 @@ export type {
   EvalObservabilitySummaryResponse,
   HealthStatus,
   IndexRunSummary,
+  LangfuseTraceAccess,
   LokiStatus,
   ObservabilityCatalogResponse,
   ObservabilityIncidentsResponse,
@@ -159,6 +161,16 @@ export async function getTraces(limit: number = 50): Promise<Trace[]> {
   } catch {
     return [];
   }
+}
+
+/** Ask the API whether Langfuse actually holds a trace before offering its deep link. */
+export async function getLangfuseTraceAccess(traceId: string): Promise<LangfuseTraceAccess | null> {
+  const id = String(traceId || '').trim();
+  if (!id) return null;
+  const { data } = await apiClient.get<LangfuseTraceAccess>(
+    api(`/observability/langfuse/trace/${encodeURIComponent(id)}`)
+  );
+  return data;
 }
 
 export async function getLatestTrace(): Promise<TracesLatestResponse | null> {

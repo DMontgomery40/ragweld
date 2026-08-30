@@ -627,6 +627,21 @@ def langfuse_client_blockers(tracing_cfg: TracingConfig) -> list[str]:
     return blockers
 
 
+def langfuse_sign_in_hint(tracing_cfg: TracingConfig) -> str:
+    """Tooltip for any Langfuse link: opening it needs a Langfuse identity.
+
+    Langfuse enforces project membership on the signed-in browser identity,
+    which no server-side check can stand in for. Saying so before the click is
+    the difference between a link and a dead end.
+    """
+    project = str(tracing_cfg.langfuse_project or "").strip() or "Langfuse"
+    return (
+        f"Opens Langfuse in a new tab. Sign in with a Langfuse account that is a member of the "
+        f"'{project}' project; an account without that membership sees "
+        f'"You do not have access to this trace".'
+    )
+
+
 def langfuse_trace_url(tracing_cfg: TracingConfig, trace_id: str | None) -> str | None:
     """Deterministic Langfuse UI deep link — no network lookup on the request path."""
     base = str(tracing_cfg.langfuse_public_base_url or "").strip().rstrip("/")
@@ -682,7 +697,10 @@ def record_langfuse_generation(
                 label="Langfuse trace",
                 kind="langfuse",
                 url=trace_url,
-                detail="LLM-native generation trace for this request.",
+                detail=(
+                    "LLM-native generation trace for this request. "
+                    + langfuse_sign_in_hint(obs.manager.tracing_config)
+                ),
             )
     except Exception as exc:
         _set_langfuse_ingestion_state(f"last record failed ({type(exc).__name__}: {exc})")

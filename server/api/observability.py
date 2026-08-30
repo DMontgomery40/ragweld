@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
 
-from server.models.observability import AlertmanagerAlertsResponse, AlertsUnavailableResponse
+from server.models.observability import (
+    AlertmanagerAlertsResponse,
+    AlertsUnavailableResponse,
+    LangfuseTraceAccess,
+)
 from server.models.tribrid_config_model import (
     ObservabilityAlertRulesResponse,
     ObservabilityCatalogResponse,
@@ -13,6 +17,7 @@ from server.observability.alert_rules import build_alert_rules
 from server.observability.alerts import AlertmanagerUnavailableError, build_alertmanager_alerts
 from server.observability.catalog import build_observability_catalog
 from server.observability.incidents import build_observability_incidents
+from server.observability.langfuse_access import check_langfuse_trace_access
 from server.observability.status import build_observability_status
 from server.services.config_store import CorpusNotFoundError
 from server.services.config_store import get_config as load_scoped_config
@@ -114,3 +119,25 @@ async def observability_alerts(
         return await build_alertmanager_alerts(cfg)
     except AlertmanagerUnavailableError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail.model_dump(mode="json")) from exc
+
+
+@router.get("/langfuse/trace/{trace_id}", response_model=LangfuseTraceAccess)
+async def observability_langfuse_trace(
+    trace_id: str,
+    repo: str | None = Query(default=None, description="Optional corpus_id to scope config"),
+    corpus_id: str | None = Query(default=None, description="Alias for repo"),
+    repo_id: str | None = Query(default=None, description="Alias for corpus_id"),
+) -> LangfuseTraceAccess:
+    """Whether Langfuse holds this trace, and the deep link if it does.
+
+    Surfaces call this before offering a "Langfuse trace" link, so the operator
+    is never sent to a trace Langfuse does not have. Whether their *browser
+    session* may read it is Langfuse project membership, which this process
+    cannot know and therefore always states in `sign_in_hint`.
+    """
+    scope_id = (repo or corpus_id or repo_id or "").strip() or None
+    try:
+        cfg = await load_scoped_config(repo_id=scope_id)
+    except CorpusNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return await check_langfuse_trace_access(cfg.tracing, trace_id)

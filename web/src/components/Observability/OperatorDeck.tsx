@@ -5,6 +5,7 @@ import type {
   AgentTrainControlPlaneStatusResponse,
   BenchmarkObservabilitySummaryResponse,
   EvalObservabilitySummaryResponse,
+  LangfuseTraceAccess,
   LokiStatus,
   ObservabilityCatalogResponse,
   ObservabilityComponentStatus,
@@ -146,6 +147,7 @@ export function ObservabilityOperatorDeck({
   const [promptSummary, setPromptSummary] = useState<PromptObservabilitySummaryResponse | null>(null);
   const [latestTraceResponse, setLatestTraceResponse] = useState<TracesLatestResponse | null>(null);
   const [lokiStatus, setLokiStatus] = useState<LokiStatus | null>(null);
+  const [langfuseAccess, setLangfuseAccess] = useState<LangfuseTraceAccess | null>(null);
   const [controlPlane, setControlPlane] = useState<AgentTrainControlPlaneStatusResponse | null>(null);
 
   useEffect(() => {
@@ -187,6 +189,11 @@ export function ObservabilityOperatorDeck({
         setPromptSummary(nextPromptSummary);
         setLatestTraceResponse(nextTrace);
         setLokiStatus(nextLoki);
+        // Only offer the per-trace Langfuse deep link once Langfuse says it
+        // holds the trace; the drive landed on "You do not have access to this
+        // trace" twice from links the deck offered unconditionally.
+        const traceId = String(nextTrace?.trace?.trace_id || '').trim();
+        setLangfuseAccess(traceId ? await DashAPI.getLangfuseTraceAccess(traceId).catch(() => null) : null);
         setControlPlane(nextControlPlane);
         setLastUpdated(new Date().toISOString());
 
@@ -222,7 +229,16 @@ export function ObservabilityOperatorDeck({
     (observability?.components || []).map((component) => [component.id, component])
   ) as Record<string, ObservabilityComponentStatus | undefined>;
 
-  const deckLinks = dedupeLinks(observability?.links, catalog?.external_links, trace?.external_links, controlPlane?.links);
+  const isLangfuseTraceLink = (link: TraceExternalLink): boolean =>
+    link.kind === 'langfuse' && String(link.url || '').includes('/traces/');
+  const deckLinks = dedupeLinks(
+    observability?.links,
+    catalog?.external_links,
+    trace?.external_links,
+    controlPlane?.links
+  ).filter((link) => !isLangfuseTraceLink(link) || langfuseAccess?.exists === true);
+  const langfuseTraceNotice =
+    trace?.trace_id && langfuseAccess && !langfuseAccess.exists ? langfuseAccess.detail : null;
   const workbenchLinks = dedupeWorkbenchLinks(catalog?.workbench_links);
   const recentIncidents = (incidents?.incidents || []).slice(0, 4);
   const retrievalComponent = componentMap.haystack_docling_qdrant || null;
@@ -266,11 +282,28 @@ export function ObservabilityOperatorDeck({
         {!error && observability?.operator_hint ? <div className="obs-banner">{observability.operator_hint}</div> : null}
         {!error && controlPlane?.operator_hint ? <div className="obs-banner obs-banner-subtle">{controlPlane.operator_hint}</div> : null}
         {loading ? <div className="obs-banner obs-banner-subtle">Refreshing live observability surfaces…</div> : null}
+        {langfuseTraceNotice ? (
+          <div className="obs-banner obs-banner-subtle" data-testid="obs-langfuse-trace-notice">
+            {`Langfuse trace link withheld: ${langfuseTraceNotice}`}
+          </div>
+        ) : null}
 
         {deckLinks.length ? (
           <div className="obs-link-row">
             {deckLinks.map((link) => (
-              <a key={`${link.label}-${link.url}`} href={link.url} target="_blank" rel="noreferrer" className="obs-link-pill">
+              <a
+                key={`${link.label}-${link.url}`}
+                href={link.url}
+                target="_blank"
+                rel="noreferrer"
+                className="obs-link-pill"
+                data-testid={`obs-external-link-${link.kind}`}
+                title={
+                  link.kind === 'langfuse' && langfuseAccess
+                    ? langfuseAccess.sign_in_hint
+                    : `${link.detail ? `${link.detail} ` : ''}Opens ${link.url} in a new tab.`
+                }
+              >
                 {link.label}
               </a>
             ))}
