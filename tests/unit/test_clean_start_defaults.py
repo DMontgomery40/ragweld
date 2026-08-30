@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
-from server.models.tribrid_config_model import ChatConfig, SystemPromptsConfig, TrainingConfig, TriBridConfig
+from server.models.tribrid_config_model import (
+    ChatConfig,
+    SystemPromptsConfig,
+    TrainingConfig,
+    TriBridConfig,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -208,7 +214,11 @@ def test_frontend_timeout_controls_follow_the_pydantic_contract() -> None:
     retrieval = (ROOT / "web/src/components/RAG/RetrievalSubtab.tsx").read_text(encoding="utf-8")
     assert f"useConfigField<number>('generation.gen_timeout', {gen_field.default})" in retrieval
     assert f"min={{{gen_ge}}}\n                    max={{{gen_le}}}" in retrieval
-    assert f"setGenTimeout(snapNumber(e.target.value, {gen_field.default}))" in retrieval
+    # The control commits through the shared NumberField (clamp on blur/Enter), not through a
+    # per-keystroke snap: a lower-bounded field is impossible to type into when every keystroke
+    # is clamped. The bounds themselves are enforced for every such field by
+    # `test_every_number_field_advertises_its_pydantic_bounds` below.
+    assert "onCommit={setGenTimeout}" in retrieval
     assert "max={300}" not in retrieval
 
     ui_field = UIConfig.model_fields["chat_stream_timeout"]
@@ -217,3 +227,160 @@ def test_frontend_timeout_controls_follow_the_pydantic_contract() -> None:
     assert f"const DEFAULT_CHAT_REQUEST_TIMEOUT_MS = {ui_field.default}_000;" in chat
     assert f"config?.ui?.chat_stream_timeout ?? {ui_field.default}" in chat
     assert f"Math.min({ui_le}, configuredChatTimeoutSeconds)" in chat
+
+
+def _config_field_bounds(path: str) -> tuple[float | None, float | None]:
+    """The ge/le of one dotted TriBridConfig path, e.g. ``chunking.target_tokens``."""
+    from pydantic import BaseModel
+
+    from server.models.tribrid_config_model import TriBridConfig
+
+    parts = path.split(".")
+    model: type[BaseModel] = TriBridConfig
+    for part in parts[:-1]:
+        model = model.model_fields[part].annotation  # type: ignore[assignment]
+    info = model.model_fields[parts[-1]]
+    low = high = None
+    for meta in info.metadata:
+        if getattr(meta, "ge", None) is not None:
+            low = meta.ge
+        if getattr(meta, "le", None) is not None:
+            high = meta.le
+    return low, high
+
+
+def _jsx_elements(source: str, tag: str) -> list[str]:
+    """Every ``<tag ... />`` element in a TSX source, brace-balanced so style props survive."""
+    lines = source.split("\n")
+    found: list[str] = []
+    i = 0
+    while i < len(lines):
+        if re.match(rf"^\s*<{tag}\b", lines[i]):
+            depth, j, block = 0, i, []
+            while j < len(lines):
+                depth += lines[j].count("{") - lines[j].count("}")
+                block.append(lines[j])
+                if depth == 0 and lines[j].rstrip().endswith("/>"):
+                    break
+                j += 1
+            found.append("\n".join(block))
+            i = j + 1
+        else:
+            i += 1
+    return found
+
+
+# Config paths whose numeric control already advertises bounds its model does not have. Every
+# one is in RetrievalSubtab.tsx and predates this test: they came in with the first NumberField
+# conversion, which carried the old raw inputs' hand-written min/max across unchanged. They are
+# real defects -- a UI bound narrower than the model refuses a legal value, a wider one sends a
+# value the PATCH rejects as an unattributed 422 -- but fixing each needs a decision about which
+# side is right, so they are recorded rather than silently skipped.
+#
+# This list is a ratchet: the test fails if a new path joins it AND if a listed path is fixed
+# without being removed. Shrink it; never grow it.
+KNOWN_NUMBER_FIELD_BOUND_GAPS = frozenset(
+    {
+        "generation.gen_max_tokens",
+        "graph_search.top_k",
+        "hydration.hydration_max_chars",
+        "retrieval.eval_final_k",
+        "retrieval.final_k",
+        "retrieval.langgraph_max_query_rewrites",
+        "retrieval.multi_query_m",
+        "retrieval.topk_dense",
+        "retrieval.topk_sparse",
+        "scoring.filename_boost_exact",
+        "scoring.filename_boost_partial",
+        "sparse_search.top_k",
+        "tracing.alert_webhook_timeout",
+        "tracing.trace_retention",
+        "vector_search.top_k",
+    }
+)
+
+
+def test_every_number_field_advertises_its_pydantic_bounds() -> None:
+    """A NumberField's min/max ARE its clamp, so they may not disagree with the model.
+
+    `NumberField` reads the bounds back off the rendered element and forces the committed value
+    inside them before the store ever sees it. A UI bound narrower than the model silently
+    refuses a legal value (this caught embedding.late_chunking_max_doc_tokens advertising
+    min=512 against ge=256); a wider one sends a value the PATCH rejects as a 422 with no field
+    attribution, surfaced only as a generic store error.
+
+    This is the general form of the per-field literal assertions above: every numeric config
+    control in the app, checked against the field it writes.
+    """
+    sources = sorted((ROOT / "web/src").rglob("*.tsx"))
+    assert sources, "no frontend sources found"
+
+    checked = 0
+    problems: dict[str, list[str]] = {}
+    for path in sources:
+        source = path.read_text(encoding="utf-8")
+        if "<NumberField" not in source:
+            continue
+        bindings = dict(
+            re.findall(
+                r"const \[\s*(\w+),\s*set\w+\s*\]\s*=\s*\n?\s*useConfigField<number>\(\s*\n?\s*'([\w.]+)'",
+                source,
+            )
+        )
+        rel = path.relative_to(ROOT)
+        for element in _jsx_elements(source, "NumberField"):
+            value_prop = re.search(r"value=\{([^\n]*)", element)
+            assert value_prop is not None, f"{rel}: a NumberField has no value prop"
+            # One control reads `value={a || b}`, so take the first identifier in the expression
+            # that is a config binding rather than requiring a bare variable.
+            candidates = [n for n in re.findall(r"\w+", value_prop.group(1)) if n in bindings]
+            assert candidates, (
+                f"{rel}: NumberField value={value_prop.group(1)!r} writes no "
+                "useConfigField<number> binding"
+            )
+            config_path = bindings[candidates[0]]
+            low, high = _config_field_bounds(config_path)
+            ui_min = re.search(r"min=\{(-?[\d_.]+)\}", element)
+            ui_max = re.search(r"max=\{(-?[\d_.]+)\}", element)
+            got_min = float(ui_min.group(1).replace("_", "")) if ui_min else None
+            got_max = float(ui_max.group(1).replace("_", "")) if ui_max else None
+            checked += 1
+            found: list[str] = []
+            if (low is None) != (got_min is None) or (
+                low is not None and got_min != float(low)
+            ):
+                found.append(f"min={got_min} vs ge={low}")
+            if (high is None) != (got_max is None) or (
+                high is not None and got_max != float(high)
+            ):
+                found.append(f"max={got_max} vs le={high}")
+            if found:
+                problems.setdefault(config_path, []).extend(f"{rel}: {config_path} {f}" for f in found)
+
+    assert checked >= 45, f"expected to check every numeric config control, checked {checked}"
+
+    unexpected = sorted(set(problems) - KNOWN_NUMBER_FIELD_BOUND_GAPS)
+    assert not unexpected, "new NumberField bounds disagree with the config model:\n  " + "\n  ".join(
+        detail for path in unexpected for detail in problems[path]
+    )
+
+    fixed = sorted(KNOWN_NUMBER_FIELD_BOUND_GAPS - set(problems))
+    assert not fixed, (
+        "these bounds now match the model -- remove them from KNOWN_NUMBER_FIELD_BOUND_GAPS: "
+        + ", ".join(fixed)
+    )
+
+
+def test_no_config_editor_still_writes_a_raw_number_input() -> None:
+    """Raw `<input type="number">` clamped nothing and wrote on every keystroke.
+
+    The two config editors are the whole numeric-config surface; a new raw numeric input here
+    is a field that bypasses the shared commit-on-blur clamp, which is how out-of-range values
+    reached the PATCH in the first place.
+    """
+    for relative in ("web/src/components/RAG/IndexingSubtab.tsx", "web/src/components/RAG/RetrievalSubtab.tsx"):
+        source = (ROOT / relative).read_text(encoding="utf-8")
+        assert 'type="number"' not in source, (
+            f"{relative} still has a raw numeric input; use NumberField so the value is clamped "
+            "to its Pydantic bounds on commit"
+        )

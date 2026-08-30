@@ -1532,13 +1532,13 @@ export function IndexingSubtab() {
                   Dimensions
                   <TooltipIcon name="EMBEDDING_DIM" />
                 </label>
-                <input
-                  type="number"
+                <NumberField
                   value={embeddingDim}
-                  onChange={(e) => setEmbeddingDim(parseInt(e.target.value || '0', 10))}
+                  onCommit={setEmbeddingDim}
                   disabled={contractLocked}
                   min={128}
                   max={4096}
+                  step={1}
                   style={{
                     width: '100%',
                     padding: '10px 12px',
@@ -1557,12 +1557,12 @@ export function IndexingSubtab() {
                   Batch size
                   <TooltipIcon name="EMBEDDING_BATCH_SIZE" />
                 </label>
-                <input
-                  type="number"
+                <NumberField
                   value={embeddingBatchSize}
-                  onChange={(e) => setEmbeddingBatchSize(parseInt(e.target.value || '0', 10))}
+                  onCommit={setEmbeddingBatchSize}
                   min={1}
                   max={256}
+                  step={1}
                   style={{
                     width: '100%',
                     padding: '10px 12px',
@@ -1682,13 +1682,13 @@ export function IndexingSubtab() {
                       Late chunking max doc tokens
                       <TooltipIcon name="EMBEDDING_LATE_CHUNKING_MAX_DOC_TOKENS" />
                     </label>
-                    <input
+                    <NumberField
                       data-testid="embedding-late-chunking-max-doc-tokens"
-                      type="number"
                       value={lateChunkingMaxDocTokens}
-                      onChange={(e) => setLateChunkingMaxDocTokens(parseInt(e.target.value || '0', 10))}
-                      min={512}
+                      onCommit={setLateChunkingMaxDocTokens}
+                      min={256}
                       max={65536}
+                      step={1}
                       disabled={String(contextualChunkEmbeddings).toLowerCase() !== 'late_chunking_local_only'}
                       style={{
                         width: '100%',
@@ -1711,12 +1711,12 @@ export function IndexingSubtab() {
                       Max tokens
                       <TooltipIcon name="EMBEDDING_MAX_TOKENS" />
                     </label>
-                    <input
-                      type="number"
+                    <NumberField
                       value={embeddingMaxTokens}
-                      onChange={(e) => setEmbeddingMaxTokens(parseInt(e.target.value || '0', 10))}
+                      onCommit={setEmbeddingMaxTokens}
                       min={512}
                       max={8192}
+                      step={1}
                       style={{
                         width: '100%',
                         padding: '10px 12px',
@@ -1733,12 +1733,12 @@ export function IndexingSubtab() {
                       Timeout (s)
                       <TooltipIcon name="EMBEDDING_TIMEOUT" />
                     </label>
-                    <input
-                      type="number"
+                    <NumberField
                       value={embeddingTimeout}
-                      onChange={(e) => setEmbeddingTimeout(parseInt(e.target.value || '0', 10))}
+                      onCommit={setEmbeddingTimeout}
                       min={5}
                       max={120}
+                      step={1}
                       style={{
                         width: '100%',
                         padding: '10px 12px',
@@ -1755,12 +1755,12 @@ export function IndexingSubtab() {
                       Max retries
                       <TooltipIcon name="EMBEDDING_RETRY_MAX" />
                     </label>
-                    <input
-                      type="number"
+                    <NumberField
                       value={embeddingRetryMax}
-                      onChange={(e) => setEmbeddingRetryMax(parseInt(e.target.value || '0', 10))}
+                      onCommit={setEmbeddingRetryMax}
                       min={1}
                       max={5}
+                      step={1}
                       style={{
                         width: '100%',
                         padding: '10px 12px',
@@ -1840,13 +1840,13 @@ export function IndexingSubtab() {
                       Target tokens
                       <TooltipIcon name="TARGET_TOKENS" />
                     </label>
-                    <input
+                    <NumberField
                       data-testid="chunking-target-tokens"
-                      type="number"
                       value={targetTokens}
-                      onChange={(e) => setTargetTokens(parseInt(e.target.value || '0', 10))}
+                      onCommit={setTargetTokens}
                       min={64}
                       max={8192}
+                      step={1}
                       style={{
                         width: '100%',
                         padding: '10px 12px',
@@ -1863,13 +1863,13 @@ export function IndexingSubtab() {
                       Overlap tokens
                       <TooltipIcon name="OVERLAP_TOKENS" />
                     </label>
-                    <input
+                    <NumberField
                       data-testid="chunking-overlap-tokens"
-                      type="number"
                       value={overlapTokens}
-                      onChange={(e) => setOverlapTokens(parseInt(e.target.value || '0', 10))}
+                      onCommit={setOverlapTokens}
                       min={0}
                       max={2048}
+                      step={1}
                       style={{
                         width: '100%',
                         padding: '10px 12px',
@@ -1886,12 +1886,12 @@ export function IndexingSubtab() {
                       AST overlap lines
                       <TooltipIcon name="AST_OVERLAP_LINES" />
                     </label>
-                    <input
-                      type="number"
+                    <NumberField
                       value={astOverlapLines}
-                      onChange={(e) => setAstOverlapLines(parseInt(e.target.value || '0', 10))}
+                      onCommit={setAstOverlapLines}
                       min={0}
                       max={100}
+                      step={1}
                       disabled
                       style={{
                         width: '100%',
@@ -1913,13 +1913,13 @@ export function IndexingSubtab() {
                       Chunk size (chars)
                       <TooltipIcon name="CHUNK_SIZE" />
                     </label>
-                    <input
+                    <NumberField
                       data-testid="chunking-chunk-size"
-                      type="number"
                       value={chunkSize}
-                      onChange={(e) => setChunkSize(parseInt(e.target.value || '0', 10))}
+                      onCommit={setChunkSize}
                       min={200}
                       max={5000}
+                      step={1}
                       style={{
                         width: '100%',
                         padding: '10px 12px',
@@ -1936,12 +1936,12 @@ export function IndexingSubtab() {
                       Chunk overlap (chars)
                       <TooltipIcon name="CHUNK_OVERLAP" />
                     </label>
-                    <input
-                      type="number"
+                    <NumberField
                       value={chunkOverlap}
-                      onChange={(e) => setChunkOverlap(parseInt(e.target.value || '0', 10))}
+                      onCommit={setChunkOverlap}
                       min={0}
                       max={1000}
+                      step={1}
                       style={{
                         width: '100%',
                         padding: '10px 12px',
@@ -1958,12 +1958,12 @@ export function IndexingSubtab() {
                       AST overlap lines
                       <TooltipIcon name="AST_OVERLAP_LINES" />
                     </label>
-                    <input
-                      type="number"
+                    <NumberField
                       value={astOverlapLines}
-                      onChange={(e) => setAstOverlapLines(parseInt(e.target.value || '0', 10))}
+                      onCommit={setAstOverlapLines}
                       min={0}
                       max={100}
+                      step={1}
                       style={{
                         width: '100%',
                         padding: '10px 12px',
@@ -2034,12 +2034,12 @@ export function IndexingSubtab() {
                         Max recursion depth
                         <TooltipIcon name="RECURSIVE_MAX_DEPTH" />
                       </label>
-                      <input
-                        type="number"
+                      <NumberField
                         value={recursiveMaxDepth}
-                        onChange={(e) => setRecursiveMaxDepth(parseInt(e.target.value || '0', 10))}
+                        onCommit={setRecursiveMaxDepth}
                         min={1}
                         max={50}
+                        step={1}
                         style={{
                           width: '100%',
                           padding: '10px 12px',
@@ -2063,12 +2063,12 @@ export function IndexingSubtab() {
                     Max heading level
                     <TooltipIcon name="MARKDOWN_MAX_HEADING_LEVEL" />
                   </label>
-                  <input
-                    type="number"
+                  <NumberField
                     value={markdownMaxHeadingLevel}
-                    onChange={(e) => setMarkdownMaxHeadingLevel(parseInt(e.target.value || '0', 10))}
+                    onCommit={setMarkdownMaxHeadingLevel}
                     min={1}
                     max={6}
+                    step={1}
                     style={{
                       width: '100%',
                       padding: '10px 12px',
@@ -2101,12 +2101,12 @@ export function IndexingSubtab() {
                   Max chunk tokens
                   <TooltipIcon name="MAX_CHUNK_TOKENS" />
                 </label>
-                <input
-                  type="number"
+                <NumberField
                   value={maxChunkTokens}
-                  onChange={(e) => setMaxChunkTokens(parseInt(e.target.value || '0', 10))}
+                  onCommit={setMaxChunkTokens}
                   min={100}
                   max={32000}
+                  step={1}
                   style={{
                     width: '100%',
                     padding: '10px 12px',
@@ -2123,12 +2123,12 @@ export function IndexingSubtab() {
                   Min chunk chars
                   <TooltipIcon name="MIN_CHUNK_CHARS" />
                 </label>
-                <input
-                  type="number"
+                <NumberField
                   value={minChunkChars}
-                  onChange={(e) => setMinChunkChars(parseInt(e.target.value || '0', 10))}
+                  onCommit={setMinChunkChars}
                   min={10}
                   max={500}
+                  step={1}
                   style={{
                     width: '100%',
                     padding: '10px 12px',
@@ -2145,12 +2145,12 @@ export function IndexingSubtab() {
                   Max file size (bytes)
                   <TooltipIcon name="MAX_INDEXABLE_FILE_SIZE" />
                 </label>
-                <input
-                  type="number"
+                <NumberField
                   value={maxIndexableFileSize}
-                  onChange={(e) => setMaxIndexableFileSize(parseInt(e.target.value || '0', 10))}
+                  onCommit={setMaxIndexableFileSize}
                   min={10000}
                   max={2000000000}
+                  step={1}
                   style={{
                     width: '100%',
                     padding: '10px 12px',
@@ -2353,13 +2353,13 @@ export function IndexingSubtab() {
                     Max tokens per chunk (hard)
                     <TooltipIcon name="TOKENIZATION_MAX_TOKENS_PER_CHUNK_HARD" />
                   </label>
-                  <input
-                    type="number"
+                  <NumberField
                     value={maxTokensPerChunkHard}
-                    onChange={(e) => setMaxTokensPerChunkHard(parseInt(e.target.value || '0', 10))}
+                    onCommit={setMaxTokensPerChunkHard}
                     disabled={contractLocked}
                     min={256}
                     max={65536}
+                    step={1}
                     style={{
                       width: '100%',
                       padding: '10px 12px',
@@ -2395,12 +2395,12 @@ export function IndexingSubtab() {
                     Max file size (MB)
                     <TooltipIcon name="INDEX_MAX_FILE_SIZE_MB" />
                   </label>
-                  <input
-                    type="number"
+                  <NumberField
                     value={indexMaxFileSizeMb}
-                    onChange={(e) => setIndexMaxFileSizeMb(parseInt(e.target.value || '0', 10))}
+                    onCommit={setIndexMaxFileSizeMb}
                     min={1}
                     max={1024}
+                    step={1}
                     style={{
                       width: '100%',
                       padding: '10px 12px',
@@ -2440,12 +2440,12 @@ export function IndexingSubtab() {
                     Stream block chars
                     <TooltipIcon name="LARGE_FILE_STREAM_CHUNK_CHARS" />
                   </label>
-                  <input
-                    type="number"
+                  <NumberField
                     value={largeFileStreamChunkChars}
-                    onChange={(e) => setLargeFileStreamChunkChars(parseInt(e.target.value || '0', 10))}
+                    onCommit={setLargeFileStreamChunkChars}
                     min={100000}
                     max={50000000}
+                    step={1}
                     disabled={largeFileMode !== 'stream'}
                     style={{
                       width: '100%',
@@ -2682,13 +2682,13 @@ export function IndexingSubtab() {
                       </div>
                       <div className="input-group">
                         <label style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '6px' }}>Max chunks</label>
-                        <input
+                        <NumberField
                           data-testid="semantic-kg-max-chunks"
-                          type="number"
                           min={0}
                           max={100000}
+                          step={1}
                           value={semanticKgMaxChunks}
-                          onChange={(e) => setSemanticKgMaxChunks(parseInt(e.target.value || '0', 10))}
+                          onCommit={setSemanticKgMaxChunks}
                           style={{ width: '100%' }}
                         />
                       </div>
@@ -2763,12 +2763,12 @@ export function IndexingSubtab() {
                     <label style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '6px' }}>
                       Max rows
                     </label>
-                    <input
-                      type="number"
+                    <NumberField
                       min={1}
                       max={200000}
+                      step={1}
                       value={parquetExtractMaxRows}
-                      onChange={(e) => setParquetExtractMaxRows(parseInt(e.target.value || '0', 10))}
+                      onCommit={setParquetExtractMaxRows}
                       style={{ width: '100%' }}
                     />
                   </div>
@@ -2776,12 +2776,12 @@ export function IndexingSubtab() {
                     <label style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '6px' }}>
                       Max chars
                     </label>
-                    <input
-                      type="number"
+                    <NumberField
                       min={10_000}
                       max={50_000_000}
+                      step={1}
                       value={parquetExtractMaxChars}
-                      onChange={(e) => setParquetExtractMaxChars(parseInt(e.target.value || '0', 10))}
+                      onCommit={setParquetExtractMaxChars}
                       style={{ width: '100%' }}
                     />
                   </div>
@@ -2789,12 +2789,12 @@ export function IndexingSubtab() {
                     <label style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '6px' }}>
                       Max cell chars
                     </label>
-                    <input
-                      type="number"
+                    <NumberField
                       min={100}
                       max={200_000}
+                      step={1}
                       value={parquetExtractMaxCellChars}
-                      onChange={(e) => setParquetExtractMaxCellChars(parseInt(e.target.value || '0', 10))}
+                      onCommit={setParquetExtractMaxCellChars}
                       style={{ width: '100%' }}
                     />
                   </div>
@@ -2850,12 +2850,12 @@ export function IndexingSubtab() {
                       Greedy fallback target
                       <TooltipIcon name="GREEDY_FALLBACK_TARGET" />
                     </label>
-                    <input
-                      type="number"
+                    <NumberField
                       value={greedyFallbackTarget}
-                      onChange={(e) => setGreedyFallbackTarget(parseInt(e.target.value || '0', 10))}
+                      onCommit={setGreedyFallbackTarget}
                       min={200}
                       max={2000}
+                      step={1}
                       style={{
                         width: '100%',
                         padding: '10px 12px',
