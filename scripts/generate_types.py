@@ -348,6 +348,7 @@ def main(output_path: Path | None = None) -> None:
             EmbeddingRuntimeProviderCapability,
             # Domain models - Graph
             Entity,
+            EvalAnalysisArtifact,
             EvalAnalyzeComparisonRequest,
             EvalAnalyzeComparisonResponse,
             EvalComparisonResult,
@@ -656,6 +657,7 @@ def main(output_path: Path | None = None) -> None:
         EvalRun,
         EvalRunMeta,
         EvalRunsResponse,
+        EvalAnalysisArtifact,
         EvalAnalyzeComparisonResponse,
         EvalAnalyzeComparisonRequest,
         EvalComparisonResult,

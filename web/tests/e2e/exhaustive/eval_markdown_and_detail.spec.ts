@@ -257,10 +257,11 @@ test('promptfoo answer renders GFM through the shared renderer', async ({ page, 
   expect(text).not.toContain('| --- |');
 });
 
-// M-73: the AI analysis panel gains copy + Markdown export (it had only Clear).
+// M-73: the AI analysis panel gains copy + Markdown export (it had only Clear),
+// and the costed result is persisted per run so re-opening never re-charges.
 // This is the one paid path in the file — one small analysis on the isolated
 // corpus through the cheap gateway alias, never the host-served local model.
-test('AI analysis exposes copy and Markdown export that produce a download', async ({ page, baseURL, request }) => {
+test('AI analysis exports, persists per run, and reloads cached without re-charging', async ({ page, baseURL, request }) => {
   // The analysis routes on generation.gen_model; point it at the cheap paid alias.
   await patchCorpusConfigSection(request, corpus.corpusId, 'generation', { gen_model: EXHAUSTIVE_CHAT_MODEL });
   await activateCorpusInBrowser(page, corpus.corpusId);
@@ -280,6 +281,22 @@ test('AI analysis exposes copy and Markdown export that produce a download', asy
   await exportBtn.click();
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toMatch(/^eval-analysis-.*\.md$/);
+
+  const generated = (await page.getByTestId('eval-ai-analysis').innerText()).trim();
+  expect(generated.length).toBeGreaterThan(0);
+
+  // Reload: the persisted analysis must serve from disk with the "cached"
+  // affordance and NO second analyze_comparison (gateway) call.
+  const analyzeCalls: string[] = [];
+  page.on('request', (r) => {
+    if (r.url().includes('/eval/analyze_comparison')) analyzeCalls.push(r.url());
+  });
+  await page.reload();
+  await expect(page.getByTestId('eval-analysis-cached-badge')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId('eval-analysis-regenerate')).toBeVisible();
+  const reloaded = (await page.getByTestId('eval-ai-analysis').innerText()).trim();
+  expect(reloaded).toBe(generated);
+  expect(analyzeCalls, 'reopening a run must not re-charge the gateway').toHaveLength(0);
 });
 
 // M-75: the Add Eval Entry form gains an expected_answer field, so entries

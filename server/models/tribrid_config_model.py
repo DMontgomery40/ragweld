@@ -3063,6 +3063,17 @@ class EvalAnalyzeComparisonResponse(BaseModel):
     error: str | None = Field(default=None, description="Error message (if any)")
 
 
+class EvalAnalysisArtifact(BaseModel):
+    """A persisted AI comparison analysis, keyed by the current run id so re-opening
+    a run serves the costed result from disk instead of re-charging the gateway."""
+
+    run_id: str = Field(description="Current (after) eval run id this analysis is keyed by")
+    compare_run_id: str = Field(description="Baseline (before) run id the analysis compared against")
+    analysis: str = Field(description="Markdown analysis text")
+    model_used: str = Field(description="Model identifier that produced the analysis")
+    created_at: datetime = Field(description="When the analysis was generated")
+
+
 class EvalComparisonResult(BaseModel):
     """Comparison between two evaluation runs."""
     baseline_run_id: str = Field(description="Baseline run ID")

@@ -174,6 +174,9 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
   const [llmLoading, setLlmLoading] = useState(false);
   const [llmError, setLlmError] = useState<string | null>(null);
   const [modelUsed, setModelUsed] = useState<string | null>(null);
+  // True when the shown analysis was served from the persisted artifact rather
+  // than freshly generated this session (M-73): re-opening a run must not re-charge.
+  const [analysisCached, setAnalysisCached] = useState(false);
 
   // Whether the operational (non-response-affecting) config tier is expanded
   const [operationalExpanded, setOperationalExpanded] = useState(false);
@@ -191,7 +194,8 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
     setLlmLoading(true);
     setLlmError(null);
     setLlmAnalysis(null);
-    
+    setAnalysisCached(false);
+
     try {
       const data = await evalApi.analyzeComparison({
         current_run: {
@@ -238,7 +242,8 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
         setLlmError(null);
         setLlmLoading(false);
         setModelUsed(null);
-        
+        setAnalysisCached(false);
+
         const data: EvalRun = await evalApi.getResults(runId);
         console.log('[EvalDrillDown] Fetched data:', data);
         console.log('[EvalDrillDown] Question 0 expected_paths:', data.results?.[0]?.expected_paths);
@@ -250,6 +255,18 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
             setCompareRun(compareData);
           } catch {
             setCompareRun(null);
+          }
+          // Serve a previously-generated analysis for this run/baseline pair from
+          // disk so re-opening the run does not re-charge the gateway (M-73).
+          try {
+            const cached = await evalApi.getCachedAnalysis(runId, compareWithRunId);
+            if (cached) {
+              setLlmAnalysis(cached.analysis);
+              setModelUsed(cached.model_used);
+              setAnalysisCached(true);
+            }
+          } catch {
+            // A cache miss/error just means the operator can generate fresh.
           }
         } else {
           setCompareRun(null);
@@ -439,6 +456,27 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
     link.remove();
     URL.revokeObjectURL(url);
     showToast('Analysis exported as Markdown', 'success');
+  };
+
+  // Generate (or regenerate) the comparison analysis — the one path that charges
+  // the gateway. Shared by the "Generate" and "Regenerate" controls.
+  const runAnalysis = () => {
+    if (!evalRun || !compareRun) return;
+    const evalResults = evalRun.results || [];
+    const compareResults = compareRun.results || [];
+    const topkRegressions = evalResults.filter((_, idx) => !evalResults[idx]?.topk_hit && compareResults[idx]?.topk_hit);
+    const topkImprovements = evalResults.filter((_, idx) => evalResults[idx]?.topk_hit && !compareResults[idx]?.topk_hit);
+    const top1Regressions = evalResults.filter((_, idx) => !evalResults[idx]?.top1_hit && compareResults[idx]?.top1_hit);
+    const top1Improvements = evalResults.filter((_, idx) => evalResults[idx]?.top1_hit && !compareResults[idx]?.top1_hit);
+    fetchLLMAnalysis(
+      evalRun,
+      compareRun,
+      configDiffs || [],
+      topkRegressions,
+      topkImprovements,
+      top1Regressions.length,
+      top1Improvements.length,
+    );
   };
 
   return (
@@ -1147,7 +1185,7 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
                 </h4>
                 {modelUsed && (
                   <span style={{
-                    fontSize: '10px',
+                    fontSize: '11.5px',
                     padding: '3px 8px',
                     background: 'var(--bg-elev2)',
                     borderRadius: '10px',
@@ -1156,48 +1194,27 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
                     {modelUsed}
                   </span>
                 )}
+                {analysisCached && llmAnalysis && (
+                  <span
+                    data-testid="eval-analysis-cached-badge"
+                    title="Served from the saved analysis for this run — no new charge. Use Regenerate to run it again."
+                    style={{
+                      fontSize: '11.5px',
+                      padding: '3px 8px',
+                      background: 'var(--bg-elev2)',
+                      border: '1px solid var(--line)',
+                      borderRadius: '10px',
+                      color: 'var(--fg-muted)'
+                    }}
+                  >
+                    cached
+                  </span>
+                )}
               </div>
-              
+
               {!llmAnalysis && !llmLoading && (
                 <button
-                  onClick={() => {
-                    if (evalRun && compareRun) {
-                      const evalResults = evalRun.results || [];
-                      const compareResults = compareRun.results || [];
-                      // Calculate Top-K changes (what we show in the table)
-                      const topkRegressions = evalResults.filter((_, idx) => {
-                        const currentHit = evalResults[idx]?.topk_hit;
-                        const previousHit = compareResults[idx]?.topk_hit;
-                        return !currentHit && previousHit;
-                      });
-                      const topkImprovements = evalResults.filter((_, idx) => {
-                        const currentHit = evalResults[idx]?.topk_hit;
-                        const previousHit = compareResults[idx]?.topk_hit;
-                        return currentHit && !previousHit;
-                      });
-                      // Calculate Top-1 changes (for complete picture)
-                      const top1Regressions = evalResults.filter((_, idx) => {
-                        const currentHit = evalResults[idx]?.top1_hit;
-                        const previousHit = compareResults[idx]?.top1_hit;
-                        return !currentHit && previousHit;
-                      });
-                      const top1Improvements = evalResults.filter((_, idx) => {
-                        const currentHit = evalResults[idx]?.top1_hit;
-                        const previousHit = compareResults[idx]?.top1_hit;
-                        return currentHit && !previousHit;
-                      });
-                      // Send both metrics for accurate analysis
-                      fetchLLMAnalysis(
-                        evalRun,
-                        compareRun,
-                        configDiffs || [],
-                        topkRegressions,
-                        topkImprovements,
-                        top1Regressions.length,
-                        top1Improvements.length
-                      );
-                    }
-                  }}
+                  onClick={runAnalysis}
                   style={{
                     background: 'var(--link)',
                     color: 'white',
@@ -1219,6 +1236,24 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
               
               {llmAnalysis && (
                 <div style={{ display: 'flex', gap: '8px' }}>
+                  {analysisCached && (
+                    <button
+                      data-testid="eval-analysis-regenerate"
+                      onClick={runAnalysis}
+                      title="Run the analysis again against the current baseline (charges the gateway)."
+                      style={{
+                        background: 'transparent',
+                        color: 'var(--link)',
+                        border: '1px solid var(--link)',
+                        padding: '6px 12px',
+                        borderRadius: '6px',
+                        fontSize: '11.5px',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Regenerate
+                    </button>
+                  )}
                   <button
                     data-testid="eval-analysis-copy"
                     onClick={() => void handleCopyAnalysis()}

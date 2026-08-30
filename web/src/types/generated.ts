@@ -3738,6 +3738,20 @@ export interface DocumentView {
   provenance: DocumentProvenanceCaptured | DocumentProvenanceNotCaptured;
 }
 
+/** A persisted AI comparison analysis, keyed by the current run id so re-opening a run serves the costed result from disk instead of re-charging the gateway. */
+export interface EvalAnalysisArtifact {
+  /** Current (after) eval run id this analysis is keyed by */
+  run_id: string;
+  /** Baseline (before) run id the analysis compared against */
+  compare_run_id: string;
+  /** Markdown analysis text */
+  analysis: string;
+  /** Model identifier that produced the analysis */
+  model_used: string;
+  /** When the analysis was generated */
+  created_at: string;
+}
+
 /** Request payload for /eval/analyze_comparison. */
 export interface EvalAnalyzeComparisonRequest {
   /** Current (after) run */

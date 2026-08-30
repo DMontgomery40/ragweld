@@ -1,5 +1,7 @@
+import axios from 'axios';
 import { apiClient, api, withCorpusScope } from './client';
 import type {
+  EvalAnalysisArtifact,
   EvalAnalyzeComparisonRequest,
   EvalAnalyzeComparisonResponse,
   EvalRequest,
@@ -46,6 +48,23 @@ export const evalApi = {
   async getResults(runId: string): Promise<EvalRun> {
     const { data } = await apiClient.get<EvalRun>(api(`/eval/results/${encodeURIComponent(runId)}`));
     return data;
+  },
+
+  async getCachedAnalysis(runId: string, compareRunId: string): Promise<EvalAnalysisArtifact | null> {
+    // The persisted AI analysis for this run/baseline pair, so re-opening a run
+    // shows the costed result without re-charging. 404 => nothing cached (or a
+    // different baseline was analyzed) => generate fresh.
+    try {
+      const qs = new URLSearchParams({ compare_run_id: compareRunId });
+      const { data } = await apiClient.get<EvalAnalysisArtifact>(
+        api(`/eval/analysis/${encodeURIComponent(runId)}?${qs.toString()}`),
+        { headers: { 'Cache-Control': 'no-store' } },
+      );
+      return data;
+    } catch (err) {
+      if (axios.isAxiosError(err) && err.response?.status === 404) return null;
+      throw err;
+    }
   },
 
   async analyzeComparison(payload: EvalAnalyzeComparisonRequest): Promise<EvalAnalyzeComparisonResponse> {

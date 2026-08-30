@@ -57,6 +57,7 @@ from server.models.eval import (
 )
 from server.models.tribrid_config_model import (
     CorpusScope,
+    EvalAnalysisArtifact,
     EvalAnalyzeComparisonRequest,
     EvalObservabilitySummaryResponse,
     PromptfooRun,
@@ -657,6 +658,34 @@ async def test_eval_entry(request: EvalTestRequest) -> EvalResult:
 
 _PROMPTFOO_RUNS_DIR = _RUNS_DIR / "promptfoo"
 
+_ANALYSIS_DIR = _RUNS_DIR / "analysis"
+
+
+def _analysis_path(run_id: str) -> Path:
+    """Path for the persisted AI analysis of a run; rejects ids that could escape the dir."""
+    validated = validate_eval_run_id(run_id)
+    _ANALYSIS_DIR.mkdir(parents=True, exist_ok=True)
+    return _ANALYSIS_DIR / f"{validated}.json"
+
+
+def _save_analysis(artifact: EvalAnalysisArtifact) -> None:
+    _analysis_path(artifact.run_id).write_text(
+        artifact.model_dump_json(indent=2), encoding="utf-8"
+    )
+
+
+def _load_analysis(run_id: str) -> EvalAnalysisArtifact | None:
+    try:
+        path = _analysis_path(run_id)
+    except ValueError:
+        return None
+    if not path.exists():
+        return None
+    try:
+        return EvalAnalysisArtifact.model_validate_json(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
 
 def _save_promptfoo_run(run: PromptfooRun) -> None:
     _PROMPTFOO_RUNS_DIR.mkdir(parents=True, exist_ok=True)
@@ -1090,6 +1119,13 @@ async def delete_eval_run(run_id: str) -> dict[str, Any]:
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"run_id={run_id} not found")
     path.unlink()
+    # Drop the run's cached AI analysis so it can never be served for a stale run.
+    try:
+        analysis_path = _analysis_path(run_id)
+        if analysis_path.exists():
+            analysis_path.unlink()
+    except ValueError:
+        pass
     return {"ok": True, "deleted": 1}
 @router.get("/eval/status")
 async def eval_status() -> dict[str, Any]:
@@ -1270,9 +1306,50 @@ async def analyze_eval_comparison(
             ),
         )
 
+    analysis_text = str(result.text or "").strip()
+
+    # Persist the costed analysis keyed by the current run id so re-opening the
+    # run serves it from disk instead of re-charging the gateway (M-73).
+    if analysis_text:
+        try:
+            _save_analysis(
+                EvalAnalysisArtifact(
+                    run_id=current.run_id,
+                    compare_run_id=baseline.run_id,
+                    analysis=analysis_text,
+                    model_used=str(route.model),
+                    created_at=datetime.now(UTC),
+                )
+            )
+        except Exception:
+            # A cache-write failure must never fail the (already paid-for) analysis.
+            pass
+
     return EvalAnalyzeComparisonResponse(
         ok=True,
-        analysis=str(result.text or "").strip(),
+        analysis=analysis_text,
         model_used=str(route.model),
         error=None,
     )
+
+
+@router.get("/eval/analysis/{run_id}", response_model=EvalAnalysisArtifact)
+async def get_eval_analysis(
+    run_id: str,
+    compare_run_id: str | None = Query(default=None),
+) -> EvalAnalysisArtifact:
+    """Return the persisted AI analysis for a run so re-opening it never re-charges.
+
+    404 when nothing is cached, or when a cached analysis exists but was generated
+    against a different baseline than the one currently selected — serving that would
+    be a stale, wrong-pair result. This read path never touches the gateway.
+    """
+    artifact = _load_analysis(run_id)
+    if artifact is None:
+        raise HTTPException(status_code=404, detail=f"No cached analysis for run_id={run_id}")
+    if compare_run_id is not None and artifact.compare_run_id != compare_run_id:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Cached analysis for run_id={run_id} was generated against a different baseline",
+        )
+    return artifact
