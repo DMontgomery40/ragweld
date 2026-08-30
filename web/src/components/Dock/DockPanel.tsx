@@ -106,10 +106,23 @@ export function DockPanel() {
       return;
     }
 
+    // Docking the current page with nothing already docked frees the main pane, so it moves to
+    // Chat. That used to happen with no announcement, which read as the page vanishing (M-153 /
+    // A-46). Say what happened and offer a one-click undo.
+    const swappedFrom = currentMainTarget;
     setDocked(currentMainTarget);
     setMode('dock');
     navigate('/chat');
-  }, [currentMainTarget, docked, navigate, setDocked, setMode]);
+    showUndoToast({
+      message: `Docked ${formatDockTitle(swappedFrom)}; the main view moved to Chat.`,
+      onUndo: () => {
+        setDocked(null, { rememberLast: false });
+        setMode('dock');
+        navigate(swappedFrom.path + swappedFrom.search);
+        clearUndoToast();
+      },
+    });
+  }, [clearUndoToast, currentMainTarget, docked, navigate, setDocked, setMode, showUndoToast]);
 
   const swap = useCallback(() => {
     if (!docked) return;
@@ -282,6 +295,13 @@ export function DockPanel() {
           </div>
 
           <div className="dock-header-actions">
+            {/* One set of dock controls, in the header. When nothing is docked the empty body
+                used to render its own Dock Current / Choose beside these, so two identical
+                control sets sat on screen at once (M-153 / A-47); Dock Chat now lives here too
+                and the empty body is guidance only. */}
+            {!docked ? (
+              <HeaderButton label="Dock Chat" onClick={dockChat} testId="dock-chat" />
+            ) : null}
             <HeaderButton label="Dock Current" onClick={dockCurrentSwap} testId="dock-current" disabled={!currentMainTarget} />
             <HeaderButton label="Choose…" onClick={() => setPickerOpen(true)} testId="dock-choose" />
             {docked ? (
@@ -359,13 +379,9 @@ export function DockPanel() {
           >
             <div style={{ fontSize: '28px' }}>📌</div>
             <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--fg)' }}>Nothing docked yet</div>
-            <div style={{ fontSize: '12px', maxWidth: '320px' }}>
-              Dock Chat while you browse Grafana/RAG.
-            </div>
-            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'center' }}>
-              <HeaderButton label="Dock Chat" onClick={dockChat} testId="dock-chat" />
-              <HeaderButton label="Dock Current" onClick={dockCurrentSwap} testId="dock-current-empty" disabled={!currentMainTarget} />
-              <HeaderButton label="Choose…" onClick={() => setPickerOpen(true)} testId="dock-choose-empty" />
+            <div style={{ fontSize: '12.5px', maxWidth: '340px', lineHeight: 1.5 }}>
+              Use <strong>Dock Chat</strong> above to keep chat beside Grafana or RAG, or{' '}
+              <strong>Dock Current</strong> to move the page you are on into this panel.
             </div>
           </div>
         )}
