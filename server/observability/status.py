@@ -354,10 +354,18 @@ def _build_operator_hint(cfg: TriBridConfig, mode: str, components: list[Observa
         return "Set a Langfuse base URL and env keys before enabling OTel + Langfuse mode."
     if mode == "otel_langfuse" and (not os.getenv("LANGFUSE_PUBLIC_KEY") or not os.getenv("LANGFUSE_SECRET_KEY")):
         return "Langfuse mode is selected, but LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY are missing."
+    # `probeable` excludes exactly one thing: a component the API cannot probe
+    # because a protected ingress redirects it off-host (M-82). It must NOT
+    # excuse a component that is enabled and simply unconfigured - that has no
+    # URL to probe, reports `probeable=False` for that reason, and still raises
+    # an incident, so hiding it here made the header and the incident feed
+    # disagree about the same component.
     down = [
         item.label
         for item in components
-        if item.severity in {"warning", "critical"} and item.enabled and item.probeable
+        if item.severity in {"warning", "critical"}
+        and item.enabled
+        and (not item.configured or item.probeable)
     ]
     if down:
         return f"Operator attention needed across: {', '.join(down)}."
@@ -711,7 +719,9 @@ async def build_observability_status(config: TriBridConfig, *, repo_id: str | No
     blockers = [
         item.id
         for item in components
-        if item.severity in {"warning", "critical"} and item.enabled and item.probeable
+        if item.severity in {"warning", "critical"}
+        and item.enabled
+        and (not item.configured or item.probeable)
     ]
 
     return ObservabilityStatusResponse(

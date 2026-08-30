@@ -214,6 +214,60 @@ async def test_an_auth_protected_surface_is_not_probeable_and_not_an_attention_i
     assert not [item for item in incidents.json()["incidents"] if item["id"] == "component:tempo"]
 
 
+@pytest.mark.asyncio
+async def test_an_enabled_component_with_no_url_stays_on_the_attention_line(client: AsyncClient) -> None:
+    """The complement of the auth-protected case: "cannot probe" is not "nothing to probe".
+
+    `_check_url("")` also reports `probeable=False`, so excluding every
+    unprobeable component from the attention line and from `ok` swept up
+    components that are enabled and simply unconfigured. Those keep
+    `severity=warning` and still raise an incident, so the deck header read
+    "Observability is configured" with `ok=true` and that component's incident
+    listed directly beneath it - the same two-surfaces-disagree defect that
+    M-81 and M-152 are about, reintroduced by the M-82 fix.
+    """
+
+    baseline = await client.get("/api/config")
+    assert baseline.status_code == 200
+    ui = baseline.json()["ui"]
+    original_url = str(ui["grafana_base_url"] or "")
+    original_embed = bool(ui["grafana_embed_enabled"])
+    original_mode = str(baseline.json()["tracing"]["tracing_mode"])
+
+    # Plain OTel mode: `otel_langfuse` without LANGFUSE_* keys short-circuits
+    # `_build_operator_hint` before it ever reaches the attention line, and this
+    # test must not depend on secrets to say something about Grafana.
+    await _set_tracing(client, {"tracing_mode": "otel"})
+    response = await client.request(
+        "PATCH", "/api/config/ui", json={"grafana_base_url": "", "grafana_embed_enabled": True}
+    )
+    assert response.status_code == 200, response.text
+    try:
+        status = await client.get("/api/observability/status")
+        assert status.status_code == 200
+        payload = status.json()
+        grafana = _component(payload, "grafana")
+
+        assert grafana["enabled"] is True
+        assert grafana["configured"] is False
+        assert grafana["probeable"] is False, "there is no URL to probe"
+        assert grafana["severity"] == "warning"
+        assert "Grafana" in str(payload["operator_hint"]), payload["operator_hint"]
+        assert payload["ok"] is False
+
+        incidents = await client.get("/api/observability/incidents")
+        assert incidents.status_code == 200
+        raised = [item for item in incidents.json()["incidents"] if item["id"] == "component:grafana"]
+        assert len(raised) == 1, "the incident feed and the attention line must agree"
+    finally:
+        await client.request(
+            "PATCH",
+            "/api/config/ui",
+            json={"grafana_base_url": original_url, "grafana_embed_enabled": original_embed},
+        )
+        await _set_tracing(client, {"tracing_mode": original_mode})
+
+
 def test_the_failure_streak_is_per_target_not_per_component_name() -> None:
     """Most `tracing.*_base_url` fields are per-corpus scopable.
 
