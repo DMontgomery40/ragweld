@@ -118,3 +118,100 @@ def test_text_token_meets_contrast_floor(
         f"(design-legibility.md; measured against the composited surface, "
         f"not the token in isolation)"
     )
+
+
+# --- Guard: no de-emphasizing text via opacity -----------------------------
+#
+# design-legibility.md bans dimming text with `opacity` outright ("de-emphasize
+# with a brighter-than-you-think muted tier, never with opacity on text
+# ... Resting opacity on visible controls >= 0.8"). A contrast-ratio check on
+# tokens.css alone can't catch this: `.topbar .tagline { color: var(--fg-muted);
+# opacity: 0.6; }` composites a token that passes its own floor down to ~2.8:1
+# on screen. This is a *heuristic guard*, not a full CSS/accessibility audit:
+# it flags any leaf CSS rule that sets `opacity` strictly between 0 and 0.8
+# AND looks like it is styling text -- it also sets `color` or `font-size` in
+# the same rule, or its selector targets a known text surface
+# (`::placeholder`, `.tagline`, or anything with "muted" in the selector).
+# `opacity: 0` is intentionally excluded: that is the hidden half of a
+# hide/reveal transition (`.error-message`, `.success-message` fade/slide-ins
+# in micro-interactions.css), not a resting dim-text style, and flagging it
+# would be a false positive with no fix available.
+#
+# Scope is `web/src/**/*.css` (every stylesheet under the web app), not just
+# `web/src/styles/*.css`: one of the two real violations this guard exists to
+# catch (`HelpGlossary.css`'s `::placeholder`) lives under
+# `web/src/components/`, so a guard limited to `styles/*.css` would not have
+# caught it and would not catch a repeat of it either.
+
+CSS_ROOT = ROOT / "web" / "src"
+_OPACITY_RE = re.compile(r"opacity\s*:\s*([0-9.]+)\s*(?:!important)?\s*;")
+_COLOR_DECL_RE = re.compile(r"(?<![-\w])color\s*:")
+_FONT_SIZE_DECL_RE = re.compile(r"font-size\s*:")
+_SUSPECT_TEXT_SELECTOR_RE = re.compile(r"::placeholder|\.tagline|muted", re.IGNORECASE)
+_CSS_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
+
+
+def _iter_leaf_css_blocks(css: str, selector_prefix: str = "") -> list[tuple[str, str]]:
+    """Yield (selector, body) for every leaf declaration block in `css`.
+
+    Recurses into at-rule wrappers (`@media`, ...) since this repo's CSS
+    nests plain rules inside media queries; only single-level nesting is
+    assumed (no rule ever appears directly inside another plain rule), which
+    holds for every file currently under `web/src`.
+    """
+    blocks: list[tuple[str, str]] = []
+    i, n = 0, len(css)
+    while i < n:
+        brace = css.find("{", i)
+        if brace == -1:
+            break
+        selector = css[i:brace].strip()
+        depth = 1
+        j = brace + 1
+        while depth > 0 and j < n:
+            if css[j] == "{":
+                depth += 1
+            elif css[j] == "}":
+                depth -= 1
+            j += 1
+        body = css[brace + 1 : j - 1]
+        if "{" in body:
+            blocks.extend(_iter_leaf_css_blocks(body, f"{selector_prefix}{selector} > "))
+        else:
+            blocks.append((f"{selector_prefix}{selector}", body))
+        i = j
+    return blocks
+
+
+def _find_opacity_text_violations(css_path: Path) -> list[str]:
+    text = _CSS_COMMENT_RE.sub("", css_path.read_text(encoding="utf-8"))
+    violations = []
+    for selector, body in _iter_leaf_css_blocks(text):
+        match = _OPACITY_RE.search(body)
+        if not match:
+            continue
+        value = float(match.group(1))
+        if not (0.0 < value < 0.8):
+            continue
+        looks_like_text_rule = (
+            _COLOR_DECL_RE.search(body)
+            or _FONT_SIZE_DECL_RE.search(body)
+            or _SUSPECT_TEXT_SELECTOR_RE.search(selector)
+        )
+        if looks_like_text_rule:
+            violations.append(f"{css_path.relative_to(ROOT)}: `{selector}` sets opacity: {value}")
+    return violations
+
+
+def test_no_css_rule_dims_text_via_opacity() -> None:
+    css_files = sorted(CSS_ROOT.glob("**/*.css"))
+    assert css_files, f"expected to find stylesheets under {CSS_ROOT}"
+
+    violations: list[str] = []
+    for css_path in css_files:
+        violations.extend(_find_opacity_text_violations(css_path))
+
+    assert not violations, (
+        "opacity used to de-emphasize text (design-legibility.md bans this; "
+        "use a muted color tier instead):\n" + "\n".join(violations)
+    )

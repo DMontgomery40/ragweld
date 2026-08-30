@@ -27,7 +27,6 @@
 
 .glossary-search::placeholder {
   color: var(--fg-muted);
-  opacity: 0.7;
 }
 
 /* Category Filters */
