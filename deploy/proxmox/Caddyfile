@@ -40,20 +40,13 @@ http://me.ragweld.com:58000 {
     handle /api/* {
         reverse_proxy 127.0.0.1:58012
     }
-    # The MCP Streamable HTTP transport is mounted inside the API process at
-    # `config.mcp.mount_path`. Without this the workbench advertises
-    # `https://<host>/mcp/` and Caddy answers 404 before the request reaches the API,
-    # so the endpoint never existed on the public origin at all (M-91).
-    #
-    # NOTE for the operator: this sits inside `require_owner_except_faro`, so a request
-    # without an Authelia session is redirected to the portal. An MCP client cannot
-    # complete an interactive login. To serve real MCP clients, either exempt this path
-    # from forward_auth and set `config.mcp.require_api_key = true` (the transport's own
-    # `Authorization: Bearer $MCP_API_KEY` check), or have the client carry a session
-    # cookie. Routed here as instructed; the auth choice is a deployment decision.
-    handle /mcp* {
-        reverse_proxy 127.0.0.1:58012
-    }
+    # No /mcp route on this host on purpose. `mcp.allowed_hosts` carries only the
+    # advertised origin (ragweld.dtmont.com), so the transport answers 421 to a request
+    # arriving as me.ragweld.com -- opening the path here would publish a route that
+    # cannot work. Nothing advertises it, so nothing is misdirected. If this host ever
+    # becomes an advertised MCP origin, add it to `mcp.allowed_hosts` in the renderer and
+    # add the route back; the path allowlist in the contract test makes either choice a
+    # visible edit.
     handle /faro/collect {
         uri strip_prefix /faro
         reverse_proxy 127.0.0.1:52347
@@ -80,12 +73,15 @@ http://ragweld.dtmont.com:58000 {
     # `https://<host>/mcp/` and Caddy answers 404 before the request reaches the API,
     # so the endpoint never existed on the public origin at all (M-91).
     #
-    # NOTE for the operator: this sits inside `require_owner_except_faro`, so a request
-    # without an Authelia session is redirected to the portal. An MCP client cannot
-    # complete an interactive login. To serve real MCP clients, either exempt this path
-    # from forward_auth and set `config.mcp.require_api_key = true` (the transport's own
-    # `Authorization: Bearer $MCP_API_KEY` check), or have the client carry a session
-    # cookie. Routed here as instructed; the auth choice is a deployment decision.
+    # Auth, stated as a choice rather than a recommendation. This path sits inside
+    # `require_owner_except_faro`, so a request without an Authelia session is redirected
+    # to the portal, and an MCP client cannot complete an interactive login. The
+    # alternative is to move `/mcp*` outside the import and set
+    # `config.mcp.require_api_key = true`, which enforces
+    # `Authorization: Bearer $MCP_API_KEY` at the mount (server/mcp/auth.py) and refuses
+    # to start if `MCP_API_KEY` is unset. Both are real; neither is the default. Whoever
+    # changes it owns the consequence -- outside forward_auth with the flag off, this
+    # route serves `search`, `answer` and `list_corpora` to the internet.
     handle /mcp* {
         reverse_proxy 127.0.0.1:58012
     }

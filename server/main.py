@@ -46,6 +46,7 @@ from server.indexing.generations import (
     PersistedStateCorruptError,
     manifest_upgrade_blocked,
 )
+from server.mcp.auth import guarded_mcp_app
 from server.mcp.server import get_mcp_server, record_mounted_state
 from server.models.index import (
     IndexDeletionIncompleteDetail,
@@ -385,7 +386,19 @@ async def _deletion_incomplete_handler(
 
 
 if _global_cfg.mcp.enabled:
-    app.mount(_global_cfg.mcp.mount_path, _mcp.streamable_http_app())
+    # `mcp.require_api_key` used to be read by nothing at all: the model promised an
+    # `Authorization: Bearer $MCP_API_KEY` check, the docs called it the thing to use in
+    # production, and the mount had no wrapper. Turning it on now enforces it, and turning
+    # it on WITHOUT `MCP_API_KEY` in the environment refuses to start rather than serving
+    # `search`/`answer`/`list_corpora` unauthenticated.
+    app.mount(
+        _global_cfg.mcp.mount_path,
+        guarded_mcp_app(
+            _mcp.streamable_http_app(),
+            require_api_key=bool(_global_cfg.mcp.require_api_key),
+            api_key=os.environ.get("MCP_API_KEY"),
+        ),
+    )
 record_mounted_state(
     enabled=bool(_global_cfg.mcp.enabled), mount_path=str(_global_cfg.mcp.mount_path)
 )

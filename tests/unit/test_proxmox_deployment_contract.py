@@ -312,14 +312,17 @@ def _assert_caddy_contract(source: str) -> None:
             )
         }
 
-    expected_app_paths = {"/api/*", "/mcp*", "/faro/collect", "/web/*"}
+    # Asymmetric on purpose: `/mcp*` is served only on the advertised origin. The renderer
+    # puts `ragweld.dtmont.com` in `mcp.allowed_hosts` and nothing else, so the transport
+    # answers 421 to a request arriving as `me.ragweld.com` -- routing it there would open
+    # a public path that cannot work. Pinned per block so the asymmetry stays deliberate.
+    base_app_paths = {"/api/*", "/faro/collect", "/web/*"}
 
     me_block = blocks["http://me.ragweld.com:58000"]
-    assert block_paths(me_block) == expected_app_paths, block_paths(me_block)
-    # The MCP Streamable HTTP transport is mounted inside the API process; without this
-    # route Caddy answers 404 before the request reaches it, so the endpoint the workbench
-    # advertises does not exist on the public origin (M-91).
-    assert "handle /mcp* {" in me_block
+    assert block_paths(me_block) == base_app_paths, block_paths(me_block)
+    assert "handle /mcp* {" not in me_block, (
+        "me.ragweld.com is not in mcp.allowed_hosts; routing /mcp there publishes a 421"
+    )
     assert "handle /api/* {" in me_block
     assert "reverse_proxy 127.0.0.1:58012" in me_block
     assert "handle /faro/collect {" in me_block
@@ -336,7 +339,9 @@ def _assert_caddy_contract(source: str) -> None:
     assert block_targets(me_block) == {"127.0.0.1:58012", "127.0.0.1:52347"}
 
     temporary_app_block = blocks["http://ragweld.dtmont.com:58000"]
-    assert block_paths(temporary_app_block) == expected_app_paths, block_paths(temporary_app_block)
+    assert block_paths(temporary_app_block) == base_app_paths | {"/mcp*"}, block_paths(
+        temporary_app_block
+    )
     for required_directive in (
         "handle /mcp* {",
         "handle /api/* {",

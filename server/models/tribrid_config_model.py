@@ -401,6 +401,14 @@ class MCPHTTPTransportStatus(BaseModel):
     )
 
 
+class MCPUnauthorizedResponse(BaseModel):
+    """Body returned when the MCP mount refuses a request for want of a bearer token."""
+
+    detail: str = Field(
+        description="Operator-facing reason the MCP request was refused, and how to fix it."
+    )
+
+
 class MCPToolInfo(BaseModel):
     """One tool registered on the embedded MCP server."""
 
