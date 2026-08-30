@@ -68,6 +68,33 @@ const FALLBACK_CHUNKING_STRATEGIES = [
   { id: 'hybrid', label: 'Hybrid', description: 'AST with fallback behavior' },
 ];
 
+/**
+ * Mirrors `IndexingFiguresConfig.skip_classes` (server/models/tribrid_config_model.py).
+ * Module-level so the array identity is stable: `useConfigField` memoizes on its default
+ * value, and the skip-classes text field re-syncs off that memo.
+ */
+const FIGURES_SKIP_CLASSES_DEFAULT: string[] = ['logo', 'signature', 'icon'];
+
+/** Trim, drop blanks and de-duplicate a comma-separated class list. */
+function parseSkipClasses(raw: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const entry of raw.split(',')) {
+    const value = entry.trim();
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    out.push(value);
+  }
+  return out;
+}
+
+/** Numeric input value, falling back while the field is empty or mid-edit. */
+function figureNumber(raw: string, fallback: number): number {
+  if (raw === '') return fallback;
+  const next = Number(raw);
+  return Number.isFinite(next) ? next : fallback;
+}
+
 export function IndexingSubtab() {
   const { api } = useAPI();
   const { config, flushPendingPatches } = useConfig();
@@ -202,6 +229,34 @@ export function IndexingSubtab() {
   const [semanticKgMode, setSemanticKgMode] = useConfigField<'heuristic' | 'llm'>('graph_indexing.semantic_kg_mode', 'llm');
   const [semanticKgMaxChunks, setSemanticKgMaxChunks] = useConfigField<number>('graph_indexing.semantic_kg_max_chunks', 40000);
   const [semanticKgLlmModel, setSemanticKgLlmModel] = useConfigField<string>('graph_indexing.semantic_kg_llm_model', '');
+
+  // Figure description (indexing.figures.*). Nested paths: `useConfigField` reads the dotted
+  // path off the loaded config and writes `{ figures: { <field>: value } }` into the `indexing`
+  // section, which the store and `_deep_merge_dicts` on the server both merge in depth.
+  const [figuresEnabled, setFiguresEnabled] = useConfigField<boolean>('indexing.figures.enabled', false);
+  const [figuresDescribe, setFiguresDescribe] = useConfigField<boolean>('indexing.figures.describe', true);
+  const [figuresClassify, setFiguresClassify] = useConfigField<boolean>('indexing.figures.classify', true);
+  const [figuresVisionModel, setFiguresVisionModel] = useConfigField<string>('indexing.figures.vision_model', 'z-ai.glm-5.3-flash');
+  const [figuresPromptProfile, setFiguresPromptProfile] = useConfigField<'technical_figure' | 'schematic'>(
+    'indexing.figures.prompt_profile',
+    'technical_figure'
+  );
+  const [figuresImagesScale, setFiguresImagesScale] = useConfigField<number>('indexing.figures.images_scale', 2.0);
+  const [figuresMinAreaFraction, setFiguresMinAreaFraction] = useConfigField<number>(
+    'indexing.figures.min_area_fraction',
+    0.02
+  );
+  const [figuresSkipClasses, setFiguresSkipClasses] = useConfigField<string[]>(
+    'indexing.figures.skip_classes',
+    FIGURES_SKIP_CLASSES_DEFAULT
+  );
+  const [figuresMaxCompletionTokens, setFiguresMaxCompletionTokens] = useConfigField<number>(
+    'indexing.figures.max_completion_tokens',
+    2500
+  );
+  const [figuresConcurrency, setFiguresConcurrency] = useConfigField<number>('indexing.figures.concurrency', 4);
+  const [figuresTimeoutS, setFiguresTimeoutS] = useConfigField<number>('indexing.figures.timeout_s', 90);
+
   const [generationModels, setGenerationModels] = useState<ChatModelInfo[]>([]);
 
   useEffect(() => {
@@ -223,6 +278,48 @@ export function IndexingSubtab() {
       });
     return () => controller.abort();
   }, [activeRepo, api]);
+
+  // Only vision-capable gateway aliases can describe figures; the run refuses to start
+  // otherwise (HTTP 409 figure_vision_alias), so the picker offers nothing else.
+  const visionModels = useMemo(
+    () => generationModels.filter((model) => Boolean(model.supports_vision)),
+    [generationModels]
+  );
+  const figuresVisionAliasWarning = useMemo(() => {
+    if (!figuresEnabled) return '';
+    if (generationModels.length === 0) return '';
+    if (visionModels.length === 0) {
+      return 'No vision-capable alias is available from LiteLLM. Add one to the model catalog before indexing figures.';
+    }
+    const alias = String(figuresVisionModel || '').trim();
+    if (!alias) return 'Choose a vision-capable alias: figure description has no gateway default.';
+    if (visionModels.some((model) => String(model.id || '').trim() === alias)) return '';
+    if (generationModels.some((model) => String(model.id || '').trim() === alias)) {
+      return `Alias '${alias}' is not flagged vision-capable in the model catalog; indexing will refuse to start.`;
+    }
+    return `Alias '${alias}' is not available from LiteLLM.`;
+  }, [figuresEnabled, figuresVisionModel, generationModels, visionModels]);
+
+  // Comma-separated editing buffer for `indexing.figures.skip_classes`: the operator types a
+  // raw string, the config keeps the parsed list. Re-seeded only when the persisted list stops
+  // matching what the buffer parses to (config load, corpus switch), so typing is never fought.
+  const [skipClassesText, setSkipClassesText] = useState<string>(() => (figuresSkipClasses || []).join(', '));
+  const skipClassesTextRef = useRef<string>(skipClassesText);
+  useEffect(() => {
+    const persisted = JSON.stringify(figuresSkipClasses || []);
+    if (JSON.stringify(parseSkipClasses(skipClassesTextRef.current)) === persisted) return;
+    const next = (figuresSkipClasses || []).join(', ');
+    skipClassesTextRef.current = next;
+    setSkipClassesText(next);
+  }, [figuresSkipClasses]);
+  const onSkipClassesChange = useCallback(
+    (raw: string) => {
+      skipClassesTextRef.current = raw;
+      setSkipClassesText(raw);
+      setFiguresSkipClasses(parseSkipClasses(raw));
+    },
+    [setFiguresSkipClasses]
+  );
 
   // (Models loaded via useModels hook below — no manual state needed)
 
@@ -2575,6 +2672,207 @@ export function IndexingSubtab() {
                         <span style={{ fontSize: '11px', color: 'var(--fg-muted)' }}>
                           Choose a LiteLLM alias. Empty uses the configured gateway default.
                         </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div
+                data-testid="figures-card"
+                style={{
+                  padding: '16px',
+                  background: 'var(--bg-elev2)',
+                  borderRadius: '8px',
+                  border: figuresEnabled ? '2px solid var(--accent)' : '1px solid var(--line)',
+                }}
+              >
+                <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
+                  <input
+                    data-testid="figures-enabled"
+                    type="checkbox"
+                    checked={figuresEnabled}
+                    onChange={(e) => setFiguresEnabled(e.target.checked)}
+                    style={{ width: '18px', height: '18px' }}
+                  />
+                  <div>
+                    <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--fg)' }}>
+                      Figures — describe charts, diagrams and drawings so they become searchable, citable chunks
+                    </div>
+                    <div style={{ fontSize: '11.5px', color: 'var(--fg-muted)', marginTop: '2px' }}>
+                      Vision calls via the gateway; the estimate below prices them.
+                    </div>
+                  </div>
+                  <TooltipIcon name="FIGURES_ENABLED" />
+                </label>
+
+                {figuresEnabled && (
+                  <div style={{ marginTop: '12px', display: 'grid', gap: '12px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
+                        <input
+                          data-testid="figures-describe"
+                          type="checkbox"
+                          checked={figuresDescribe}
+                          onChange={(e) => setFiguresDescribe(e.target.checked)}
+                          style={{ width: '18px', height: '18px' }}
+                        />
+                        <span style={{ fontSize: '11.5px', color: 'var(--fg)' }}>Describe with the vision alias</span>
+                        <TooltipIcon name="FIGURES_DESCRIBE" />
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
+                        <input
+                          data-testid="figures-classify"
+                          type="checkbox"
+                          checked={figuresClassify}
+                          onChange={(e) => setFiguresClassify(e.target.checked)}
+                          style={{ width: '18px', height: '18px' }}
+                        />
+                        <span style={{ fontSize: '11.5px', color: 'var(--fg)' }}>Classify figures locally first</span>
+                        <TooltipIcon name="FIGURES_CLASSIFY" />
+                      </label>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', alignItems: 'start' }}>
+                      <div className="input-group">
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11.5px', color: 'var(--fg-muted)', marginBottom: '6px' }}>
+                          Vision alias
+                          <TooltipIcon name="FIGURES_VISION_MODEL" />
+                        </label>
+                        <ChatModelPicker
+                          testId="figures-vision-model"
+                          value={figuresVisionModel}
+                          onChange={setFiguresVisionModel}
+                          models={visionModels}
+                          valueMode="id"
+                        />
+                        {figuresVisionAliasWarning ? (
+                          <div
+                            data-testid="figures-vision-model-warning"
+                            style={{ marginTop: '6px', fontSize: '11.5px', color: 'var(--warn)' }}
+                          >
+                            {figuresVisionAliasWarning}
+                          </div>
+                        ) : (
+                          <div style={{ marginTop: '6px', fontSize: '11.5px', color: 'var(--fg-muted)' }}>
+                            Only vision-capable catalog aliases are listed.
+                          </div>
+                        )}
+                      </div>
+                      <div className="input-group">
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11.5px', color: 'var(--fg-muted)', marginBottom: '6px' }}>
+                          Prompt profile
+                          <TooltipIcon name="FIGURES_PROMPT_PROFILE" />
+                        </label>
+                        <select
+                          data-testid="figures-prompt-profile"
+                          value={figuresPromptProfile}
+                          onChange={(e) => setFiguresPromptProfile(e.target.value as 'technical_figure' | 'schematic')}
+                          style={{ width: '100%' }}
+                        >
+                          <option value="technical_figure">Technical figure (charts, diagrams, photos)</option>
+                          <option value="schematic">Schematic (engineering drawings)</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
+                      <div className="input-group">
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11.5px', color: 'var(--fg-muted)', marginBottom: '6px' }}>
+                          Image scale
+                          <TooltipIcon name="FIGURES_IMAGES_SCALE" />
+                        </label>
+                        <input
+                          data-testid="figures-images-scale"
+                          type="number"
+                          min={1}
+                          max={4}
+                          step={0.5}
+                          value={figuresImagesScale}
+                          onChange={(e) => setFiguresImagesScale(figureNumber(e.target.value, 2.0))}
+                          style={{ width: '100%' }}
+                        />
+                      </div>
+                      <div className="input-group">
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11.5px', color: 'var(--fg-muted)', marginBottom: '6px' }}>
+                          Min area fraction
+                          <TooltipIcon name="FIGURES_MIN_AREA_FRACTION" />
+                        </label>
+                        <input
+                          data-testid="figures-min-area-fraction"
+                          type="number"
+                          min={0}
+                          max={1}
+                          step={0.01}
+                          value={figuresMinAreaFraction}
+                          onChange={(e) => setFiguresMinAreaFraction(figureNumber(e.target.value, 0.02))}
+                          style={{ width: '100%' }}
+                        />
+                      </div>
+                      <div className="input-group">
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11.5px', color: 'var(--fg-muted)', marginBottom: '6px' }}>
+                          Max completion tokens
+                          <TooltipIcon name="FIGURES_MAX_COMPLETION_TOKENS" />
+                        </label>
+                        <input
+                          data-testid="figures-max-completion-tokens"
+                          type="number"
+                          min={64}
+                          max={8000}
+                          step={1}
+                          value={figuresMaxCompletionTokens}
+                          onChange={(e) => setFiguresMaxCompletionTokens(figureNumber(e.target.value, 2500))}
+                          style={{ width: '100%' }}
+                        />
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
+                      <div className="input-group">
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11.5px', color: 'var(--fg-muted)', marginBottom: '6px' }}>
+                          Concurrency
+                          <TooltipIcon name="FIGURES_CONCURRENCY" />
+                        </label>
+                        <input
+                          data-testid="figures-concurrency"
+                          type="number"
+                          min={1}
+                          max={16}
+                          step={1}
+                          value={figuresConcurrency}
+                          onChange={(e) => setFiguresConcurrency(figureNumber(e.target.value, 4))}
+                          style={{ width: '100%' }}
+                        />
+                      </div>
+                      <div className="input-group">
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11.5px', color: 'var(--fg-muted)', marginBottom: '6px' }}>
+                          Timeout (s)
+                          <TooltipIcon name="FIGURES_TIMEOUT_S" />
+                        </label>
+                        <input
+                          data-testid="figures-timeout-s"
+                          type="number"
+                          min={5}
+                          max={600}
+                          step={1}
+                          value={figuresTimeoutS}
+                          onChange={(e) => setFiguresTimeoutS(figureNumber(e.target.value, 90))}
+                          style={{ width: '100%' }}
+                        />
+                      </div>
+                      <div className="input-group">
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11.5px', color: 'var(--fg-muted)', marginBottom: '6px' }}>
+                          Skip classes
+                          <TooltipIcon name="FIGURES_SKIP_CLASSES" />
+                        </label>
+                        <input
+                          data-testid="figures-skip-classes"
+                          type="text"
+                          value={skipClassesText}
+                          onChange={(e) => onSkipClassesChange(e.target.value)}
+                          placeholder="logo, signature, icon"
+                          style={{ width: '100%' }}
+                        />
                       </div>
                     </div>
                   </div>

@@ -9,6 +9,8 @@ type ModelPickerProps = {
   allowEmpty?: boolean;
   disabled?: boolean;
   ariaDescribedBy?: string;
+  /** Overrides the default test id so several pickers on one page stay addressable. */
+  testId?: string;
 };
 
 function toOptionValue(model: ChatModelInfo, valueMode: 'override' | 'id'): string {
@@ -23,6 +25,7 @@ export function ModelPicker({
   allowEmpty = false,
   disabled = false,
   ariaDescribedBy,
+  testId = 'model-picker',
 }: ModelPickerProps) {
   const gatewayModels = models.filter((model) => model.source === 'litellm');
   const hasModels = gatewayModels.length > 0;
@@ -33,7 +36,7 @@ export function ModelPicker({
 
   return (
     <select
-      data-testid="model-picker"
+      data-testid={testId}
       value={hasModels ? value : ''}
       onChange={(e) => onChange(e.target.value)}
       disabled={disabled || !hasModels}

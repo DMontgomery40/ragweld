@@ -27,6 +27,34 @@ interface ConfigStore {
   reset: () => void;
 }
 
+type PatchObject = Record<string, unknown>;
+
+const isPatchObject = (value: unknown): value is PatchObject =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/**
+ * Merge a PATCH payload into a config section exactly the way the server does
+ * (`_deep_merge_dicts`, server/api/config.py): recurse into nested objects, replace
+ * arrays and scalars wholesale.
+ *
+ * A shallow spread is wrong for any nested config group (`indexing.figures`,
+ * `chat.recall`, `chat.multimodal`): `useConfigField('indexing.figures.enabled')`
+ * emits `{ figures: { enabled: true } }`, and spreading that over the section drops
+ * every sibling key of `figures` from the optimistic copy and from the aggregated
+ * pending patch — so a second nested edit inside the debounce window would never
+ * send the first one, and "Apply All Changes" would PUT a collapsed group.
+ */
+const deepMergePatch = (base: PatchObject, updates: PatchObject): PatchObject => {
+  const merged: PatchObject = { ...base };
+  for (const key of Object.keys(updates)) {
+    if (key === '__proto__') continue;
+    const current = merged[key];
+    const next = updates[key];
+    merged[key] = isPatchObject(current) && isPatchObject(next) ? deepMergePatch(current, next) : next;
+  }
+  return merged;
+};
+
 export const useConfigStore = create<ConfigStore>((set) => {
   // Debounce + aggregation per top-level section AND per corpus.
   // This prevents corpus-switch races from canceling/flush-ing the wrong corpus' pending writes.
@@ -133,16 +161,16 @@ export const useConfigStore = create<ConfigStore>((set) => {
       const cur = state.config as any;
       if (!cur) return {};
       const curSection = (cur as any)[sectionKey] || {};
-      const nextSection = { ...(curSection as any), ...(updates as any) };
+      const nextSection = deepMergePatch(curSection as PatchObject, updates);
       return { config: { ...cur, [sectionKey]: nextSection } as TriBridConfig, error: null };
     });
 
     // Merge into pending patch and debounce the network call.
     pendingByCorpus[corpusKey] = pendingByCorpus[corpusKey] || {};
-    pendingByCorpus[corpusKey][sectionKey] = {
-      ...(pendingByCorpus[corpusKey][sectionKey] || {}),
-      ...(updates || {})
-    };
+    pendingByCorpus[corpusKey][sectionKey] = deepMergePatch(
+      pendingByCorpus[corpusKey][sectionKey] || {},
+      updates || {}
+    );
     timersByCorpus[corpusKey] = timersByCorpus[corpusKey] || {};
     if (timersByCorpus[corpusKey][sectionKey]) clearTimeout(timersByCorpus[corpusKey][sectionKey]);
     timersByCorpus[corpusKey][sectionKey] = setTimeout(() => {
@@ -189,7 +217,7 @@ export const useConfigStore = create<ConfigStore>((set) => {
         for (const [sectionKey, updates] of Object.entries(optimisticUpdates)) {
           if (updates && Object.keys(updates).length > 0) {
             const curSection = mergedConfig[sectionKey] || {};
-            mergedConfig[sectionKey] = { ...curSection, ...updates };
+            mergedConfig[sectionKey] = deepMergePatch(curSection as PatchObject, updates);
           }
         }
       }
