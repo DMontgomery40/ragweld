@@ -218,9 +218,11 @@ def test_a_long_conversion_says_it_is_still_running_then_backs_off() -> None:
         queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         _register(queue, WAITER_CORPUS, WAITER_RUN)
         started = datetime.now(UTC)
+        # 6.0s against 0.6 + 2.0 puts beats at ~0.6/2.6/4.6 with ~1.4s of slack before the
+        # third one is at risk. At 5.0s the slack was 0.4s, which is thin for a shared box.
         await _run_docling_extraction_locked(
             time.sleep,
-            5.0,
+            6.0,
             event_queue=queue,
             conversion=DoclingConversion(
                 repo_id=WAITER_CORPUS, run_id=WAITER_RUN, file="apollo-11-mission-report.pdf"
