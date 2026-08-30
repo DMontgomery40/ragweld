@@ -24,6 +24,9 @@ import httpx
 import pytest
 from httpx import AsyncClient
 
+from server.models.tribrid_config_model import TracingConfig
+from server.observability.runtime import langfuse_sign_in_hint
+
 _REAL_TRACE = "3f1c58cf2d7a2b733e06b3fefde527d4"
 _ABSENT_TRACE = "deadbeefdeadbeefdeadbeefdeadbeef"
 
@@ -84,15 +87,25 @@ async def _set_tracing(client: AsyncClient, payload: dict[str, object]) -> None:
     assert response.status_code == 200, response.text
 
 
+def _server_keys_present() -> bool:
+    return bool(os.getenv("LANGFUSE_PUBLIC_KEY")) and bool(os.getenv("LANGFUSE_SECRET_KEY"))
+
+
 @pytest.fixture
 async def langfuse_config(client: AsyncClient) -> Iterator[dict[str, str]]:
-    """Point Langfuse at a listener this test owns, and restore the config after."""
+    """Point Langfuse at a listener this test owns, and restore the config after.
+
+    Only the cases that need a *successful, authenticated* lookup take this
+    fixture. The tooltip and the gating logic are asserted without keys below,
+    so a suite run without secrets still covers them - a P1 whose entire
+    regression set vanishes without secrets is one refactor from silent
+    breakage.
+    """
 
     baseline = await client.get("/api/config")
     assert baseline.status_code == 200
     original = dict(baseline.json()["tracing"])
-    keys_present = bool(os.getenv("LANGFUSE_PUBLIC_KEY")) and bool(os.getenv("LANGFUSE_SECRET_KEY"))
-    if not keys_present:
+    if not _server_keys_present():
         pytest.skip("LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY are not in this API environment")
     with _langfuse() as base_url:
         await _set_tracing(
@@ -148,15 +161,51 @@ async def test_a_trace_langfuse_does_not_hold_gets_no_link(client: AsyncClient, 
 
 
 @pytest.mark.asyncio
-async def test_every_answer_states_the_membership_requirement(client: AsyncClient, langfuse_config: dict) -> None:
-    """Existence is checkable from here; project membership is not, so it is said out loud."""
+async def test_every_answer_states_the_membership_requirement(client: AsyncClient) -> None:
+    """Existence is checkable from here; project membership is not, so it is said out loud.
 
-    for trace_id in (_REAL_TRACE, _ABSENT_TRACE):
+    Runs with or without server keys: the hint is built from config, and it has
+    to be present on *every* answer shape, including the ones that never reach
+    Langfuse at all.
+    """
+
+    for trace_id in (_REAL_TRACE, _ABSENT_TRACE, "%20"):
         response = await client.get(f"/api/observability/langfuse/trace/{trace_id}")
-        hint = response.json()["sign_in_hint"]
-        assert "ragweld" in hint
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        hint = payload["sign_in_hint"]
         assert "member" in hint
+        assert "project" in hint
         assert "do not have access to this trace" in hint
+        assert payload["project"] in hint
+
+
+@pytest.mark.asyncio
+async def test_an_empty_trace_id_is_unchecked_and_offers_no_link(client: AsyncClient) -> None:
+    """Nothing to look up, so nothing is claimed - and no socket is opened."""
+
+    response = await client.get("/api/observability/langfuse/trace/%20")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["trace_id"] == ""
+    assert payload["checked"] is False
+    assert payload["exists"] is False
+    assert payload["url"] is None
+
+
+def test_the_sign_in_hint_names_the_project_and_the_requirement() -> None:
+    """The hint is pure config, so it is asserted directly rather than over HTTP."""
+
+    tracing = TracingConfig(langfuse_project="ragweld")
+    hint = langfuse_sign_in_hint(tracing)
+
+    assert "ragweld" in hint
+    assert "member" in hint
+    assert "do not have access to this trace" in hint
+
+    # An unset project must not produce a hint that names an empty quote.
+    assert "''" not in langfuse_sign_in_hint(TracingConfig(langfuse_project=""))
 
 
 @pytest.mark.asyncio
@@ -180,15 +229,26 @@ async def test_an_unreachable_langfuse_is_reported_as_unchecked_not_as_absent(
 
 
 @pytest.mark.asyncio
-async def test_langfuse_disabled_is_reported_as_unchecked(client: AsyncClient, langfuse_config: dict) -> None:
+async def test_langfuse_disabled_is_reported_as_unchecked(client: AsyncClient) -> None:
+    """A blocker is reported as "could not ask", never as "Langfuse says no".
+
+    `langfuse_client_blockers` answers before any key is read, so this covers
+    the gating branch with or without secrets in the environment.
+    """
+
+    baseline = await client.get("/api/config")
+    original = bool(baseline.json()["tracing"]["langfuse_enabled"])
     await _set_tracing(client, {"langfuse_enabled": False})
+    try:
+        response = await client.get(f"/api/observability/langfuse/trace/{_REAL_TRACE}")
 
-    response = await client.get(f"/api/observability/langfuse/trace/{_REAL_TRACE}")
-
-    data = response.json()
-    assert data["checked"] is False
-    assert data["url"] is None
-    assert "langfuse_enabled is false" in data["detail"]
+        data = response.json()
+        assert data["checked"] is False
+        assert data["exists"] is False
+        assert data["url"] is None, "no link may be offered from an unchecked answer"
+        assert "langfuse_enabled is false" in data["detail"]
+    finally:
+        await _set_tracing(client, {"langfuse_enabled": original})
 
 
 def _live_langfuse() -> str | None:
