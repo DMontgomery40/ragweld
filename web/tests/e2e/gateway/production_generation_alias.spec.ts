@@ -60,14 +60,15 @@ test('production retrieval identifies the non-chat generation alias as deploymen
   });
 
   await page.goto('rag?subtab=retrieval&corpus=nasa-apollo-11', { waitUntil: 'domcontentloaded' });
+  await page.getByTestId('retrieval-card-generation').click();
 
-  const control = page.getByTestId('retrieval-generation-alias');
+  const control = page.getByTestId('retrieval-generation-answer-alias');
   await expect(control).toBeVisible();
   await expect(control.getByText('Non-chat generation alias')).toBeVisible();
   await expect(control.locator('select')).toBeDisabled();
   await expect(control.locator('select')).toHaveAttribute(
     'aria-describedby',
-    'retrieval-generation-alias-lock-note',
+    'retrieval-generation-answer-alias-lock-note',
   );
   await expect(control.locator('select')).toHaveValue('openai.gpt-5.6-terra');
   await expect(control).toContainText('Chat uses its own model picker');

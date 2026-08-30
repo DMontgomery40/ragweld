@@ -201,7 +201,7 @@ test('Run Configuration groups keys into response and operational tiers', async 
   await expect(responseTier).toBeVisible();
   await expect(responseTier).toContainText('Affects retrieval & answers');
   // Real retrieval knobs land in the response tier…
-  await expect(responseTier).toContainText('BM25_WEIGHT');
+  await expect(responseTier).toContainText('FUSION_SPARSE_WEIGHT');
   await expect(responseTier).toContainText('VECTOR_WEIGHT');
   // …and no Grafana/observability key may leak into it.
   const responseText = await responseTier.innerText();

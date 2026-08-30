@@ -46,7 +46,7 @@ test.describe('app shell', () => {
     await page.getByTestId('dock-mode-settings').click();
 
     const rail = page.getByTestId('dock-panel');
-    await expect(rail.getByText('Quick Model Switcher', { exact: false }).first()).toBeVisible();
+    await expect(rail.getByTestId('sidepanel-open-model-assignments')).toBeVisible();
 
     // The rail promised to ingest .env/.ini/.md files and to persist them to a repo
     // file on disk; nothing behind it existed. It is deleted, not hidden.
