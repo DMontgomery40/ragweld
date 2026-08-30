@@ -136,6 +136,12 @@ function errorDetail(error: unknown): string {
 
 // Status polling cadence. Fast enough to follow a live run, slow enough that an idle tab
 // is not a request generator.
+// How long to wait out a cold estimator before giving up, and how often to re-ask. The load
+// itself is ~27s; the deadline is generous enough for a loaded box and short enough that a
+// genuinely stuck warm-up becomes an error the operator can see.
+const ESTIMATE_WARMUP_DEADLINE_MS = 120_000;
+const ESTIMATE_WARMUP_POLL_MS = 3000;
+
 const INDEX_POLL_ACTIVE_MS = 3000;
 const INDEX_POLL_IDLE_MS = 30000;
 
@@ -234,6 +240,7 @@ export function IndexingSubtab() {
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
   const [indexEstimate, setIndexEstimate] = useState<IndexEstimate | null>(null);
   const [estimateLoading, setEstimateLoading] = useState(false);
+  const [estimateWarmup, setEstimateWarmup] = useState('');
 
   // Job options
   const [forceReindex, setForceReindex] = useState(false);
@@ -1030,7 +1037,29 @@ export function IndexingSubtab() {
       setEstimateLoading(true);
       let estimate: IndexEstimate;
       try {
-        estimate = await indexingApi.estimate(body);
+        // The estimator's tokenizer loads on first use in a fresh API process (~27s). Rather
+        // than let that ride against the client's 30s timeout, the endpoint answers
+        // immediately with status "warming"; wait it out here, telling the operator what is
+        // happening, and ask again. Bounded, so a warm-up that never finishes surfaces as an
+        // error instead of a spinner that never ends -- and no run starts either way.
+        const deadline = Date.now() + ESTIMATE_WARMUP_DEADLINE_MS;
+        for (;;) {
+          estimate = await indexingApi.estimate(body);
+          if (estimate.status !== 'warming') break;
+          if (Date.now() >= deadline) {
+            throw new Error(
+              'the estimator is still preparing after ' +
+                `${Math.round(ESTIMATE_WARMUP_DEADLINE_MS / 1000)}s`
+            );
+          }
+          const remaining = Math.max(0, Number(estimate.warmup_seconds_remaining ?? 0));
+          setEstimateWarmup(
+            `Preparing the estimator (about ${Math.max(1, Math.ceil(remaining))}s)…`
+          );
+          await new Promise((resolve) =>
+            setTimeout(resolve, Math.min(ESTIMATE_WARMUP_POLL_MS, Math.max(1000, remaining * 1000)))
+          );
+        }
         setIndexEstimate(estimate);
       } catch (e) {
         // The estimate IS the consent gate: it is the only place the operator sees the file
@@ -1054,6 +1083,7 @@ export function IndexingSubtab() {
         return;
       } finally {
         setEstimateLoading(false);
+        setEstimateWarmup('');
       }
 
       // Scope for the dialog copy. The estimate is always present here -- a failed one
@@ -3604,7 +3634,7 @@ export function IndexingSubtab() {
                 }}
               >
                 <span>🚀</span>
-                {estimateLoading ? 'Estimating…' : 'Index Now'}
+                {estimateWarmup ? 'Preparing…' : estimateLoading ? 'Estimating…' : 'Index Now'}
               </button>
               <label
                 data-testid="force-reindex-toggle"
@@ -3656,6 +3686,15 @@ export function IndexingSubtab() {
             </>
           )}
         </div>
+        {estimateWarmup && (
+          <div
+            data-testid="index-estimate-warmup"
+            style={{ marginTop: '10px', fontSize: '12px', color: 'var(--fg-muted)' }}
+          >
+            {estimateWarmup}
+          </div>
+        )}
+
         {!isIndexing && indexBlockingReason && (
           <div
             style={{

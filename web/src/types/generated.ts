@@ -4010,6 +4010,10 @@ export interface IndexEstimate {
   sampled_files: number;
   /** Bytes covered by the sampled files */
   sampled_bytes: number;
+  /** 'warming' means the estimator's tokenizer is still loading and NOTHING was measured: every count below is zero and the client must ask again. The estimate answers immediately in that state rather than blocking past its own timeout. */
+  status?: "ready" | "warming";
+  /** Rough seconds until the estimator is ready, when status is 'warming'. */
+  warmup_seconds_remaining?: number | null;
   /** Wall-clock seconds this estimate spent sampling. The first call in a fresh process pays for loading the tokenizer, so the UI can say how long the measurement took. */
   elapsed_seconds: number;
   /** Embedding backend used for indexing (deterministic has no external cost) */

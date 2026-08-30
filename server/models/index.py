@@ -285,6 +285,19 @@ class IndexEstimate(BaseModel):
         ge=0, description="Files opened, extracted and chunked to produce the estimate"
     )
     sampled_bytes: int = Field(ge=0, description="Bytes covered by the sampled files")
+    status: Literal["ready", "warming"] = Field(
+        default="ready",
+        description=(
+            "'warming' means the estimator's tokenizer is still loading and NOTHING was "
+            "measured: every count below is zero and the client must ask again. The estimate "
+            "answers immediately in that state rather than blocking past its own timeout."
+        ),
+    )
+    warmup_seconds_remaining: float | None = Field(
+        default=None,
+        ge=0.0,
+        description="Rough seconds until the estimator is ready, when status is 'warming'.",
+    )
     elapsed_seconds: float = Field(
         ge=0.0,
         description=(

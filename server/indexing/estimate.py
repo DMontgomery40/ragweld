@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import math
 import re
+import threading
 import time
 import zipfile
 from collections.abc import Sequence
@@ -301,10 +302,52 @@ def _sampling_error(densities: Sequence[float]) -> float:
     return coefficient_of_variation / math.sqrt(n)
 
 
+# How long the load takes, measured on this box: a first-in-process sample of a 794-file corpus
+# costs ~27 s of which ~26 s is the tokenizer. Used only to tell the operator roughly how long
+# the estimator has left to wait, so being a few seconds out is harmless.
+_TYPICAL_WARMUP_SECONDS = 27.0
+
+_warmup_started_at: float | None = None
+# Two threads importing `transformers` for the first time is not safe: one of them gets the
+# half-initialised module and raises "cannot import name 'AutoTokenizer'". Observed twice --
+# once with the indexer running beside the warm-up, once with two warm-ups racing each other --
+# so every caller goes through this lock and a concurrent one waits instead of importing again.
+_warmup_lock = threading.Lock()
+
+
+def sampler_is_warm() -> bool:
+    """Whether a tokenizer is already loaded in this process.
+
+    Read from the tokenizer's own caches rather than a flag this module sets, because the
+    indexer warms them too: after a run has started, the estimate must not claim to be warming
+    something that is plainly already loaded. Unreadable state answers "warm", since the cost of
+    being wrong here is one slow estimate, while the cost of the opposite is an estimate that
+    never stops saying "warming".
+    """
+    from server.indexing.tokenizer import TextTokenizer
+
+    try:
+        return (
+            TextTokenizer._get_hf_tokenizer.cache_info().currsize > 0
+            or TextTokenizer._get_tiktoken_encoding.cache_info().currsize > 0
+        )
+    except Exception:
+        return True
+
+
+def warmup_seconds_remaining() -> float:
+    """Roughly how much longer the load has to run, for the operator-facing message."""
+    if sampler_is_warm():
+        return 0.0
+    if _warmup_started_at is None:
+        return _TYPICAL_WARMUP_SECONDS
+    return max(0.0, _TYPICAL_WARMUP_SECONDS - (time.monotonic() - _warmup_started_at))
+
+
 def warm_sampler(chunker: Chunker) -> None:
     """Load whatever the sampler loads lazily, so the first estimate does not pay for it.
 
-    The chunker's tokenizer loads its model on first use -- measured at 29.3 s in a fresh API
+    The chunker's tokenizer loads its model on first use -- measured at ~27 s in a fresh API
     process against a 30 s client timeout, i.e. the operator's first Index Now after every
     service restart was a coin flip. Nothing in the sampling budget can help: the budget is
     checked between files and the load happens inside the first one.
@@ -312,7 +355,14 @@ def warm_sampler(chunker: Chunker) -> None:
     Cheap and idempotent: the tokenizer caches per model name, so after the first call this
     costs a few hundred microseconds. Safe to call from anywhere, including a background task.
     """
-    chunker.chunk_file("warmup.md", "warm the tokenizer with one short line of text.\n")
+    global _warmup_started_at
+
+    if _warmup_started_at is None:
+        _warmup_started_at = time.monotonic()
+    with _warmup_lock:
+        if sampler_is_warm():
+            return
+        chunker.chunk_file("warmup.md", "warm the tokenizer with one short line of text.\n")
 
 
 def sample_corpus(

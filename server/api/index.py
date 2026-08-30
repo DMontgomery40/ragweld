@@ -36,7 +36,13 @@ from server.db.postgres import PostgresClient
 from server.indexing.chunker import Chunker
 from server.indexing.code_graph import CODE_GRAPH_LANGUAGES, extract_code_graph
 from server.indexing.embedder import Embedder, configure_postgres_embedding_cache_backend
-from server.indexing.estimate import ParquetBounds, sample_corpus, warm_sampler
+from server.indexing.estimate import (
+    ParquetBounds,
+    sample_corpus,
+    sampler_is_warm,
+    warm_sampler,
+    warmup_seconds_remaining,
+)
 from server.indexing.generations import (
     DeletionIncompleteError,
     FenceClaim,
@@ -336,7 +342,8 @@ def _warm_sampler_in_background(cfg: TriBridConfig) -> None:
         # importing `transformers` for the first time from different threads, and one of them
         # gets the half-initialised module: observed as the indexer failing with "cannot import
         # name 'AutoTokenizer' from 'transformers'". Warming is only useful before a run anyway,
-        # and this returns without latching so the next idle read tries again.
+        # and a run loads the tokenizer itself, so sampler_is_warm() goes true without us.
+        # Returns without latching, so the next idle read tries again.
         return
     _SAMPLER_WARMED = True
 
@@ -3792,6 +3799,40 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
         sized_files.append((p, max(0, size_bytes)))
         if p.suffix.lower() == ".pdf":
             pdf_paths.append(p)
+
+    # A cold tokenizer costs ~27 s to load, which is inside the client's 30 s timeout only by
+    # luck. Rather than gamble the operator's first Index Now after a restart on that margin,
+    # answer immediately with what has been counted so far and say the estimator is still
+    # warming; the client shows the wait and asks again. Nothing is measured in this state and
+    # nothing is started -- the consent gate is untouched, it simply has not opened yet.
+    if not sampler_is_warm():
+        _warm_sampler_in_background(cfg)
+        return IndexEstimate(
+            repo_id=repo_id,
+            repo_path=str(root),
+            total_files=int(total_files),
+            total_size_bytes=int(total_bytes),
+            skipped_large_files=int(skipped_large_files),
+            estimated_total_tokens=0,
+            estimated_total_chunks=0,
+            estimated_tokens_low=0,
+            estimated_tokens_high=0,
+            estimated_chunks_low=0,
+            estimated_chunks_high=0,
+            estimate_relative_error=0.0,
+            sampled_files=0,
+            sampled_bytes=0,
+            status="warming",
+            warmup_seconds_remaining=warmup_seconds_remaining(),
+            elapsed_seconds=0.0,
+            embedding_backend="provider"
+            if str(getattr(cfg.embedding, "embedding_backend", "") or "") == "provider"
+            else "deterministic",
+            embedding_provider=str(getattr(cfg.embedding, "embedding_type", "") or ""),
+            embedding_model=str(getattr(cfg.embedding, "effective_model", "") or ""),
+            skip_dense=bool(getattr(cfg.indexing, "skip_dense", False)),
+            assumptions=["the estimator's tokenizer is still loading; nothing was measured"],
+        )
 
     # Measured, not a byte ratio: a sample of every format is extracted and run through the
     # chunker the operator just configured. Off the event loop -- it opens files and tokenizes.
