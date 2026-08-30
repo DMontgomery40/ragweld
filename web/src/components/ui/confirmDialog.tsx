@@ -111,7 +111,7 @@ function ConfirmDialogView({
         <h3 style={{ margin: '0 0 10px', fontSize: '1rem' }}>{options.title}</h3>
         <div
           data-testid="confirm-dialog-message"
-          style={{ whiteSpace: 'pre-wrap', fontSize: '0.85rem', lineHeight: 1.5, marginBottom: options.requireTyped ? 14 : 18 }}
+          style={{ whiteSpace: 'pre-wrap', fontSize: '14px', lineHeight: 1.5, marginBottom: options.requireTyped ? 14 : 18 }}
         >
           {options.message}
         </div>

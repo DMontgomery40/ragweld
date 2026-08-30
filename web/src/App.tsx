@@ -359,7 +359,12 @@ function App() {
                   Reload latest
                 </button>
               )}
-              {/* Config-vs-index drift badge - appears next to Apply button */}
+              {/* Embedding config-vs-index drift badge. This keys on IndexStats, which today
+                  exposes only the embedding provider/model/dim the index was built with — not its
+                  chunking strategy or tokenizer — so it cannot show a persistent chunking-/
+                  tokenization-drift badge without a backend field (IndexStats.chunking_strategy /
+                  tokenizer, owned by the indexing lane). The Apply-time confirmation warns for all
+                  three index-invalidating sections at the point of change. */}
               <EmbeddingMismatchWarning variant="compact" />
             </div>
           </div>
