@@ -65,6 +65,31 @@ test.describe('help, search and keyboard access', () => {
     // Every top-bar tab stop shows a real focus ring. `--ring` is a 20%-alpha slate and a
     // blanket `input:focus-visible { outline: none }` removed the global outline, so the
     // first tab stops of the page had no visible indicator at all.
+    // A fixed list, including a sidebar link: the old loop broke at the first stop outside
+    // `.topbar`, so it could pass having checked one element and never reached `.tab-bar a`.
+    for (const selector of ['#btn-learn', '#global-search', '#theme-mode', '#btn-health', '.tab-bar a']) {
+      const stop = page.locator(selector).first();
+      await stop.focus();
+      // `main.css:186` transitions `outline` over ~120 ms, so an immediate computed read
+      // reports 0px while the value animates in. Settle before measuring.
+      await page.waitForTimeout(250);
+      const ring = await stop.evaluate((el) => {
+        const cs = getComputedStyle(el);
+        const shadow = cs.boxShadow || 'none';
+        const opaqueSpread = /rgb\(\d+,\s*\d+,\s*\d+\)[^,]*?\b([2-9]|\d{2,})px\b/.test(shadow);
+        return {
+          outline: `${cs.outlineStyle} ${cs.outlineWidth}`,
+          shadow,
+          visible:
+            (cs.outlineStyle !== 'none' && parseFloat(cs.outlineWidth || '0') >= 2) || opaqueSpread,
+        };
+      });
+      expect(
+        ring.visible,
+        `${selector} has no visible focus ring (outline: ${ring.outline}, box-shadow: ${ring.shadow})`
+      ).toBe(true);
+    }
+
     await page.locator('.topbar button').first().focus();
     for (let i = 0; i < 4; i += 1) {
       const ring = await page.evaluate(() => {
@@ -147,7 +172,7 @@ test.describe('help, search and keyboard access', () => {
     expect(count).toBeGreaterThan(5);
     for (let i = 0; i < count; i += 1) {
       const link = links.nth(i);
-      const visible = (await link.innerText()).replace(/\s*📌\s*$/, '').trim();
+      const visible = (await link.innerText()).replace(/\s*\u{1F4CC}\s*$/u, '').trim();
       const accessible = (await link.getAttribute('aria-label')) ?? '';
       expect(accessible, `sidebar link ${i} must announce "${visible}"`).toBe(visible);
     }
@@ -313,11 +338,32 @@ test.describe('help, search and keyboard access', () => {
     const http = status.python_http;
     test.skip(!http, 'the MCP HTTP transport is not enabled on this deployment');
 
-    const config = await (await request.get(`${API_BASE}/config`)).json();
-    const expected = `${String(config.mcp.public_base_url).replace(/\/+$/, '')}${http.path}`;
-    // The server owns the string; the workbench must render exactly it. The old client-side
-    // build produced `http://<request host>:80/mcp/` -- plain HTTP on an HTTPS-only box.
-    expect(http.url).toBe(expected);
+    // NOT re-derived from `public_base_url`: asserting `url === public_base_url + path`
+    // passes on any value including the unconfigured default, which is exactly the state
+    // that shipped a loopback URL to a proxied deployment. The real expectation is that a
+    // client on this origin can use what it is shown.
+    const advertised = new URL(http.url);
+    const pageHost = new URL(baseURL!).host;
+    const servedFromLoopback = /^(localhost|127\.|\[?::1)/.test(pageHost);
+    if (!servedFromLoopback) {
+      expect(advertised.protocol, 'a non-loopback deployment must advertise https').toBe('https:');
+      expect(advertised.host, 'the advertised host must be the one serving this page').toBe(pageHost);
+    }
+
+    // The proxied-but-unconfigured state is reported, not silently advertised. The browser
+    // cannot set a Host header, so the API is asked directly with one.
+    const proxied = await (
+      await request.get(`${API_BASE}/mcp/status`, { headers: { Host: 'ragweld.dtmont.com' } })
+    ).json();
+    expect(
+      proxied.python_http.public_base_url_configured,
+      'an unset public_base_url reached from a public origin must be reported'
+    ).toBe(false);
+    expect(proxied.python_http.request_host).toBe('ragweld.dtmont.com');
+    expect(
+      proxied.python_http.host_allowed,
+      'host_allowed must describe the host a client would really use, not the loopback'
+    ).toBe(false);
 
     await activateCorpusInBrowser(page, corpusId);
     await gotoWeb(page, baseURL, 'infrastructure?subtab=mcp');

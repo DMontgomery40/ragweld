@@ -28,7 +28,13 @@ interface RepoStore {
   initialized: boolean;
 
   // Actions
-  loadRepos: () => Promise<void>;
+  /**
+   * `force` skips the shared in-flight load. A mutation must never resolve against a
+   * registry read that started BEFORE it: `deleteCorpus` awaiting a pre-delete load would
+   * come back with the deleted corpus still in the list. `loadConfig` has the same guard
+   * for pending patches.
+   */
+  loadRepos: (options?: { force?: boolean }) => Promise<void>;
   setActiveRepo: (repoName: string) => Promise<void>;
   refreshActiveRepo: () => Promise<void>;
   getRepoByName: (name: string) => Corpus | undefined;
@@ -64,8 +70,8 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
   switching: false,
   initialized: false,
 
-  loadRepos: async () => {
-    if (inFlightRepoLoad) return inFlightRepoLoad;
+  loadRepos: async (options?: { force?: boolean }) => {
+    if (inFlightRepoLoad && !options?.force) return inFlightRepoLoad;
     const run = (async () => {
     set({ loading: true, error: null });
     try {
@@ -210,7 +216,7 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
     }
     const created: Corpus = await response.json();
     // Refresh list and set active
-    await get().loadRepos();
+    await get().loadRepos({ force: true });
     await get().setActiveRepo(created.corpus_id);
     return created;
   },
@@ -228,7 +234,7 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
     }
     const updated: Corpus = await response.json();
     // Refresh list to reflect changes
-    await get().loadRepos();
+    await get().loadRepos({ force: true });
     return updated;
   },
 
@@ -249,7 +255,7 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
     }
 
     // Refresh list after deletion
-    await get().loadRepos();
+    await get().loadRepos({ force: true });
     const afterActive = String(get().activeRepo || '').trim();
 
     // If the active corpus changed under us, notify listeners that depend on
@@ -313,7 +319,7 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
       }
     }
 
-    await get().loadRepos();
+    await get().loadRepos({ force: true });
     const afterActive = String(get().activeRepo || '').trim();
     if (beforeActive && afterActive && beforeActive !== afterActive) {
       window.dispatchEvent(

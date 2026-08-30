@@ -150,7 +150,9 @@ export function GlobalSearch() {
                   role="combobox"
                   aria-label="Search all settings"
                   aria-expanded={results.length > 0}
-                  aria-controls="global-search-listbox"
+                  // Only while the listbox exists: an empty query renders none, and a
+                  // dangling reference is worse than no reference.
+                  aria-controls={results.length > 0 ? 'global-search-listbox' : undefined}
                   aria-activedescendant={activeOptionId}
                   placeholder="Search all settings... (Ctrl+K)"
                   style={{

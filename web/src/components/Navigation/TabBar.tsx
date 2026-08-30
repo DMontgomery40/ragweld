@@ -83,8 +83,10 @@ export function TabBar({ mobileOpen = false, onNavigate }: TabBarProps) {
           // announced ("Visible benchmark surface for runtime and prompt-regression
           // triage" instead of "Benchmark"), so the sidebar read inconsistently
           // (M-161/A-07). The description stays as the hover/`title` text.
+          // `title` already carries the description for both pointer and AT users;
+          // `aria-description` is still a draft attribute with thin support, so it
+          // promised more than it delivered.
           aria-label={route.label}
-          aria-description={route.nav?.title}
         >
           {route.label}
           {pinned(route.path)}

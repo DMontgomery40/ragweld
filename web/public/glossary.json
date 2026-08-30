@@ -8057,7 +8057,7 @@
     {
       "term": "OTLP Headers",
       "key": "OTLP_HEADERS",
-      "definition": "OTLP_HEADERS carries any required authentication or tenant-routing headers for the OTLP exporter. Use it when the collector path sits behind auth or multi-tenant gateways, and keep the values consistent with the endpoint you configured. Header mismatches are a common cause of silent export failures.",
+      "definition": "OTLP_HEADERS carries any required authentication or tenant-routing headers for the OTLP exporter. Use it when the collector path sits behind auth or multi-tenant gateways, and keep the values consistent with the endpoint you configured. Header mismatches are a common cause of silent export failures. An authorization header here is never sent back to the browser: the API replaces its value with [redacted] and restores the stored one when a write returns the marker, so leaving the marker keeps the current credential. Every non-secret header (X-Scope-OrgID and friends) is shown and saved in clear.",
       "category": "general",
       "related": [
         "OTLP Endpoint",
@@ -8358,7 +8358,7 @@
     {
       "term": "PostgreSQL URL",
       "key": "POSTGRES_URL",
-      "definition": "Connection DSN for the PostgreSQL control/state store: the corpus registry and per-corpus config, chunk rows with provenance, chunk summaries, and the semantic/embedding caches. Chunk rows carry no vectors; dense and sparse vectors live in Qdrant and Postgres records the dense and sparse contracts they were built under. Retrieval hydrates graph hits and neighbor chunks from these rows, so Postgres must stay reachable for every leg even though it no longer executes vector or full-text search.",
+      "definition": "Connection DSN for the PostgreSQL control/state store: the corpus registry and per-corpus config, chunk rows with provenance, chunk summaries, and the semantic/embedding caches. Chunk rows carry no vectors; dense and sparse vectors live in Qdrant and Postgres records the dense and sparse contracts they were built under. Retrieval hydrates graph hits and neighbor chunks from these rows, so Postgres must stay reachable for every leg even though it no longer executes vector or full-text search. The password is never sent to the browser: the API replaces it with [redacted] on the way out and puts the stored value back when a write returns the marker unchanged, so leaving the marker in place keeps the current password while host, port, database and user stay editable. Type a real password only to rotate it.",
       "category": "infrastructure",
       "related": [
         "Neo4j Connection URI",

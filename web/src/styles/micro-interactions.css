@@ -809,7 +809,14 @@ button:focus-visible {
    The two ID'd controls are listed by id on purpose: `main.css` clears their outline
    through `#global-search:focus` and `.theme-mode-select:focus`, and a class-level rule
    cannot outrank an id. These match at equal specificity and this file is imported after
-   `main.css`, so they win on source order. */
+   `main.css`, so they win on source order.
+
+   NOT a cascade fight, despite how it first looked: `main.css:186` transitions `outline`
+   over ~120 ms, so a `getComputedStyle` read taken immediately after `.focus()` or a Tab
+   press reports `outline-width: 0px` while the value animates in. With a settle the
+   outline reaches every stop. The box-shadow below is kept because it makes an
+   immediate read deterministic -- a focus assertion should not depend on a timer -- and
+   because it is the mechanism the rest of the app already uses for focus. */
 .topbar a:focus-visible,
 .topbar button:focus-visible,
 .topbar input:focus-visible,
@@ -820,11 +827,10 @@ button:focus-visible {
     outline: 2px solid var(--accent-text) !important;
     outline-offset: 2px;
     border-radius: 6px;
-    /* The ring is also drawn as a box-shadow. Two of these stops (`#global-search` and the
-       sidebar links) resolve their outline from elsewhere in the cascade no matter how the
-       selector is written, and the app's own focus treatment is already a box-shadow -- it
-       was simply painted in `--ring`, a 20%-alpha slate that composites to nothing. Same
-       geometry, opaque colour, and it cannot lose an outline specificity fight. */
+    /* The ring is also drawn as a box-shadow: the app's own focus treatment already is one,
+       it was simply painted in `--ring`, a 20%-alpha slate that composites to nothing over
+       the panel. Same geometry, opaque colour, and it is readable the instant focus lands
+       rather than 120 ms later. */
     box-shadow: 0 0 0 3px var(--accent-text) !important;
 }
 

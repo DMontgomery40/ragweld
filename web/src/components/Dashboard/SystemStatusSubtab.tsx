@@ -22,10 +22,19 @@ import type { IndexRunSummary } from '@/types/generated';
 type FrontendMode = 'dev_server' | 'built_bundle' | 'absent';
 
 function frontendPresentation(
-  mode: FrontendMode,
+  mode: FrontendMode | undefined,
   port: number,
   bundlePath: string | null | undefined
-): { tone: 'online' | 'offline'; label: string; title: string } {
+): { tone: 'online' | 'offline' | 'unknown'; label: string; title: string } {
+  // Narrowed, not cast. An absent field used to fall through to the `absent` branch and
+  // paint the row red "not built" -- the exact false-red M-80 exists to remove.
+  if (mode === undefined) {
+    return {
+      tone: 'unknown',
+      label: 'unknown',
+      title: 'The API did not report how the frontend is served.',
+    };
+  }
   if (mode === 'dev_server') {
     return {
       tone: 'online',
@@ -271,7 +280,7 @@ export function SystemStatusSubtab() {
 
   const frontend = devStackStatus
     ? frontendPresentation(
-        devStackStatus.frontend_mode as FrontendMode,
+        devStackStatus.frontend_mode,
         devStackStatus.frontend_port,
         devStackStatus.frontend_bundle_path
       )
@@ -509,14 +518,26 @@ export function SystemStatusSubtab() {
                         color: devStackLoading
                           ? 'var(--fg-muted)'
                           : frontend
-                            ? (frontend.tone === 'online' ? 'var(--ok)' : 'var(--err)')
+                            ? (frontend.tone === 'online'
+                                ? 'var(--ok)'
+                                : frontend.tone === 'unknown'
+                                  ? 'var(--fg-muted)'
+                                  : 'var(--err)')
                             : 'var(--fg-muted)',
                       }}
                       title={frontend?.title}
                       data-testid="dash-frontend-status"
                     >
                       <StatusIndicator
-                        status={devStackLoading ? 'loading' : frontend ? frontend.tone : 'idle'}
+                        status={
+                          devStackLoading
+                            ? 'loading'
+                            : frontend
+                              ? frontend.tone === 'unknown'
+                                ? 'idle'
+                                : frontend.tone
+                              : 'idle'
+                        }
                         showLabel={false}
                         size="sm"
                         pulse
