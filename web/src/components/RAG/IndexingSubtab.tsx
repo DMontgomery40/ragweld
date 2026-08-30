@@ -422,24 +422,22 @@ export function IndexingSubtab() {
   const resolvedPath = useMemo(() => String(activeCorpus?.path || ''), [activeCorpus]);
   const effectivePath = useMemo(() => (pathOverride.trim() ? pathOverride.trim() : resolvedPath), [pathOverride, resolvedPath]);
 
-  // "Embed ~" is the remainder of the time estimate, so every phase folded into the total has
-  // to come back out of it: without subtracting the figure seconds, turning figures on would
-  // silently inflate the embedding line by exactly the figure time.
+  // The phases the API measured, printed as they are. Deriving the embedding leg by
+  // subtracting the others from the range's midpoint made it disagree with the range beside
+  // it -- the midpoint of a x0.6/x1.9 band is 1.25x the run, so the embed line came out a
+  // quarter of a run too long and could exceed the range's own lower bound.
   const estimateTimeBreakdown = useMemo(() => {
     if (!indexEstimate) return '';
-    const { estimated_seconds_low: low, estimated_seconds_high: high } = indexEstimate;
+    const embedSeconds = indexEstimate.estimated_seconds_embedding;
     const kgSeconds = indexEstimate.estimated_seconds_semantic_kg;
     const figureSeconds = indexEstimate.estimated_seconds_figures;
-    if (low == null || high == null) return '';
-    if (kgSeconds == null && figureSeconds == null) return '';
-    const embedSeconds = Math.max(
-      0,
-      (Number(low) + Number(high)) / 2 - Number(kgSeconds || 0) - Number(figureSeconds || 0)
-    );
+    const overheadSeconds = indexEstimate.estimated_seconds_overhead;
+    if (embedSeconds == null) return '';
     return [
-      `Embed ~${formatDuration(embedSeconds * 1000)}`,
+      `Embed ~${formatDuration(Number(embedSeconds) * 1000)}`,
       kgSeconds == null ? null : `KG ~${formatDuration(Number(kgSeconds) * 1000)}`,
       figureSeconds == null ? null : `Figures ~${formatDuration(Number(figureSeconds) * 1000)}`,
+      overheadSeconds == null ? null : `startup ~${formatDuration(Number(overheadSeconds) * 1000)}`,
     ]
       .filter(Boolean)
       .join(' + ');
@@ -949,28 +947,27 @@ export function IndexingSubtab() {
               ]
                 .filter(Boolean)
                 .join(' + ');
+        // One model, so the range and the breakdown can never contradict each other: the
+        // point estimate is the sum of the phases printed beside it, and the range is that
+        // same number scaled.
+        const pointSeconds = estimate.estimated_seconds;
         const time =
-          estimate.estimated_seconds_low != null && estimate.estimated_seconds_high != null
-            ? `${formatDuration(Number(estimate.estimated_seconds_low) * 1000)}–${formatDuration(
-                Number(estimate.estimated_seconds_high) * 1000
-              )}`
+          pointSeconds != null &&
+          estimate.estimated_seconds_low != null &&
+          estimate.estimated_seconds_high != null
+            ? `~${formatDuration(Number(pointSeconds) * 1000)} (${formatDuration(
+                Number(estimate.estimated_seconds_low) * 1000
+              )}–${formatDuration(Number(estimate.estimated_seconds_high) * 1000)})`
             : 'N/A';
         const semanticKgSeconds = estimate.estimated_seconds_semantic_kg;
         const figureSeconds = estimate.estimated_seconds_figures;
-        const midTotalSeconds =
-          estimate.estimated_seconds_low != null && estimate.estimated_seconds_high != null
-            ? (Number(estimate.estimated_seconds_low) + Number(estimate.estimated_seconds_high)) / 2
-            : null;
-        // Embed time is the remainder, so every phase folded into the total has to come back
-        // out of it -- otherwise turning figures on silently inflates the "Embed ~" line.
-        const embedSecondsApprox =
-          (semanticKgSeconds != null || figureSeconds != null) && midTotalSeconds != null
-            ? Math.max(0, midTotalSeconds - Number(semanticKgSeconds || 0) - Number(figureSeconds || 0))
-            : null;
+        const embedSeconds = estimate.estimated_seconds_embedding;
+        const overheadSeconds = estimate.estimated_seconds_overhead;
         const timeBreakdown = [
-          `Embed ${embedSecondsApprox == null ? 'N/A' : `~${formatDuration(embedSecondsApprox * 1000)}`}`,
+          embedSeconds == null ? null : `Embed ~${formatDuration(Number(embedSeconds) * 1000)}`,
           semanticKgSeconds == null ? null : `Semantic KG ~${formatDuration(Number(semanticKgSeconds) * 1000)}`,
           figureSeconds == null ? null : `Figures ~${formatDuration(Number(figureSeconds) * 1000)}`,
+          overheadSeconds == null ? null : `startup ~${formatDuration(Number(overheadSeconds) * 1000)}`,
         ]
           .filter(Boolean)
           .join(' + ');
@@ -993,8 +990,15 @@ export function IndexingSubtab() {
           }, skip_dense=${estimate.skip_dense ? 'yes' : 'no'})`,
           `Cost (est): ${cost} • Time (est): ${time}`,
           ...(costBreakdown ? [`Cost breakdown: ${costBreakdown}`] : []),
-          ...(semanticKgSeconds != null || figureSeconds != null
-            ? [`Time breakdown (est): ${timeBreakdown}`]
+          ...(timeBreakdown ? [`Time breakdown (est): ${timeBreakdown}`] : []),
+          // A run does not add to the live index, it replaces it: the new generation is
+          // published on commit and the current one is retired.
+          ...(hasIndexedCorpus
+            ? [
+                forceReindex
+                  ? 'This run CLEARS the current index first, then rebuilds it: searches return nothing until it commits.'
+                  : 'On commit this run publishes a new generation and retires the one now serving searches.',
+              ]
             : []),
         ].join('\n');
 
@@ -1073,6 +1077,7 @@ export function IndexingSubtab() {
     flushPendingPatches,
     forceReindex,
     graphIndexingEnabled,
+    hasIndexedCorpus,
     loadLatestRunReplay,
     loadStats,
     resetTerminal,

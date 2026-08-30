@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from server.api.index import (
+    _EST_OVERHEAD_SECONDS,
+    _EST_RANGE_HIGH_MULT,
+    _EST_RANGE_LOW_MULT,
     _FIGURE_INPUT_TOKENS,
     _FIGURE_SECONDS_PER_CALL,
     _FIGURES_PER_PAGE_HEURISTIC,
@@ -13,6 +18,7 @@ from server.api.index import (
     _estimate_figure_seconds,
     _estimate_figures,
     _figure_seconds_assumption,
+    _index_time_model,
 )
 from server.models.index import IndexEstimate
 from server.models.tribrid_config_model import TriBridConfig
@@ -177,3 +183,53 @@ def test_the_two_page_fixture_prices_and_times_one_figure_together() -> None:
         )
         == 5.0
     )
+
+
+def test_the_time_range_and_the_breakdown_come_from_one_model() -> None:
+    """The dialog quoted a range whose own breakdown did not fit inside it.
+
+    "Time (est): 14m 3s-44m 17s" printed next to "Embed ~17m 10s + Figures ~12m 0s": the
+    embed leg alone exceeded the lower bound, and the parts summed to ~29m, which is neither
+    endpoint nor the midpoint. The range came from ``total x 0.6 / x 1.9`` while the
+    breakdown derived embed as ``midpoint - other phases``, and that midpoint is
+    ``1.25 x total + overhead`` -- so the embed leg was inflated by a quarter of the run.
+    """
+    model = _index_time_model(
+        embedding_seconds=1030.0, semantic_kg_seconds=0.0, figure_seconds=720.0
+    )
+
+    assert model.parts_total == pytest.approx(model.seconds)
+    assert model.low <= model.seconds <= model.high
+    assert model.embedding <= model.seconds
+    # Every phase fits inside the range that is quoted beside it.
+    assert model.embedding + model.semantic_kg + model.figures <= model.high
+
+
+def test_the_old_two_model_breakdown_would_have_failed_that_invariant() -> None:
+    """Not a vacuous assertion: the arithmetic this replaced breaks it on the drive's numbers."""
+    phases = 1030.0 + 720.0
+    old_low = phases * _EST_RANGE_LOW_MULT + _EST_OVERHEAD_SECONDS
+    old_high = phases * _EST_RANGE_HIGH_MULT + _EST_OVERHEAD_SECONDS * 2.0
+    old_embed_leg = (old_low + old_high) / 2 - 720.0
+
+    assert old_embed_leg > old_low, "the old embed leg exceeded the range's own lower bound"
+
+
+def test_a_zero_length_run_still_has_a_coherent_model() -> None:
+    model = _index_time_model(embedding_seconds=0.0, semantic_kg_seconds=0.0, figure_seconds=0.0)
+
+    assert model.seconds == pytest.approx(_EST_OVERHEAD_SECONDS)
+    assert model.parts_total == pytest.approx(model.seconds)
+    assert model.low <= model.seconds <= model.high
+
+
+def test_the_estimate_model_carries_the_point_estimate_and_its_phases() -> None:
+    fields = IndexEstimate.model_fields
+    for name in (
+        "estimated_seconds",
+        "estimated_seconds_embedding",
+        "estimated_seconds_overhead",
+        "estimated_seconds_low",
+        "estimated_seconds_high",
+    ):
+        assert name in fields

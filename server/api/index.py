@@ -242,6 +242,48 @@ _EST_OVERHEAD_SECONDS = 12.0
 _EST_RANGE_LOW_MULT = 0.6
 _EST_RANGE_HIGH_MULT = 1.9
 
+
+@dataclass(frozen=True, slots=True)
+class _IndexTimeModel:
+    """One time model for the whole estimate: a point estimate, its phases, and its band.
+
+    The dialog used to mix two models -- a range of ``total x 0.6 / x 1.9`` against a
+    breakdown that derived the embedding leg as ``midpoint - other phases``. The midpoint of
+    that range is ``1.25 x total + overhead``, so the embedding leg came out inflated by a
+    quarter of the run: "Time (est): 14m 3s-44m 17s" printed next to "Embed ~17m 10s +
+    Figures ~12m 0s", where one leg alone exceeded the range's lower bound and the parts
+    summed to neither endpoint nor the midpoint. Here the phases sum to ``seconds`` exactly
+    and the band is that same number scaled, so the two can never disagree again.
+    """
+
+    seconds: float
+    low: float
+    high: float
+    embedding: float
+    semantic_kg: float
+    figures: float
+    overhead: float
+
+    @property
+    def parts_total(self) -> float:
+        return self.embedding + self.semantic_kg + self.figures + self.overhead
+
+
+def _index_time_model(
+    *, embedding_seconds: float, semantic_kg_seconds: float, figure_seconds: float
+) -> _IndexTimeModel:
+    phases = max(0.0, embedding_seconds) + max(0.0, semantic_kg_seconds) + max(0.0, figure_seconds)
+    seconds = phases + _EST_OVERHEAD_SECONDS
+    return _IndexTimeModel(
+        seconds=seconds,
+        low=seconds * _EST_RANGE_LOW_MULT,
+        high=seconds * _EST_RANGE_HIGH_MULT,
+        embedding=max(0.0, embedding_seconds),
+        semantic_kg=max(0.0, semantic_kg_seconds),
+        figures=max(0.0, figure_seconds),
+        overhead=float(_EST_OVERHEAD_SECONDS),
+    )
+
 # Local embedding throughput heuristics (tokens/sec) by hardware class.
 _LOCAL_EMBED_TPS_TABLE: dict[str, dict[str, int]] = {
     "apple_silicon_mlx": {
@@ -3709,9 +3751,9 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
         else sum(float(component) for component in cost_components)  # type: ignore[arg-type]
     )
 
-    # Time estimate (rough): embedding throughput + optional semantic KG extraction phase + overhead.
-    est_low: float | None = None
-    est_high: float | None = None
+    # Time estimate (rough): embedding throughput + optional semantic KG extraction phase +
+    # figure descriptions + fixed overhead. One model -- see _index_time_model.
+    time_model: _IndexTimeModel | None = None
     estimated_seconds_semantic_kg: float | None = None
     estimated_seconds_figures: float | None = None
     assumptions: list[str] = [*sample.assumptions, "time range is a heuristic (very rough)"]
@@ -3748,7 +3790,6 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
 
     if est_tokens > 0 and tps > 0:
         base_embedding_seconds = float(est_tokens) / float(tps)
-        base_total_seconds = base_embedding_seconds
         if semantic_kg_enabled and semantic_kg_chunks > 0:
             # The throughput table is keyed by provider, and the only way from a gateway
             # alias to its provider is the same alias lookup that prices it.
@@ -3762,7 +3803,6 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
                 chunks_in_scope=semantic_kg_chunks,
                 indexing_workers=int(getattr(cfg.indexing, "indexing_workers", 1) or 1),
             )
-            base_total_seconds += float(estimated_seconds_semantic_kg)
             assumptions.append(
                 f"semantic_graphrag≈{semantic_kg_chunks:,} chunks using {semantic_provider_for_time or 'unknown'}"
             )
@@ -3773,18 +3813,19 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
             estimated_seconds_figures = _estimate_figure_seconds(
                 figures=estimated_figures, concurrency=figure_concurrency
             )
-            base_total_seconds += float(estimated_seconds_figures)
             assumptions.append(
                 _figure_seconds_assumption(
                     figures=estimated_figures, concurrency=figure_concurrency
                 )
             )
-        est_low = max(
-            0.0, (base_total_seconds * _EST_RANGE_LOW_MULT) + float(_EST_OVERHEAD_SECONDS)
+        time_model = _index_time_model(
+            embedding_seconds=base_embedding_seconds,
+            semantic_kg_seconds=float(estimated_seconds_semantic_kg or 0.0),
+            figure_seconds=float(estimated_seconds_figures or 0.0),
         )
-        est_high = max(
-            est_low,
-            (base_total_seconds * _EST_RANGE_HIGH_MULT) + float(_EST_OVERHEAD_SECONDS) * 2.0,
+        assumptions.append(
+            f"time = embed + semantic KG + figures + {_EST_OVERHEAD_SECONDS:g}s startup, "
+            f"ranged x{_EST_RANGE_LOW_MULT:g}-x{_EST_RANGE_HIGH_MULT:g}"
         )
 
     return IndexEstimate(
@@ -3811,8 +3852,11 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
         estimated_figures=estimated_figures,
         figure_description_cost_usd=figure_cost,
         total_cost_usd=total_cost,
-        estimated_seconds_low=est_low,
-        estimated_seconds_high=est_high,
+        estimated_seconds=None if time_model is None else time_model.seconds,
+        estimated_seconds_low=None if time_model is None else time_model.low,
+        estimated_seconds_high=None if time_model is None else time_model.high,
+        estimated_seconds_embedding=None if time_model is None else time_model.embedding,
+        estimated_seconds_overhead=None if time_model is None else time_model.overhead,
         estimated_seconds_semantic_kg=estimated_seconds_semantic_kg,
         estimated_seconds_figures=estimated_seconds_figures,
         assumptions=assumptions,

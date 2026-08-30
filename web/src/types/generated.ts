@@ -4010,6 +4010,12 @@ export interface IndexEstimate {
   figure_description_cost_usd?: number | null;
   /** Estimated total indexing cost (USD): embedding + semantic KG + figure description (each when applicable). */
   total_cost_usd?: number | null;
+  /** Point estimate for total indexing time (seconds). The phase fields below plus estimated_seconds_overhead sum to exactly this; low/high are it scaled. */
+  estimated_seconds?: number | null;
+  /** Estimated embedding phase time (seconds), stated rather than derived by subtraction. */
+  estimated_seconds_embedding?: number | null;
+  /** Fixed startup/teardown time (seconds) included in the point estimate. */
+  estimated_seconds_overhead?: number | null;
   /** Very rough low-end estimate for total indexing time (seconds) */
   estimated_seconds_low?: number | null;
   /** Very rough high-end estimate for total indexing time (seconds) */

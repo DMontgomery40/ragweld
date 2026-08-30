@@ -299,6 +299,24 @@ class IndexEstimate(BaseModel):
         ge=0.0,
         description="Estimated total indexing cost (USD): embedding + semantic KG + figure description (each when applicable).",
     )
+    estimated_seconds: float | None = Field(
+        default=None,
+        ge=0.0,
+        description=(
+            "Point estimate for total indexing time (seconds). The phase fields below plus "
+            "estimated_seconds_overhead sum to exactly this; low/high are it scaled."
+        ),
+    )
+    estimated_seconds_embedding: float | None = Field(
+        default=None,
+        ge=0.0,
+        description="Estimated embedding phase time (seconds), stated rather than derived by subtraction.",
+    )
+    estimated_seconds_overhead: float | None = Field(
+        default=None,
+        ge=0.0,
+        description="Fixed startup/teardown time (seconds) included in the point estimate.",
+    )
     estimated_seconds_low: float | None = Field(
         default=None,
         ge=0.0,

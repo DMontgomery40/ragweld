@@ -128,3 +128,42 @@ test('a failed estimate blocks the run with an actionable error instead of skipp
   const latest = await request.get(`${API_BASE}/index/${encodeURIComponent(unresolvable.corpusId)}/runs/latest`);
   expect(latest.status(), 'no index run may exist for a corpus whose estimate failed').toBe(404);
 });
+
+test('the dialog states the generation swap and a breakdown drawn from one model', async ({
+  page,
+  request,
+}) => {
+  // A real index of the small deterministic acceptance fixture (no paid embedding, no
+  // enrichment) so the corpus has a live generation for the run to supersede.
+  const indexed = await provisionExhaustiveCorpus(request, { index: true });
+  try {
+    // The estimate the dialog is about to print, straight from the API: the phases plus the
+    // fixed startup have to sum to the point estimate, and the point estimate has to sit
+    // inside the range quoted beside them.
+    const response = await request.post(`${API_BASE}/index/estimate`, {
+      data: { corpus_id: indexed.corpusId, repo_path: indexed.corpusPath },
+    });
+    expect(response.status()).toBe(200);
+    const estimate = (await response.json()) as Record<string, number | null>;
+    const parts =
+      Number(estimate.estimated_seconds_embedding ?? 0) +
+      Number(estimate.estimated_seconds_semantic_kg ?? 0) +
+      Number(estimate.estimated_seconds_figures ?? 0) +
+      Number(estimate.estimated_seconds_overhead ?? 0);
+    expect(parts).toBeCloseTo(Number(estimate.estimated_seconds), 6);
+    expect(Number(estimate.estimated_seconds_low)).toBeLessThanOrEqual(Number(estimate.estimated_seconds));
+    expect(Number(estimate.estimated_seconds)).toBeLessThanOrEqual(Number(estimate.estimated_seconds_high));
+
+    await openIndexing(page, indexed.corpusId);
+    await page.getByTestId('index-now-button').click();
+    await expect(page.getByTestId('confirm-dialog')).toBeVisible();
+    const message = page.getByTestId('confirm-dialog-message');
+    await expect(message).toContainText('Time breakdown (est): Embed');
+    await expect(message).toContainText('startup');
+    await expect(message).toContainText('retires the one now serving searches');
+    await page.getByTestId('confirm-dialog-cancel').click();
+    await expect(page.getByTestId('confirm-dialog')).toHaveCount(0);
+  } finally {
+    await indexed.dispose(request);
+  }
+});
