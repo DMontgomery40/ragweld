@@ -203,5 +203,21 @@ test.describe('help, search and keyboard access', () => {
     await expect(totalHelp).toHaveCount(1);
     await expect(activeHelp).toHaveCount(1);
   });
+
+  test('M-28: Admin Basic names the corpus it is editing and tags each field scope', async ({ page, baseURL }) => {
+    await activateCorpusInBrowser(page, corpusId);
+    await gotoWeb(page, baseURL, 'admin?subtab=basic');
+
+    const banner = page.getByTestId('admin-basic-scope');
+    await expect(banner).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId('admin-basic-scope-corpus')).toHaveText(corpusId);
+
+    // Every field says whether a save lands on this corpus or on the deployment.
+    const scopeChips = page.locator('[data-testid^="config-field-scope-"]');
+    await expect(scopeChips.first()).toBeVisible();
+    const labels = await scopeChips.allInnerTexts();
+    expect(labels.length).toBeGreaterThan(3);
+    for (const label of labels) expect(['corpus', 'global']).toContain(label.trim());
+  });
 });
 

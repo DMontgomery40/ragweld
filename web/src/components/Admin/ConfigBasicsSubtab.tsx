@@ -7,12 +7,14 @@ import {
   useConfigControlPlaneData,
   useConfigFieldSave,
 } from './configControlPlane';
+import { useActiveRepo } from '@/stores/useRepoStore';
 
 type ConfigBasicsSubtabProps = {
   onOpenRaw: (section: string) => void;
 };
 
 export function ConfigBasicsSubtab({ onOpenRaw }: ConfigBasicsSubtabProps) {
+  const activeRepo = useActiveRepo();
   const { registry, readiness, loading, error, reload } = useConfigControlPlaneData();
   const { config, saveField, saving } = useConfigFieldSave();
   const saveAndRefresh = async (path: string, value: unknown) => {
@@ -38,8 +40,33 @@ export function ConfigBasicsSubtab({ onOpenRaw }: ConfigBasicsSubtabProps) {
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', marginBottom: 20, minWidth: 0, width: '100%' }}>
         <div style={{ minWidth: 0, flex: '1 1 320px' }}>
           <h2 style={{ marginBottom: 8 }}>Configuration Center</h2>
+          {/* The page was titled as though it edited global defaults, while every write
+              carried `?corpus_id=<active corpus>`. An operator changing a corpus-scoped
+              field here believed they were setting the default for everything (M-28). */}
+          <div
+            data-testid="admin-basic-scope"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              marginBottom: 10,
+              padding: '6px 12px',
+              borderRadius: 999,
+              border: '1px solid var(--line)',
+              background: 'var(--bg-elev2)',
+              fontSize: 12.5,
+              color: 'var(--fg)',
+            }}
+          >
+            <span style={{ fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--fg-muted)' }}>
+              Editing corpus
+            </span>
+            <span data-testid="admin-basic-scope-corpus" style={{ fontFamily: 'var(--font-mono)', fontWeight: 700 }}>
+              {activeRepo || 'none selected'}
+            </span>
+          </div>
           <p className="small" style={{ maxWidth: 860, minWidth: 0, overflowWrap: 'anywhere' }}>
-            Curated operator controls for the locked OSS stack. Every field here comes from the backend registry, and every integration card reflects live readiness rather than hand-maintained UI copy.
+            Curated operator controls for the locked OSS stack. Every field here comes from the backend registry, and every integration card reflects live readiness rather than hand-maintained UI copy. Fields tagged <strong>corpus</strong> are saved against the corpus named above and change nothing for any other corpus; fields tagged <strong>global</strong> apply to the whole deployment.
           </p>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'start', flexWrap: 'wrap', minWidth: 0 }}>

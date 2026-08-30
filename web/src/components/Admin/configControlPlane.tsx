@@ -301,14 +301,24 @@ export function ConfigFieldEditor({
     }
   };
 
-  const metaChips = showMetadata ? (
+  // The scope chip is never optional. `showMetadata={false}` (the Basic surface) used to
+  // hide it along with the other three, so a field that writes to ONE corpus looked
+  // exactly like a field that writes the global default (M-28). What a save will change
+  // is not decoration.
+  const metaChips = (
     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
-      <span style={CHIP_BASE}>{field.scope}</span>
-      <span style={CHIP_BASE}>{field.integration}</span>
-      <span style={CHIP_BASE}>{field.impact}</span>
-      <span style={CHIP_BASE}>{field.exposure_level}</span>
+      <span style={CHIP_BASE} data-testid={`config-field-scope-${field.path}`}>
+        {field.scope}
+      </span>
+      {showMetadata ? (
+        <>
+          <span style={CHIP_BASE}>{field.integration}</span>
+          <span style={CHIP_BASE}>{field.impact}</span>
+          <span style={CHIP_BASE}>{field.exposure_level}</span>
+        </>
+      ) : null}
     </div>
-  ) : null;
+  );
 
   const saveButton = (
     <button
