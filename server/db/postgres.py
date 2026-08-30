@@ -2538,6 +2538,11 @@ class PostgresClient:
             if not row:
                 return None
             out = dict(row)
+            # One row, one shape. The no-update branch above answers through `get_corpus`,
+            # which renames `root_path` to `path`; a caller that had to read both shapes
+            # would be a dual-read contract over the same table -- and did in fact raise
+            # KeyError on whichever branch it had not been written against.
+            out["path"] = out.pop("root_path", None)
             out["meta"] = _coerce_jsonb_dict(out.get("meta"))
             return out
 

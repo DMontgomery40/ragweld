@@ -648,23 +648,25 @@ class TestCorpusRowMapping:
         assert corpus.internal is False
         assert corpus.keywords == ["lunar"]
 
-    def test_the_mapping_accepts_both_row_shapes(self) -> None:
-        """`get_corpus` renames root_path to path; `update_corpus` returns the raw column."""
-        raw = _corpus_from_row(
-            {
-                "repo_id": "nasa-apollo-11",
-                "name": "NASA Apollo 11 Mission Report",
-                "root_path": "/srv/corpora/apollo",
-                "description": "mission report",
-                "meta": {},
-                "created_at": datetime(2026, 8, 30, tzinfo=UTC),
-                "last_indexed": None,
-            }
-        )
+    def test_the_mapping_reads_one_row_shape(self) -> None:
+        """Every corpus read answers in the same shape, so the mapping reads only that one.
 
-        assert raw.path == "/srv/corpora/apollo"
-        assert raw.description == "mission report"
-        assert raw.internal is False
+        `update_corpus` used to answer with the raw `root_path` column on one branch and
+        `get_corpus`'s renamed row on the other; it now renames on both, so a reader that
+        accepted either would be keeping a dual-read contract alive for nothing.
+        """
+        with pytest.raises(KeyError):
+            _corpus_from_row(
+                {
+                    "repo_id": "nasa-apollo-11",
+                    "name": "NASA Apollo 11 Mission Report",
+                    "root_path": "/srv/corpora/apollo",
+                    "description": "mission report",
+                    "meta": {},
+                    "created_at": datetime(2026, 8, 30, tzinfo=UTC),
+                    "last_indexed": None,
+                }
+            )
 
     def test_internal_defaults_to_false_on_the_wire_model(self) -> None:
         """A corpus built without a row (corpus creation) is an operator corpus."""

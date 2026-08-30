@@ -113,16 +113,15 @@ def _corpus_from_row(row: dict[str, Any]) -> Corpus:
     surfaces have a typed answer instead of a hardcoded `recall_default` check, and a second
     construction site cannot forget to derive it.
 
-    `get_corpus`/`list_corpora` rename `root_path` to `path`; `update_corpus` returns the
-    raw column. Both shapes describe the same row, so both are read here rather than at
-    every call site.
+    Every `PostgresClient` corpus read answers in one shape -- `repo_id`, `name`, `path`,
+    `description`, `meta` -- so this reads that shape and nothing else.
     """
     meta = row.get("meta") or {}
     repo_id = str(row["repo_id"])
     return Corpus(
         repo_id=repo_id,
         name=row["name"],
-        path=row.get("path") or row["root_path"],
+        path=row["path"],
         slug=meta.get("slug") or repo_id,
         branch=meta.get("branch"),
         default=meta.get("default"),
