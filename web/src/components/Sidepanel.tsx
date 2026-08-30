@@ -336,59 +336,6 @@ export function Sidepanel() {
         </div>
       </div>
 
-      {/* Secrets Ingest Widget */}
-      <div
-        style={{
-          background: 'var(--card-bg)',
-          border: '1px solid var(--line)',
-          borderRadius: '8px',
-          padding: '16px',
-        }}
-      >
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            marginBottom: '12px',
-          }}
-        >
-          <span style={{ color: 'var(--accent-text)', fontSize: '8px' }}>●</span>
-          <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--fg)' }}>
-            Secrets Ingest
-          </span>
-        </div>
-
-        <div
-          style={{
-            border: '2px dashed var(--line)',
-            borderRadius: '6px',
-            padding: '32px 16px',
-            textAlign: 'center',
-            color: 'var(--fg-muted)',
-            fontSize: '12px',
-            marginBottom: '8px',
-          }}
-        >
-          Drop any .env / .ini / .md
-          <br />
-          or click to upload
-        </div>
-
-        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-          <input
-            type="checkbox"
-            defaultChecked
-            style={{
-              width: '16px',
-              height: '16px',
-              cursor: 'pointer',
-            }}
-          />
-          <span style={{ fontSize: '11px', color: 'var(--fg)' }}>Persist to defaults.json</span>
-        </label>
-      </div>
-
       {/* Apply Changes Button - Always at bottom */}
       <div
         style={{
