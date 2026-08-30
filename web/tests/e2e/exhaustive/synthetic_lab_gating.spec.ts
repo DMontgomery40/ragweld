@@ -74,6 +74,10 @@ test('Synthetic Lab: a failed run cannot be promoted and is not a dead end', asy
       await expect(page.getByTestId(`lineage-set-${a}`), `${a} disabled on a failed run`).toBeDisabled();
     }
 
+    // M-56 (id half): the bundle id is copyable via the shared TruncatedId control
+    // (the lane's inline IdValue was reconciled away in favor of legibility's component).
+    await expect(page.getByTestId('lineage-copy-current-bundle')).toBeVisible();
+
     // M-57: the quality-gate block carries the self-generated caveat regardless of verdict.
     const gate = page.locator('.studio-callout', { hasText: 'Quality Gate' });
     await expect(gate).toContainText(/self-generated|self-consistency/i);
