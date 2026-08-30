@@ -596,20 +596,26 @@ def test_secure_ingress_ui_contract_marks_missing_services_deployment_only() -> 
     assert "const deploymentOnly = DEPLOYMENT_ONLY_SERVICES.has(service);" in docker_subtab_source
     assert "const deploymentOnly = DEPLOYMENT_ONLY_SERVICES.has(service);" in services_subtab_source
 
-    assert "deploymentOnly ? '— Deployment-only' : '— Missing'" in docker_subtab_source
-    assert re.search(
-        r"deploymentOnly\s*\?\s*'— Deployment-only'\s*:\s*optional\s*\?\s*'— Not deployed \(optional\)'\s*:\s*'— Missing'",
-        services_subtab_source,
+    # An absent optional container must read the same on both pages: the drive
+    # found it "Missing" on Docker and "Not deployed (expected)" on Services,
+    # and "Missing" reads as a fault while "expected" reads as fine.
+    optional_ladder = (
+        r"deploymentOnly\s*\?\s*'— Deployment-only'\s*:\s*optional\s*\?\s*"
+        r"'— Optional, not deployed'\s*:\s*'— Missing'"
     )
+    assert "const optional = OPTIONAL_SERVICES.has(service);" in docker_subtab_source
+    assert "const optional = OPTIONAL_SERVICES.has(service);" in services_subtab_source
+    assert re.search(optional_ladder, docker_subtab_source)
+    assert re.search(optional_ladder, services_subtab_source)
+    assert "'— Not deployed (optional)'" not in services_subtab_source
 
     assert docker_subtab_source.count(deployment_only_detail) == 1
     assert services_subtab_detail in services_subtab_source
 
     assert "!container && deploymentOnly && (" not in docker_subtab_source
-    assert "!container && !deploymentOnly && (" in docker_subtab_source
+    # An optional container is not created by a start.sh flag the operator needs.
+    assert "!container && !deploymentOnly && !optional && (" in docker_subtab_source
     assert "container ? '○ Stopped' : '— Missing'" not in docker_subtab_source
-
-    assert "optional ? '— Not deployed (optional)' : '— Missing'" not in services_subtab_source
     assert (
         "optional\n                        ? 'Optional container; not part of the default development topology.'\n                        : 'No managed container exists for this service.'"
         not in services_subtab_source

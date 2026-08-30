@@ -20,7 +20,7 @@ from server.models.tribrid_config_model import (
     TraceExternalLink,
     TriBridConfig,
 )
-from server.observability.probe_history import ProbeSample, record_probe, sample_for
+from server.observability.probe_history import ProbeSample, probe_key, record_probe, sample_for
 from server.observability.profiling import profiling_state
 from server.observability.runtime import (
     langfuse_client_blockers,
@@ -306,7 +306,7 @@ def _decorate_component(
 ) -> ObservabilityComponentStatus:
     group = _component_group(component_id)
     sample: ProbeSample = sample_for(reachable, probeable=probeable)
-    history, consecutive_failures = record_probe(component_id, sample)
+    history, consecutive_failures = record_probe(probe_key(component_id, url), sample)
     severity = _component_severity(
         group=group,
         enabled=enabled,

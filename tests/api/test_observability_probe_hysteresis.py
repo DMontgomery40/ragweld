@@ -21,7 +21,7 @@ from threading import Lock, Thread
 import pytest
 from httpx import AsyncClient
 
-from server.observability.probe_history import reset_probe_history
+from server.observability.probe_history import probe_key, record_probe, reset_probe_history
 
 
 class _ReadinessHandler(BaseHTTPRequestHandler):
@@ -212,3 +212,26 @@ async def test_an_auth_protected_surface_is_not_probeable_and_not_an_attention_i
 
     incidents = await client.get("/api/observability/incidents")
     assert not [item for item in incidents.json()["incidents"] if item["id"] == "component:tempo"]
+
+
+def test_the_failure_streak_is_per_target_not_per_component_name() -> None:
+    """Most `tracing.*_base_url` fields are per-corpus scopable.
+
+    Two corpora can point the same component at different targets, so keying
+    the streak by component id alone would let a healthy target clear a failing
+    one's streak (and vice versa). Re-pointing a component also starts fresh,
+    which is what an operator means by editing its URL.
+    """
+
+    reset_probe_history()
+    try:
+        for _ in range(3):
+            record_probe(probe_key("tempo", "http://127.0.0.1:53200"), "failed")
+        _history, other = record_probe(probe_key("tempo", "http://127.0.0.1:9999"), "ok")
+        assert other == 0
+
+        history, streak = record_probe(probe_key("tempo", "http://127.0.0.1:53200"), "failed")
+        assert streak == 4
+        assert history == ["failed"] * 4
+    finally:
+        reset_probe_history()

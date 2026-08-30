@@ -44,11 +44,24 @@ def sample_for(reachable: bool | None, *, probeable: bool = True) -> ProbeSample
     return "unprobeable"
 
 
-def record_probe(component_id: str, sample: ProbeSample) -> tuple[list[ProbeSample], int]:
+def probe_key(component_id: str, url: str | None) -> str:
+    """Identity of the thing being probed.
+
+    Most `tracing.*_base_url` fields are per-corpus scopable, so two corpora can
+    point the same component at different targets. Keying the streak by
+    component id alone would interleave their samples; a component whose URL is
+    edited also starts a fresh streak, which is what an operator means by
+    pointing it somewhere else.
+    """
+
+    return f"{component_id}|{str(url or '').strip()}"
+
+
+def record_probe(key: str, sample: ProbeSample) -> tuple[list[ProbeSample], int]:
     """Append one sample and return the visible history plus the failure streak."""
 
     with _LOCK:
-        history = _HISTORY.setdefault(component_id, deque(maxlen=PROBE_HISTORY_LENGTH))
+        history = _HISTORY.setdefault(key, deque(maxlen=PROBE_HISTORY_LENGTH))
         history.append(sample)
         samples = list(history)
     streak = 0
