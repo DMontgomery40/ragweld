@@ -4039,6 +4039,12 @@ async def get_dashboard_index_status(
         total_storage=int(storage_breakdown.total_storage_bytes),
     )
 
+    # The status line has to survive a restart. `_STATUS` only knows runs THIS process
+    # started, so a corpus indexed yesterday reported "Ready to index…" next to a Recent
+    # Index Runs table that showed it complete. The persisted run is the durable truth, and
+    # unrestricted (not `("complete",)` like the cost card above): an operator reading the
+    # ops strip wants the failure, not the last success it happened to follow.
+    last_run = await asyncio.to_thread(_load_latest_run_summary, repo_id)
     lines: list[str] = []
     if s is not None and s.status == "error":
         lines = [f"Index error: {s.error or 'unknown error'}"]
@@ -4049,6 +4055,21 @@ async def get_dashboard_index_status(
             lines.append(current_file)
     elif s is not None and s.status == "complete":
         lines = ["✓ Indexing complete"]
+    elif last_run is not None and last_run.status == "complete":
+        finished = last_run.completed_at or last_run.started_at
+        lines = [
+            f"✓ Indexing complete — {total_chunks:,} chunks, "
+            f"{finished.strftime('%Y-%m-%d %H:%M')} UTC"
+        ]
+        if progress is None:
+            progress = 1.0
+    elif last_run is not None and last_run.status == "error":
+        lines = [f"Last index run failed: {last_run.error or 'unknown error'}"]
+    elif last_run is not None and last_run.status == "cancelled":
+        lines = ["Last index run was cancelled"]
+    elif last_run is not None:
+        # Persisted as "indexing" with no live fence: the process holding it went away.
+        lines = ["Last index run was interrupted before it committed"]
     else:
         lines = ["Ready to index…"]
 
