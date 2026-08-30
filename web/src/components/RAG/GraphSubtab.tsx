@@ -1,5 +1,5 @@
 import type React from 'react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import ForceGraph2D from 'react-force-graph-2d';
 import { useGraph } from '@/hooks/useGraph';
@@ -409,7 +409,9 @@ export function GraphSubtab() {
   // ancestor would size the canvas short.
   // Three columns only fit when there is room for them. Below that the visualization takes
   // its own full-width row instead of being squeezed to 145px beside the entity list (M-63).
-  useEffect(() => {
+  // useLayoutEffect, not useEffect: `wideLayout` defaults to wide, so measuring after
+  // paint made a narrow container render three columns and jump to two (review F-08).
+  useLayoutEffect(() => {
     const el = layoutRef.current;
     if (!el) return;
     const update = () => setLayoutWidth(Math.floor(el.clientWidth));
@@ -657,7 +659,7 @@ export function GraphSubtab() {
     // Derived from the scope the rows were LOADED under, never from the current
     // selection: a failed expansion leaves the previous rows on screen, and reading
     // the label off `selectedEntity`/`expansion` relabelled one entity's 86-node
-    // neighborhood as a slice of the corpus or of the last search (review F-01).
+    // neighborhood as "Showing 86 of 5,179 in this corpus" (review F-01).
     switch (scope.kind) {
       case 'community':
         return `${fmt(shown)} in this community${hidden}`;
@@ -775,7 +777,18 @@ export function GraphSubtab() {
     (host: HTMLDivElement | null) => {
       const canvas = host?.querySelector('canvas');
       if (!canvas) return;
-      canvas.toBlob((blob) => {
+      // The visualizer paints on a transparent ground with near-white edges, so a raw
+      // toBlob() produced a PNG whose 549 edges were invisible on any light background
+      // (review F-05). Composite onto the panel's own dark ground first.
+      const flattened = document.createElement('canvas');
+      flattened.width = canvas.width;
+      flattened.height = canvas.height;
+      const ctx = flattened.getContext('2d');
+      if (!ctx) return;
+      ctx.fillStyle = '#0c0c12';
+      ctx.fillRect(0, 0, flattened.width, flattened.height);
+      ctx.drawImage(canvas, 0, 0);
+      flattened.toBlob((blob) => {
         if (blob) downloadBlob(`${exportBaseName}.png`, 'image/png', blob);
       }, 'image/png');
     },
@@ -1106,6 +1119,68 @@ export function GraphSubtab() {
           pushed the visualization column down to 2px wide at 1280x720 - the "solid grey
           hairball in a ~320x300 box" of M-63. minmax(0, 1fr) is what makes the panel a
           panel. */}
+      {/* Export lives above the grid, not inside the visualization panel: the panel is not
+          rendered in Table view, which left the one surface most obviously wanting CSV with
+          no export at all (review F-04). Real buttons rather than a <select> whose options
+          are actions — assistive tech announced that as a combobox reading "Export..." and
+          it worked only because React re-rendered the value back (F-07). */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'flex-end',
+          gap: '8px',
+          marginBottom: '10px',
+          fontSize: '11.5px',
+          color: 'var(--fg-muted)',
+        }}
+        data-testid="graph-export"
+      >
+        <span>Export</span>
+        {viewMode === 'viz' ? (
+          <button
+            type="button"
+            style={controlButtonStyle}
+            onClick={() => exportPng(vizCanvasRef.current)}
+            disabled={!filteredEntities.length}
+            data-testid="graph-export-png"
+            title="Download the rendered graph as a PNG"
+          >
+            PNG
+          </button>
+        ) : null}
+        <button
+          type="button"
+          style={controlButtonStyle}
+          onClick={exportEntitiesCsv}
+          disabled={!filteredEntities.length}
+          data-testid="graph-export-entities"
+          title="Download the loaded entities as CSV"
+        >
+          Entities CSV
+        </button>
+        <button
+          type="button"
+          style={controlButtonStyle}
+          onClick={exportRelationshipsCsv}
+          disabled={!filteredRelationships.length}
+          data-testid="graph-export-relationships"
+          title="Download the loaded relationships as CSV"
+        >
+          Relationships CSV
+        </button>
+        <button
+          type="button"
+          style={controlButtonStyle}
+          onClick={exportJson}
+          disabled={!filteredEntities.length}
+          data-testid="graph-export-json"
+          title="Download entities and relationships as JSON"
+        >
+          JSON
+        </button>
+      </div>
+
       <div
         ref={layoutRef}
         style={{
@@ -1528,34 +1603,7 @@ export function GraphSubtab() {
                     Fit
                   </button>
                 </div>
-                <select
-                  value=""
-                  onChange={(e) => {
-                    const choice = e.target.value;
-                    e.target.value = '';
-                    if (choice === 'png') exportPng(vizCanvasRef.current);
-                    else if (choice === 'entities') exportEntitiesCsv();
-                    else if (choice === 'relationships') exportRelationshipsCsv();
-                    else if (choice === 'json') exportJson();
-                  }}
-                  style={{
-                    padding: '6px 8px',
-                    background: 'var(--input-bg)',
-                    border: '1px solid var(--line)',
-                    borderRadius: '8px',
-                    color: 'var(--fg)',
-                    fontSize: '11.5px',
-                    fontWeight: 700,
-                  }}
-                  data-testid="graph-export"
-                  aria-label="Export the rendered graph"
-                >
-                  <option value="">Export...</option>
-                  <option value="png">Visualization (PNG)</option>
-                  <option value="entities">Entities (CSV)</option>
-                  <option value="relationships">Relationships (CSV)</option>
-                  <option value="json">Entities + relationships (JSON)</option>
-                </select>
+
                 <button
                   onClick={handleOpenFullscreen}
                   disabled={filteredEntities.length === 0}

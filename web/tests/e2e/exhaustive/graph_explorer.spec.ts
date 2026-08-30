@@ -244,11 +244,11 @@ test.describe('Graph Explorer on the ragweld_code code graph', () => {
 
     // M-149 / C-42: the render and the data can leave the page.
     const png = page.waitForEvent('download');
-    await page.getByTestId('graph-export').selectOption('png');
+    await page.getByTestId('graph-export-png').click();
     expect((await png).suggestedFilename()).toMatch(/^graph-ragweld_code.*\.png$/);
 
     const csv = page.waitForEvent('download');
-    await page.getByTestId('graph-export').selectOption('entities');
+    await page.getByTestId('graph-export-entities').click();
     const entitiesCsv = await csv;
     expect(entitiesCsv.suggestedFilename()).toMatch(/-entities\.csv$/);
     const stream = await entitiesCsv.createReadStream();
@@ -272,6 +272,15 @@ test.describe('Graph Explorer on the ragweld_code code graph', () => {
     expect(listed).toBeGreaterThan(0);
 
     await page.getByTestId('graph-view-table').click();
+    // F-04: export lives above the grid, so it survives the view switch that removes the
+    // visualization panel. The tables are the surface most obviously wanting CSV.
+    await expect(page.getByTestId('graph-export-entities')).toBeVisible();
+    await expect(page.getByTestId('graph-export-relationships')).toBeVisible();
+    await expect(page.getByTestId('graph-export-png')).toHaveCount(0);
+    const tableCsv = page.waitForEvent('download');
+    await page.getByTestId('graph-export-relationships').click();
+    expect((await tableCsv).suggestedFilename()).toMatch(/-relationships\.csv$/);
+
     const entityRows = page.getByTestId('graph-entities-table').locator('tbody tr');
     const relRows = page.getByTestId('graph-relationships-table').locator('tbody tr');
     await expect(entityRows.first()).toBeVisible({ timeout: 30_000 });
