@@ -4553,6 +4553,10 @@ export interface RerankerEvaluateResponse {
 /** Response payload for GET /api/reranker/info (no secrets). */
 export interface RerankerInfoResponse {
   enabled: boolean;
+  /** Whether reranking will actually run for this corpus scope: configured AND ready (cloud provider+model set, or a learning adapter promoted). The configured-vs-active distinction, computed server-side so the UI cannot contradict the runtime. */
+  active?: boolean;
+  /** Human-readable explanation of the active/inactive state (the 'because' behind Active). */
+  active_reason?: string;
   /** Resolved reranker mode */
   reranker_mode?: string;
   reranker_cloud_provider?: string | null;

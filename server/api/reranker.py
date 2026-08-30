@@ -2074,10 +2074,63 @@ async def get_reranker_status(
     )
 
 
+def _reranker_active_status(
+    *,
+    mode: str,
+    cloud_provider: str | None,
+    cloud_model: str | None,
+    learning_path: str,
+    learning_resolved: str,
+) -> tuple[bool, str]:
+    """Compute the single authoritative configured-vs-active reranker status.
+
+    Returns ``(active, reason)`` where ``active`` means reranking will actually run
+    for this scope (configured AND ready), and ``reason`` is the operator-facing
+    "because" that makes the configured-vs-active distinction explicit.
+    """
+    if mode == "none":
+        return False, "Reranking is disabled (mode 'none'); fusion order is returned unchanged."
+    if mode == "cloud":
+        provider = str(cloud_provider or "").strip()
+        model = str(cloud_model or "").strip()
+        if provider and model:
+            return True, f"Cloud reranking is active via {provider} / {model}."
+        return False, "Cloud mode is selected but no reranker provider/model is configured."
+    if mode == "learning":
+        if str(learning_resolved or "").strip():
+            return True, f"Learning reranker adapter is active at {learning_resolved}."
+        return False, (
+            "Learning mode is selected but no adapter is promoted under "
+            f"{learning_path or 'the configured path'}."
+        )
+    return False, f"Unknown reranker mode '{mode}'."
+
+
 @router.get("/reranker/info", response_model=RerankerInfoResponse)
-async def get_reranker_info() -> RerankerInfoResponse:
-    """Return current reranker runtime/config info (no secrets)."""
-    cfg = load_config()
+async def get_reranker_info(
+    corpus_id: str | None = Query(
+        default=None,
+        description=(
+            "Corpus scope. Reranker config is corpus-scoped, so runtime info must reflect the "
+            "same corpus the mode selector configures; without it, info reports the global config."
+        ),
+    ),
+) -> RerankerInfoResponse:
+    """Return current reranker runtime/config info (no secrets), scoped to a corpus.
+
+    The reranker config section is corpus-scoped, so this endpoint MUST resolve the
+    scoped config when a corpus is given. Reading the global config here (the old
+    behavior) is exactly what made the mode selector say CLOUD while runtime info said
+    disabled: two different scopes on one screen.
+    """
+    cid = str(corpus_id or "").strip()
+    if cid:
+        try:
+            cfg = await load_scoped_config(repo_id=cid)
+        except CorpusNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+    else:
+        cfg = load_config()
     mode = (cfg.reranking.reranker_mode or "none").lower()
     enabled = mode != "none"
 
@@ -2093,13 +2146,23 @@ async def get_reranker_info() -> RerankerInfoResponse:
         # The resolved path is the pinned active version, or empty when nothing is promoted
         # or the store is broken — never the root pretending to be an adapter.
         try:
-            active = await asyncio.to_thread(resolve_active_artifact_dir, _resolve_path(str(path)))
+            active_dir = await asyncio.to_thread(resolve_active_artifact_dir, _resolve_path(str(path)))
         except ArtifactStoreError:
-            active = None
-        resolved = str(active) if active is not None else ""
+            active_dir = None
+        resolved = str(active_dir) if active_dir is not None else ""
+
+    active, active_reason = _reranker_active_status(
+        mode=mode,
+        cloud_provider=cfg.reranking.reranker_cloud_provider,
+        cloud_model=cfg.reranking.reranker_cloud_model,
+        learning_path=str(path or ""),
+        learning_resolved=resolved,
+    )
 
     return RerankerInfoResponse(
         enabled=enabled,
+        active=active,
+        active_reason=active_reason,
         reranker_mode=mode,
         reranker_cloud_provider=cfg.reranking.reranker_cloud_provider,
         reranker_cloud_model=cfg.reranking.reranker_cloud_model,

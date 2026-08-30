@@ -2648,6 +2648,18 @@ class RerankerInfoResponse(BaseModel):
     """Response payload for GET /api/reranker/info (no secrets)."""
 
     enabled: bool
+    active: bool = Field(
+        default=False,
+        description=(
+            "Whether reranking will actually run for this corpus scope: configured AND ready "
+            "(cloud provider+model set, or a learning adapter promoted). The configured-vs-active "
+            "distinction, computed server-side so the UI cannot contradict the runtime."
+        ),
+    )
+    active_reason: str = Field(
+        default="",
+        description="Human-readable explanation of the active/inactive state (the 'because' behind Active).",
+    )
     reranker_mode: str = Field(default="none", description="Resolved reranker mode")
     reranker_cloud_provider: str | None = Field(default=None)
     reranker_cloud_model: str | None = Field(default=None)

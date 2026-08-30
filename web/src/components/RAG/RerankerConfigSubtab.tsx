@@ -6,7 +6,7 @@ import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { ApiKeyStatus } from '@/components/ui/ApiKeyStatus';
 import { NumberField } from '@/components/ui/NumberField';
 import { ModelPicker } from '@/components/RAG/ModelPicker';
-import type { TrainingConfig } from '@/types/generated';
+import type { RerankerInfoResponse, TrainingConfig } from '@/types/generated';
 
 const RERANKER_MODES = ['none', 'learning', 'cloud'] as const;
 type RerankerMode = (typeof RERANKER_MODES)[number];
@@ -89,7 +89,7 @@ export function RerankerConfigSubtab() {
 
   // Runtime info (server)
   const { getInfo } = useReranker();
-  const [runtimeInfo, setRuntimeInfo] = useState<any>(null);
+  const [runtimeInfo, setRuntimeInfo] = useState<RerankerInfoResponse | null>(null);
   const [runtimeLoading, setRuntimeLoading] = useState(false);
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
 
@@ -414,19 +414,37 @@ export function RerankerConfigSubtab() {
         </div>
 
         {runtimeError && <div style={{ color: 'var(--err)', marginBottom: 8 }}>{runtimeError}</div>}
-        {!runtimeError && runtimeInfo && (
-          <div style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.6 }}>
-            <div>
-              <strong style={{ color: 'var(--fg)' }}>Enabled:</strong> {String(runtimeInfo.enabled ?? '—')}
+        {!runtimeError && runtimeInfo && (() => {
+          const rmode = String(runtimeInfo.reranker_mode || 'none');
+          const configuredLabel =
+            rmode === 'cloud'
+              ? `Cloud (${runtimeInfo.reranker_cloud_provider || '—'} / ${runtimeInfo.reranker_cloud_model || '—'})`
+              : rmode === 'learning'
+                ? `Learning (${runtimeInfo.resolved_path || runtimeInfo.path || 'no adapter promoted'})`
+                : 'Disabled';
+          const isActive = Boolean(runtimeInfo.active);
+          return (
+            <div style={{ fontSize: 13, color: 'var(--fg-muted)', lineHeight: 1.6 }}>
+              <div
+                data-testid="reranker-authoritative-status"
+                style={{ color: 'var(--fg)', fontWeight: 600, fontSize: 13 }}
+              >
+                Configured: {configuredLabel} · Active: {isActive ? 'yes' : 'no'}
+              </div>
+              {runtimeInfo.active_reason ? (
+                <div data-testid="reranker-active-reason" style={{ marginTop: 4, fontSize: 12.5 }}>
+                  {runtimeInfo.active_reason}
+                </div>
+              ) : null}
+              <div style={{ marginTop: 8, fontSize: 12.5 }}>
+                <span style={{ color: 'var(--fg)' }}>Device:</span> {runtimeInfo.device ?? '—'}
+                {'    '}
+                <span style={{ color: 'var(--fg)' }}>Model:</span>{' '}
+                {runtimeInfo.resolved_path || runtimeInfo.path || '—'}
+              </div>
             </div>
-            <div>
-              <strong style={{ color: 'var(--fg)' }}>Device:</strong> {runtimeInfo.device ?? '—'}
-            </div>
-            <div>
-              <strong style={{ color: 'var(--fg)' }}>Model:</strong> {runtimeInfo.resolved_path || runtimeInfo.path || '—'}
-            </div>
-          </div>
-        )}
+          );
+        })()}
 
         {!runtimeError && !runtimeInfo && (
           <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
