@@ -136,16 +136,24 @@ export function IndexingSubtab() {
     isIndexingComponent(componentParam) ? componentParam : 'embedding'
   );
 
+  // `/rag` renders native in the Dock (`dockCatalog.ts`), where `location` is the synthetic
+  // `{ key: 'dock' }` one `DockView` passes to `<Routes location=...>`. Navigating from there
+  // would move the real browser URL out from under the page behind the dock, which is the
+  // same hazard `useSubtab` guards. Docked, the param still selects the card; it just is not
+  // rewritten -- and a docked URL is neither shared nor reloaded, so nothing sticks.
+  const isDockContext = (location as { key?: string })?.key === 'dock';
+
   useEffect(() => {
     if (componentParam === null) return;
     if (isIndexingComponent(componentParam)) setSelectedComponent(componentParam);
+    if (isDockContext) return;
     // Stripped whether or not it named a real card, so a typo cannot stick either.
     // `replace` keeps the consumed link out of the back stack.
     const next = new URLSearchParams(location.search || '');
     next.delete('component');
     const search = next.toString();
     navigate({ pathname: location.pathname, search: search ? `?${search}` : '' }, { replace: true });
-  }, [componentParam, location.pathname, location.search, navigate]);
+  }, [componentParam, isDockContext, location.pathname, location.search, navigate]);
   const [isIndexing, setIsIndexing] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 100, status: 'Ready' });
   const [terminalVisible, setTerminalVisible] = useState(false);
