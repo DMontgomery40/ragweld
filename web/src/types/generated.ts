@@ -1603,7 +1603,7 @@ export interface LiteLLMConfig {
 export interface MCPConfig {
   /** Enable the embedded MCP Streamable HTTP server. */
   enabled?: boolean; // default: True
-  /** Mount path for the MCP Streamable HTTP endpoint (e.g. /mcp). */
+  /** Mount path for the MCP Streamable HTTP endpoint (e.g. /mcp). Must name a path segment: a bare "/" would mount the transport at the site root, shadowing every other route, and leaves nothing for the advertised URL to point at. */
   mount_path?: string; // default: "/mcp"
   /** Externally reachable base URL (scheme://host[:port]) that MCP clients should connect to; the mount path is appended to it. Set this to the deployment's public origin when the API sits behind a proxy -- the workbench advertises exactly this value, and deriving it from the request would advertise the proxy's internal hop instead of the address a client can actually reach. Its host must also appear in `allowed_hosts`: with DNS rebinding protection on, the transport answers 421 to any Host header it does not recognise, so advertising a host that is not allowed trades one broken instruction for another. Writing the mount path here too (`https://host/mcp`) is accepted and not doubled -- both spellings advertise the same URL. */
   public_base_url?: string; // default: "http://127.0.0.1:58012"

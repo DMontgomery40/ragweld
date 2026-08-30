@@ -16,8 +16,10 @@ from urllib.parse import urlsplit
 
 import pytest
 from httpx import AsyncClient
+from pydantic import ValidationError
 
 from server.config_redaction import SECRET_REDACTED
+from server.models.tribrid_config_model import MCPConfig
 from server.services.config_store import get_config as load_scoped_config
 from server.services.config_store import save_config as save_scoped_config
 
@@ -618,8 +620,23 @@ async def test_the_advertised_url_is_the_same_however_the_public_base_is_spelled
     """
     original = await load_scoped_config(repo_id=None)
     try:
-        seen = []
-        for base in ("https://mcp-spelling.example", "https://mcp-spelling.example/mcp"):
+        # Every spelling that has been proposed or that a near-miss could produce, with the
+        # advertised URL each must yield. The last two rows are the mangling the string-wise
+        # guard produced: `https://mcp` matched "/mcp" on the second slash of "//" and lost
+        # its scheme separator, and a "/" mount hit the `base[:-0]` whole-slice trap. The
+        # mount is now compared as a PATH component, and `MCPConfig.mount_path`'s pattern
+        # keeps "/" unsettable so the empty-mount case cannot arise from config at all.
+        cases = [
+            ("https://mcp-spelling.example", "https://mcp-spelling.example/mcp/"),
+            ("https://mcp-spelling.example/mcp", "https://mcp-spelling.example/mcp/"),
+            ("https://mcp-spelling.example/mcp/", "https://mcp-spelling.example/mcp/"),
+            # A near miss that must NOT be treated as already mounted.
+            ("https://mcp-spelling.example/foo-mcp", "https://mcp-spelling.example/foo-mcp/mcp/"),
+            # The host itself is the mount name.
+            ("https://mcp", "https://mcp/mcp/"),
+        ]
+        seen: list[tuple[str, str]] = []
+        for base, expected in cases:
             edited = original.model_copy(deep=True)
             edited.mcp.public_base_url = base
             await save_scoped_config(edited, repo_id=None)
@@ -628,9 +645,15 @@ async def test_the_advertised_url_is_the_same_however_the_public_base_is_spelled
             ).json().get("python_http")
             if not http:
                 pytest.skip("the MCP HTTP transport is not enabled in this environment")
-            seen.append(http["url"])
+            seen.append((base, http["url"]))
+            assert http["url"] == expected, seen
 
-        assert seen[0] == seen[1] == "https://mcp-spelling.example/mcp/", seen
+        # A "/" mount is refused by the model, so the advertised URL can never collapse to
+        # "/" -- the second mangling row, closed at the source rather than in the assembly.
+        with pytest.raises(ValidationError):
+            MCPConfig(mount_path="/")
+        with pytest.raises(ValidationError):
+            MCPConfig(mount_path="")
     finally:
         await save_scoped_config(original, repo_id=None)
 

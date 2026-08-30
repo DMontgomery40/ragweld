@@ -456,7 +456,14 @@ class MCPConfig(BaseModel):
     )
     mount_path: str = Field(
         default="/mcp",
-        description="Mount path for the MCP Streamable HTTP endpoint (e.g. /mcp).",
+        min_length=2,
+        pattern=r"^/[^/\s]+(?:/[^/\s]+)*/?$",
+        description=(
+            "Mount path for the MCP Streamable HTTP endpoint (e.g. /mcp). Must name a "
+            "path segment: a bare \"/\" would mount the transport at the site root, "
+            "shadowing every other route, and leaves nothing for the advertised URL to "
+            "point at."
+        ),
     )
     public_base_url: str = Field(
         default="http://127.0.0.1:58012",

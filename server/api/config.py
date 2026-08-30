@@ -6,6 +6,7 @@ import importlib.util
 import os
 import re
 from typing import Any
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
@@ -716,8 +717,6 @@ def _advertised_host_is_allowed(cfg: TriBridConfig, url: str) -> bool:
     deployment's public origin without also allowing that host swaps "redirected or
     plaintext" (M-91) for a 421 -- which is not a fix.
     """
-    from urllib.parse import urlsplit
-
     from mcp.server.transport_security import (
         TransportSecurityMiddleware,
         TransportSecuritySettings,
@@ -785,9 +784,18 @@ async def mcp_status(request: Request) -> MCPStatusResponse:
                 # asked for once. Rather than let the two spellings disagree -- silently
                 # advertising `/mcp/mcp/` -- a base that already ends in the mount path is
                 # accepted and not doubled.
+                #
+                # Compared on the PATH component, not on the whole string: `https://mcp`
+                # ends with "/mcp" only because of the second slash in "//", and stripping
+                # it produced `https:/mcp/`. The mount is guaranteed non-empty by
+                # `MCPConfig.mount_path`'s pattern, which is what keeps `base[:-0]` -- the
+                # whole-slice trap that turned a "/" mount into an advertised "/" -- out of
+                # reach here.
                 base = str(cfg.mcp.public_base_url).rstrip("/")
-                if base.endswith(path.rstrip("/")):
-                    base = base[: -len(path.rstrip("/"))].rstrip("/")
+                mount = path.rstrip("/")
+                base_path = urlsplit(base).path.rstrip("/")
+                if mount and base_path.endswith(mount):
+                    base = base[: len(base) - len(mount)].rstrip("/")
                 url = f"{base}{path}"
 
                 # An unconfigured public origin is its own failure mode, and the quiet one.
