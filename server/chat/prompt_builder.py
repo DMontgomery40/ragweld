@@ -2,12 +2,18 @@ from __future__ import annotations
 
 from server.models.chat_config import ChatConfig
 
+# The single fallback when an operator has cleared a 4-state prompt to empty. This is a code
+# invariant, not a second configurable prompt system: the legacy base+suffix composition was a
+# banned dual path (replacement-only canon; M-101/B-22) and has been removed.
+_EMPTY_PROMPT_FALLBACK = "You are a helpful assistant."
+
 
 def get_system_prompt(*, has_rag_context: bool, has_recall_context: bool, config: ChatConfig) -> str:
-    """Select the system prompt based on what context is present.
+    """Select one of the four state prompts based on what context is present.
 
-    There are 4 states, 4 prompts. Pick one. If the selected prompt is empty,
-    fall back to legacy base+suffix composition.
+    There are 4 states, 4 prompts. Pick one. If the selected prompt is empty, use a single
+    hardcoded fallback string - never the legacy base+suffix composition, which was a
+    transition-period dual path the canon forbids.
     """
 
     if has_rag_context and has_recall_context:
@@ -19,14 +25,5 @@ def get_system_prompt(*, has_rag_context: bool, has_recall_context: bool, config
     else:
         selected = str(getattr(config, "system_prompt_direct", "") or "")
 
-    if selected.strip():
-        return selected.strip()
-
-    # Backwards-compatible composition.
-    prompt = str(getattr(config, "system_prompt_base", "") or "")
-    if has_recall_context:
-        prompt += str(getattr(config, "system_prompt_recall_suffix", "") or "")
-    if has_rag_context:
-        prompt += str(getattr(config, "system_prompt_rag_suffix", "") or "")
-    return prompt.strip() or "You are a helpful assistant."
+    return selected.strip() or _EMPTY_PROMPT_FALLBACK
 

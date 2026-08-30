@@ -34,13 +34,8 @@ export function ChatSettings() {
     setPendingScrollPrompt(null);
   }, [activeTab, pendingScrollPrompt]);
 
-  // Chat core
-  const [systemPromptBase, setSystemPromptBase] = useConfigField(
-    'chat.system_prompt_base',
-    'You are a helpful assistant.'
-  );
-  const [systemPromptRecallSuffix, setSystemPromptRecallSuffix] = useConfigField('chat.system_prompt_recall_suffix', '');
-  const [systemPromptRagSuffix, setSystemPromptRagSuffix] = useConfigField('chat.system_prompt_rag_suffix', '');
+  // Chat core. There is one prompt system: the four state prompts below. The legacy
+  // base + recall/RAG suffix composition (a banned fallback dual path) was removed (M-101).
   const [systemPromptDirect, setSystemPromptDirect] = useConfigField('chat.system_prompt_direct', '');
   const [systemPromptRag, setSystemPromptRag] = useConfigField('chat.system_prompt_rag', '');
   const [systemPromptRecall, setSystemPromptRecall] = useConfigField('chat.system_prompt_recall', '');
@@ -95,32 +90,13 @@ export function ChatSettings() {
               </div>
             </div>
 
-            <div className="input-row">
-              <div className="input-group full-width">
-                <label>
-                  System prompt (base) <TooltipIcon name="chat.system_prompt_base" />
-                </label>
-                <textarea
-                  id="chat-prompt-system_prompt_base"
-                  value={systemPromptBase}
-                  onChange={(e) => setSystemPromptBase(e.target.value)}
-                  rows={6}
-                  style={{ width: '100%' }}
-                />
-                <p className="small">
-                  Used as the baseline prompt. Recall/RAG suffixes are appended automatically when those sources are
-                  enabled.
-                </p>
-              </div>
-            </div>
-
-            <div style={{ marginTop: 18 }}>
+            <div>
               <h4 style={{ margin: '0 0 10px 0', fontSize: 14, fontWeight: 600, color: 'var(--fg)' }}>
                 System prompts (4 states)
               </h4>
               <div style={{ marginBottom: 10, fontSize: 12, color: 'var(--fg-muted)' }}>
-                One of these is sent to the model based on whether RAG and/or Recall context is present.
-                If a selected prompt is empty, the system falls back to the legacy base+suffix prompt composition.
+                Exactly one of these is sent to the model, based on whether RAG and/or Recall context is present.
+                This is the only prompt system; there is no legacy fallback.
               </div>
 
               <div className="input-row">
@@ -178,45 +154,6 @@ export function ChatSettings() {
                     value={systemPromptRagAndRecall}
                     onChange={(e) => setSystemPromptRagAndRecall(e.target.value)}
                     rows={10}
-                    style={{ width: '100%' }}
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div style={{ marginTop: 18 }}>
-              <h4 style={{ margin: '0 0 10px 0', fontSize: 14, fontWeight: 600, color: 'var(--fg)' }}>
-                Legacy suffix prompts
-              </h4>
-              <div style={{ marginBottom: 10, fontSize: 12, color: 'var(--fg-muted)' }}>
-                Used only when a 4-state prompt is empty (fallback behavior).
-              </div>
-
-              <div className="input-row">
-                <div className="input-group full-width">
-                  <label>
-                    Recall suffix <TooltipIcon name="chat.system_prompt_recall_suffix" />
-                  </label>
-                  <textarea
-                    id="chat-prompt-system_prompt_recall_suffix"
-                    value={systemPromptRecallSuffix}
-                    onChange={(e) => setSystemPromptRecallSuffix(e.target.value)}
-                    rows={4}
-                    style={{ width: '100%' }}
-                  />
-                </div>
-              </div>
-
-              <div className="input-row">
-                <div className="input-group full-width">
-                  <label>
-                    RAG suffix <TooltipIcon name="chat.system_prompt_rag_suffix" />
-                  </label>
-                  <textarea
-                    id="chat-prompt-system_prompt_rag_suffix"
-                    value={systemPromptRagSuffix}
-                    onChange={(e) => setSystemPromptRagSuffix(e.target.value)}
-                    rows={4}
                     style={{ width: '100%' }}
                   />
                 </div>
