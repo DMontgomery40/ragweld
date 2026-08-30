@@ -25,6 +25,9 @@ export type RagweldMessageCustom = {
   eventId?: string;
   imagesStripped?: boolean;
   imageCount?: number;
+  /** How many images the prompting user turn attached, recorded on the answer so the Sources
+   * block can list the real image inputs even after a reload strips the image bytes (M-95). */
+  attachedImageCount?: number;
   legacyCitations?: string[];
   providerMeta?: Record<string, unknown>;
   providerResponseId?: string | null;
@@ -242,6 +245,36 @@ export function clampChatHistory(messages: ThreadMessage[], chatHistoryMax: numb
   if (!Array.isArray(messages)) return [];
   if (messages.length <= chatHistoryMax) return messages;
   return messages.slice(-chatHistoryMax);
+}
+
+export const INTERRUPTED_STREAM_MESSAGE = 'Generation was interrupted before it completed.';
+
+/**
+ * A `running` assistant message can only be live inside the instance that is currently
+ * streaming it. Any `running` message read back from storage on a fresh page load, or carried
+ * on a session the operator switches to, was abandoned mid-stream (a reload or a Stop that the
+ * old code never finalized) and would otherwise render "Streaming" forever with no way to
+ * clear or retry it (M-93/B-07). Reconcile it to a terminal, retryable error state.
+ *
+ * Pure and total: returns the same array reference when nothing was running, so callers can
+ * cheaply skip a persist/broadcast when `changed` is false.
+ */
+export function reconcileInterruptedMessages(
+  messages: ThreadMessage[],
+): { messages: ThreadMessage[]; changed: boolean } {
+  if (!Array.isArray(messages) || messages.length === 0) return { messages: messages || [], changed: false };
+  let changed = false;
+  const next = messages.map((message) => {
+    if (message.role !== 'assistant') return message;
+    const status = (message as ThreadAssistantMessage).status as MessageStatus | undefined;
+    if (status?.type !== 'running') return message;
+    changed = true;
+    return {
+      ...message,
+      status: { type: 'incomplete', reason: 'error', error: INTERRUPTED_STREAM_MESSAGE },
+    } as ThreadMessage;
+  });
+  return { changed, messages: changed ? next : messages };
 }
 
 export function deriveSessionTitle(messages: ThreadMessage[]): string {

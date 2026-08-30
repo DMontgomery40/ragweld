@@ -32,6 +32,7 @@ import {
   LEGACY_CHAT_SESSIONS_STORAGE_KEY,
   loadChatSessionsFromStorage,
   persistChatSessions as persistChatSessionsToStorage,
+  reconcileInterruptedMessages,
   setMessageCustom,
   upsertChatSession,
 } from '@/components/Chat/chatSessions';
@@ -68,6 +69,11 @@ import type {
 } from '@assistant-ui/react';
 
 const CHAT_REQUEST_ABORT_TIMEOUT = 'timeout';
+// A user pressing Stop. Unlike 'superseded'/'session_change'/'unmount', a Stop (and a
+// timeout) has no successor turn that owns the UI, so its catch handler must finalize the
+// in-flight assistant message even though resetTransientChatState already bumped the request
+// token (leaving it 'running' forever was M-93/B-07).
+const CHAT_REQUEST_ABORT_USER_CANCEL = 'user_cancel';
 const DEFAULT_CHAT_REQUEST_TIMEOUT_MS = 600_000;
 const MAX_CHAT_SESSIONS = 50;
 
@@ -106,7 +112,7 @@ function emitRunComplete(runId?: string, startedAtMs?: number, endedAtMs?: numbe
 
 const AssistantMarkdown = memo(function AssistantMarkdown({ content }: { content: string }) {
   return (
-    <div className="chat-markdown" style={{ fontSize: '13px', lineHeight: '1.7' }}>
+    <div className="chat-markdown" style={{ fontSize: '13px', lineHeight: '1.7', minWidth: 0, overflowWrap: 'anywhere' }}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
@@ -151,6 +157,8 @@ const AssistantMarkdown = memo(function AssistantMarkdown({ content }: { content
                     padding: '12px',
                     fontSize: '12px',
                     background: '#1e1e2e',
+                    maxWidth: '100%',
+                    overflowX: 'auto',
                   }}
                   {...props}
                 >
@@ -223,10 +231,22 @@ type ChatComposerProps = {
   sending: boolean;
 };
 
+/** Composer-local view of a pending attachment: the wire fields plus the file's own name/size
+ * so the preview can say what is about to be sent (B-25). Only base64 + mime_type cross the
+ * wire; name/size are UI state and never become a wire contract. */
+type ComposerAttachment = ImageAttachment & { name: string; size: number };
+
+function formatAttachmentSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 const ChatComposer = memo(function ChatComposer({ blockedReason, multimodal, onCancel, onSend, sending }: ChatComposerProps) {
   const { showToast } = useUIHelpers();
   const [draft, setDraft] = useState('');
-  const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
+  const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -257,6 +277,13 @@ const ChatComposer = memo(function ChatComposer({ blockedReason, multimodal, onC
       }
 
       const imageFiles = files.filter((file) => file && typeof file.type === 'string' && file.type.startsWith('image/'));
+      const nonImages = files.filter((file) => !(file && typeof file.type === 'string' && file.type.startsWith('image/')));
+      if (nonImages.length) {
+        // Previously these were silently dropped, so an operator who picked a PDF or a .zip got
+        // no feedback at all (B-25). Name what was refused and why.
+        const names = nonImages.map((file) => file.name || 'file').slice(0, 3).join(', ');
+        showToast(`Only image files can be attached. Skipped: ${names}${nonImages.length > 3 ? ', …' : ''}`, 'error');
+      }
       if (!imageFiles.length) return;
 
       const room = Math.max(0, maxImages - attachments.length);
@@ -267,7 +294,7 @@ const ChatComposer = memo(function ChatComposer({ blockedReason, multimodal, onC
 
       const selected = imageFiles.slice(0, room);
       const maxBytes = maxImageSizeMb * 1024 * 1024;
-      const next: ImageAttachment[] = [];
+      const next: ComposerAttachment[] = [];
       for (const file of selected) {
         const mime = String(file.type || 'image/png');
         const ext = (mime.split('/', 2)[1] || '').toLowerCase();
@@ -277,12 +304,12 @@ const ChatComposer = memo(function ChatComposer({ blockedReason, multimodal, onC
           if (allowed.has('jpg')) allowed.add('jpeg');
           if (allowed.has('jpeg')) allowed.add('jpg');
           if (normalizedExt && !allowed.has(normalizedExt)) {
-            showToast(`Unsupported image type: ${mime}`, 'error');
+            showToast(`Unsupported image type: ${mime} (allowed: ${supportedFormats.join(', ')})`, 'error');
             continue;
           }
         }
         if (typeof file.size === 'number' && file.size > maxBytes) {
-          showToast(`Image too large (max ${maxImageSizeMb} MB).`, 'error');
+          showToast(`"${file.name || 'image'}" is too large (${formatAttachmentSize(file.size)}; max ${maxImageSizeMb} MB).`, 'error');
           continue;
         }
         const base64 = await fileToBase64NoPrefix(file);
@@ -290,7 +317,7 @@ const ChatComposer = memo(function ChatComposer({ blockedReason, multimodal, onC
           showToast('Failed to read image.', 'error');
           continue;
         }
-        next.push({ base64, mime_type: mime });
+        next.push({ base64, mime_type: mime, name: String(file.name || 'image'), size: Number(file.size || 0) });
       }
       if (imageFiles.length > selected.length) {
         showToast(`Only the first ${room} images were attached.`, 'info');
@@ -303,7 +330,9 @@ const ChatComposer = memo(function ChatComposer({ blockedReason, multimodal, onC
   const handleSend = useCallback(() => {
     const trimmed = draft.trim();
     if (!trimmed || sending || blockedReason) return;
-    onSend(trimmed, attachments);
+    // Only the wire fields leave the composer; name/size are UI-only and the wire
+    // ImageAttachment forbids extra keys.
+    onSend(trimmed, attachments.map((attachment) => ({ base64: attachment.base64, mime_type: attachment.mime_type })));
     setDraft('');
     setAttachments([]);
     requestAnimationFrame(() => textareaRef.current?.focus());
@@ -349,49 +378,80 @@ const ChatComposer = memo(function ChatComposer({ blockedReason, multimodal, onC
               background: 'var(--bg-elev2)',
             }}
           >
-            {attachments.map((attachment, index) => (
-              <div
-                key={index}
-                data-testid={`chat-attachment-${index}`}
-                style={{
-                  position: 'relative',
-                  width: '56px',
-                  height: '56px',
-                  borderRadius: '8px',
-                  overflow: 'hidden',
-                  border: '1px solid var(--line)',
-                  background: 'var(--bg-elev1)',
-                }}
-              >
-                <img
-                  src={`data:${attachment.mime_type};base64,${attachment.base64}`}
-                  alt={`Attachment ${index + 1}`}
-                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                />
-                <button
-                  type="button"
-                  onClick={() => setAttachments((prev) => prev.filter((_, current) => current !== index))}
-                  aria-label="Remove image"
-                  data-testid={`chat-attachment-remove-${index}`}
+            {attachments.map((attachment, index) => {
+              const typeLabel = String(attachment.mime_type || '').split('/', 2)[1]?.toUpperCase() || 'IMAGE';
+              const sizeLabel = formatAttachmentSize(attachment.size);
+              return (
+                <div
+                  key={index}
+                  data-testid={`chat-attachment-${index}`}
                   style={{
-                    position: 'absolute',
-                    top: '4px',
-                    right: '4px',
-                    width: '18px',
-                    height: '18px',
-                    borderRadius: '999px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px',
+                    padding: '6px 10px 6px 6px',
+                    borderRadius: '10px',
                     border: '1px solid var(--line)',
-                    background: 'rgba(0,0,0,0.55)',
-                    color: '#fff',
-                    fontSize: '12px',
-                    lineHeight: '16px',
-                    cursor: 'pointer',
+                    background: 'var(--bg-elev1)',
+                    maxWidth: '260px',
                   }}
                 >
-                  x
-                </button>
-              </div>
-            ))}
+                  <img
+                    src={`data:${attachment.mime_type};base64,${attachment.base64}`}
+                    alt={attachment.name || `Attachment ${index + 1}`}
+                    style={{
+                      width: '44px',
+                      height: '44px',
+                      objectFit: 'cover',
+                      borderRadius: '8px',
+                      border: '1px solid var(--line)',
+                      flex: '0 0 auto',
+                    }}
+                  />
+                  <div style={{ minWidth: 0, display: 'grid', gap: '2px' }}>
+                    <span
+                      data-testid={`chat-attachment-name-${index}`}
+                      title={attachment.name}
+                      style={{
+                        fontSize: '12px',
+                        fontWeight: 700,
+                        color: 'var(--fg)',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {attachment.name}
+                    </span>
+                    <span style={{ fontSize: '11.5px', color: 'var(--fg-muted)' }}>
+                      {typeLabel}
+                      {sizeLabel ? ` · ${sizeLabel}` : ''}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setAttachments((prev) => prev.filter((_, current) => current !== index))}
+                    aria-label={`Remove ${attachment.name || 'image'}`}
+                    data-testid={`chat-attachment-remove-${index}`}
+                    style={{
+                      marginLeft: 'auto',
+                      flex: '0 0 auto',
+                      width: '22px',
+                      height: '22px',
+                      borderRadius: '999px',
+                      border: '1px solid var(--line)',
+                      background: 'var(--bg-elev2)',
+                      color: 'var(--fg)',
+                      fontSize: '13px',
+                      lineHeight: '18px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    x
+                  </button>
+                </div>
+              );
+            })}
           </div>
         )}
 
@@ -484,6 +544,7 @@ const ChatComposer = memo(function ChatComposer({ blockedReason, multimodal, onC
 type AssistantThreadMessageProps = {
   messageFeedback: Record<string, { type: string; rating?: number }>;
   onCopy: (content: string) => void;
+  onRetry: (messageId: string) => void;
   onSendFeedback: (message: ThreadMessage, signal: string) => void;
   onViewTraceAndLogs: (message: ThreadMessage) => void;
   renderAssistantContent: (content: string) => React.ReactNode;
@@ -492,6 +553,24 @@ type AssistantThreadMessageProps = {
   showDebugFooter: boolean;
   showRecallGateSignals: boolean;
 };
+
+/** Live elapsed counter shown while an assistant answer is streaming. The drive's 92.7 s wait
+ * showed only a static "Streaming" with no elapsed time and no sign of progress (B-24/M-97);
+ * the backend's per-leg spans are emitted on the streaming path this lane does not own, so this
+ * is the client-side half: a ticking elapsed time so the operator can see it is still working. */
+const StreamingElapsed = memo(function StreamingElapsed({ startedAtMs }: { startedAtMs: number }) {
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+  const seconds = Math.max(0, Math.floor((nowMs - startedAtMs) / 1000));
+  return (
+    <span data-testid="chat-streaming-elapsed" style={{ color: 'var(--accent-text)', fontWeight: 700 }}>
+      Streaming · {seconds}s
+    </span>
+  );
+});
 
 function formatConfidence(value?: number | null): string | null {
   if (value === undefined || value === null || Number.isNaN(value)) return null;
@@ -652,7 +731,7 @@ function AssistantThreadMessage(props: AssistantThreadMessageProps) {
           <span>{message.createdAt.toLocaleTimeString()}</span>
           {providerName ? <span style={{ color: 'var(--fg-muted)' }}>{providerName}</span> : null}
           {message.role === 'assistant' && messageStatus?.type === 'running' ? (
-            <span style={{ color: 'var(--accent-text)', fontWeight: 700 }}>Streaming</span>
+            <StreamingElapsed startedAtMs={custom.startedAtMs ?? message.createdAt.getTime()} />
           ) : null}
           {message.role === 'assistant' && webGrounding?.web_requested ? (
             <span
@@ -675,7 +754,7 @@ function AssistantThreadMessage(props: AssistantThreadMessageProps) {
               display: 'inline-block',
               background:
                 custom.confidence > 0.7
-                  ? 'var(--success)'
+                  ? 'var(--ok)'
                   : custom.confidence > 0.4
                     ? 'var(--warn)'
                     : 'var(--err)',
@@ -698,6 +777,7 @@ function AssistantThreadMessage(props: AssistantThreadMessageProps) {
               <StructuredErrorCard error={custom.structuredError} />
             ) : isAssistantError ? (
               <div
+                data-testid="chat-assistant-error"
                 style={{
                   marginTop: '10px',
                   padding: '10px 12px',
@@ -705,10 +785,35 @@ function AssistantThreadMessage(props: AssistantThreadMessageProps) {
                   background: 'rgba(214, 79, 79, 0.12)',
                   border: '1px solid rgba(214, 79, 79, 0.35)',
                   color: 'var(--fg)',
-                  fontSize: '12px',
+                  fontSize: '12.5px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '12px',
+                  flexWrap: 'wrap',
                 }}
               >
-                Generation ended with an error.
+                <span>
+                  {(messageStatus?.type === 'incomplete' && typeof messageStatus.error === 'string' && messageStatus.error) ||
+                    'Generation ended with an error.'}
+                </span>
+                <button
+                  type="button"
+                  data-testid="chat-retry"
+                  onClick={() => props.onRetry(message.id)}
+                  style={{
+                    background: 'var(--bg-elev2)',
+                    color: 'var(--accent-text)',
+                    border: '1px solid var(--accent)',
+                    padding: '6px 12px',
+                    borderRadius: '8px',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Retry
+                </button>
               </div>
             ) : null}
           </>
@@ -755,33 +860,39 @@ function AssistantThreadMessage(props: AssistantThreadMessageProps) {
           </div>
         )}
 
-        {props.showCitations && (sources.length > 0 || legacyCitations.length > 0 || webCitations.length > 0) && (
-          <SourceList sources={sources} legacyCitations={legacyCitations} webCitations={webCitations} />
-        )}
+        {props.showCitations &&
+          (sources.length > 0 || legacyCitations.length > 0 || webCitations.length > 0 || (custom.attachedImageCount ?? 0) > 0) && (
+            <SourceList
+              sources={sources}
+              legacyCitations={legacyCitations}
+              webCitations={webCitations}
+              attachedImageCount={custom.attachedImageCount ?? 0}
+            />
+          )}
 
         <div
           style={{
             marginTop: '10px',
-            fontSize: '10px',
+            fontSize: '11.5px',
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
             gap: '10px',
-            opacity: 0.78,
             flexWrap: 'wrap',
           }}
         >
-          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
             <button
               type="button"
               onClick={() => props.onCopy(text)}
               style={{
                 background: 'none',
                 border: 'none',
-                color: 'inherit',
+                color: 'var(--fg-muted)',
                 cursor: 'pointer',
                 padding: '0',
-                fontSize: '10px',
+                fontSize: '11.5px',
+                fontWeight: 600,
               }}
             >
               Copy
@@ -793,10 +904,11 @@ function AssistantThreadMessage(props: AssistantThreadMessageProps) {
                 style={{
                   background: 'none',
                   border: 'none',
-                  color: 'inherit',
+                  color: 'var(--fg-muted)',
                   cursor: 'pointer',
                   padding: '0',
-                  fontSize: '10px',
+                  fontSize: '11.5px',
+                  fontWeight: 600,
                 }}
               >
                 Trace
@@ -805,16 +917,16 @@ function AssistantThreadMessage(props: AssistantThreadMessageProps) {
           </div>
 
           {message.role === 'assistant' ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: 'auto' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginLeft: 'auto' }}>
               {props.messageFeedback[message.id] ? (
-                <span style={{ color: 'var(--success)' }}>Feedback saved</span>
+                <span style={{ color: 'var(--ok)', fontWeight: 700 }}>Feedback saved</span>
               ) : (
                 <>
                   <button
                     type="button"
                     data-testid="chat-feedback-thumbsup"
                     onClick={() => props.onSendFeedback(message, 'thumbsup')}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px', padding: 0 }}
+                    style={{ background: 'none', border: 'none', color: 'var(--ok)', cursor: 'pointer', fontSize: '12px', fontWeight: 700, padding: 0 }}
                   >
                     Helpful
                   </button>
@@ -822,7 +934,7 @@ function AssistantThreadMessage(props: AssistantThreadMessageProps) {
                     type="button"
                     data-testid="chat-feedback-thumbsdown"
                     onClick={() => props.onSendFeedback(message, 'thumbsdown')}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px', padding: 0 }}
+                    style={{ background: 'none', border: 'none', color: 'var(--fg-muted)', cursor: 'pointer', fontSize: '12px', fontWeight: 700, padding: 0 }}
                   >
                     Not helpful
                   </button>
@@ -980,6 +1092,10 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
   const requestAbortControllerRef = useRef<AbortController | null>(null);
   const activeRequestTokenRef = useRef(0);
   const sessionsLoadedRef = useRef(false);
+  // False until the first load off storage. Only that initial hydration reconciles abandoned
+  // 'running' messages (M-93); a mirror-triggered reload while another instance streams must
+  // NOT, or it would flip the live stream to "interrupted" in the docked copy.
+  const hydratedRef = useRef(false);
   const sendingRef = useRef(false);
   /** A mirror event that arrived while this instance was streaming, replayed when it ends. */
   const pendingReloadRef = useRef(false);
@@ -1123,9 +1239,25 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
 
   const loadChatHistory = useCallback(() => {
     try {
-      const { sessions, activeSession, removeLegacyHistory } = loadChatSessionsFromStorage(localStorage, chatHistoryMax);
+      const loaded = loadChatSessionsFromStorage(localStorage, chatHistoryMax);
+      const { removeLegacyHistory } = loaded;
+      let { sessions, activeSession } = loaded;
+      // Only the very first hydration cleans abandoned streams (a reload or an un-finalized
+      // Stop left them 'running'). A later reload is a mirror of another instance that may be
+      // actively streaming; leave its 'running' message alone.
+      if (!hydratedRef.current) {
+        hydratedRef.current = true;
+        const activeId = String(activeSession.conversation_id || '').trim();
+        sessions = sessions.map((session) => {
+          const { messages, changed } = reconcileInterruptedMessages(session.messages);
+          return changed ? { ...session, messages } : session;
+        });
+        activeSession = sessions.find((s) => String(s.conversation_id || '').trim() === activeId) || sessions[0] || activeSession;
+      }
       setChatSessions(sessions);
       sessionsLoadedRef.current = true;
+      // persistChatSessions no-ops its broadcast when the bytes are unchanged, so this only
+      // rewrites storage (and notifies the dock) when a stream was actually reconciled.
       persistSessions(sessions, String(activeSession.conversation_id || '').trim());
       activateSession(activeSession);
       if (removeLegacyHistory) {
@@ -1541,7 +1673,9 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
 
         if (!isRequestTokenActive(requestToken)) return;
 
+        const attachedImageCount = getMessageImages(userMessage).length;
         const custom = {
+          attachedImageCount: attachedImageCount > 0 ? attachedImageCount : undefined,
           confidence: typeof result.debug?.confidence === 'number' ? result.debug.confidence : undefined,
           correlationId: result.headers.correlationId,
           debug: result.debug,
@@ -1578,7 +1712,14 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
         emitRunComplete(result.runId, result.startedAtMs, result.endedAtMs);
       } catch (error) {
         const abortReason = toAbortReason(error, abortController.signal);
-        if (!isRequestTokenActive(requestToken)) return;
+        // A user Stop ('user_cancel') or a timeout must finalize THIS assistant message even
+        // though resetTransientChatState already bumped the request token — there is no
+        // successor turn, and the early token guard is what left the bubble 'running' forever
+        // (M-93). A 'superseded'/'session_change'/'unmount' abort, and any non-abort error,
+        // keep the guard: a newer turn or view owns the UI and must not be clobbered.
+        const userInitiatedAbort =
+          abortReason === CHAT_REQUEST_ABORT_TIMEOUT || abortReason === CHAT_REQUEST_ABORT_USER_CANCEL;
+        if (!userInitiatedAbort && !isRequestTokenActive(requestToken)) return;
 
         if (abortReason) {
           const message = abortReason === CHAT_REQUEST_ABORT_TIMEOUT
@@ -1688,7 +1829,7 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
     isRunning: sending,
     messages,
     onCancel: async () => {
-      resetTransientChatState('user_cancel');
+      resetTransientChatState(CHAT_REQUEST_ABORT_USER_CANCEL);
     },
     onNew: handleAssistantUiAppend,
     suggestions: WELCOME_PROMPTS.map((prompt) => ({ prompt })),
@@ -1715,6 +1856,40 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
       void runUserTurn(userMessage);
     },
     [runUserTurn],
+  );
+
+  // Re-run the user turn behind a failed or interrupted assistant message. Both the interrupted
+  // bubble and the user message that prompted it are dropped, then the user message is replayed
+  // (runUserTurn re-appends it), so the thread does not accumulate a duplicate question (B-07).
+  // Any images survive only while they are still in the message content (a reload strips them),
+  // which is the honest limit of a text-first retry.
+  const handleRetry = useCallback(
+    (assistantId: string) => {
+      if (sendingRef.current) return;
+      const current = messagesRef.current;
+      const assistantIndex = current.findIndex((message) => message.id === assistantId && message.role === 'assistant');
+      if (assistantIndex < 0) return;
+      let userIndex = -1;
+      for (let i = assistantIndex - 1; i >= 0; i -= 1) {
+        if (current[i].role === 'user') {
+          userIndex = i;
+          break;
+        }
+      }
+      if (userIndex < 0) return;
+      const priorUser = current[userIndex] as ThreadUserMessage;
+      const replayUser: ThreadUserMessage = {
+        ...priorUser,
+        id: `user-${Date.now()}-retry`,
+        createdAt: new Date(),
+      };
+      const trimmed = current.filter((_, index) => index !== assistantIndex && index !== userIndex);
+      messagesRef.current = trimmed;
+      setMessages(trimmed);
+      saveChatHistory(trimmed);
+      void runUserTurn(replayUser);
+    },
+    [runUserTurn, saveChatHistory],
   );
 
   const handleCleanupUnindexed = useCallback(async () => {
@@ -1793,10 +1968,15 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
   );
 
   const handleExport = useCallback(() => {
+    const exportMessages = messagesRef.current;
+    if (exportMessages.length === 0) {
+      showToast('Nothing to export yet — this chat has no messages.', 'info');
+      return;
+    }
     const exportData = {
       exported: new Date().toISOString(),
       conversation_id: conversationIdRef.current,
-      messages: messagesRef.current.map((message) => ({
+      messages: exportMessages.map((message) => ({
         role: message.role,
         createdAt: message.createdAt.toISOString(),
         text: getMessageText(message),
@@ -1805,12 +1985,21 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
     };
     const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
+    const filename = `chat-export-${Date.now()}.json`;
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = `chat-export-${Date.now()}.json`;
+    anchor.download = filename;
+    anchor.rel = 'noopener';
+    anchor.style.display = 'none';
+    // The anchor must be in the document and the object URL must outlive the click: the old
+    // code called URL.revokeObjectURL synchronously on the next line, which cancels the
+    // download in Chromium before it starts (B-26 — "no download, ~/Downloads unchanged").
+    document.body.appendChild(anchor);
     anchor.click();
-    URL.revokeObjectURL(url);
-  }, []);
+    document.body.removeChild(anchor);
+    window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    showToast(`Exported ${exportMessages.length} message${exportMessages.length === 1 ? '' : 's'} to ${filename}.`, 'success');
+  }, [showToast]);
 
   const handleCopy = useCallback((content: string) => {
     navigator.clipboard.writeText(content);
@@ -1895,6 +2084,7 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
 
           <button
             type="button"
+            data-testid="chat-export"
             onClick={handleExport}
             style={{
               background: 'var(--bg-elev2)',
@@ -2027,7 +2217,7 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
           />
         )}
 
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
           <AssistantRuntimeProvider runtime={runtime}>
             <ThreadPrimitive.Root
               style={{
@@ -2035,6 +2225,7 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
                 flexDirection: 'column',
                 flex: 1,
                 minHeight: 0,
+                minWidth: 0,
               }}
             >
               <ThreadPrimitive.Viewport
@@ -2042,8 +2233,13 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
                 style={{
                   flex: 1,
                   overflowY: 'auto',
+                  // A wide code block or an unbreakable string used to grow the whole list
+                  // sideways at 1024px (M-97). Clip here; wide code scrolls inside its own
+                  // container (AssistantMarkdown) rather than the message list.
+                  overflowX: 'hidden',
                   padding: '18px',
                   minHeight: 0,
+                  minWidth: 0,
                 }}
               >
                 <AuiIf condition={(state) => state.thread.isEmpty}>
@@ -2055,6 +2251,7 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
                     <AssistantThreadMessage
                       messageFeedback={messageFeedback}
                       onCopy={handleCopy}
+                      onRetry={handleRetry}
                       onSendFeedback={(message, signal) => {
                         const custom = getMessageCustom(message);
                         void sendFeedback(custom.eventId ?? custom.runId, message.id, signal);
@@ -2114,7 +2311,7 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
             <ChatComposer
               blockedReason={chatBlockedReason}
               multimodal={multimodalCfg}
-              onCancel={() => resetTransientChatState('user_cancel')}
+              onCancel={() => resetTransientChatState(CHAT_REQUEST_ABORT_USER_CANCEL)}
               onSend={handleSend}
               sending={sending}
             />
