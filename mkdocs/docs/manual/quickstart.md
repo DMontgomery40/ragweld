@@ -39,6 +39,14 @@
 !!! note "Ports are configurable"
     `./start.sh` honors `BACKEND_PORT` and `FRONTEND_PORT`. If you change ports, update your curl examples accordingly.
 
+    Environment variables you export in your shell **win over `.env`**: `start.sh` snapshots every exported variable before sourcing `.env` and restores that exact snapshot afterwards, so `.env` only fills in the keys you did not already set. A caller-provided `BACKEND_PORT=59999` therefore survives even a `.env` that hardcodes `BACKEND_PORT` for the deployed default.
+
+!!! tip "If a port override seems ignored"
+    - Confirm the variable is actually **exported** (`BACKEND_PORT=59999 ./start.sh` or `export BACKEND_PORT=59999` first) — unexported shell variables are not visible to the script.
+    - Check `/api/health` on the port you expected: the backend logs the `--port` value it was launched with.
+    - If you're not sure what the effective value was, run `./start.sh --check` and read the rendered port in its output.
+
+
 ## 1) Start everything
 
 From the repo root:

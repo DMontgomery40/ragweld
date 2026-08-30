@@ -32,6 +32,11 @@
 !!! note "Environment Template"
     Copy the provided environment configuration to `.env`, fill in DB credentials and API keys, and export it into your shell for local runs.
 
+!!! tip "Precedence: shell environment beats `.env`"
+    `./start.sh` sources `.env` with `set -a`, but it first snapshots every exported variable in your shell and restores that exact snapshot after sourcing. The practical effect: **caller-provided environment always wins over `.env`** — `.env` fills in only the keys you did not already set. This matters for ports (`BACKEND_PORT`, `FRONTEND_PORT`), provider keys you inject from a secret manager, and any CI runner that exports configuration before invoking `./start.sh`.
+
+    The snapshot/restore uses `export -p` + `eval` rather than bash-4 associative arrays, so the behavior is identical under macOS's stock bash 3.2. A regression here (a `.env` value silently clobbering an exported override) is caught by `tests/unit/test_runtime_lifecycle.py`.
+
 !!! warning "Production Secrets"
     Use a secret manager for API keys and DB credentials in production. Do not rely on `.env` files in containerized environments.
 

@@ -47,6 +47,16 @@
 | Retrieval logic | pytest: search returns relevant results |
 | Bug fix | Test reproduces bug, then passes after fix |
 
+### Environment hygiene in tests (enforced)
+
+Tests that mutate `os.environ` must restore what they touched. A raw `os.environ.pop("KEY", None)` with no `finally`-guaranteed restore leaks across **every later test in the same pytest process** — the motivating bug was an unrestored `os.environ.pop("LITELLM_API_KEY", None)` in `tests/unit/test_reranker.py` that silently failed 17 unrelated `tests/api` tests which each passed in isolation.
+
+- [ ] Prefer the patching fixtures: `monkeypatch.delenv("KEY", raising=False)` / `monkeypatch.setenv(...)` — they restore automatically on teardown.
+- [ ] If you must touch `os.environ` directly (for example, snapshotting the whole environ for a wide seam like `RAGWELD_SYNTHETIC_RUNS_ROOT`), restore it in a `try/finally` — `os.environ.clear()` + `os.environ.update(previous_env)` in the `finally` counts as a wildcard restore.
+- [ ] A architecture-policy test parses every file under `tests/` and fails on any raw `os.environ.pop(...)` / `del os.environ[...]` that is not paired with a restore of the same key (or a wildcard restore) in a `finally` body — see `tests/unit/test_architecture_policy.py::test_no_unrestored_os_environ_mutations_in_tests`.
+
+The same discipline is enforced at the shell boundary: `start.sh` snapshots and restores the exported environment around `source .env` so a `.env` value can never clobber a caller-provided override (covered by `tests/unit/test_runtime_lifecycle.py`). If you add a test that needs to mutate `os.environ` directly, restore in `finally` or use `monkeypatch` — the policy test will reject anything else.
+
 ### Examples
 
 === "Python"
