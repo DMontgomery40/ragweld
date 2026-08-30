@@ -12,24 +12,29 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import os
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from server.db.postgres import PostgresClient
 from server.indexing.embedder import Embedder
 from server.indexing.text_extractors import document_kind_for_path, extraction_method_for_path
+from server.lineage.registry import resolve_project_path
 from server.models.chat import Message
 from server.models.chat_config import RecallConfig
 from server.models.index import Chunk, IndexedDocumentRecord
+from server.models.tribrid_config_model import validate_corpus_id_component
 from server.retrieval.contracts import contract_hash
 from server.retrieval.errors import EmbeddingContractMismatchError, SparseContractMismatchError
 from server.retrieval.qdrant_store import QdrantChunkStore
 
-_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+logger = logging.getLogger(__name__)
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 
 # Conversation ids reach this module straight from the client (`ChatRequest.conversation_id`
 # is used verbatim by ConversationStore.get_or_create) and now name a file on disk, so the
@@ -41,34 +46,54 @@ _CONVERSATION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _CONVERSATION_DIR = "conversations"
 
 
-def recall_corpus_root(corpus_id: str) -> Path:
-    """Absolute on-disk root of a recall corpus.
+class RecallConversationIdError(ValueError):
+    """A conversation id that cannot safely name a file inside the recall corpus root."""
 
-    Absolute, because the registry row is read by every process (the API resolving a viewer
-    path, the indexer estimating a run) and a relative ``data/recall`` resolves against
-    whichever project root that process happens to have.
 
-    Per corpus id, because ``RecallConfig.default_corpus_id`` is configurable: two recall
-    corpora must not write conversations of the same id over each other.
+def configured_recall_root(config: RecallConfig, corpus_id: str | None = None) -> Path:
+    """The root a recall corpus is CREATED under, from configuration only.
+
+    Read from `RecallConfig.corpus_root` (a typed tunable), never from this module's own
+    location: a process's checkout must not be able to decide where the operator's recall
+    documents live. `RAGWELD_RECALL_ROOT` is the isolation seam, the same contract as
+    `RAGWELD_LINEAGE_ROOT` and `RAGWELD_SYNTHETIC_RUNS_ROOT`, so a disposable lane can point
+    its own runs somewhere harmless.
+
+    Once a corpus exists this value is NOT consulted: `recall_corpus_root_from_row` reads the
+    registry, which is the one thing every process shares.
     """
-    return PROJECT_ROOT / "data" / "recall" / validate_conversation_id(corpus_id, kind="corpus id")
+    raw = str(os.environ.get("RAGWELD_RECALL_ROOT") or "").strip() or str(config.corpus_root)
+    base = resolve_project_path(raw)
+    cid = str(corpus_id if corpus_id is not None else config.default_corpus_id)
+    return base / validate_corpus_id_component(cid)
 
 
-def recall_conversation_path(corpus_id: str, conversation_id: str) -> Path:
-    """Absolute path of one conversation's markdown inside its recall corpus."""
-    return recall_corpus_root(corpus_id) / _CONVERSATION_DIR / f"{validate_conversation_id(conversation_id)}.md"
+def recall_corpus_root_from_row(corpus_row: Mapping[str, Any]) -> Path:
+    """The root of an EXISTING recall corpus, as the shared registry records it.
+
+    Reader and writer must agree, so this resolves a registry `path` exactly the way the
+    document viewer does (`server/api/documents.py`).
+    """
+    return resolve_project_path(str(corpus_row.get("path") or ""))
 
 
-def validate_conversation_id(conversation_id: str, *, kind: str = "conversation id") -> str:
-    """Return the id if it can safely name a file inside the corpus root; raise otherwise."""
+def recall_conversation_path(root: Path, conversation_id: str) -> Path:
+    """Absolute path of one conversation's markdown inside a resolved recall corpus root."""
+    return Path(root) / _CONVERSATION_DIR / f"{validate_conversation_id(conversation_id)}.md"
+
+
+def validate_conversation_id(conversation_id: str) -> str:
+    """Return the id if it can safely name a file inside the corpus root; raise otherwise.
+
+    Raises `RecallConversationIdError` so callers can answer a typed 4xx instead of turning
+    a bad request into a 500.
+    """
     text = str(conversation_id or "")
     if not _CONVERSATION_ID_RE.match(text):
-        raise ValueError(
-            f"Unsupported recall {kind}: it must be 1-128 characters of letters, digits, "
-            "'.', '_' or '-' and start with a letter or digit."
+        raise RecallConversationIdError(
+            "Unsupported recall conversation id: it must be 1-128 characters of letters, "
+            "digits, '.', '_' or '-' and start with a letter or digit."
         )
-    if text in {".", ".."} or text.startswith("."):
-        raise ValueError(f"Unsupported recall {kind}: it must not start with '.'.")
     return text
 
 
@@ -157,32 +182,34 @@ async def _ensure_recall_contracts(
         )
 
 
-async def ensure_recall_corpus(pg: PostgresClient, config: RecallConfig) -> None:
-    """Ensure the Recall corpus exists in Postgres.
+async def ensure_recall_corpus(pg: PostgresClient, config: RecallConfig) -> Path:
+    """Ensure the Recall corpus exists in Postgres; return the root it is registered under.
 
     Recall is stored using the existing `corpora` + `chunks` tables under
     repo_id == config.default_corpus_id; its vectors live in Qdrant like any
     other corpus.
+
+    An EXISTING row's `root_path` is never rewritten. It is one row in one shared Postgres,
+    and this runs on the chat hot path, so any process serving a request from another
+    checkout would otherwise repoint the operator's recall corpus at its own tree - the
+    same class of defect (a path that means something different per process) that M-04
+    exists to fix, moved to a write on shared state where the last writer wins.
     """
     repo_id = config.default_corpus_id
-    root = recall_corpus_root(repo_id)
-    await asyncio.to_thread(lambda: (root / _CONVERSATION_DIR).mkdir(parents=True, exist_ok=True))
-
     existing = await pg.get_corpus(repo_id)
     if existing is not None:
-        # "Ensure" includes the root path: rows written before recall had documents on disk
-        # recorded a relative ``data/recall``, which resolves differently in every process.
-        if str(existing.get("path") or "") != str(root):
-            await pg.update_corpus(repo_id, path=str(root))
-        return
-
-    await pg.upsert_corpus(
-        repo_id=repo_id,
-        name="Recall",
-        root_path=str(root),
-        description="Persistent chat recall corpus (auto-managed)",
-        meta={"system_kind": "recall", "pinned": True},
-    )
+        root = recall_corpus_root_from_row(existing)
+    else:
+        root = configured_recall_root(config, repo_id)
+        await pg.upsert_corpus(
+            repo_id=repo_id,
+            name="Recall",
+            root_path=str(root),
+            description="Persistent chat recall corpus (auto-managed)",
+            meta={"system_kind": "recall", "pinned": True},
+        )
+    await asyncio.to_thread(lambda: (root / _CONVERSATION_DIR).mkdir(parents=True, exist_ok=True))
+    return root
 
 
 def build_recall_document(
@@ -271,7 +298,7 @@ async def index_recall_conversation(
     # Before any side effect: a conversation that cannot be stored under a safe name must
     # not leave a corpus row, a directory or a contract behind.
     validate_conversation_id(conversation_id)
-    await ensure_recall_corpus(pg, config)
+    root = await ensure_recall_corpus(pg, config)
     await _ensure_recall_contracts(
         pg,
         repo_id=config.default_corpus_id,
@@ -284,7 +311,9 @@ async def index_recall_conversation(
         return 0
 
     repo_id = config.default_corpus_id
-    path = recall_conversation_path(repo_id, conversation_id)
+    # The root comes from the registry row, which is what the viewer reads: writer and
+    # reader cannot disagree about where a conversation lives.
+    path = recall_conversation_path(root, conversation_id)
     # The document lands before its rows: a chunk row must never cite a file that is not there.
     sha256, byte_size = await asyncio.to_thread(_write_recall_document, path, doc.markdown)
 

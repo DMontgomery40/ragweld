@@ -2053,6 +2053,8 @@ export interface RecallConfig {
   max_history_tokens?: number; // default: 4096
   /** Auto-created at first launch. Users never touch this. */
   default_corpus_id?: string; // default: "recall_default"
+  /** Directory a recall corpus is created under, one subdirectory per corpus id. Relative values resolve against the project root; RAGWELD_RECALL_ROOT overrides it for disposable lanes. Only consulted when the corpus is created - after that the registry row's path is authoritative, so every process agrees. */
+  corpus_root?: string; // default: "data/recall"
   /** Enable Recall graph indexing + retrieval (experimental). */
   graph_enabled?: boolean; // default: False
 }

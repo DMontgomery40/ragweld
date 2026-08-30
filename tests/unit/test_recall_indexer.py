@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from server.chat.recall_indexer import (
+    RecallConversationIdError,
     build_recall_document,
+    configured_recall_root,
     recall_conversation_path,
-    recall_corpus_root,
+    recall_corpus_root_from_row,
 )
 from server.models.chat import Message
 from server.models.chat_config import RecallConfig
@@ -156,7 +160,7 @@ def test_a_conversation_id_that_could_escape_the_corpus_is_refused(conversation_
     """Recall conversation ids come straight from the client and now name a file on disk."""
     cfg = RecallConfig(chunking_strategy="turn")
     ts = datetime(2026, 5, 5, 0, 0, 0, tzinfo=UTC)
-    with pytest.raises(ValueError):
+    with pytest.raises(RecallConversationIdError):
         build_recall_document(
             conversation_id=conversation_id,
             messages=[Message(role="user", content="hello", timestamp=ts)],
@@ -164,17 +168,87 @@ def test_a_conversation_id_that_could_escape_the_corpus_is_refused(conversation_
         )
 
 
-def test_the_recall_corpus_root_is_absolute_and_per_corpus() -> None:
-    """The registry stores an absolute root, so every process resolves the same directory."""
-    root_a = recall_corpus_root("recall_default")
-    root_b = recall_corpus_root("recall_other")
-    assert root_a.is_absolute()
-    assert root_a != root_b
-    assert root_a.name == "recall_default"
+def test_the_conversation_id_refusal_is_typed_so_the_api_can_answer_4xx() -> None:
+    """A bare ValueError at the router became a 500 for what is a bad request."""
+    assert issubclass(RecallConversationIdError, ValueError)
 
 
-def test_the_conversation_path_stays_inside_the_recall_corpus_root() -> None:
-    root = recall_corpus_root("recall_default")
-    path = recall_conversation_path("recall_default", "conv_123")
-    assert path == root / "conversations" / "conv_123.md"
-    assert Path(path).is_relative_to(root)
+def test_a_registered_corpus_root_does_not_depend_on_the_reading_process(tmp_path: Path) -> None:
+    """Two processes in different worktrees must resolve one corpus to one directory.
+
+    The registry row is the only thing they share, so it is the authority. This is the
+    defect class M-04 exists to fix; deriving the root from the running module's own
+    location just moved it from read time to a write on shared state.
+    """
+    row = {"repo_id": "recall_default", "path": str(tmp_path / "srv" / "recall" / "recall_default")}
+    worktree_a = tmp_path / "worktree-a"
+    worktree_b = tmp_path / "worktree-b"
+    worktree_a.mkdir()
+    worktree_b.mkdir()
+
+    origin = Path.cwd()
+    try:
+        os.chdir(worktree_a)
+        from_a = recall_corpus_root_from_row(row)
+        os.chdir(worktree_b)
+        from_b = recall_corpus_root_from_row(row)
+    finally:
+        os.chdir(origin)
+
+    assert from_a == from_b
+    assert from_a.is_absolute()
+    assert from_a.name == "recall_default"
+
+
+def test_the_creation_root_comes_from_config_not_from_this_module() -> None:
+    cfg = RecallConfig(corpus_root="/srv/ragweld/recall")
+    assert configured_recall_root(cfg, "recall_default") == Path("/srv/ragweld/recall/recall_default")
+
+
+def test_the_isolation_seam_overrides_the_configured_root() -> None:
+    """Same contract as RAGWELD_LINEAGE_ROOT: a disposable lane points its runs elsewhere."""
+    cfg = RecallConfig(corpus_root="/srv/ragweld/recall")
+    previous = os.environ.get("RAGWELD_RECALL_ROOT")
+    os.environ["RAGWELD_RECALL_ROOT"] = "/tmp/lane-recall"
+    try:
+        assert configured_recall_root(cfg, "recall_default") == Path("/tmp/lane-recall/recall_default")
+    finally:
+        if previous is None:
+            os.environ.pop("RAGWELD_RECALL_ROOT", None)
+        else:
+            os.environ["RAGWELD_RECALL_ROOT"] = previous
+
+
+@pytest.mark.parametrize("corpus_id", ["a/b", "a\\b", ".", "..", "", "  ", "with space"])
+def test_a_corpus_id_that_is_not_one_path_component_is_refused(corpus_id: str) -> None:
+    with pytest.raises(ValueError):
+        configured_recall_root(RecallConfig(), corpus_id)
+
+
+def test_a_corpus_id_the_registry_accepts_is_not_rejected_here(tmp_path: Path) -> None:
+    """Regression: the corpus id used the CONVERSATION regex, which is strictly narrower.
+
+    `_recall` is a legal corpus id by `validate_corpus_id_component`, but the conversation
+    rule requires an alphanumeric first character - and because `ensure_recall_corpus` runs
+    on the chat hot path, that turned every send into a 500 for such a configured id.
+    """
+    cfg = RecallConfig(default_corpus_id="_recall", corpus_root=str(tmp_path))
+    assert configured_recall_root(cfg) == tmp_path / "_recall"
+
+
+@pytest.mark.parametrize("corpus_id", ["_recall", "recall.v2", "recall-2026"])
+def test_recall_config_accepts_every_id_the_corpus_rule_allows(corpus_id: str) -> None:
+    assert RecallConfig(default_corpus_id=corpus_id).default_corpus_id == corpus_id
+
+
+@pytest.mark.parametrize("corpus_id", ["a/b", "..", "", "two words"])
+def test_recall_config_refuses_an_id_it_could_never_store(corpus_id: str) -> None:
+    """Refused at config load, not deep inside a request."""
+    with pytest.raises(ValidationError):
+        RecallConfig(default_corpus_id=corpus_id)
+
+
+def test_the_conversation_path_stays_inside_the_recall_corpus_root(tmp_path: Path) -> None:
+    path = recall_conversation_path(tmp_path, "conv_123")
+    assert path == tmp_path / "conversations" / "conv_123.md"
+    assert Path(path).is_relative_to(tmp_path)

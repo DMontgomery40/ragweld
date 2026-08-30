@@ -27,7 +27,7 @@ from server.chat.handler import ChatGenerationError, chat_once
 from server.chat.handler import chat_stream as chat_stream_handler
 from server.chat.model_discovery import discover_litellm_models
 from server.chat.prompt_budget import PromptBudgetError
-from server.chat.recall_indexer import index_recall_conversation
+from server.chat.recall_indexer import RecallConversationIdError, index_recall_conversation
 from server.chat.source_router import resolve_sources
 from server.db.postgres import PostgresClient
 from server.gateway_catalog import gateway_rows_by_alias_cached
@@ -432,6 +432,12 @@ async def chat(request: ChatRequest, response: Response) -> ChatResponse:
                         logger.warning(
                             "Recall auto-index blocked by embedding contract mismatch: %s", e
                         )
+                    except RecallConversationIdError as e:
+                        # Nothing retrieves this task's exception, so an unlogged raise here
+                        # is a conversation that silently never enters recall.
+                        logger.warning(
+                            "Recall auto-index skipped for conversation %s: %s", conv.id, e
+                        )
 
                 asyncio.create_task(_do_index())
 
@@ -664,6 +670,14 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                             except RetrievalContractMismatchError as e:
                                 logger.warning(
                                     "Recall auto-index blocked by embedding contract mismatch: %s", e
+                                )
+                            except RecallConversationIdError as e:
+                                # Same as above: an unretrieved task exception would drop
+                                # this conversation out of recall with no trace.
+                                logger.warning(
+                                    "Recall auto-index skipped for conversation %s: %s",
+                                    conv.id,
+                                    e,
                                 )
 
                         asyncio.create_task(_do_index())
@@ -968,6 +982,9 @@ async def recall_index(request: RecallIndexRequest) -> RecallIndexResponse:
         )
     except RetrievalContractMismatchError as e:
         raise retrieval_contract_mismatch_http_exception(e) from e
+    except RecallConversationIdError as e:
+        # A conversation id this cannot store is a bad request, not a server fault.
+        raise HTTPException(status_code=422, detail=str(e)) from e
     return RecallIndexResponse(ok=True, conversation_id=request.conversation_id, chunks_indexed=int(n))
 
 

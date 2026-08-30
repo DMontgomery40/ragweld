@@ -6592,10 +6592,29 @@ class RecallConfig(BaseModel):
         default="recall_default",
         description="Auto-created at first launch. Users never touch this.",
     )
+    corpus_root: str = Field(
+        default="data/recall",
+        description=(
+            "Directory a recall corpus is created under, one subdirectory per corpus id. "
+            "Relative values resolve against the project root; RAGWELD_RECALL_ROOT overrides "
+            "it for disposable lanes. Only consulted when the corpus is created - after that "
+            "the registry row's path is authoritative, so every process agrees."
+        ),
+    )
     graph_enabled: bool = Field(
         default=False,
         description="Enable Recall graph indexing + retrieval (experimental).",
     )
+
+    @field_validator("default_corpus_id")
+    @classmethod
+    def _validate_default_corpus_id(cls, value: str) -> str:
+        """The recall corpus id names a directory, so it must obey the corpus-id rule.
+
+        Refused at config load rather than deep in the chat hot path: `ensure_recall_corpus`
+        runs on every send, so an id this could not store used to turn each one into a 500.
+        """
+        return validate_corpus_id_component(value)
 
 
 class ChatMultimodalConfig(BaseModel):
