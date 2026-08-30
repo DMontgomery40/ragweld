@@ -38,7 +38,7 @@
 | `training.learning_reranker_backend` | `LEARNING_RERANKER_BACKEND` | `Literal["auto", "mlx_qwen3"]` | `"auto"` | allowed="auto", "mlx_qwen3" | Learning reranker backend: auto (prefer MLX Qwen3 on Apple Silicon), mlx_qwen3 (force). Stale values such as 'transformers'/'hf'/'mlx' fail validation and must be migrated. |
 | `training.learning_reranker_base_model` | `LEARNING_RERANKER_BASE_MODEL` | `str` | `"Qwen/Qwen3-Reranker-0.6B"` | — | Base model to fine-tune for MLX Qwen3 learning reranker |
 | `training.learning_reranker_grad_accum_steps` | `LEARNING_RERANKER_GRAD_ACCUM_STEPS` | `int` | `8` | ≥ 1, ≤ 128 | Gradient accumulation steps per optimizer update for MLX Qwen3 learning reranker training |
-| `training.learning_reranker_lora_alpha` | `LEARNING_RERANKER_LORA_ALPHA` | `float` | `32.0` | > 0.0, ≤ 512.0 | LoRA alpha for MLX Qwen3 learning reranker |
+| `training.learning_reranker_lora_alpha` | `LEARNING_RERANKER_LORA_ALPHA` | `float` | `32.0` | ≥ 1.0, ≤ 512.0 | LoRA alpha for MLX Qwen3 learning reranker |
 | `training.learning_reranker_lora_dropout` | `LEARNING_RERANKER_LORA_DROPOUT` | `float` | `0.05` | ≥ 0.0, ≤ 0.5 | LoRA dropout for MLX Qwen3 learning reranker |
 | `training.learning_reranker_lora_rank` | `LEARNING_RERANKER_LORA_RANK` | `int` | `16` | ≥ 1, ≤ 128 | LoRA rank for MLX Qwen3 learning reranker |
 | `training.learning_reranker_lora_target_modules` | — | `list[str]` | `["q_proj", "k_proj", "v_proj", "o_proj"]` | min_length=1 | Module name suffixes to apply LoRA to (MLX Qwen3) |
@@ -56,7 +56,7 @@
 | `training.ragweld_agent_flyte_launchplan` | `RAGWELD_AGENT_FLYTE_LAUNCHPLAN` | `str` | `""` | — | Flyte launch plan name for the Learning Agent workflow lane. |
 | `training.ragweld_agent_flyte_project` | `RAGWELD_AGENT_FLYTE_PROJECT` | `str` | `"ragweld"` | — | Flyte project that owns Learning Agent executions. |
 | `training.ragweld_agent_grad_accum_steps` | `RAGWELD_AGENT_GRAD_ACCUM_STEPS` | `int` | `8` | ≥ 1, ≤ 128 | Gradient accumulation steps per optimizer update for ragweld agent training. |
-| `training.ragweld_agent_lora_alpha` | `RAGWELD_AGENT_LORA_ALPHA` | `float` | `32.0` | > 0.0, ≤ 512.0 | LoRA alpha for ragweld agent MLX fine-tuning. |
+| `training.ragweld_agent_lora_alpha` | `RAGWELD_AGENT_LORA_ALPHA` | `float` | `32.0` | ≥ 1.0, ≤ 512.0 | LoRA alpha for ragweld agent MLX fine-tuning. |
 | `training.ragweld_agent_lora_dropout` | `RAGWELD_AGENT_LORA_DROPOUT` | `float` | `0.05` | ≥ 0.0, ≤ 0.5 | LoRA dropout for ragweld agent MLX fine-tuning. |
 | `training.ragweld_agent_lora_rank` | `RAGWELD_AGENT_LORA_RANK` | `int` | `16` | ≥ 1, ≤ 128 | LoRA rank for ragweld agent MLX fine-tuning. |
 | `training.ragweld_agent_lora_target_modules` | — | `list[str]` | `["q_proj", "k_proj", "v_proj", "o_proj"]` | min_length=1 | Module name suffixes to apply LoRA to (ragweld agent; MLX Qwen3). |

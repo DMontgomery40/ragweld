@@ -39,7 +39,7 @@
 
 | File | Purpose |
 |------|---------|
-| `web/src/stores/useConfigStore.ts` | Holds `TriBridConfig` and patch helpers |
+| `web/src/stores/useConfigStore.ts` | Holds `TriBridConfig` and patch helpers; records `fieldErrors` keyed by dotted config path from rejected section PATCHes |
 | `web/src/hooks/useConfig.ts` | Read/update config |
 | `web/src/hooks/useFusion.ts` | Fusion-related derived state |
 | `web/src/hooks/useReranker.ts` | Reranker configuration and status |
@@ -91,6 +91,25 @@ flowchart LR
     Glossary[data/glossary.json] --> Tooltip[TooltipIcon]
     Tooltip --> UI
 ```
+
+## Numeric inputs: `NumberField`
+
+Every numeric input in the frontend is `web/src/components/ui/NumberField.tsx` — the one place a raw `<input type="number">` is allowed to render. It exists so a config-bound number has one behavior everywhere: raw text while editing, a clamp to the field's Pydantic bounds at commit (blur, Tab, or Enter), then an optimistic local update followed by a debounced, deep-merged `PATCH /api/config/{section}`.
+
+Two props carry the contract:
+
+configPath
+:   The full dotted `TriBridConfig` path the field persists to (for example `enrichment.chunk_summaries_max`). When set, the per-field detail of a rejected PATCH — parsed by `web/src/utils/configPatchErrors.ts` into `useConfigStore`'s `fieldErrors` — renders under this exact field as a `role="alert"` message. Omit it for inputs that are not persisted config values (the Storage Calculator, ad-hoc request parameters): they still clamp, there is just nothing to attribute a server error to.
+
+onCommit
+:   Receives the clamped number. Clearing the box and blurring restores the last committed value — `NumberField` cannot express "the operator cleared this", so genuinely nullable overrides (Chat's per-conversation Top-K) must not use it.
+
+Two tests enforce the contract instead of trusting review:
+
+- `tests/unit/test_clean_start_defaults.py::test_every_number_field_advertises_its_pydantic_bounds` — every `NumberField`'s advertised min/max must equal the Pydantic `ge`/`le` of the config path it writes (resolved from `configPath` or a `useConfigField<number>` binding). It checks 100+ controls; a `NumberField` with neither marker must be a genuine non-config input.
+- `tests/unit/test_clean_start_defaults.py::test_no_config_editor_still_writes_a_raw_number_input` — no frontend source may contain `type="number"` outside `NumberField.tsx`, with one pinned, documented exception (Chat's Top-K override).
+
+The end-to-end behavior (clamped value persisted, raw value never posted, a rejected PATCH reverting its own optimistic edits) is proven against a live stack in `web/tests/e2e/exhaustive/numberfield_migration.spec.ts` — see [Testing](testing.md).
 
 ## Theme tokens and text contrast
 

@@ -204,3 +204,46 @@ async function patchFusion() {
 
 !!! note "UI numeric controls are clamped to the same model"
     Every numeric config control in the UI is a clamped `NumberField` whose advertised min/max match the Pydantic field it writes — the UI cannot accept a value the `PATCH /api/config/{section}` would reject, and a bound the model does not have is caught by a test against the model itself (`tests/unit/test_clean_start_defaults.py`) rather than surfacing later as an unattributed `422`. If you tighten a `ge`/`le` in Pydantic, regenerate the TypeScript types and the UI clamp follows automatically.
+
+## How numeric fields behave in the UI
+
+Every numeric config control in the workbench is one component: `web/src/components/ui/NumberField.tsx`. It exists so the question "what happens when I type a value past the bound?" has exactly one answer on every surface — Chat settings, the RAG subtabs, both training studios, Eval run settings, Data Quality, Grafana config.
+
+*Concept diagram (the commit-on-blur mechanism only — the read/patch config workflow itself is documented above):*
+
+```mermaid
+flowchart LR
+    subgraph s_field["NumberField (web/src/components/ui/NumberField.tsx)"]
+        TYPED["Operator types\\na raw value"] --> BLUR["Blur / Tab / Enter\\n= commit"]
+        BLUR --> CLAMP["Clamp to min/max\\n(= the field's Pydantic ge/le)"]
+        CLAMP --> COMMIT["onCommit\\n(optimistic local update)"]
+    end
+    COMMIT --> STORE["useConfigStore\\n(web/src/stores/useConfigStore.ts)"]
+    STORE --> PATCH["PATCH /api/config/{section}\\n(debounced, deep-merged)"]
+    PATCH --> SERVER["Section re-validated atomically\\n(server/api/config.py)"]
+    SERVER -->|"200"| SYNC["Server truth becomes\\nthe new persisted snapshot"]
+    SERVER -->|"422"| PARSE["parseConfigPatchErrors\\n(web/src/utils/configPatchErrors.ts)"]
+    PARSE --> REVERT["Revert the optimistic edits\\nthis PATCH wrote (leaf paths only)"]
+    PARSE --> ERR["fieldErrors[dotted path]\\nrendered under the field\\nas a role=alert"]
+```
+
+In practice:
+
+- **Typing is never saved.** The box holds raw text while you edit; nothing is sent until you blur, Tab, or Enter.
+- **The clamp happens at commit.** A value past the advertised min/max is corrected before it is applied, so the raw value never reaches the server — and a fresh `GET /api/config` confirms the persisted value is the clamped one.
+- **A rejected PATCH undoes itself.** The server validates the whole merged section atomically, so a `422` means nothing in that PATCH was saved. The store reverts exactly the leaf paths the rejected patch wrote (never the whole section, so a newer concurrent edit survives), rather than keeping a value the server refused and silently re-sending it on the next Apply.
+- **Errors render next to the field.** A `NumberField` with a `configPath` prop shows its own validation message under the box instead of only a generic footer error string. Errors are keyed by full dotted config path and are cleared as soon as that section's next PATCH lands, successful or not.
+- **Fields that are not config values still clamp.** The Storage Calculator's inputs and ad-hoc request parameters (Synthetic Lab, the graph max-hops control) pass bounds but no `configPath` — they clamp, there is just nothing persisted to attribute a server error to.
+
+??? note "One deliberate exception: Chat's Top-K override"
+    The Chat **Top-K (results)** control is a *nullable* per-conversation override: clearing it and blurring reverts to the corpus's configured `retrieval.final_k`, and it is never persisted to config. `NumberField`'s commit treats an empty box as "restore the last committed value", so it cannot express "the operator cleared this" — adopting it there would silently remove the only way back to the corpus default. The control still clamps (1–100) inline and is pinned by the guard test below.
+
+Enforcement is a test against the model itself, not a review guideline (`tests/unit/test_clean_start_defaults.py`):
+
+- `test_every_number_field_advertises_its_pydantic_bounds` walks every `NumberField` in `web/src`, resolves its config path (an explicit `configPath="a.b.c"` prop, or a `useConfigField<number>` binding), and asserts the advertised min/max equal the Pydantic `ge`/`le` — it checks **100+** controls, and a `NumberField` with neither marker must be a genuine non-config input.
+- `test_no_config_editor_still_writes_a_raw_number_input` scans every frontend source and forbids a raw `<input type="number">` outside `NumberField.tsx`, with one pinned, documented exception (the Chat Top-K override above).
+
+The end-to-end behavior is proven against a live stack in `web/tests/e2e/exhaustive/numberfield_migration.spec.ts` — see [Testing](testing.md).
+
+!!! tip "If you're not sure"
+    Add numeric controls as `<NumberField configPath="section.field" ... />` with min/max matching the Pydantic field. A bound the model does not have fails the bounds test above at build time, instead of surfacing later as an unattributed `422` in production. If a value must be clearable/nullable, do not use `NumberField` — clamp inline and document why, like the Chat Top-K control does.

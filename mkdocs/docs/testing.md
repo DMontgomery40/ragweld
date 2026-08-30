@@ -152,5 +152,17 @@ A serial-mode spec that drives [figure descriptions](manual/indexing.md) end to 
 !!! tip "Long-running indexes need an explicit deadline"
     `indexCorpus` in `corpus_fixture.ts` accepts a `timeoutMs` override. A Docling conversion of scanned pages plus per-figure vision calls can take tens of minutes on a loaded box — `figure_workflow.spec.ts` passes a 30-minute deadline explicitly rather than relying on the shared `EXHAUSTIVE_INDEX_TIMEOUT_MS` env default (5 minutes), so the spec cannot fail for whoever forgets the env var.
 
+### The NumberField migration spec (`numberfield_migration.spec.ts`)
+
+One behavior, proven across every surface family that carries a config-bound numeric input: type a value past the field's Pydantic bound, Tab away, and (a) the box shows the clamped value, (b) the PATCH that actually reached the server carried the clamped value — the raw value appears in no request body — and (c) a fresh `GET /api/config` confirms the server persisted the clamped value, not the operator's typed one. No route mocking; the same zero-mock discipline as the rest of the exhaustive suite.
+
+- [x] **Data Quality** — `enrichment.chunk_summaries_max`, probe `999999` → `1000`: the exact probe that previously reached the server unclamped and came back a 422 whose only signal was a raw error string
+- [x] **Chat Settings** — `chat.temperature`, `9` → `2`: deliberately not `chat.max_tokens`, which is a production-scoped global that the per-corpus config would reconcile away on read, making the persistence assertion fail for a reason unrelated to `NumberField`
+- [x] **Reranker config** — `reranking.rerank_input_snippet_chars`, `50000` → `2000`: a field visible regardless of reranker mode, since the fixture corpus pins `reranker_mode: none`
+- [x] **Reranker Training Studio** — `training.reranker_train_epochs`, `999` → `20`, driven through the Inspector's "Paths + Config" tab
+- [x] **Storage Calculator** — the non-config calculator inputs survive blur unchanged (no step snapping) while min/max clamping still applies
+
+See [Configuration](configuration.md) for the full commit-on-blur behavior and the guard tests behind it.
+
 ??? info "Artifacts"
     Temporary feature tests and results go in `.tests/`; permanent tests go under `tests/`.

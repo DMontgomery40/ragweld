@@ -56,7 +56,7 @@
 | `ui.grafana_dashboard_uid` | `GRAFANA_DASHBOARD_UID` | `str` | `"ragweld-oncall-overview"` | — | Default Grafana dashboard UID |
 | `ui.grafana_embed_enabled` | `GRAFANA_EMBED_ENABLED` | `bool` | `true` | — | Enable Grafana embedding |
 | `ui.grafana_kiosk` | `GRAFANA_KIOSK` | `str` | `"tv"` | — | Grafana kiosk mode |
-| `ui.grafana_org_id` | `GRAFANA_ORG_ID` | `int` | `1` | — | Grafana organization ID |
+| `ui.grafana_org_id` | `GRAFANA_ORG_ID` | `int` | `1` | ≥ 1 | Grafana organization ID |
 | `ui.grafana_refresh` | `GRAFANA_REFRESH` | `str` | `"10s"` | — | Grafana refresh interval |
 | `ui.learning_reranker_default_preset` | `LEARNING_RERANKER_DEFAULT_PRESET` | `Literal["balanced", "focus_viz", "focus_logs", "focus_inspector"]` | `"balanced"` | allowed="balanced", "focus_viz", "focus_logs", "focus_inspector" | Default pane layout preset applied when opening Learning Reranker Studio |
 | `ui.learning_reranker_dockview_layout_json` | `LEARNING_RERANKER_DOCKVIEW_LAYOUT_JSON` | `str` | `""` | — | Serialized Dockview layout JSON for Learning Reranker Studio pane persistence |
