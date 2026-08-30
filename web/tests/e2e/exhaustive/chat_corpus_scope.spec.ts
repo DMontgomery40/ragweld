@@ -215,3 +215,45 @@ test('the conversation Top-K reaches the server and bounds a real answer', async
   expect(answered, `new answer cited ${answered} sources`).toBeGreaterThan(0);
   expect(answered).toBeLessThanOrEqual(2);
 });
+
+test('the docked chat mirrors the live conversation instead of drifting into its own state', async ({
+  page,
+  request,
+}) => {
+  if (!corpus) throw new Error('corpus not provisioned');
+  await seedAnswerFromSearch(page, request, corpus.corpusId, 'What is the calibration interval?', {
+    topK: 5,
+    label: 'Corpus scope dock spec',
+  });
+  // Dock the chat route, so the page renders TWO ChatInterface instances over one thread.
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      'tribrid-dock-storage',
+      JSON.stringify({
+        version: 0,
+        state: {
+          mode: 'dock',
+          docked: { path: '/chat', search: '?subtab=ui', label: 'Chat', icon: '', renderMode: 'native' },
+          lastDocked: null,
+        },
+      }),
+    );
+  });
+
+  await gotoChatWithGlobalCorpus(page, otherCorpusId);
+  const pickers = page.getByTestId('source-dropdown');
+  await expect.poll(async () => pickers.count(), { timeout: 60_000 }).toBe(2);
+
+  // Both instances start on the same conversation: the docked copy is not a third state.
+  for (let i = 0; i < 2; i += 1) {
+    const picker = pickers.nth(i);
+    if (!(await picker.evaluate((el: HTMLDetailsElement) => el.open))) await picker.locator('summary').click();
+    await expect(picker.getByTestId(`source-corpus-${corpus.corpusId}`)).toBeChecked();
+    await expect(picker.getByTestId(`source-corpus-${otherCorpusId}`)).not.toBeChecked();
+  }
+
+  // A change made in one instance reaches the other.
+  await pickers.first().getByTestId(`source-corpus-${otherCorpusId}`).check();
+  await expect(pickers.nth(1).getByTestId(`source-corpus-${otherCorpusId}`)).toBeChecked({ timeout: 30_000 });
+  await expect(pickers.nth(1).getByTestId(`source-corpus-${corpus.corpusId}`)).toBeChecked();
+});

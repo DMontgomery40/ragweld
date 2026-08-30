@@ -23,6 +23,7 @@ import {
   createChatSession,
   createConversationId,
   createUserThreadMessage,
+  CHAT_SESSIONS_CHANGED_EVENT,
   defaultChatSources,
   getMessageCustom,
   getMessageImages,
@@ -978,6 +979,9 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
   const requestAbortControllerRef = useRef<AbortController | null>(null);
   const activeRequestTokenRef = useRef(0);
   const sessionsLoadedRef = useRef(false);
+  const sendingRef = useRef(false);
+  /** Distinguishes this instance's own writes from the other instance's (tab vs dock). */
+  const instanceIdRef = useRef(`chat-${Math.random().toString(36).slice(2)}`);
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => { messagesRef.current = messages; }, [messages]);
@@ -985,6 +989,7 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
   useEffect(() => { modelOverrideRef.current = modelOverride; }, [modelOverride]);
   useEffect(() => { activeSourcesRef.current = activeSources; }, [activeSources]);
   useEffect(() => { topKOverrideRef.current = topKOverride; }, [topKOverride]);
+  useEffect(() => { sendingRef.current = sending; }, [sending]);
 
   const notifyTrace = useCallback(
     (steps: TraceStep[], open: boolean, source: 'config' | 'response' | 'clear' = 'response') => {
@@ -1012,7 +1017,7 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
 
   const persistSessions = useCallback((sessions: ReturnType<typeof createChatSession>[], activeId: string) => {
     try {
-      persistChatSessionsToStorage(localStorage, sessions, activeId);
+      persistChatSessionsToStorage(localStorage, sessions, activeId, { writerId: instanceIdRef.current });
     } catch (error) {
       console.error('[ChatInterface] Failed to persist chat sessions:', error);
     }
@@ -1130,6 +1135,21 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
   useEffect(() => {
     if (!initialized) loadRepos();
   }, [initialized, loadRepos]);
+
+  // The chat tab and the docked chat are two instances over one stored thread. Each reloads
+  // when the OTHER writes, so the docked copy mirrors the live conversation instead of
+  // showing a third, independent state (M-03/B-39). An instance with an answer in flight is
+  // never disturbed, and it ignores the echo of its own writes.
+  useEffect(() => {
+    const onThreadsChanged = (event: Event) => {
+      const writerId = (event as CustomEvent<{ writerId?: string }>).detail?.writerId;
+      if (writerId && writerId === instanceIdRef.current) return;
+      if (sendingRef.current) return;
+      loadChatHistory();
+    };
+    window.addEventListener(CHAT_SESSIONS_CHANGED_EVENT, onThreadsChanged);
+    return () => window.removeEventListener(CHAT_SESSIONS_CHANGED_EVENT, onThreadsChanged);
+  }, [loadChatHistory]);
 
   useEffect(() => {
     loadChatHistory();

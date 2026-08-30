@@ -380,7 +380,27 @@ export function compactChatSessionsForStorage(sessions: ChatSession[]): ChatSess
   }));
 }
 
-export function persistChatSessions(storage: Storage, sessions: ChatSession[], activeId: string): void {
+/**
+ * Fired on `window` when the stored threads actually change, carrying the id of the writer.
+ *
+ * The chat tab and the docked chat are two ChatInterface instances over ONE stored thread.
+ * Each listens for the other's writes so the docked copy shows the live conversation instead
+ * of a second, independently drifting state (M-03/B-39).
+ */
+export const CHAT_SESSIONS_CHANGED_EVENT = 'ragweld-chat-threads-changed';
+
+export type PersistChatSessionsOptions = {
+  /** Identifies the writing instance so it can ignore the echo of its own write. */
+  writerId?: string;
+};
+
+/** Persist the threads. Returns whether anything changed - a no-op write broadcasts nothing. */
+export function persistChatSessions(
+  storage: Storage,
+  sessions: ChatSession[],
+  activeId: string,
+  options: PersistChatSessionsOptions = {},
+): boolean {
   const state: ChatSessionsState = {
     version: 2,
     active_conversation_id: activeId,
@@ -393,7 +413,19 @@ export function persistChatSessions(storage: Storage, sessions: ChatSession[], a
       messages: session.messages.map(serializeMessage),
     })),
   };
-  storage.setItem(CHAT_SESSIONS_STORAGE_KEY, JSON.stringify(serialized));
+  const next = JSON.stringify(serialized);
+  // Both instances reload on the other's broadcast and every reload persists, so an
+  // unconditional dispatch would ping-pong forever. Only a real change is announced.
+  if (storage.getItem(CHAT_SESSIONS_STORAGE_KEY) === next) return false;
+  storage.setItem(CHAT_SESSIONS_STORAGE_KEY, next);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent(CHAT_SESSIONS_CHANGED_EVENT, {
+        detail: { writerId: String(options.writerId || '') },
+      }),
+    );
+  }
+  return true;
 }
 
 export function loadChatSessionsFromStorage(storage: Storage, chatHistoryMax: number): LoadChatSessionsResult {
