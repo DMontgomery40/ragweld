@@ -27,10 +27,23 @@ type SurfaceTone = 'good' | 'warn' | 'bad' | 'dim';
 
 function toneFromComponent(component: ObservabilityComponentStatus | null | undefined): SurfaceTone {
   if (!component) return 'dim';
-  if (component.enabled && component.configured && component.reachable === true) return 'good';
-  if (component.enabled && component.configured && component.reachable === false) return 'bad';
-  if (component.enabled || component.configured) return 'warn';
+  // The API already applied probe hysteresis and probeability when it computed
+  // `severity`; re-deriving here is how a single missed probe used to paint a
+  // card red while the deck header said the opposite.
+  if (component.severity === 'healthy') return 'good';
+  if (component.severity === 'critical') return 'bad';
+  if (component.severity === 'warning') return 'warn';
   return 'dim';
+}
+
+/** The one status word for a component, drawn from the same evidence as its detail text. */
+function componentStatusWord(component: ObservabilityComponentStatus): string {
+  if (!component.enabled) return 'off';
+  if (!component.configured) return 'not configured';
+  if (component.probeable === false) return 'not probeable';
+  if (component.reachable === true) return 'reachable';
+  if (component.reachable === false) return component.severity === 'critical' ? 'down' : 'degraded';
+  return 'configured';
 }
 
 function toneFromControlPlane(status: AgentTrainControlPlaneStatusResponse | null): SurfaceTone {
@@ -447,18 +460,31 @@ export function ObservabilityOperatorDeck({
                   <div key={component!.id} className={toneClassName(toneFromComponent(component))}>
                     <div className="obs-card-heading">
                       <span className="obs-card-kicker">{component!.id}</span>
-                      <span className="obs-card-status">
-                        {component!.reachable === true
-                          ? 'reachable'
-                          : component!.reachable === false
-                            ? 'degraded'
-                            : component!.enabled
-                              ? 'configured'
-                              : 'off'}
+                      <span className="obs-card-status" data-testid={`obs-status-${component!.id}`}>
+                        {componentStatusWord(component!)}
                       </span>
                     </div>
                     <div className="obs-card-title">{component!.label}</div>
                     <p className="obs-card-detail">{component!.detail || 'No operator detail yet.'}</p>
+                    {component!.probe_history?.length ? (
+                      <div
+                        className="obs-probe-history"
+                        data-testid={`obs-probe-history-${component!.id}`}
+                        title={`Readiness probes, oldest first: ${component!.probe_history.join(', ')}`}
+                      >
+                        <span className="obs-probe-strip" aria-hidden="true">
+                          {component!.probe_history.map((sample, index) => (
+                            <span key={index} className={`obs-probe-dot obs-probe-${sample}`} />
+                          ))}
+                        </span>
+                        <span className="obs-probe-label">
+                          {`last ${component!.probe_history?.length ?? 0} probes`}
+                          {(component!.consecutive_failures ?? 0) > 0
+                            ? `, ${component!.consecutive_failures} failing`
+                            : ''}
+                        </span>
+                      </div>
+                    ) : null}
                     {component!.url ? (
                       <a href={component!.url} target="_blank" rel="noreferrer" className="obs-inline-link">
                         Open surface
@@ -848,8 +874,44 @@ export function ObservabilityOperatorDeck({
           flex-wrap: wrap;
         }
 
+        .obs-probe-history {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+
+        .obs-probe-strip {
+          display: inline-flex;
+          gap: 3px;
+        }
+
+        .obs-probe-dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 2px;
+          background: rgba(198, 209, 222, 0.35);
+        }
+
+        .obs-probe-ok {
+          background: var(--ok);
+        }
+
+        .obs-probe-failed {
+          background: var(--err);
+        }
+
+        .obs-probe-unprobeable {
+          background: rgba(198, 209, 222, 0.35);
+        }
+
+        .obs-probe-label {
+          font-size: 11.5px;
+          font-family: "IBM Plex Mono", monospace;
+          color: rgba(214, 224, 236, 0.86);
+        }
+
         .obs-card-status {
-          font-size: 11px;
+          font-size: 11.5px;
           font-family: "IBM Plex Mono", monospace;
           color: rgba(214, 224, 236, 0.86);
         }
@@ -872,7 +934,7 @@ export function ObservabilityOperatorDeck({
         .obs-card-detail,
         .obs-evidence-copy {
           margin: 0;
-          font-size: 12px;
+          font-size: 12.5px;
           line-height: 1.55;
           color: rgba(198, 209, 222, 0.78);
         }

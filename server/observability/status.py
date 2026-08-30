@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from typing import Any
@@ -19,6 +20,7 @@ from server.models.tribrid_config_model import (
     TraceExternalLink,
     TriBridConfig,
 )
+from server.observability.probe_history import ProbeSample, record_probe, sample_for
 from server.observability.profiling import profiling_state
 from server.observability.runtime import (
     langfuse_client_blockers,
@@ -67,10 +69,25 @@ def readiness_probe_url(component_id: str, base_url: str) -> str:
     return target + path
 
 
-async def _check_url(url: str, *, component_id: str | None = None) -> tuple[bool | None, str | None]:
+@dataclass(frozen=True)
+class ProbeResult:
+    """One readiness probe: what it found, and whether it could look at all.
+
+    `probeable=False` is a third answer, distinct from "unreachable": an
+    Authelia-protected ingress redirects the API off-host, so the probe proves
+    nothing about the service. Counting that against the operator gives a
+    permanent attention item no operator can ever clear.
+    """
+
+    reachable: bool | None = None
+    detail: str | None = None
+    probeable: bool = True
+
+
+async def _check_url(url: str, *, component_id: str | None = None) -> ProbeResult:
     target = readiness_probe_url(component_id, url) if component_id else str(url or "").strip()
     if not target:
-        return None, None
+        return ProbeResult(reachable=None, detail=None, probeable=False)
     try:
         async with httpx.AsyncClient(timeout=2.0, follow_redirects=False) as client:
             next_target = target
@@ -80,25 +97,29 @@ async def _check_url(url: str, *, component_id: str | None = None) -> tuple[bool
                 if status in {301, 302, 303, 307, 308}:
                     location = str(response.headers.get("location") or "").strip()
                     if not location:
-                        return False, f"HTTP {status}"
+                        return ProbeResult(reachable=False, detail=f"HTTP {status}")
                     redirect_target = str(response.url.join(location))
                     redirect_host = response.url.join(location).host
                     current_host = response.url.host
                     if redirect_host and current_host and redirect_host != current_host:
-                        return (
-                            None,
-                            f"redirected to {redirect_host}; protected ingress cannot be probed from the API, verify the local listener",
+                        return ProbeResult(
+                            reachable=None,
+                            detail=(
+                                f"redirected to {redirect_host}; protected ingress cannot be probed from the API, "
+                                "verify the local listener"
+                            ),
+                            probeable=False,
                         )
                     next_target = redirect_target
                     continue
                 if component_id in {"otlp_export", "faro"} and status in {405, 415}:
                     # OTLP/Faro intake endpoints are POST-only; a method rejection proves the listener.
-                    return True, f"listener present (HTTP {status} to GET)"
+                    return ProbeResult(reachable=True, detail=f"listener present (HTTP {status} to GET)")
                 # Readiness is a 2xx on the readiness path; 4xx means the path or service is wrong.
-                return status < 300, f"HTTP {status}"
+                return ProbeResult(reachable=status < 300, detail=f"HTTP {status}")
     except Exception as exc:
-        return False, str(exc)
-    return False, "HTTP redirect loop"
+        return ProbeResult(reachable=False, detail=str(exc))
+    return ProbeResult(reachable=False, detail="HTTP redirect loop")
 
 
 async def _check_model_api(url: str, *, api_key: str | None = None) -> tuple[bool, str]:
@@ -216,16 +237,32 @@ def _component_group(component_id: str) -> str:
     return "observability"
 
 
-def _component_severity(*, group: str, enabled: bool, configured: bool, reachable: bool | None) -> str:
-    if enabled and configured and reachable is True:
+def _component_severity(
+    *,
+    group: str,
+    enabled: bool,
+    configured: bool,
+    reachable: bool | None,
+    probeable: bool,
+    consecutive_failures: int,
+    failure_threshold: int,
+) -> str:
+    if not enabled:
+        return "info"
+    if not configured:
+        return "warning"
+    if not probeable:
+        # The probe could not look. That is not a fault to page on, and it must
+        # not sit permanently on the operator-attention line.
+        return "info"
+    if reachable is True:
         return "healthy"
-    if enabled and configured and reachable is False:
-        return "critical" if group in _CRITICAL_GROUPS else "warning"
-    if enabled and not configured:
+    if reachable is None:
         return "warning"
-    if enabled and configured and reachable is None:
+    if consecutive_failures < failure_threshold:
+        # A missed probe is worth showing, never worth paging on.
         return "warning"
-    return "info"
+    return "critical" if group in _CRITICAL_GROUPS else "warning"
 
 
 def _component_slo_state(severity: str) -> str:
@@ -262,11 +299,28 @@ def _decorate_component(
     configured: bool,
     reachable: bool | None,
     detail: str | None,
+    failure_threshold: int,
+    probeable: bool = True,
     url: str | None = None,
     links: list[TraceExternalLink] | None = None,
 ) -> ObservabilityComponentStatus:
     group = _component_group(component_id)
-    severity = _component_severity(group=group, enabled=enabled, configured=configured, reachable=reachable)
+    sample: ProbeSample = sample_for(reachable, probeable=probeable)
+    history, consecutive_failures = record_probe(component_id, sample)
+    severity = _component_severity(
+        group=group,
+        enabled=enabled,
+        configured=configured,
+        reachable=reachable,
+        probeable=probeable,
+        consecutive_failures=consecutive_failures,
+        failure_threshold=failure_threshold,
+    )
+    if reachable is False and 0 < consecutive_failures < failure_threshold:
+        # Say which sample this is, so the card's status word and its body text
+        # rest on the same evidence.
+        streak = f"failed probe {consecutive_failures} of {failure_threshold}"
+        detail = f"{detail} ({streak})" if detail else streak.capitalize()
     return ObservabilityComponentStatus(
         id=component_id,
         label=label,
@@ -280,6 +334,9 @@ def _decorate_component(
         slo_state=_component_slo_state(severity),  # type: ignore[arg-type]
         operator_hint=_component_operator_hint(component_id, url, reachable),
         links=list(links or []),
+        probeable=probeable,
+        consecutive_failures=consecutive_failures,
+        probe_history=history,
     )
 
 
@@ -296,7 +353,11 @@ def _build_operator_hint(cfg: TriBridConfig, mode: str, components: list[Observa
         return "Set a Langfuse base URL and env keys before enabling OTel + Langfuse mode."
     if mode == "otel_langfuse" and (not os.getenv("LANGFUSE_PUBLIC_KEY") or not os.getenv("LANGFUSE_SECRET_KEY")):
         return "Langfuse mode is selected, but LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY are missing."
-    down = [item.label for item in components if item.severity in {"warning", "critical"} and item.enabled]
+    down = [
+        item.label
+        for item in components
+        if item.severity in {"warning", "critical"} and item.enabled and item.probeable
+    ]
     if down:
         return f"Operator attention needed across: {', '.join(down)}."
     return "Observability is configured. Start with Grafana Overview, then drill into incidents, dashboards, and ML-quality surfaces."
@@ -304,6 +365,7 @@ def _build_operator_hint(cfg: TriBridConfig, mode: str, components: list[Observa
 
 async def build_observability_status(config: TriBridConfig, *, repo_id: str | None = None) -> ObservabilityStatusResponse:
     mode = normalize_tracing_mode(config.tracing.tracing_mode)
+    failure_threshold = int(config.tracing.probe_failure_threshold)
     control_plane = await build_agent_control_plane_status(config)
 
     grafana_url = str(config.ui.grafana_base_url or "").strip()
@@ -340,16 +402,16 @@ async def build_observability_status(config: TriBridConfig, *, repo_id: str | No
     else:
         vllm_url = str(config.chat.vllm.base_url or "").strip()
 
-    otlp_reachable, otlp_detail = await _check_url(otlp_url, component_id="otlp_export")
-    grafana_reachable, grafana_detail = await _check_url(grafana_url, component_id="grafana")
-    tempo_reachable, tempo_detail = await _check_url(tempo_url, component_id="tempo")
-    alloy_reachable, alloy_detail = await _check_url(alloy_url, component_id="alloy")
-    mimir_reachable, mimir_detail = await _check_url(mimir_url, component_id="mimir")
-    pyroscope_reachable, pyroscope_detail = await _check_url(pyroscope_url, component_id="pyroscope")
-    faro_reachable, faro_detail = await _check_url(faro_url, component_id="faro")
-    opencost_reachable, opencost_detail = await _check_url(opencost_url, component_id="opencost")
-    alertmanager_reachable, alertmanager_detail = await _check_url(alertmanager_url, component_id="alertmanager")
-    langfuse_reachable, langfuse_detail = await _check_url(langfuse_url, component_id="langfuse")
+    otlp_probe = await _check_url(otlp_url, component_id="otlp_export")
+    grafana_probe = await _check_url(grafana_url, component_id="grafana")
+    tempo_probe = await _check_url(tempo_url, component_id="tempo")
+    alloy_probe = await _check_url(alloy_url, component_id="alloy")
+    mimir_probe = await _check_url(mimir_url, component_id="mimir")
+    pyroscope_probe = await _check_url(pyroscope_url, component_id="pyroscope")
+    faro_probe = await _check_url(faro_url, component_id="faro")
+    opencost_probe = await _check_url(opencost_url, component_id="opencost")
+    alertmanager_probe = await _check_url(alertmanager_url, component_id="alertmanager")
+    langfuse_probe = await _check_url(langfuse_url, component_id="langfuse")
     if not litellm_enabled:
         litellm_reachable, litellm_detail = None, None
     elif litellm_resolution_error:
@@ -369,6 +431,7 @@ async def build_observability_status(config: TriBridConfig, *, repo_id: str | No
 
     components = [
         _decorate_component(
+            failure_threshold=failure_threshold,
             component_id="local_trace_buffer",
             label="Local trace buffer",
             enabled=config.tracing.tracing_enabled and mode != "off",
@@ -377,46 +440,55 @@ async def build_observability_status(config: TriBridConfig, *, repo_id: str | No
             detail="In-process trace buffer feeding the workbench trace views.",
         ),
         _decorate_component(
+            failure_threshold=failure_threshold,
             component_id="otlp_export",
             label="OTLP export",
             enabled=config.tracing.otel_export_enabled and mode in {"otel", "otel_langfuse"},
             configured=bool(otlp_url),
-            reachable=otlp_reachable,
-            detail=otlp_detail or "Configure an OTLP HTTP endpoint so traces can leave the API process.",
+            reachable=otlp_probe.reachable,
+            probeable=otlp_probe.probeable,
+            detail=otlp_probe.detail or "Configure an OTLP HTTP endpoint so traces can leave the API process.",
             url=otlp_url or None,
             links=_make_links("OTLP export", otlp_url, "Collector HTTP endpoint."),
         ),
         _decorate_component(
+            failure_threshold=failure_threshold,
             component_id="alloy",
             label="Grafana Alloy",
             enabled=bool(alloy_url),
             configured=bool(alloy_url),
-            reachable=alloy_reachable,
-            detail=alloy_detail,
+            reachable=alloy_probe.reachable,
+            probeable=alloy_probe.probeable,
+            detail=alloy_probe.detail,
             url=alloy_url or None,
             links=_make_links("Grafana Alloy", alloy_url, "Collector or agent endpoint for OTLP ingest."),
         ),
         _decorate_component(
+            failure_threshold=failure_threshold,
             component_id="tempo",
             label="Tempo",
             enabled=bool(tempo_url),
             configured=bool(tempo_url),
-            reachable=tempo_reachable,
-            detail=tempo_detail,
+            reachable=tempo_probe.reachable,
+            probeable=tempo_probe.probeable,
+            detail=tempo_probe.detail,
             url=tempo_url or None,
             links=_make_links("Tempo", tempo_url, "Tempo or Grafana Explore base URL.", kind="tempo"),
         ),
         _decorate_component(
+            failure_threshold=failure_threshold,
             component_id="mimir",
             label="Mimir",
             enabled=bool(mimir_url),
             configured=bool(mimir_url),
-            reachable=mimir_reachable,
-            detail=mimir_detail or "Metrics backend for long-range retention and alert queries.",
+            reachable=mimir_probe.reachable,
+            probeable=mimir_probe.probeable,
+            detail=mimir_probe.detail or "Metrics backend for long-range retention and alert queries.",
             url=mimir_url or None,
             links=_make_links("Mimir", mimir_url, "Metrics backend base URL."),
         ),
         _decorate_component(
+            failure_threshold=failure_threshold,
             component_id="pyroscope",
             label="Pyroscope",
             enabled=bool(pyroscope_url),
@@ -424,48 +496,56 @@ async def build_observability_status(config: TriBridConfig, *, repo_id: str | No
             # even when the server itself answers /ready — a reachable server
             # receiving nothing is not healthy profiling.
             configured=bool(pyroscope_url) and not profiling_state().startswith("failed"),
-            reachable=pyroscope_reachable,
+            reachable=pyroscope_probe.reachable,
+            probeable=pyroscope_probe.probeable,
             detail=(
-                f"{pyroscope_detail or 'Continuous profiling backend for hot-path investigation.'}"
+                f"{pyroscope_probe.detail or 'Continuous profiling backend for hot-path investigation.'}"
                 f"; host agent: {profiling_state()}"
             ),
             url=pyroscope_url or None,
             links=_make_links("Pyroscope", pyroscope_url, "Continuous profiling surface."),
         ),
         _decorate_component(
+            failure_threshold=failure_threshold,
             component_id="faro",
             label="Faro",
             enabled=bool(faro_url),
             configured=bool(faro_url),
-            reachable=faro_reachable,
-            detail=faro_detail or "Frontend/RUM telemetry collector path.",
+            reachable=faro_probe.reachable,
+            probeable=faro_probe.probeable,
+            detail=faro_probe.detail or "Frontend/RUM telemetry collector path.",
             url=faro_url or None,
             links=_make_links("Faro", faro_url, "Frontend/RUM collector endpoint."),
         ),
         _decorate_component(
+            failure_threshold=failure_threshold,
             component_id="opencost",
             label="OpenCost",
             enabled=bool(opencost_url),
             configured=bool(opencost_url),
-            reachable=opencost_reachable,
-            detail=opencost_detail or "Cost and capacity backend for infra spend visibility.",
+            reachable=opencost_probe.reachable,
+            probeable=opencost_probe.probeable,
+            detail=opencost_probe.detail or "Cost and capacity backend for infra spend visibility.",
             url=opencost_url or None,
             links=_make_links("OpenCost", opencost_url, "Cost allocation surface."),
         ),
         _decorate_component(
+            failure_threshold=failure_threshold,
             component_id="alertmanager",
             label="Alertmanager",
             enabled=bool(alertmanager_url),
             configured=bool(alertmanager_url),
-            reachable=alertmanager_reachable,
+            reachable=alertmanager_probe.reachable,
+            probeable=alertmanager_probe.probeable,
             detail=(
-                f"{alertmanager_detail or 'Alert aggregation and routing for Prometheus rules.'}"
+                f"{alertmanager_probe.detail or 'Alert aggregation and routing for Prometheus rules.'}"
                 "; delivery receivers (webhook/email/pager) are operator-configured in infra/alertmanager.yml"
             ),
             url=alertmanager_url or None,
             links=_make_links("Alertmanager", alertmanager_url, "Alert routing surface."),
         ),
         _decorate_component(
+            failure_threshold=failure_threshold,
             component_id="langfuse",
             label="Langfuse",
             enabled=config.tracing.langfuse_enabled and mode == "otel_langfuse",
@@ -473,25 +553,29 @@ async def build_observability_status(config: TriBridConfig, *, repo_id: str | No
             # to build an ingestion client (keys + SDK), or generations are
             # silently dropped while the health endpoint stays green.
             configured=bool(langfuse_url) and not langfuse_client_blockers(config.tracing),
-            reachable=langfuse_reachable,
+            reachable=langfuse_probe.reachable,
+            probeable=langfuse_probe.probeable,
             detail=(
-                f"{langfuse_detail or 'Generation trace drilldown substrate.'}"
+                f"{langfuse_probe.detail or 'Generation trace drilldown substrate.'}"
                 f"; ingestion: {_langfuse_ingestion_detail(config)}"
             ),
             url=langfuse_public_url or None,
             links=_make_links("Langfuse", langfuse_public_url, "Langfuse base URL.", kind="langfuse"),
         ),
         _decorate_component(
+            failure_threshold=failure_threshold,
             component_id="grafana",
             label="Grafana",
             enabled=config.ui.grafana_embed_enabled,
             configured=bool(grafana_url),
-            reachable=grafana_reachable,
-            detail=grafana_detail,
+            reachable=grafana_probe.reachable,
+            probeable=grafana_probe.probeable,
+            detail=grafana_probe.detail,
             url=grafana_url or None,
             links=_make_links("Grafana", grafana_url, "Grafana command center base URL.", kind="grafana"),
         ),
         _decorate_component(
+            failure_threshold=failure_threshold,
             component_id="litellm",
             label="LiteLLM",
             enabled=litellm_enabled,
@@ -506,6 +590,7 @@ async def build_observability_status(config: TriBridConfig, *, repo_id: str | No
             links=_make_links("LiteLLM Gateway", litellm_url, "Gateway routing and provider policy surface."),
         ),
         _decorate_component(
+            failure_threshold=failure_threshold,
             component_id="vllm",
             label="vLLM",
             enabled=vllm_enabled,
@@ -522,6 +607,7 @@ async def build_observability_status(config: TriBridConfig, *, repo_id: str | No
     ]
     components.extend(
         _decorate_component(
+            failure_threshold=failure_threshold,
             component_id=component.kind,
             label=component.label,
             enabled=bool(component.enabled),
@@ -583,6 +669,7 @@ async def build_observability_status(config: TriBridConfig, *, repo_id: str | No
             )
     components.append(
         _decorate_component(
+            failure_threshold=failure_threshold,
             component_id="haystack_docling_qdrant",
             label="Haystack + Docling + Qdrant",
             enabled=True,
@@ -604,7 +691,11 @@ async def build_observability_status(config: TriBridConfig, *, repo_id: str | No
     severity_rank = {"healthy": 0, "info": 1, "warning": 2, "critical": 3}
     highest = max((severity_rank.get(item.severity, 1) for item in components), default=1)
     overall_severity = next(label for label, score in severity_rank.items() if score == highest)
-    blockers = [item.id for item in components if item.severity in {"warning", "critical"} and item.enabled]
+    blockers = [
+        item.id
+        for item in components
+        if item.severity in {"warning", "critical"} and item.enabled and item.probeable
+    ]
 
     return ObservabilityStatusResponse(
         ok=len(blockers) == 0,

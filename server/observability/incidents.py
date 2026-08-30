@@ -7,6 +7,7 @@ from server.models.tribrid_config_model import (
     ObservabilityIncident,
     ObservabilityIncidentChange,
     ObservabilityIncidentsResponse,
+    ObservabilityStatusResponse,
     ObservabilityWorkbenchLink,
     TraceExternalLink,
     TriBridConfig,
@@ -72,19 +73,36 @@ async def build_observability_incidents(
     config: TriBridConfig,
     *,
     repo_id: str | None = None,
+    status: ObservabilityStatusResponse | None = None,
 ) -> ObservabilityIncidentsResponse:
-    status = await build_observability_status(config, repo_id=repo_id)
+    """Correlate incidents from an observability status.
+
+    `status` is threaded in by callers that already have one, so a request that
+    needs both does exactly one readiness sweep. Probing twice per request made
+    every consecutive-failure threshold a fiction and tripled the probe traffic
+    the operator deck generates.
+    """
+    if status is None:
+        status = await build_observability_status(config, repo_id=repo_id)
     catalog = build_observability_catalog(config)
     workbench_by_path = {item.path: item for item in catalog.workbench_links}
 
     incidents: list[ObservabilityIncident] = []
 
+    failure_threshold = int(config.tracing.probe_failure_threshold)
     for component in status.components:
-        needs_attention = (
-            (component.enabled and not component.configured)
-            or (component.enabled and component.configured and component.reachable is False)
+        # A misconfiguration is a fact about config and fires immediately. An
+        # unreachable probe is a sample, and only counts once it has failed
+        # `probe_failure_threshold` times in a row.
+        misconfigured = component.enabled and not component.configured
+        confirmed_down = (
+            component.enabled
+            and component.configured
+            and component.probeable
+            and component.reachable is False
+            and component.consecutive_failures >= failure_threshold
         )
-        if not needs_attention:
+        if not (misconfigured or confirmed_down):
             continue
         component_links = list(component.links or [])
         if not component_links and component.url:

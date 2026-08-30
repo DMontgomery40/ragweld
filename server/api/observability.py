@@ -31,8 +31,8 @@ async def observability_status(
         cfg = await load_scoped_config(repo_id=scope_id)
     except CorpusNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    incidents = await build_observability_incidents(cfg, repo_id=scope_id)
     status = await build_observability_status(cfg, repo_id=scope_id)
+    incidents = await build_observability_incidents(cfg, repo_id=scope_id, status=status)
     status.incident_count = int(incidents.total_count or 0)
     status.critical_incident_count = int(incidents.critical_count or 0)
     return status

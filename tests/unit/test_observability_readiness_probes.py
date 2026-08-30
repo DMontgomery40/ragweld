@@ -102,23 +102,25 @@ def test_logs_endpoint_is_derived_from_the_traces_endpoint() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("path", "component_id", "expected_reachable", "expected_detail"),
+    ("path", "component_id", "expected_reachable", "expected_detail", "expected_probeable"),
     [
-        ("/same-host-relative", None, True, "HTTP 200"),
-        ("/same-host-absolute", None, True, "HTTP 200"),
-        ("/same-host-missing", None, False, "HTTP 404"),
-        ("/faro", "faro", True, "listener present (HTTP 405 to GET)"),
+        ("/same-host-relative", None, True, "HTTP 200", True),
+        ("/same-host-absolute", None, True, "HTTP 200", True),
+        ("/same-host-missing", None, False, "HTTP 404", True),
+        ("/faro", "faro", True, "listener present (HTTP 405 to GET)", True),
         (
             "/off-host-302",
             None,
             None,
             "redirected to me.ragweld.com; protected ingress cannot be probed from the API, verify the local listener",
+            False,
         ),
         (
             "/off-host-307",
             None,
             None,
             "redirected to auth.ragweld.com; protected ingress cannot be probed from the API, verify the local listener",
+            False,
         ),
     ],
     ids=[
@@ -131,13 +133,31 @@ def test_logs_endpoint_is_derived_from_the_traces_endpoint() -> None:
     ],
 )
 async def test_check_url_only_treats_off_host_redirects_as_unverified(
-    path: str, component_id: str | None, expected_reachable: bool | None, expected_detail: str
+    path: str,
+    component_id: str | None,
+    expected_reachable: bool | None,
+    expected_detail: str,
+    expected_probeable: bool,
 ) -> None:
     with _probe_redirect_server() as base_url:
-        reachable, detail = await _check_url(f"{base_url}{path}", component_id=component_id)
+        result = await _check_url(f"{base_url}{path}", component_id=component_id)
 
-    assert reachable is expected_reachable
-    assert detail == expected_detail
+    assert result.reachable is expected_reachable
+    assert result.detail == expected_detail
+    # An off-host redirect through a protected ingress proves nothing about the
+    # service, so it is reported as "could not probe", not as a failure.
+    assert result.probeable is expected_probeable
+
+
+@pytest.mark.asyncio
+async def test_check_url_reports_an_unconfigured_target_as_unprobeable() -> None:
+    """With no URL there is nothing to probe; that must never read as a failure."""
+
+    result = await _check_url("", component_id="tempo")
+
+    assert result.reachable is None
+    assert result.detail is None
+    assert result.probeable is False
 
 
 def test_tempo_trace_link_targets_grafana_explore_not_the_bare_tempo_port() -> None:

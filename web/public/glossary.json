@@ -12707,6 +12707,24 @@
       ],
       "links": [],
       "badges": []
+    },
+    {
+      "term": "Probe Failure Threshold",
+      "key": "PROBE_FAILURE_THRESHOLD",
+      "definition": "How many readiness probes in a row must fail before an observability component counts as a real incident on the Operator Deck. A single HTTP probe is a noisy signal - a collector restart, a brief stall or a busy container answers 503 and recovers seconds later - so escalating one miss to a critical incident trains operators to ignore the deck. Below the threshold a failing probe is shown as a warning with its last-N probe history; at or above it the component becomes an incident. Surfaces the API cannot probe at all, such as an ingress that redirects off-host to the auth provider, never advance the streak.",
+      "category": "infrastructure",
+      "related": [],
+      "links": [
+        {
+          "text": "Prometheus Alerting Rules (for)",
+          "href": "https://prometheus.io/docs/prometheus/latest/configuration/alerting_rules/"
+        },
+        {
+          "text": "Google SRE Workbook: Alerting on SLOs",
+          "href": "https://sre.google/workbook/alerting-on-slos/"
+        }
+      ],
+      "badges": []
     }
   ]
 }

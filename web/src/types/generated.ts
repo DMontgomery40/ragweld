@@ -1759,6 +1759,12 @@ export interface ObservabilityComponentStatus {
   operator_hint?: string | null; // default: None
   /** Curated deep links relevant to this component. */
   links?: TraceExternalLink[];
+  /** Whether this component can be probed from the API at all (false behind a protected ingress). */
+  probeable?: boolean; // default: True
+  /** How many readiness probes in a row have failed; an incident needs tracing.probe_failure_threshold. */
+  consecutive_failures?: number; // default: 0
+  /** Most recent readiness-probe outcomes, oldest first. */
+  probe_history?: ("ok" | "failed" | "unprobeable")[];
 }
 
 /** Catalog entry for one Grafana dashboard family. */
@@ -2829,6 +2835,8 @@ export interface TracingConfig {
   tribrid_log_path?: string; // default: "data/logs/queries.jsonl"
   /** Alert severities to notify */
   alert_notify_severities?: string; // default: "critical,warning"
+  /** Consecutive failed readiness probes before an observability component counts as an incident */
+  probe_failure_threshold?: number; // default: 3
   /** Enable OTLP export for traces */
   otel_export_enabled?: boolean; // default: True
   /** OTLP HTTP endpoint for trace export */

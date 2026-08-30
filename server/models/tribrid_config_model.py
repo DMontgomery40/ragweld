@@ -1428,6 +1428,19 @@ class ObservabilityComponentStatus(BaseModel):
         default_factory=list,
         description="Curated deep links relevant to this component.",
     )
+    probeable: bool = Field(
+        default=True,
+        description="Whether this component can be probed from the API at all (false behind a protected ingress).",
+    )
+    consecutive_failures: int = Field(
+        default=0,
+        ge=0,
+        description="How many readiness probes in a row have failed; an incident needs tracing.probe_failure_threshold.",
+    )
+    probe_history: list[Literal["ok", "failed", "unprobeable"]] = Field(
+        default_factory=list,
+        description="Most recent readiness-probe outcomes, oldest first.",
+    )
 
 
 class ObservabilityWorkbenchLink(BaseModel):
@@ -5403,6 +5416,13 @@ class TracingConfig(BaseModel):
         description="Alert severities to notify"
     )
 
+    probe_failure_threshold: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="Consecutive failed readiness probes before an observability component counts as an incident",
+    )
+
     otel_export_enabled: bool = Field(
         default=True,
         description="Enable OTLP export for traces"
@@ -6967,6 +6987,7 @@ class TriBridConfig(BaseModel):
             'TRACE_STORE_PATH': self.tracing.trace_store_path,
             'TRIBRID_LOG_PATH': self.tracing.tribrid_log_path,
             'ALERT_NOTIFY_SEVERITIES': self.tracing.alert_notify_severities,
+            'PROBE_FAILURE_THRESHOLD': self.tracing.probe_failure_threshold,
             'OTEL_EXPORT_ENABLED': self.tracing.otel_export_enabled,
             'OTLP_ENDPOINT': self.tracing.otlp_endpoint,
             'OTLP_HEADERS': self.tracing.otlp_headers,
@@ -7356,6 +7377,7 @@ class TriBridConfig(BaseModel):
                 trace_store_path=data.get('TRACE_STORE_PATH', ''),
                 tribrid_log_path=data.get('TRIBRID_LOG_PATH', 'data/logs/queries.jsonl'),
                 alert_notify_severities=data.get('ALERT_NOTIFY_SEVERITIES', 'critical,warning'),
+                probe_failure_threshold=data.get('PROBE_FAILURE_THRESHOLD', 3),
                 otel_export_enabled=data.get('OTEL_EXPORT_ENABLED', True),
                 otlp_endpoint=data.get('OTLP_ENDPOINT', ''),
                 otlp_headers=data.get('OTLP_HEADERS', ''),
