@@ -5,6 +5,7 @@ import ForceGraph2D from 'react-force-graph-2d';
 import { useGraph } from '@/hooks/useGraph';
 import { useIndexing } from '@/hooks/useIndexing';
 import { SyntheticCallout } from '@/components/RAG/SyntheticCallout';
+import { NumberField } from '@/components/ui/NumberField';
 import { useRepoStore } from '@/stores/useRepoStore';
 import { DEFAULT_ENTITY_LIMIT, ENTITY_LIMIT_CHOICES } from '@/stores/useGraphStore';
 import type { Community, Entity, IndexStatus, Relationship } from '@/types/generated';
@@ -1035,12 +1036,11 @@ export function GraphSubtab() {
           <div style={{ marginTop: '12px', fontSize: '12px', color: 'var(--fg-muted)' }}>
             Max hops
           </div>
-          <input
-            type="number"
+          <NumberField
             min={1}
             max={5}
             value={maxHops}
-            onChange={(e) => setMaxHops(Math.max(1, Math.min(5, parseInt(e.target.value || '2', 10))))}
+            onCommit={setMaxHops}
             style={{
               width: '100%',
               padding: '10px 12px',

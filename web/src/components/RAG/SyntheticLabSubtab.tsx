@@ -3,6 +3,7 @@ import { useLocation } from 'react-router-dom';
 import { useNotification } from '@/hooks';
 import { api, apiClient, withCorpusScope } from '@/api/client';
 import { LineageMeta } from '@/components/ui/LineageMeta';
+import { NumberField } from '@/components/ui/NumberField';
 import { useActiveRepo } from '@/stores';
 import { configApi } from '@/api/config';
 import { describeSyntheticFailure, syntheticService } from '@/services/SyntheticService';
@@ -510,37 +511,34 @@ export function SyntheticLabSubtab() {
         <div className="input-row">
           <div className="input-group">
             <label>Max source chunks</label>
-            <input
-              type="number"
+            <NumberField
               min={10}
               max={20000}
               value={maxSourceChunks}
-              onChange={(e) => setMaxSourceChunks(parseInt(e.target.value || '150', 10))}
+              onCommit={setMaxSourceChunks}
             />
           </div>
           <div className="input-group">
             <label>Max pairs</label>
-            <input type="number" min={10} max={50000} value={maxPairs} onChange={(e) => setMaxPairs(parseInt(e.target.value || '150', 10))} />
+            <NumberField min={10} max={50000} value={maxPairs} onCommit={setMaxPairs} />
           </div>
           <div className="input-group">
             <label>Pairs per source</label>
-            <input
-              type="number"
+            <NumberField
               min={1}
               max={20}
               value={pairsPerSource}
-              onChange={(e) => setPairsPerSource(parseInt(e.target.value || '1', 10))}
+              onCommit={setPairsPerSource}
             />
           </div>
           <div className="input-group">
             <label>Curate threshold</label>
-            <input
-              type="number"
+            <NumberField
               min={0}
               max={10}
               step={0.1}
               value={curateThreshold}
-              onChange={(e) => setCurateThreshold(parseFloat(e.target.value || '7'))}
+              onCommit={setCurateThreshold}
             />
           </div>
         </div>
