@@ -42,7 +42,7 @@ import type {
 } from '@/types/generated';
 import { describeEmbeddingProviderStrategy } from '@/utils/embeddingStrategy';
 
-type IndexingComponent = 'embedding' | 'chunking' | 'bm25' | 'enrichment';
+type IndexingComponent = 'embedding' | 'chunking' | 'bm25' | 'enrichment' | 'figures';
 
 const COMPONENT_CARDS: Array<{
   id: IndexingComponent;
@@ -54,6 +54,7 @@ const COMPONENT_CARDS: Array<{
   { id: 'chunking', icon: '🧩', label: 'Chunking', description: 'Strategy, size, overlap, limits' },
   { id: 'bm25', icon: '📝', label: 'Tokenization', description: 'Chunk tokenizer + Postgres FTS tokenizer + large-file mode' },
   { id: 'enrichment', icon: '🧠', label: 'Graph & Options', description: 'Graph build + dense skip mode' },
+  { id: 'figures', icon: '🖼️', label: 'Figures & Vision', description: 'Describe charts, diagrams, drawings via the gateway' },
 ];
 
 const FALLBACK_CHUNKING_STRATEGIES = [
@@ -1267,7 +1268,8 @@ export function IndexingSubtab() {
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(4, 1fr)',
+          // Derived so the row never goes stale when a component card is added.
+          gridTemplateColumns: `repeat(${COMPONENT_CARDS.length}, minmax(0, 1fr))`,
           gap: '16px',
           marginBottom: '24px',
         }}
@@ -2679,6 +2681,183 @@ export function IndexingSubtab() {
               </div>
 
               <div
+                style={{
+                  padding: '16px',
+                  background: 'var(--bg-elev2)',
+                  borderRadius: '8px',
+                  border: skipDense ? '2px solid var(--warn)' : '1px solid var(--line)',
+                }}
+              >
+                <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={skipDense} onChange={(e) => setSkipDense(e.target.checked)} style={{ width: '18px', height: '18px' }} />
+                  <div>
+                    <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--fg)' }}>Skip dense vectors</div>
+                    <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginTop: '2px' }}>
+                      Useful for graph-only/sparse-only indexing runs (fast, no embeddings).
+                    </div>
+                  </div>
+                  <TooltipIcon name="SKIP_DENSE" />
+                </label>
+                {skipDense && (
+                  <div style={{ marginTop: '10px', padding: '8px 12px', background: 'rgba(var(--warn-rgb), 0.1)', borderRadius: '6px', color: 'var(--warn)', fontSize: '11px' }}>
+                    Vector search will not work until you re-index with dense enabled.
+                  </div>
+                )}
+              </div>
+
+              <div
+                style={{
+                  padding: '16px',
+                  background: 'var(--bg-elev2)',
+                  borderRadius: '8px',
+                  border: '1px solid var(--line)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+                  <div>
+                    <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--fg)' }}>Parquet ingestion (bounded)</div>
+                    <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginTop: '2px' }}>
+                      Prevents huge Parquet files from dominating memory/time during indexing.
+                    </div>
+                  </div>
+                  <TooltipIcon name="PARQUET_EXTRACT_MAX_ROWS" />
+                </div>
+
+                <div style={{ marginTop: '12px', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '14px' }}>
+                  <div className="input-group">
+                    <label style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '6px' }}>
+                      Max rows
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={200000}
+                      value={parquetExtractMaxRows}
+                      onChange={(e) => setParquetExtractMaxRows(parseInt(e.target.value || '0', 10))}
+                      style={{ width: '100%' }}
+                    />
+                  </div>
+                  <div className="input-group">
+                    <label style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '6px' }}>
+                      Max chars
+                    </label>
+                    <input
+                      type="number"
+                      min={10_000}
+                      max={50_000_000}
+                      value={parquetExtractMaxChars}
+                      onChange={(e) => setParquetExtractMaxChars(parseInt(e.target.value || '0', 10))}
+                      style={{ width: '100%' }}
+                    />
+                  </div>
+                  <div className="input-group">
+                    <label style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '6px' }}>
+                      Max cell chars
+                    </label>
+                    <input
+                      type="number"
+                      min={100}
+                      max={200_000}
+                      value={parquetExtractMaxCellChars}
+                      onChange={(e) => setParquetExtractMaxCellChars(parseInt(e.target.value || '0', 10))}
+                      style={{ width: '100%' }}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ marginTop: '12px', display: 'flex', gap: '18px', flexWrap: 'wrap' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={parquetExtractTextColumnsOnly}
+                      onChange={(e) => setParquetExtractTextColumnsOnly(e.target.checked)}
+                    />
+                    <span style={{ fontSize: '12px', color: 'var(--fg)' }}>Text columns only</span>
+                    <TooltipIcon name="PARQUET_EXTRACT_TEXT_COLUMNS_ONLY" />
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={parquetExtractIncludeColumnNames}
+                      onChange={(e) => setParquetExtractIncludeColumnNames(e.target.checked)}
+                    />
+                    <span style={{ fontSize: '12px', color: 'var(--fg)' }}>Include column names</span>
+                    <TooltipIcon name="PARQUET_EXTRACT_INCLUDE_COLUMN_NAMES" />
+                  </label>
+                </div>
+              </div>
+
+              <div
+                style={{
+                  padding: '16px',
+                  background: 'var(--bg-elev2)',
+                  borderRadius: '8px',
+                  border: '1px solid var(--line)',
+                }}
+              >
+                <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--fg)', marginBottom: '8px' }}>Prompt Templates</div>
+                <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                  <PromptLink promptKey="code_enrichment">Edit Code Enrichment Prompt</PromptLink>
+                  <PromptLink promptKey="lightweight_chunk_summaries">Edit Lightweight Summary Prompt</PromptLink>
+                  <PromptLink promptKey="semantic_chunk_summaries">Edit Summary Prompt</PromptLink>
+                </div>
+              </div>
+            </div>
+
+            <details style={{ marginTop: '18px' }}>
+              <summary style={{ cursor: 'pointer', fontSize: '13px', fontWeight: 600, color: 'var(--fg)' }}>
+                Advanced chunking controls
+              </summary>
+              <div style={{ marginTop: '12px' }}>
+                <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px' }}>
+                  <div className="input-group">
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
+                      Greedy fallback target
+                      <TooltipIcon name="GREEDY_FALLBACK_TARGET" />
+                    </label>
+                    <input
+                      type="number"
+                      value={greedyFallbackTarget}
+                      onChange={(e) => setGreedyFallbackTarget(parseInt(e.target.value || '0', 10))}
+                      min={200}
+                      max={2000}
+                      style={{
+                        width: '100%',
+                        padding: '10px 12px',
+                        background: 'var(--input-bg)',
+                        border: '1px solid var(--line)',
+                        borderRadius: '6px',
+                        color: 'var(--fg)',
+                        fontSize: '13px',
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+            </details>
+          </div>
+        )}
+
+        {/* FIGURES & VISION */}
+        {selectedComponent === 'figures' && (
+          <div>
+            <h4
+              style={{
+                fontSize: '14px',
+                fontWeight: 600,
+                color: 'var(--fg)',
+                marginBottom: '16px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+              }}
+            >
+              🖼️ Figures & Vision
+              <TooltipIcon name="FIGURES_ENABLED" />
+            </h4>
+
+            <div style={{ display: 'grid', gap: '16px' }}>
+              <div
                 data-testid="figures-card"
                 style={{
                   padding: '16px',
@@ -2878,162 +3057,7 @@ export function IndexingSubtab() {
                   </div>
                 )}
               </div>
-
-              <div
-                style={{
-                  padding: '16px',
-                  background: 'var(--bg-elev2)',
-                  borderRadius: '8px',
-                  border: skipDense ? '2px solid var(--warn)' : '1px solid var(--line)',
-                }}
-              >
-                <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
-                  <input type="checkbox" checked={skipDense} onChange={(e) => setSkipDense(e.target.checked)} style={{ width: '18px', height: '18px' }} />
-                  <div>
-                    <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--fg)' }}>Skip dense vectors</div>
-                    <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginTop: '2px' }}>
-                      Useful for graph-only/sparse-only indexing runs (fast, no embeddings).
-                    </div>
-                  </div>
-                  <TooltipIcon name="SKIP_DENSE" />
-                </label>
-                {skipDense && (
-                  <div style={{ marginTop: '10px', padding: '8px 12px', background: 'rgba(var(--warn-rgb), 0.1)', borderRadius: '6px', color: 'var(--warn)', fontSize: '11px' }}>
-                    Vector search will not work until you re-index with dense enabled.
-                  </div>
-                )}
-              </div>
-
-              <div
-                style={{
-                  padding: '16px',
-                  background: 'var(--bg-elev2)',
-                  borderRadius: '8px',
-                  border: '1px solid var(--line)',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
-                  <div>
-                    <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--fg)' }}>Parquet ingestion (bounded)</div>
-                    <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginTop: '2px' }}>
-                      Prevents huge Parquet files from dominating memory/time during indexing.
-                    </div>
-                  </div>
-                  <TooltipIcon name="PARQUET_EXTRACT_MAX_ROWS" />
-                </div>
-
-                <div style={{ marginTop: '12px', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '14px' }}>
-                  <div className="input-group">
-                    <label style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '6px' }}>
-                      Max rows
-                    </label>
-                    <input
-                      type="number"
-                      min={1}
-                      max={200000}
-                      value={parquetExtractMaxRows}
-                      onChange={(e) => setParquetExtractMaxRows(parseInt(e.target.value || '0', 10))}
-                      style={{ width: '100%' }}
-                    />
-                  </div>
-                  <div className="input-group">
-                    <label style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '6px' }}>
-                      Max chars
-                    </label>
-                    <input
-                      type="number"
-                      min={10_000}
-                      max={50_000_000}
-                      value={parquetExtractMaxChars}
-                      onChange={(e) => setParquetExtractMaxChars(parseInt(e.target.value || '0', 10))}
-                      style={{ width: '100%' }}
-                    />
-                  </div>
-                  <div className="input-group">
-                    <label style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '6px' }}>
-                      Max cell chars
-                    </label>
-                    <input
-                      type="number"
-                      min={100}
-                      max={200_000}
-                      value={parquetExtractMaxCellChars}
-                      onChange={(e) => setParquetExtractMaxCellChars(parseInt(e.target.value || '0', 10))}
-                      style={{ width: '100%' }}
-                    />
-                  </div>
-                </div>
-
-                <div style={{ marginTop: '12px', display: 'flex', gap: '18px', flexWrap: 'wrap' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-                    <input
-                      type="checkbox"
-                      checked={parquetExtractTextColumnsOnly}
-                      onChange={(e) => setParquetExtractTextColumnsOnly(e.target.checked)}
-                    />
-                    <span style={{ fontSize: '12px', color: 'var(--fg)' }}>Text columns only</span>
-                    <TooltipIcon name="PARQUET_EXTRACT_TEXT_COLUMNS_ONLY" />
-                  </label>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-                    <input
-                      type="checkbox"
-                      checked={parquetExtractIncludeColumnNames}
-                      onChange={(e) => setParquetExtractIncludeColumnNames(e.target.checked)}
-                    />
-                    <span style={{ fontSize: '12px', color: 'var(--fg)' }}>Include column names</span>
-                    <TooltipIcon name="PARQUET_EXTRACT_INCLUDE_COLUMN_NAMES" />
-                  </label>
-                </div>
-              </div>
-
-              <div
-                style={{
-                  padding: '16px',
-                  background: 'var(--bg-elev2)',
-                  borderRadius: '8px',
-                  border: '1px solid var(--line)',
-                }}
-              >
-                <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--fg)', marginBottom: '8px' }}>Prompt Templates</div>
-                <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-                  <PromptLink promptKey="code_enrichment">Edit Code Enrichment Prompt</PromptLink>
-                  <PromptLink promptKey="lightweight_chunk_summaries">Edit Lightweight Summary Prompt</PromptLink>
-                  <PromptLink promptKey="semantic_chunk_summaries">Edit Summary Prompt</PromptLink>
-                </div>
-              </div>
             </div>
-
-            <details style={{ marginTop: '18px' }}>
-              <summary style={{ cursor: 'pointer', fontSize: '13px', fontWeight: 600, color: 'var(--fg)' }}>
-                Advanced chunking controls
-              </summary>
-              <div style={{ marginTop: '12px' }}>
-                <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px' }}>
-                  <div className="input-group">
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
-                      Greedy fallback target
-                      <TooltipIcon name="GREEDY_FALLBACK_TARGET" />
-                    </label>
-                    <input
-                      type="number"
-                      value={greedyFallbackTarget}
-                      onChange={(e) => setGreedyFallbackTarget(parseInt(e.target.value || '0', 10))}
-                      min={200}
-                      max={2000}
-                      style={{
-                        width: '100%',
-                        padding: '10px 12px',
-                        background: 'var(--input-bg)',
-                        border: '1px solid var(--line)',
-                        borderRadius: '6px',
-                        color: 'var(--fg)',
-                        fontSize: '13px',
-                      }}
-                    />
-                  </div>
-                </div>
-              </div>
-            </details>
           </div>
         )}
       </div>
