@@ -129,6 +129,7 @@ nav:
       - Retrieval overview: retrieval/overview.md
       - Indexing pipeline: indexing.md
       - Corpus vs repo_id: guides/corpus.md
+      - Figure grounding eval: guides/eval_figure_grounding.md
   - Reference:
       - Configuration: configuration.md
       - API: api.md

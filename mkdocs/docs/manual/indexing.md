@@ -141,6 +141,8 @@ A chunk whose text is majority covered by a described figure's source span is st
 
 For retrieval, this means figure evidence can be preferred or excluded by chunk metadata without text sniffing, and extraction triages every picture into exactly one of three run-summary counts (across both the live `item.meta` shape and Docling's deprecated `item.annotations` shape): `figures_described` (the vision call returned non-blank text), `figures_failed` (the vision call was attempted but the gateway returned nothing — an unreachable alias, or a reasoning alias that exhausted its `max_completion_tokens` budget on its internal trace before writing any JSON), and `figures_skipped` (never attempted: below `min_area_fraction`, a confident `skip_classes` prediction, or `describe` off).
 
+To measure whether these figure chunks actually move retrieval on a document corpus, score a page-grounded question set with the [figure grounding eval](../guides/eval_figure_grounding.md).
+
 !!! note "Profiles are protocol, not configuration"
     The two prompt templates (`technical_figure`, `schematic`) live in `server/indexing/figure_prompts.py` as code — they are the reply-schema contract between ragweld and the vision alias, not per-corpus config. You choose the profile with `indexing.figures.prompt_profile`; the `schematic` profile additionally asks the model to put drawing number, sheet and revision into `references`, connector/pin/signal designators into `labels`, and every drawn connection into `connections` as `A -> B` with units exactly as printed.
 

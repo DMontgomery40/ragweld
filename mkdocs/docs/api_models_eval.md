@@ -70,3 +70,8 @@ const report = await (await fetch('/reranker/evaluate', { method:'POST', headers
 
 ??? info "Top-K alignment"
     Ensure `eval_final_k >= retrieval.final_k` when you want strict hit@K parity with production.
+
+??? note "Figure eval dataset models"
+    Page-grounded figure evaluation uses its own dataset shapes in `server/models/eval_figures.py` (`FigureEvalDataset` / `FigureEvalItem` with `question`, `expected_pages` (1-based), `figure_ref`, `kind` (`locate`/`content`) and `tags`). They are serialized to `data/eval_datasets/*.json` and consumed by `scripts/eval_figure_grounding.py`; no frontend consumes them, so they are deliberately not registered for TypeScript generation. See [Figure grounding eval](guides/eval_figure_grounding.md).
+
+    These complement — they do not replace — the `EvalDatasetItem` path-based shapes above.

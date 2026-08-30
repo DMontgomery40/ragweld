@@ -73,3 +73,9 @@ const result = await (await fetch('/reranker/evaluate', { method:'POST', headers
 
 ??? info "Prompt analysis"
     Use `system_prompts.eval_analysis` to generate skeptical post-hoc analysis comparing two runs.
+
+## Page-grounded figure retrieval (single-PDF corpora)
+
+The standard eval lane scores retrieval by `expected_paths`, which works when a corpus spans many files but is meaningless on a corpus that is one PDF: every match has the same path, so path-level MRR is 1.0 whatever the retriever does. For document corpora indexed with [figure descriptions](manual/indexing.md), use the page-grounded dataset and scorer instead — each question is grounded on the **pages** where the answer is printed. See [Figure grounding eval](guides/eval_figure_grounding.md).
+
+The two lanes complement each other: keep path-based runs for multi-file code corpora, and use the figure-grounding harness when the question "does retrieval bring back the page with the chart?" is the one that matters.
