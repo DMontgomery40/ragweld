@@ -14,6 +14,8 @@ import os
 import shutil
 import tempfile
 import uuid
+from collections.abc import AsyncGenerator, Callable
+from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -42,8 +44,42 @@ _QUESTION = "How often is the tidal salinity array calibrated?"
 _ANSWER = "Every 14 days, and after any sensor swap.\nThe log lives in the calibration handbook."
 
 
-async def test_a_recall_conversation_opens_in_the_document_viewer(client: AsyncClient) -> None:
+@pytest.fixture
+async def recall_corpora() -> AsyncGenerator[Callable[[str], None], None]:
+    """Register corpora created by a test; guarantee they are gone afterwards.
+
+    Teardown goes straight to Postgres (and Qdrant) rather than through
+    `DELETE /api/corpora`. That endpoint runs the whole deletion saga, so it answers a typed
+    503 `dependency_unavailable:neo4j` when Neo4j is unreachable or unauthenticated - and
+    the earlier teardown ignored the response, so `pg.delete_corpus` never ran and
+    `recall_test_*` rows leaked into the operator's registry. Cleanup must not depend on a
+    store these tests never use.
+
+    Registration happens before the corpus exists, so a test that fails part-way through
+    still gets cleaned up.
+    """
+    registered: list[str] = []
+    yield registered.append
+
+    cfg = load_config()
+    pg = PostgresClient(os.environ.get("POSTGRES_DSN") or cfg.indexing.postgres_url)
+    await pg.connect()
+    survivors: list[str] = []
+    for corpus_id in registered:
+        with suppress(Exception):
+            # Best effort: vectors are not what a leaked registry row costs the operator.
+            await QdrantChunkStore(cfg).delete_corpus(corpus_id)
+        await pg.delete_corpus_with_data(corpus_id)
+        if await pg.get_corpus(corpus_id) is not None:
+            survivors.append(corpus_id)
+    assert not survivors, f"test corpora leaked into the registry: {survivors}"
+
+
+async def test_a_recall_conversation_opens_in_the_document_viewer(
+    client: AsyncClient, recall_corpora: Callable[[str], None]
+) -> None:
     corpus_id = f"recall_test_{uuid.uuid4().hex[:8]}"
+    recall_corpora(corpus_id)
     conversation_id = f"conv-{uuid.uuid4().hex[:8]}"
     cfg = load_config()
     recall_root = Path(tempfile.mkdtemp(prefix="ragweld-recall-"))
@@ -143,12 +179,11 @@ async def test_a_recall_conversation_opens_in_the_document_viewer(client: AsyncC
         assert refetched.json()["provenance"]["stale"] is False
         assert len(list(path.parent.glob("*.md"))) == 1
     finally:
-        await client.delete(f"/api/corpora/{corpus_id}")
         shutil.rmtree(recall_root, ignore_errors=True)
 
 
 async def test_an_existing_recall_row_is_never_repointed_at_another_checkout(
-    client: AsyncClient,
+    recall_corpora: Callable[[str], None],
 ) -> None:
     """One row, one shared Postgres, and this runs on every chat send.
 
@@ -157,6 +192,7 @@ async def test_an_existing_recall_row_is_never_repointed_at_another_checkout(
     citation would 404 again until the next production send flipped it back.
     """
     corpus_id = f"recall_test_{uuid.uuid4().hex[:8]}"
+    recall_corpora(corpus_id)
     operator_root = Path(tempfile.mkdtemp(prefix="ragweld-recall-operator-"))
     other_checkout = Path(tempfile.mkdtemp(prefix="ragweld-recall-other-"))
     cfg = load_config()
@@ -181,7 +217,6 @@ async def test_an_existing_recall_row_is_never_repointed_at_another_checkout(
         assert str(row["path"]) == str(registered), "the registered root was repointed"
         assert root == registered, "the writer must follow the registry, not its own config"
     finally:
-        await client.delete(f"/api/corpora/{corpus_id}")
         shutil.rmtree(operator_root, ignore_errors=True)
         shutil.rmtree(other_checkout, ignore_errors=True)
 
@@ -200,10 +235,13 @@ async def test_an_unstorable_conversation_id_is_a_422_not_a_500(client: AsyncCli
         store.clear(bad_id)
 
 
-async def test_a_conversation_id_that_escapes_the_corpus_root_is_refused() -> None:
+async def test_a_conversation_id_that_escapes_the_corpus_root_is_refused(
+    recall_corpora: Callable[[str], None],
+) -> None:
     """The id names a file now; a traversing id must be refused, not written somewhere else."""
     cfg = load_config()
     corpus_id = f"recall_test_{uuid.uuid4().hex[:8]}"
+    recall_corpora(corpus_id)
     recall_root = Path(tempfile.mkdtemp(prefix="ragweld-recall-"))
     recall_cfg = RecallConfig(
         default_corpus_id=corpus_id, chunking_strategy="turn", corpus_root=str(recall_root)
