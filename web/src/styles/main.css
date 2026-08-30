@@ -18,7 +18,8 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            height: 56px;
+            height: var(--topbar-h);
+            flex-shrink: 0;
             position: sticky;
             top: 0;
             z-index: 100;
@@ -102,6 +103,7 @@
             font-size: 13px;
             font-family: 'SF Mono', monospace;
             min-width: 60px;
+            white-space: nowrap; /* never split "OK @ 7:46:55 AM" across two lines (M-114/X-15) */
         }
 
         #global-search {
@@ -189,13 +191,27 @@
         :root {
             --sidepanel-width: 360px;
             --sidebar-width: 170px;
+            --topbar-h: 56px;
+        }
+
+        /* The app shell fills exactly the viewport (dynamic vh so mobile browser
+           chrome can't leave a dead band under the footer, M-113/X-14). The
+           topbar keeps its natural height; the layout takes the rest. This
+           retires every `calc(100vh - 56px)` magic number, which was already
+           4px wrong wherever the topbar is not 56px tall (e.g. 52px <=1024px). */
+        #root {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            height: 100dvh;
         }
 
         /* 3-column layout: sidebar | main-content | sidepanel */
         .layout {
             display: grid;
             grid-template-columns: var(--sidebar-width) 1fr var(--sidepanel-width);
-            min-height: calc(100vh - 56px);
+            flex: 1 1 auto;
+            min-height: 0;
             position: relative;
         }
 
@@ -216,9 +232,9 @@
             flex-direction: column;
             min-width: 0;
             overflow: hidden;
-            /* Constrain to grid cell height */
+            /* Fills its grid row, which stretches to the layout's flex height. */
             height: 100%;
-            max-height: calc(100vh - 56px); /* viewport minus topbar */
+            min-height: 0;
         }
 
         /* Breadcrumbs bar */
@@ -272,7 +288,7 @@
             /* Fixed so the grab area stays within the viewport (prevents offscreen hit testing). */
             position: fixed;
             left: calc(100vw - var(--sidepanel-width) - 3px);
-            top: 56px; /* matches .topbar height */
+            top: var(--topbar-h); /* matches .topbar height */
             bottom: 0;
             width: 10px; /* wider grab area for reliability */
             cursor: col-resize;
@@ -865,7 +881,6 @@
             display: flex;
             flex-direction: column;
             height: 100%;
-            max-height: calc(100vh - 56px);
             min-height: 0;
         }
 
@@ -891,6 +906,7 @@
             justify-content: center;
             gap: 0;
             height: 100vh;
+            height: 100dvh;
             background: var(--bg);
             color: var(--fg);
         }
@@ -920,6 +936,7 @@
 
         .app-embed-root {
             height: 100vh;
+            height: 100dvh;
             background: var(--bg);
             color: var(--fg);
             display: flex;
@@ -1282,6 +1299,31 @@
         }
 
         /* ===================================
+           COMPACT CHROME (<=1200px) - keep the centre column readable (M-114/X-15)
+           A half-screen window must not squeeze the content pane. The rail and
+           sidebar narrow to fixed compact tracks set on grid-template-columns
+           DIRECTLY -- not via --sidepanel-width, which the resizable-sidepanel
+           helper writes inline on <html> where it would beat any media override.
+           Resize is disabled here (as it already is <900px) and the decorative
+           tagline is dropped so the top bar stops wrapping. This narrows the
+           chrome; it does NOT turn the sidebar into an icon strip -- that needs
+           the TabBar to render route.icon (shell lane); see the lane report.
+           =================================== */
+        @media (max-width: 1200px) {
+            .layout {
+                grid-template-columns: 150px 1fr 320px;
+            }
+
+            .resize-handle {
+                display: none;
+            }
+
+            .topbar .tagline {
+                display: none;
+            }
+        }
+
+        /* ===================================
            TABLET RESPONSIVE (768px - 1024px)
            PRIMARY FOCUS - Most Used
            =================================== */
@@ -1291,12 +1333,13 @@
         @media (max-width: 1024px) {
             :root {
                 --sidepanel-width: 320px;
+                --topbar-h: 52px;
             }
 
-            /* More compact topbar */
+            /* More compact topbar (height flows from --topbar-h so the fixed
+               resize handle and off-canvas sidebar stay aligned to it). */
             .topbar {
                 padding: 12px 16px;
-                height: 52px;
             }
 
             .topbar .brand {
