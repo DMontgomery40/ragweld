@@ -2727,9 +2727,19 @@ class GraphNeighborsResponse(BaseModel):
     entities: list[Entity] = Field(description="Entities in the neighborhood (includes the center entity)")
     relationships: list[Relationship] = Field(description="Relationships between returned entities")
     total_matched: int = Field(
-        default=0, ge=0, description="Entities matching the request before `limit` was applied"
+        default=0,
+        ge=0,
+        description=(
+            "Entities the request matched before `limit` was applied: the corpus or search "
+            "match count, the reachable neighbourhood size including the centre, or the "
+            "community's member count. Never capped by `limit`."
+        ),
     )
-    limit: int = Field(default=0, ge=0, description="Maximum number of entities the server returned")
+    limit: int = Field(
+        default=0,
+        ge=0,
+        description="Cap applied to `entities`; `len(entities) <= limit` on every producer",
+    )
 
 
 class EvalDatasetItem(BaseModel):

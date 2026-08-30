@@ -768,9 +768,64 @@ class Neo4jClient:
                     )
                 )
 
+        # `limit` caps the ENTITIES returned, the same as on the corpus and community
+        # subgraphs. The Cypher caps the neighbour scan, which yielded limit+1 rows once
+        # the centre was appended (review F-03); lowering that scan to limit-1 instead made
+        # a limit of 1 return no rows at all and 404 an entity that exists. So the trim
+        # happens here, centre first, with the edges narrowed to the entities that survive.
+        entities.sort(key=lambda e: e.entity_id != entity_id)
+        entities = entities[:lim]
+        kept = {e.entity_id for e in entities}
+        rels = [r for r in rels if r.source_id in kept and r.target_id in kept]
+
         return GraphNeighborsResponse(
-            entities=entities, relationships=rels, total_matched=len(entities), limit=lim
+            entities=entities,
+            relationships=rels,
+            total_matched=await self.count_entity_neighbors(repo_id, entity_id, max_hops=hops),
+            limit=lim,
         )
+
+    async def count_entity_neighbors(self, repo_id: str, entity_id: str, *, max_hops: int) -> int:
+        """Reachable neighbours within ``max_hops``, plus the centre, BEFORE any display limit.
+
+        ``total_matched`` promises a pre-limit count. Reporting ``len(entities)`` made it
+        equal ``limit`` for any entity with more neighbours than the cap, so a 500-neighbour
+        entity said "200 of 200" (review F-03).
+        """
+        hops = min(max(1, int(max_hops or 1)), 5)
+        allowed_rels = sorted(ALL_RELATION_TYPES)
+        driver = self._require_driver()
+        cypher = f"""
+        MATCH (center:__Entity__ {{repo_id: $repo_id, entity_id: $entity_id}})
+        OPTIONAL MATCH (center)-[rels*1..{hops}]-(n:__Entity__ {{repo_id: $repo_id}})
+        WHERE ALL(r IN rels WHERE type(r) IN $allowed_rels)
+        RETURN count(DISTINCT n) AS neighbours;
+        """
+        async with driver.session(database=self.database) as session:
+            res = await session.run(
+                cypher, repo_id=repo_id, entity_id=entity_id, allowed_rels=allowed_rels
+            )
+            rec = await res.single()
+        if rec is None:
+            return 0
+        # The centre is part of the returned subgraph, so it counts toward the total.
+        return int(rec.get("neighbours") or 0) + 1
+
+    async def count_community_members(self, repo_id: str, community_id: str) -> int:
+        """Members of a community BEFORE any display limit."""
+        driver = self._require_driver()
+        async with driver.session(database=self.database) as session:
+            res = await session.run(
+                """
+                MATCH (c:Community {repo_id: $repo_id, community_id: $community_id})
+                MATCH (e:__Entity__ {repo_id: $repo_id})-[:IN_COMMUNITY]->(c)
+                RETURN count(DISTINCT e) AS members;
+                """,
+                repo_id=repo_id,
+                community_id=community_id,
+            )
+            rec = await res.single()
+        return int((rec or {}).get("members") or 0)
 
     async def get_community_members(
         self, repo_id: str, community_id: str, *, limit: int = 500
@@ -904,7 +959,12 @@ class Neo4jClient:
 
         if not entities:
             return None
-        return GraphNeighborsResponse(entities=entities, relationships=rels)
+        return GraphNeighborsResponse(
+            entities=entities,
+            relationships=rels,
+            total_matched=await self.count_community_members(repo_id, community_id),
+            limit=lim,
+        )
 
     async def get_repo_subgraph(
         self, repo_id: str, *, limit: int = 200, query: str | None = None

@@ -16,14 +16,20 @@ class _FakeResult:
     async def data(self) -> list[dict[str, object]]:
         return self._records
 
+    async def single(self) -> dict[str, object] | None:
+        return self._records[0] if self._records else None
+
 
 class _FakeSession:
-    def __init__(self, records: list[dict[str, object]]):
+    def __init__(self, records: list[dict[str, object]], neighbour_count: int = 0):
         self._records = records
+        self._neighbour_count = neighbour_count
         self.last_query: str | None = None
         self.last_params: dict[str, object] | None = None
+        self.count_query: str | None = None
+        self.count_params: dict[str, object] | None = None
 
-    async def __aenter__(self) -> "_FakeSession":
+    async def __aenter__(self) -> _FakeSession:
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
@@ -32,13 +38,19 @@ class _FakeSession:
     async def run(self, query: str, **params):
         self.last_query = query
         self.last_params = params
+        # `get_entity_neighbors` also asks for the pre-limit neighbour count, which is a
+        # different query against the same stand-in driver; answer it as Neo4j would.
+        if "AS neighbours" in query:
+            self.count_query = query
+            self.count_params = params
+            return _FakeResult([{"neighbours": self._neighbour_count}])
         return _FakeResult(self._records)
 
 
 class _FakeDriver:
-    def __init__(self, records: list[dict[str, object]]):
+    def __init__(self, records: list[dict[str, object]], neighbour_count: int = 0):
         self._records = records
-        self.session_obj = _FakeSession(records)
+        self.session_obj = _FakeSession(records, neighbour_count)
 
     def session(self, database: str | None = None) -> _FakeSession:
         _ = database
@@ -194,7 +206,8 @@ async def test_get_entity_neighbors_inlines_hops_and_parses_response() -> None:
         }
     ]
 
-    client._driver = _FakeDriver(records)  # type: ignore[assignment]
+    # Five reachable neighbours, only two of which the capped query returned.
+    client._driver = _FakeDriver(records, neighbour_count=5)  # type: ignore[assignment]
 
     out = await client.get_entity_neighbors(repo_id="test-corpus", entity_id="e1", max_hops=2, limit=200)
     assert out is not None
@@ -204,6 +217,12 @@ async def test_get_entity_neighbors_inlines_hops_and_parses_response() -> None:
     assert out.relationships[0].relation_type == "calls"
     assert out.relationships[0].source_id == "e1"
     assert out.relationships[0].target_id == "e2"
+    # The centre sorts first, so a cap never drops the entity that was asked for.
+    assert out.entities[0].entity_id == "e1"
+    # `total_matched` is the PRE-limit count (5 neighbours + the centre), not len(entities),
+    # which would have equalled the cap for any truncated neighbourhood (review F-03).
+    assert out.total_matched == 6
+    assert out.limit == 200
 
     session = client._driver.session_obj  # type: ignore[attr-defined]
     assert session.last_query is not None

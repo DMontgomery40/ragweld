@@ -3927,9 +3927,9 @@ export interface GraphNeighborsResponse {
   entities: Entity[];
   /** Relationships between returned entities */
   relationships: Relationship[];
-  /** Entities matching the request before `limit` was applied */
+  /** Entities the request matched before `limit` was applied: the corpus or search match count, the reachable neighbourhood size including the centre, or the community's member count. Never capped by `limit`. */
   total_matched?: number;
-  /** Maximum number of entities the server returned */
+  /** Cap applied to `entities`; `len(entities) <= limit` on every producer */
   limit?: number;
 }
 

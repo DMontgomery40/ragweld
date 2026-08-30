@@ -128,6 +128,22 @@ async def test_label_propagation_communities_survive_promotion_and_feed_the_subg
         members = await client.get(f"/api/graph/{active}/community/{detected[0].community_id}/members")
         assert members.status_code == 200 and len(members.json()) == 3, members.text
 
+        # The community subgraph carries the same pre-limit contract; it used to leave
+        # total_matched at the model default of 0 (review F-03).
+        for cap, expected_shown in ((50, 3), (1, 1)):
+            community_sub = await client.get(
+                f"/api/graph/{active}/community/{detected[0].community_id}/subgraph",
+                params={"limit": cap},
+            )
+            assert community_sub.status_code == 200, community_sub.text
+            body = community_sub.json()
+            assert len(body["entities"]) == expected_shown
+            assert body["limit"] == cap
+            assert body["total_matched"] == 3, (
+                f"community total_matched must be the pre-limit member count, got "
+                f"{body['total_matched']} at limit={cap}"
+            )
+
         # The whole-corpus view gets entities AND the edges between them.
         subgraph = await client.get(f"/api/graph/{active}/subgraph", params={"limit": 50})
         assert subgraph.status_code == 200, subgraph.text
@@ -291,6 +307,25 @@ async def test_code_entity_ids_round_trip_and_a_search_carries_its_own_edges(
         whole = await client.get(f"/api/graph/{active}/subgraph", params={"limit": 200})
         assert whole.status_code == 200, whole.text
         assert whole.json()["total_matched"] == 5
+
+        # `total_matched` means "before limit" on EVERY producer, not only /subgraph.
+        # get_entity_neighbors used to report len(entities), which equals `limit` as soon
+        # as a neighborhood is truncated - a 500-neighbour entity said "200 of 200"
+        # (review F-03). `module` reaches Reranker (1 hop) and Reranker.__init__ (2 hops),
+        # so with the centre the pre-limit total is 3 however small the display cap is.
+        for cap, expected_shown in ((200, 3), (1, 1)):
+            capped = await client.get(
+                f"/api/graph/{active}/entity/neighbors",
+                params={"entity_id": module, "max_hops": 2, "limit": cap},
+            )
+            assert capped.status_code == 200, capped.text
+            body = capped.json()
+            assert len(body["entities"]) == expected_shown
+            assert body["limit"] == cap
+            assert body["total_matched"] == 3, (
+                f"total_matched must be the pre-limit neighbour count, got {body['total_matched']} "
+                f"at limit={cap}"
+            )
 
         # The entity list and the search subgraph must select the SAME entities, or the
         # list would show rows the visualizer never draws.
