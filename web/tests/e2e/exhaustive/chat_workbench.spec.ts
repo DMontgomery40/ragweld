@@ -171,6 +171,106 @@ test.describe.serial('chat workbench (seeded, no paid sends)', () => {
     await expect(page.getByTestId('chat-attachment-0')).toContainText('PNG');
   });
 
+  test('M-94: source scores carry a label and a consistent 3-dp precision', async ({ page }) => {
+    const sources = [
+      { chunk_id: 'c1', content: 'alpha', file_path: 'src/a.py', start_line: 1, end_line: 5, score: 0.0432, source: 'vector', metadata: { corpus_id: 'demo' } },
+      { chunk_id: 'c2', content: 'beta', file_path: 'src/b.py', start_line: 9, end_line: 12, score: 0.7, source: 'sparse', metadata: { corpus_id: 'demo' } },
+    ];
+    await seedThread(page, {
+      sources: { corpus_ids: ['recall_default'] },
+      messages: [
+        { id: 'u1', role: 'user', createdAt: new Date().toISOString(), content: [{ type: 'text', text: 'scores?' }] },
+        completedAssistant('Answer with scored sources.', { sources }),
+      ],
+    });
+    await gotoChat(page);
+
+    const block = page.getByTestId('chat-sources');
+    await expect(block).toBeVisible();
+    // Header count matches the two rendered corpus sources.
+    await expect(page.getByTestId('chat-sources-header')).toHaveText('Sources (2)');
+    // Every score is labelled and rendered to exactly three decimals.
+    const scoreTexts = await block.getByText(/score \d/).allInnerTexts();
+    expect(scoreTexts.length).toBeGreaterThanOrEqual(2);
+    for (const t of scoreTexts) {
+      expect(t, `score "${t}" should be labelled with 3-dp precision`).toMatch(/score \d+\.\d{3}\b/);
+    }
+  });
+
+  test('M-95: a multimodal answer lists its attached image sources', async ({ page }) => {
+    await seedThread(page, {
+      sources: { corpus_ids: ['recall_default'] },
+      messages: [
+        { id: 'u1', role: 'user', createdAt: new Date().toISOString(), content: [{ type: 'text', text: 'what is in this image?' }] },
+        completedAssistant('It shows a diagram.', { attachedImageCount: 2 }),
+      ],
+    });
+    await gotoChat(page);
+    const imageSource = page.getByTestId('chat-source-attached-images');
+    await expect(imageSource).toBeVisible();
+    await expect(imageSource).toContainText(/2 attached images/);
+  });
+
+  test('M-97: a long answer does not grow a horizontal scrollbar at 1024px', async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 768 });
+    const longWord = 'x'.repeat(400);
+    await seedThread(page, {
+      sources: { corpus_ids: ['recall_default'] },
+      messages: [
+        { id: 'u1', role: 'user', createdAt: new Date().toISOString(), content: [{ type: 'text', text: 'long?' }] },
+        completedAssistant(`Here is an unbreakable token ${longWord} and a wide line ${longWord}.`),
+      ],
+    });
+    await gotoChat(page);
+    // The chat surface must not overflow horizontally (wide content wraps/scrolls internally).
+    const overflow = await page.locator('[data-react-chat="true"]').evaluate((el) => el.scrollWidth - el.clientWidth);
+    expect(overflow, 'chat surface should not scroll horizontally').toBeLessThanOrEqual(1);
+    const bodyOverflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(bodyOverflow, 'page should not scroll horizontally').toBeLessThanOrEqual(1);
+  });
+
+  test('M-100: chat history shows a corpus badge and a timestamp', async ({ page }) => {
+    // Two sessions: the ACTIVE one is recall-only (so the "drop unknown corpora" effect,
+    // which only reconciles the active session, never prunes our synthetic corpus id); an
+    // INACTIVE session carries the corpus whose badge the History row must show.
+    await page.addInitScript(() => {
+      const now = Date.now();
+      const active = {
+        conversation_id: 'chat2-hist-active',
+        created_at: now,
+        updated_at: now + 10,
+        title: 'active recall chat',
+        model_override: '',
+        sources: { corpus_ids: ['recall_default'] },
+        messages: [
+          { id: 'ua', role: 'user', createdAt: new Date(now).toISOString(), content: [{ type: 'text', text: 'hi' }] },
+        ],
+      };
+      const withCorpus = {
+        conversation_id: 'chat2-hist-corpus',
+        created_at: now,
+        updated_at: now,
+        title: 'oxygen recycling question',
+        model_override: '',
+        sources: { corpus_ids: ['recall_default', 'apollo-corpus'] },
+        messages: [
+          { id: 'uc', role: 'user', createdAt: new Date(now).toISOString(), content: [{ type: 'text', text: 'how was oxygen recycled?' }] },
+        ],
+      };
+      localStorage.setItem(
+        'ragweld-chat-threads:v2',
+        JSON.stringify({ version: 2, active_conversation_id: 'chat2-hist-active', sessions: [active, withCorpus] }),
+      );
+    });
+    await gotoChat(page);
+    await page.getByTestId('chat-history-toggle').click();
+    // The corpus session's History row shows its corpus badge and Recall, plus a timestamp/msgs.
+    const corpora = page.getByTestId('chat-history-corpora').filter({ hasText: 'apollo-corpus' });
+    await expect(corpora).toBeVisible();
+    await expect(corpora).toContainText('Recall');
+    await expect(page.getByText(/msgs: \d/).first()).toBeVisible();
+  });
+
   test('M-96: recall-only selection reads "Recall", never "1 selected"', async ({ page }) => {
     await seedThread(page, {
       sources: { corpus_ids: ['recall_default'] },

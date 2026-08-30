@@ -23,6 +23,8 @@ test('M-93: Stop halts the send and leaves no permanent Streaming orphan', async
   // Once it is streaming, press Stop.
   const sendButton = chat.locator('#chat-send');
   await expect(sendButton).toHaveText('Stop', { timeout: 60_000 });
+  // M-97: the streaming bubble shows a live elapsed counter, not a static "Streaming".
+  await expect(chat.getByTestId('chat-streaming-elapsed')).toContainText(/Streaming · \d+s/, { timeout: 30_000 });
   await sendButton.click();
 
   // Stop halts the send: the composer returns to a ready state.
