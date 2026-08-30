@@ -335,7 +335,7 @@ async def test_run_index_body_batches_small_files_across_files_when_graph_work_i
     embedder = _RecordingEmbedder()
     qdrant = _RecordingQdrant(sparse_contract_from_config(cfg))
 
-    stats = await index_api._run_index_body(
+    stats, figure_totals = await index_api._run_index_body(
         repo_id="tiny-corpus",
         repo_path=str(root),
         force_reindex=False,
@@ -356,6 +356,9 @@ async def test_run_index_body_batches_small_files_across_files_when_graph_work_i
 
     assert stats.total_files == 3
     assert stats.total_chunks >= 3
+    # A text-only corpus with figures off still returns a totals record, all zeroes and unpriced:
+    # the run summary reports "no figures", never a missing figure phase.
+    assert figure_totals == index_api.FigureRunTotals()
     assert len(embedder.calls) == 1
     assert set(embedder.calls[0]) == {"doc-0.txt", "doc-1.txt", "doc-2.txt"}
     assert postgres.chunk_batch_sizes == [stats.total_chunks]

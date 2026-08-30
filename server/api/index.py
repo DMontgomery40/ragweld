@@ -15,6 +15,7 @@ import threading
 import uuid
 from collections import defaultdict
 from collections.abc import AsyncGenerator, Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
@@ -1206,6 +1207,53 @@ def _estimate_figure_description_cost_usd(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class FigureRunTotals:
+    """What one indexing run's figure phase actually did, priced.
+
+    Internal to the indexing pipeline: it exists to carry the figure outcome from the run
+    body to the completing run summary, which is the serialized boundary. Nothing outside
+    this module reads it, so it stays a local type rather than a second wire contract for
+    numbers ``IndexRunSummary`` already publishes.
+    """
+
+    described: int = 0
+    failed: int = 0
+    undescribed: int = 0
+    cost_usd: float | None = None
+
+
+def _figure_run_totals(
+    cfg: TriBridConfig, *, described: int, failed: int, undescribed: int
+) -> FigureRunTotals:
+    """Price a run's figure phase with the same ceiling the pre-run estimate quotes.
+
+    The estimate charges the full ``max_completion_tokens`` budget per figure against a
+    guessed figure count; this charges it against the figures the run really described, so
+    the two numbers are directly comparable (record <= estimate when the guess held).
+
+    A run that described nothing carries no price at all: skipped and failed figures never
+    reached the vision alias, and quoting ``$0.0000`` would put a cost line on the dashboard
+    for a run that made no call.
+    """
+    count = max(0, int(described or 0))
+    cost = (
+        _estimate_figure_description_cost_usd(
+            alias=cfg.indexing.figures.vision_model,
+            figures=count,
+            max_completion_tokens=int(cfg.indexing.figures.max_completion_tokens),
+        )
+        if count > 0
+        else None
+    )
+    return FigureRunTotals(
+        described=count,
+        failed=max(0, int(failed or 0)),
+        undescribed=max(0, int(undescribed or 0)),
+        cost_usd=cost,
+    )
+
+
 def _count_pdf_pages(paths: list[Path]) -> int:
     """Total page count across ``paths``, skipping files pdfium cannot open."""
     from server.services.pdf_render import pdf_page_sizes
@@ -1468,7 +1516,7 @@ async def _run_index(
     qdrant: QdrantChunkStore,
     qdrant_generation: str,
     cfg: TriBridConfig,
-) -> IndexStats:
+) -> tuple[IndexStats, FigureRunTotals]:
     # ONE config snapshot per run (the caller's): what the fence recorded, what is
     # built here and what the commit names must come from the same decision.
     target_repo_id = str(write_repo_id or repo_id)
@@ -1851,7 +1899,7 @@ async def _run_index_body(
     write_repo_id: str,
     qdrant: QdrantChunkStore,
     qdrant_generation: str,
-) -> IndexStats:
+) -> tuple[IndexStats, FigureRunTotals]:
     """Core indexing loop -- extracted to allow _run_index() to guarantee Neo4j cleanup via finally.
 
     Chunk rows go to Postgres under `write_repo_id`; dense + sparse vectors go
@@ -2465,7 +2513,12 @@ async def _run_index_body(
     # Not published to _STATS here: the caller publishes after the staged
     # Postgres/Qdrant/Neo4j resources have all been promoted, so a failed run
     # never reports staging numbers as the active index.
-    return stats
+    return stats, _figure_run_totals(
+        cfg,
+        described=figures_described_total,
+        failed=figures_failed_total,
+        undescribed=figures_undescribed_total,
+    )
 
 
 async def _release_fence(repo_id: str, run_id: str) -> bool:
@@ -2695,8 +2748,10 @@ def _publish_complete(
     started_at: datetime,
     stats: IndexStats,
     queue: asyncio.Queue[dict[str, Any]],
+    figures: FigureRunTotals | None = None,
 ) -> None:
     """The manifest is committed: this run IS the live index, whatever happens afterwards."""
+    figure_totals = figures or FigureRunTotals()
     _STATS[repo_id] = stats
     _STATUS_RUN_ID[repo_id] = run_id
     _STATUS[repo_id] = IndexStatus(
@@ -2721,6 +2776,10 @@ def _publish_complete(
         embedding_provider=str(getattr(stats, "embedding_provider", "") or ""),
         embedding_model=str(getattr(stats, "embedding_model", "") or ""),
         embedding_dimensions=int(getattr(stats, "embedding_dimensions", 0) or 0),
+        figures_described=figure_totals.described,
+        figures_failed=figure_totals.failed,
+        figures_undescribed=figure_totals.undescribed,
+        figure_description_cost_usd=figure_totals.cost_usd,
     )
     with contextlib.suppress(Exception):
         _persist_run_summary(summary)
@@ -2762,6 +2821,7 @@ async def _background_index_job(
     committed = False  # once the manifest is written, staged resources are the live ones
     commit_unknown = False  # promotion interrupted and the manifest unreadable: touch nothing
     stats: IndexStats | None = None
+    figure_totals: FigureRunTotals | None = None  # this run's figure phase, priced for the summary
     complete_published = False
     heartbeat: _FenceHeartbeat | None = None
     staged_collection: str | None = None  # the name recorded on the fence BEFORE creation
@@ -2774,7 +2834,12 @@ async def _background_index_job(
             return
         complete_published = True
         _publish_complete(
-            repo_id=repo_id, run_id=run_id, started_at=started_at, stats=stats, queue=queue
+            repo_id=repo_id,
+            run_id=run_id,
+            started_at=started_at,
+            stats=stats,
+            queue=queue,
+            figures=figure_totals,
         )
 
     try:
@@ -2826,7 +2891,7 @@ async def _background_index_job(
             drop_oldest=True,
         )
         with INDEX_DURATION_SECONDS.time():
-            stats = await _run_index(
+            stats, figure_totals = await _run_index(
                 repo_id,
                 request.repo_path,
                 request.force_reindex,

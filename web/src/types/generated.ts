@@ -3961,6 +3961,14 @@ export interface IndexRunSummary {
   embedding_model?: string | null;
   /** Embedding dimensions used by this run */
   embedding_dimensions?: number | null;
+  /** Figures this run described with the vision alias */
+  figures_described?: number;
+  /** Figures this run sent for description that came back empty or errored */
+  figures_failed?: number;
+  /** Figures this run left undescribed (filtered by class, area, or describe=false) */
+  figures_undescribed?: number;
+  /** Ceiling on the vision-call cost (USD) of this run's figure descriptions, from catalog pricing for the run's indexing.figures.vision_model charged over the full max_completion_tokens budget; null when nothing was described or the alias is unpriced */
+  figure_description_cost_usd?: number | null;
 }
 
 /** Current status of repository indexing. */

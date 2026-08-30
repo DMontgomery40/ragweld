@@ -150,6 +150,28 @@ class IndexRunSummary(BaseModel):
     embedding_dimensions: int | None = Field(
         default=None, ge=0, description="Embedding dimensions used by this run"
     )
+    figures_described: int = Field(
+        default=0, ge=0, description="Figures this run described with the vision alias"
+    )
+    figures_failed: int = Field(
+        default=0,
+        ge=0,
+        description="Figures this run sent for description that came back empty or errored",
+    )
+    figures_undescribed: int = Field(
+        default=0,
+        ge=0,
+        description="Figures this run left undescribed (filtered by class, area, or describe=false)",
+    )
+    figure_description_cost_usd: float | None = Field(
+        default=None,
+        ge=0.0,
+        description=(
+            "Ceiling on the vision-call cost (USD) of this run's figure descriptions, from catalog "
+            "pricing for the run's indexing.figures.vision_model charged over the full "
+            "max_completion_tokens budget; null when nothing was described or the alias is unpriced"
+        ),
+    )
 
 
 class IndexRunEvent(BaseModel):
