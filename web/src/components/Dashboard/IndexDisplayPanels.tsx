@@ -6,7 +6,10 @@ import type { DashboardIndexStatusMetadata } from '@/types/generated';
 const formatBytes = (bytes?: number) => {
   if (!bytes || bytes <= 0) return '0 B';
   const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  // Binary units (KiB/MiB/...) because the division is by 1024, not 1000. This card and the
+  // Storage subtab showed the same byte figure as "MB" here and "MiB" there (M-138); the
+  // MiB label is the one that is correct against the raw bytes, so both now agree.
+  const sizes = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return `${Math.round((bytes / Math.pow(k, i)) * 100) / 100} ${sizes[i]}`;
 };
@@ -111,15 +114,34 @@ export function IndexDisplayPanels() {
     { label: 'Postgres Total', value: formatBytes(storage.postgres_total_bytes), accent: 'var(--link)' }
   ];
 
+  // Total Cost includes the figure-description ceiling, so it is itself an upper bound whenever
+  // figures contributed: it gets the same "<=" the Recent Index Runs table already shows, so a
+  // ceiling is never printed as if it were an exact charge (M-162 / A-09).
+  const totalIsCeiling = costs.figure_description_cost != null && Number(costs.figure_description_cost) > 0;
+  // A metered $0.0000 (a local/no-charge embedding model) is real spend of zero, not a missing
+  // meter -- the null case already reads "N/A", so this qualifier keeps the two distinguishable
+  // to a reader who does not know that convention (M-162 / A-10).
+  const embeddingIsMeteredZero =
+    costs.embedding_cost != null && Number(costs.embedding_cost) === 0 && Number(costs.total_tokens || 0) > 0;
+
   const costCards = [
     { label: 'Total Tokens', value: costs.total_tokens?.toLocaleString() || '0' },
     {
       label: 'Embedding Cost',
-      value: costs.embedding_cost == null ? 'N/A' : `$${Number(costs.embedding_cost || 0).toFixed(4)}`
+      value:
+        costs.embedding_cost == null
+          ? 'N/A'
+          : embeddingIsMeteredZero
+            ? '$0.0000 (no charge)'
+            : `$${Number(costs.embedding_cost || 0).toFixed(4)}`
     },
-    ...(costs.semantic_kg_cost != null
-      ? [{ label: 'Semantic KG Cost', value: `$${Number(costs.semantic_kg_cost || 0).toFixed(4)}` }]
-      : []),
+    // "not run" rather than a silently missing row: the contract carries semantic_kg_cost as
+    // null when the phase did not run, and omitting it made "not run" indistinguishable from
+    // "$0.00" (M-162 / A-11).
+    {
+      label: 'Semantic KG Cost',
+      value: costs.semantic_kg_cost == null ? 'not run' : `$${Number(costs.semantic_kg_cost || 0).toFixed(4)}`
+    },
     // The label says "ceiling" because the run record prices the full completion budget per
     // figure; a real description spends only part of it. Total Cost inherits that ceiling.
     ...(costs.figure_description_cost != null
@@ -134,7 +156,7 @@ export function IndexDisplayPanels() {
       ? [{ label: 'Figures Described', value: Number(costs.figures_described || 0).toLocaleString() }]
       : []),
     ...(costs.total_cost != null
-      ? [{ label: 'Total Cost', value: `$${Number(costs.total_cost || 0).toFixed(4)}` }]
+      ? [{ label: 'Total Cost', value: `${totalIsCeiling ? '≤ ' : ''}$${Number(costs.total_cost || 0).toFixed(4)}` }]
       : []),
   ];
 

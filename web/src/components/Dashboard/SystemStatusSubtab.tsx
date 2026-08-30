@@ -494,7 +494,10 @@ export function SystemStatusSubtab() {
                         boxShadow: '0 0 6px var(--link)'
                       }}
                     />
-                    Local Runtime
+                    {/* "Runtime", not "Local Runtime": on the LXC deployment the frontend is a
+                        reverse-proxied built bundle and the backend runs on the host, so "Local"
+                        was a false claim about where this runs (ruling 3). */}
+                    Runtime
                   </span>
 
                   {/* Status indicators */}
