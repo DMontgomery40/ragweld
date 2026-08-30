@@ -26,7 +26,7 @@
 [Config API & workflow](../../configuration.md){ .md-button }
 [Glossary](../../glossary.md){ .md-button }
 
-**Total parameters**: 30
+**Total parameters**: 29
 
 ??? info "Group index"
     - `(root)`
@@ -243,7 +243,6 @@
 | `indexing.figures.enabled` | — | `bool` | `false` | — | Describe and classify figures inside Docling-converted PDFs so they become retrievable chunks |
 | `indexing.figures.images_scale` | — | `float` | `2.0` | ≥ 1.0, ≤ 4.0 | Docling raster scale for figure crops (2.0 is about 144 DPI) |
 | `indexing.figures.max_completion_tokens` | — | `int` | `600` | ≥ 64, ≤ 4000 | Output token budget per figure description |
-| `indexing.figures.max_figures_per_file` | — | `int` | `200` | ≥ 0 | Cap on described figures per document; the rest keep caption-only text |
 | `indexing.figures.min_area_fraction` | — | `float` | `0.02` | ≥ 0.0, ≤ 1.0 | Skip figures smaller than this fraction of the page area (icons, logos) |
 | `indexing.figures.prompt_profile` | — | `Literal["technical_figure", "schematic"]` | `"technical_figure"` | allowed="technical_figure", "schematic" | Prompt template for figure descriptions: technical figures or engineering schematics |
 | `indexing.figures.skip_classes` | — | `list[str]` | `["logo", "signature", "icon"]` | — | Classifier classes that are never sent for description |

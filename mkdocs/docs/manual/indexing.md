@@ -154,7 +154,8 @@ Knobs that matter:
 | `indexing.figures.prompt_profile` | `technical_figure` | `technical_figure` for reports; `schematic` adds drawing number, sheet, revision and connector conventions |
 | `indexing.figures.images_scale` | `2.0` | Raster scale for figure crops (≈144 DPI at 2.0) |
 | `indexing.figures.min_area_fraction` | `0.02` | Skip icons and decorative marks |
-| `indexing.figures.max_figures_per_file` | `200` | Cap per document; the rest keep caption-only text |
+| `indexing.figures.concurrency` | `4` | Parallel vision calls while converting one document |
+| `indexing.figures.timeout_s` | `90` | Per-figure vision call timeout (seconds) |
 
 Enable it per corpus:
 
@@ -180,7 +181,7 @@ Enable it per corpus:
 1. Sectional PATCH is validated by Pydantic; re-index the corpus to describe figures
 
 !!! warning "Vision costs are per figure"
-    A dense scanned PDF can hold hundreds of figures. Run `/api/index/estimate` first — the estimate includes the figure cost before you commit. Keep `max_figures_per_file` and `min_area_fraction` tight on large corpora, and point hard scanned schematics at a stronger vision alias per corpus.
+    A dense scanned PDF can hold hundreds of figures. Run `/api/index/estimate` first — the estimate includes the figure cost before you commit. There is no per-file figure cap: bound cost with `min_area_fraction`, `skip_classes`, and `max_completion_tokens`, and point hard scanned schematics at a stronger vision alias per corpus.
 
 !!! tip "If you're not sure"
     Leave it off for text-heavy corpora. Turn it on for report/drawing corpora where "which chart shows X?" is a real question, start with the defaults, and check the run summary's skipped-figure counts before widening the filters.
@@ -332,7 +333,10 @@ Here’s the short list of “most likely to matter” knobs:
 
 ??? info "Figure descriptions never appear"
     - Confirm `indexing.figures.enabled` is `true` for this corpus and the corpus was **re-indexed after enabling** — figures are captured during indexing, not retroactively.
-    - Check the run summary: figures below `min_area_fraction`, in `skip_classes`, or beyond `max_figures_per_file` are counted as skipped and keep caption-only text.
-    - The run refuses to start if the vision alias (`indexing.figures.vision_model`) is not flagged vision-capable in the model catalog — check the run error.
+    - Check the run summary: figures below `min_area_fraction` or in `skip_classes` are counted as skipped and keep caption-only text.
+    - Watch the run's final `Figure summary` event: `figures_described` vs `figures_undescribed`. If description was enabled but no figure came back described while pictures existed, the run logs a **warning** — Docling absorbs a per-picture vision failure, so an unreachable alias otherwise produces a run that looks completely successful.
     - Use `/api/index/estimate` before re-indexing large PDF corpora; figure descriptions are priced per figure.
+
+??? question "Starting the run returns 409 with `code: figure_vision_alias`"
+    `indexing.figures.vision_model` is either not a vision-capable gateway alias in the model catalog, or it cannot be routed right now (for example, the LiteLLM gateway is disabled). ragweld refuses the run **before** it takes the per-corpus run fence, so nothing is claimed, leased, or staged. Fix the alias — pick a vision-capable alias from the model catalog — or turn `indexing.figures.describe` off, then start the run again.
 
