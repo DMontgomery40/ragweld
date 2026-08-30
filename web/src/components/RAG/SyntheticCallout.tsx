@@ -13,25 +13,76 @@ type SyntheticContext =
   | 'learning-ranker'
   | 'learning-agent';
 
+// These buttons were labelled like viewers ("Corpus Keywords", "Starter Pack") but every one
+// of them LEAVES the page for Synthetic Lab with a recipe preselected -- Starter Pack for the
+// most expensive recipe there is. The label now says it generates and where, and `title`
+// carries the recipe the destination will arrive with.
 type ActionPreset = {
   label: string;
+  title: string;
   recipe: NonNullable<SyntheticRunStartRequest['recipe']>;
 };
 
 const ACTIONS: Record<SyntheticContext, ActionPreset[]> = {
-  indexing: [{ label: 'Starter Pack', recipe: 'full_stack' }],
+  indexing: [
+    {
+      label: 'Preload a full-stack recipe in Synthetic Lab \u2192',
+      title: 'Opens RAG \u203a Synthetic Lab with the full_stack recipe preselected. Nothing runs until you start it there.',
+      recipe: 'full_stack',
+    },
+  ],
   'data-quality': [
-    { label: 'Semantic Summaries', recipe: 'semantic_cards' },
-    { label: 'Corpus Keywords', recipe: 'keywords' },
+    {
+      label: 'Generate semantic summaries in Synthetic Lab \u2192',
+      title: 'Opens RAG \u203a Synthetic Lab with the semantic_cards recipe preselected. Nothing runs until you start it there.',
+      recipe: 'semantic_cards',
+    },
+    {
+      label: 'Generate keywords in Synthetic Lab \u2192',
+      title: 'Opens RAG \u203a Synthetic Lab with the keywords recipe preselected. Nothing runs until you start it there.',
+      recipe: 'keywords',
+    },
   ],
   retrieval: [
-    { label: 'Retrieval Eval Set', recipe: 'eval_dataset' },
-    { label: 'Autotune Retrieval', recipe: 'autotune_retrieval' },
+    {
+      label: 'Generate a retrieval eval set in Synthetic Lab \u2192',
+      title: 'Opens RAG \u203a Synthetic Lab with the eval_dataset recipe preselected. Nothing runs until you start it there.',
+      recipe: 'eval_dataset',
+    },
+    {
+      label: 'Autotune retrieval in Synthetic Lab \u2192',
+      title: 'Opens RAG \u203a Synthetic Lab with the autotune_retrieval recipe preselected. Nothing runs until you start it there.',
+      recipe: 'autotune_retrieval',
+    },
   ],
-  graph: [{ label: 'Graph Eval Set', recipe: 'eval_dataset' }],
-  'reranker-config': [{ label: 'Synthetic Triplets', recipe: 'triplets' }],
-  'learning-ranker': [{ label: 'Synthetic Triplets', recipe: 'triplets' }],
-  'learning-agent': [{ label: 'Agent Eval Set', recipe: 'eval_dataset' }],
+  graph: [
+    {
+      label: 'Generate a graph eval set in Synthetic Lab \u2192',
+      title: 'Opens RAG \u203a Synthetic Lab with the eval_dataset recipe preselected. Nothing runs until you start it there.',
+      recipe: 'eval_dataset',
+    },
+  ],
+  'reranker-config': [
+    {
+      label: 'Generate synthetic triplets in Synthetic Lab \u2192',
+      title: 'Opens RAG \u203a Synthetic Lab with the triplets recipe preselected. Nothing runs until you start it there.',
+      recipe: 'triplets',
+    },
+  ],
+  'learning-ranker': [
+    {
+      label: 'Generate synthetic triplets in Synthetic Lab \u2192',
+      title: 'Opens RAG \u203a Synthetic Lab with the triplets recipe preselected. Nothing runs until you start it there.',
+      recipe: 'triplets',
+    },
+  ],
+  'learning-agent': [
+    {
+      label: 'Generate an agent eval set in Synthetic Lab \u2192',
+      title: 'Opens RAG \u203a Synthetic Lab with the eval_dataset recipe preselected. Nothing runs until you start it there.',
+      recipe: 'eval_dataset',
+    },
+  ],
 };
 
 export function SyntheticCallout({ context }: { context: SyntheticContext }) {
@@ -67,6 +118,11 @@ export function SyntheticCallout({ context }: { context: SyntheticContext }) {
     (preset?: ActionPreset) => {
       const qs = new URLSearchParams();
       qs.set('subtab', 'synthetic');
+      // The corpus the operator was working on has to survive the jump: without it the
+      // destination URL is unreloadable and a refresh silently changes which corpus the
+      // recipe would run against.
+      const corpusId = String(activeRepo || '').trim();
+      if (corpusId) qs.set('corpus', corpusId);
       qs.set('synthetic_context', context);
       if (preset?.recipe) {
         qs.set('synthetic_recipe', String(preset.recipe));
@@ -74,7 +130,7 @@ export function SyntheticCallout({ context }: { context: SyntheticContext }) {
       qs.set('synthetic_autorun', '0');
       navigate({ pathname: '/rag', search: `?${qs.toString()}` });
     },
-    [context, navigate]
+    [activeRepo, context, navigate]
   );
 
   const status = loading ? 'loading' : latest?.status || 'idle';
@@ -103,6 +159,8 @@ export function SyntheticCallout({ context }: { context: SyntheticContext }) {
           <button
             key={action.label}
             className="small-button"
+            data-testid={`synthetic-generator-${action.recipe}`}
+            title={action.title}
             disabled={!String(activeRepo || '').trim()}
             onClick={() => openLab(action)}
           >

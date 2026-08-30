@@ -117,33 +117,48 @@ function ConfirmDialogView({
   );
 }
 
-// One dialog at a time: concurrent requests queue behind the open one so a
-// double-triggered action can never present two stacked overlays that a
-// single keypress could resolve together.
-let dialogQueue: Promise<unknown> = Promise.resolve();
+// One dialog at a time, held in a slot rather than a promise chain.
+//
+// This used to be `dialogQueue = dialogQueue.then(() => new Promise(...))`: every request
+// awaited the previous one, so a single dialog whose promise never settled -- a render that
+// threw, a host removed by something other than its own handler -- wedged the chain and every
+// later confirmation hung silently. No dialog, no error, and the caller awaiting it never
+// returned. Serializing on a pending promise is what made an unsettled dialog contagious.
+//
+// The slot keeps the property that motivated the queue (a double-triggered action can never
+// stack two overlays a single keypress resolves together) without the coupling: opening a
+// dialog while one is already open CANCELS the open one first. Cancelling is the safe answer
+// -- every caller treats false as "the operator declined" and does nothing.
+let openDialog: { cancel: () => void } | null = null;
 
 export function confirmDialog(options: ConfirmDialogOptions): Promise<boolean> {
-  const request = dialogQueue.then(
-    () =>
-      new Promise<boolean>((resolve) => {
-        const host = document.createElement('div');
-        document.body.appendChild(host);
-        const root = createRoot(host);
-        let settled = false;
-        const done = (accepted: boolean) => {
-          if (settled) return;
-          settled = true;
-          // Defer unmount out of the dispatching event so React never
-          // unmounts a root from inside its own event handler.
-          setTimeout(() => {
-            root.unmount();
-            host.remove();
-          }, 0);
-          resolve(accepted);
-        };
-        root.render(<ConfirmDialogView options={options} onResolve={done} />);
-      })
-  );
-  dialogQueue = request.catch(() => undefined);
-  return request;
+  openDialog?.cancel();
+
+  return new Promise<boolean>((resolve) => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    let settled = false;
+    const done = (accepted: boolean) => {
+      if (settled) return;
+      settled = true;
+      if (openDialog === slot) openDialog = null;
+      // Defer unmount out of the dispatching event so React never
+      // unmounts a root from inside its own event handler.
+      setTimeout(() => {
+        root.unmount();
+        host.remove();
+      }, 0);
+      resolve(accepted);
+    };
+    const slot = { cancel: () => done(false) };
+    openDialog = slot;
+    try {
+      root.render(<ConfirmDialogView options={options} onResolve={done} />);
+    } catch (error) {
+      // A dialog that cannot render must answer its caller, not hang it.
+      done(false);
+      throw error;
+    }
+  });
 }

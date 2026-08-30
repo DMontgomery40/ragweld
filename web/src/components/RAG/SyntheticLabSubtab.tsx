@@ -146,11 +146,21 @@ export function SyntheticLabSubtab() {
 
   const selectedArtifacts = useMemo(() => selectedRun?.artifacts || [], [selectedRun]);
 
+  // Arriving with a preset applied and no sign of it is how an operator ends up starting the
+  // most expensive recipe there is without having chosen it.
+  const [presetNotice, setPresetNotice] = useState('');
+
   useEffect(() => {
     const qs = new URLSearchParams(location.search || '');
     const recipeParam = String(qs.get('synthetic_recipe') || '').trim() as SyntheticRecipeKind;
     if (recipeParam && RECIPES.includes(recipeParam)) {
       setRecipe(recipeParam);
+      const from = String(qs.get('synthetic_context') || '').trim();
+      setPresetNotice(
+        `Recipe preset to "${recipeParam}"${from ? ` from ${from}` : ''}. Nothing has run — review it and start when you are ready.`
+      );
+    } else {
+      setPresetNotice('');
     }
   }, [location.search]);
 
@@ -425,6 +435,23 @@ export function SyntheticLabSubtab() {
           </div>
         ))}
       </div>
+      {presetNotice ? (
+        <div
+          data-testid="synthetic-preset-notice"
+          role="status"
+          style={{
+            marginBottom: 14,
+            padding: '10px 12px',
+            borderRadius: 8,
+            border: '1px solid var(--accent)',
+            background: 'rgba(var(--accent-rgb), 0.08)',
+            color: 'var(--fg)',
+            fontSize: 13,
+          }}
+        >
+          {presetNotice}
+        </div>
+      ) : null}
       <div style={{ marginBottom: 18 }}>
         <h3 style={{ fontSize: 18, fontWeight: 600, color: 'var(--fg)', marginBottom: 6 }}>Synthetic Lab</h3>
         <div style={{ fontSize: 13, color: 'var(--fg-muted)' }}>

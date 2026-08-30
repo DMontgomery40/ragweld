@@ -9,7 +9,7 @@ import type {
   KeywordsGenerateRequest,
   KeywordsGenerateResponse,
 } from '@/types/generated';
-import { useActiveRepo } from '@/stores';
+import { useActiveRepo, useRepoStore } from '@/stores';
 import { RepoSelectorCompact } from '@/components/RAG/RepoSelector';
 import { SyntheticCallout } from '@/components/RAG/SyntheticCallout';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
@@ -25,6 +25,7 @@ function parseList(text: string): string[] {
 
 export function DataQualitySubtab() {
   const activeRepo = useActiveRepo();
+  const loadRepos = useRepoStore((state) => state.loadRepos);
 
   // Validated public config fields
   const [excludeDirs, setExcludeDirs] = useConfigField<string[]>(
@@ -193,6 +194,13 @@ export function DataQualitySubtab() {
     void loadSummaries();
     void loadKeywords();
   }, [loadKeywords, loadSummaries]);
+
+  // One corpus source of truth across subtabs: this tab and Indexing both ask the shared store
+  // on entry, so neither can be showing a corpus list the other has already moved past. The
+  // drive found a deleted test corpus still offered here and not there.
+  useEffect(() => {
+    void loadRepos();
+  }, [loadRepos]);
 
   const generateKeywords = useCallback(async () => {
     const rid = String(activeRepo || '').trim();

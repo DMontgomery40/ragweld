@@ -186,6 +186,11 @@ _RUN_STAGE_EVENT_TYPES = frozenset({"log", "progress"})
 
 _MODELS_JSON_PATH = Path(__file__).parent.parent.parent / "data" / "models.json"
 _INDEX_RUNS_DIR = Path(__file__).parent.parent.parent / "data" / "index_runs"
+# Corpus roots may be registered relative (the recall corpus is registered as "data/recall"
+# by server/chat/recall_indexer.py). Relative to the process CWD is not a definition -- a
+# uvicorn started anywhere else resolves it somewhere else -- so they resolve against the
+# runtime root that owns data/, the same anchor _INDEX_RUNS_DIR uses.
+_RUNTIME_ROOT = Path(__file__).parent.parent.parent
 
 _ACTIVE_RUNS: dict[str, str] = {}
 _UNKNOWN_COMMITS: dict[str, str] = {}  # runs whose promotion outcome awaits manifest reconciliation
@@ -306,6 +311,17 @@ _LOCAL_EMBED_TPS_TABLE: dict[str, dict[str, int]] = {
 # a constant: it reads as calibrated when it is not. Per-provider numbers belong here only
 # once someone measures them.
 _SEMANTIC_KG_CALLS_PER_SECOND = 1.0
+
+
+
+def _resolve_corpus_root(repo_path: str) -> Path:
+    """Absolute corpus root for a registered path, relative or not.
+
+    A relative registry path resolved against the process CWD points at a different directory
+    for every process that reads it; anchoring it to the runtime root makes it one place.
+    """
+    raw = Path(str(repo_path or "").strip()).expanduser()
+    return (raw if raw.is_absolute() else (_RUNTIME_ROOT / raw)).resolve()
 
 
 def _idle_status(repo_id: str) -> IndexStatus:
@@ -3711,9 +3727,14 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
     pdf_paths: list[Path] = []
     sized_files: list[tuple[Path, int]] = []
 
-    root = Path(repo_path).expanduser().resolve()
+    root = _resolve_corpus_root(repo_path)
     if not root.exists():
-        raise HTTPException(status_code=422, detail=f"repo_path not found: {repo_path}")
+        # Name the path that was actually looked for: "repo_path not found: data/recall" sends
+        # the operator hunting for a relative path that no process ever opened.
+        detail = f"repo_path not found: {root}"
+        if str(root) != repo_path:
+            detail += f" (registered as {repo_path})"
+        raise HTTPException(status_code=422, detail=detail)
 
     for _rel, p in loader.iter_repo_files(str(root)):
         try:
@@ -3924,7 +3945,7 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
 async def start_index(request: IndexRequest) -> IndexStatus:
     # Fail closed on a path the API cannot read: the loader yields nothing for a
     # missing root and the run would otherwise "complete" with zero files.
-    root = Path(str(request.repo_path or "")).expanduser()
+    root = _resolve_corpus_root(str(request.repo_path or ""))
     if not str(request.repo_path or "").strip() or not root.is_dir():
         raise HTTPException(
             status_code=400, detail=f"repo_path is not a readable directory: {request.repo_path}"

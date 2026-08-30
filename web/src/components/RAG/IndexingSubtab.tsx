@@ -123,6 +123,11 @@ function errorDetail(error: unknown): string {
   return 'unknown error';
 }
 
+// Status polling cadence. Fast enough to follow a live run, slow enough that an idle tab
+// is not a request generator.
+const INDEX_POLL_ACTIVE_MS = 3000;
+const INDEX_POLL_IDLE_MS = 30000;
+
 const FALLBACK_CHUNKING_STRATEGIES = [
   { id: 'fixed_tokens', label: 'Fixed tokens', description: 'Token-window chunking (best default for text corpora)' },
   { id: 'recursive', label: 'Recursive', description: 'Separator-based chunking packed by token target (docs/transcripts)' },
@@ -445,12 +450,14 @@ export function IndexingSubtab() {
   const statsAbortRef = useRef<AbortController | null>(null);
 
 
-  // Ensure corpora loaded
+  // One corpus source of truth across subtabs. `if (!repos.length)` meant the list was
+  // fetched once and then never again, so this tab and Data Quality -- which asks the same
+  // store on its own schedule -- could show different corpora, and the drive caught a deleted
+  // test corpus still listed on one of them. Asking on entry makes the list belong to the view
+  // the operator is looking at; the store drops a call that is already in flight.
   useEffect(() => {
-    if (!repos.length) {
-      void loadRepos();
-    }
-  }, [repos.length, loadRepos]);
+    void loadRepos();
+  }, [loadRepos]);
 
   // Resolve selected corpus path from store
   const activeCorpus = useMemo(() => {
@@ -867,15 +874,16 @@ export function IndexingSubtab() {
       }
       foreignEventsSeenRef.current = events.length;
     };
-    const tick = async () => {
-      if (localRunRef.current) return; // this tab's own stream owns the UI
+    // Returns whether a run is live, which decides how soon to look again.
+    const tick = async (): Promise<boolean> => {
+      if (localRunRef.current) return true; // this tab's own stream owns the UI
       let data: IndexStatus | null = null;
       try {
         data = await fetchIndexStatus(rid, { quiet: true });
       } catch {
-        return;
+        return false;
       }
-      if (cancelled || activeRepoRef.current !== rid || !data) return;
+      if (cancelled || activeRepoRef.current !== rid || !data) return false;
       setIndexStatus(data);
       if (data.status === 'indexing') {
         // A single-file corpus reports progress 1.0 while its file is still converting; never
@@ -887,10 +895,10 @@ export function IndexingSubtab() {
         setProgress({ current: pct, total: 100, status: file ? `Indexing ${file}` : 'Indexing…' });
         try {
           const latestResp = await fetch(api(`index/${encodeURIComponent(rid)}/runs/latest`));
-          if (!latestResp.ok) return;
+          if (!latestResp.ok) return true;
           const latest: IndexRunSummary = await latestResp.json();
           const runId = String(latest.run_id || '');
-          if (!runId) return;
+          if (!runId) return true;
           if (runId !== foreignRunIdRef.current) {
             foreignRunIdRef.current = runId;
             foreignEventsSeenRef.current = 0;
@@ -901,16 +909,17 @@ export function IndexingSubtab() {
           const eventsResp = await fetch(
             api(`index/${encodeURIComponent(rid)}/runs/${encodeURIComponent(runId)}/events?limit=500`)
           );
-          if (!eventsResp.ok) return;
+          if (!eventsResp.ok) return true;
           const page: IndexRunEventPage = await eventsResp.json();
           const events: IndexRunEvent[] = Array.isArray(page.events) ? page.events : [];
-          if (cancelled) return;
+          if (cancelled) return true;
           appendEvents(events);
           setLatestRunEvents(events);
           setLatestRunEventTotal(Number(page.total ?? events.length));
         } catch {
           // best effort only
         }
+        return true;
       } else if (foreignRunIdRef.current) {
         // The adopted run ended while we were watching it.
         foreignRunIdRef.current = '';
@@ -928,14 +937,22 @@ export function IndexingSubtab() {
         void loadStats();
         void loadLatestRunReplay();
       }
+      return false;
     };
-    void tick();
-    const timer = window.setInterval(() => {
-      void tick();
-    }, 3000);
+    // A fixed 3 s interval kept asking about a run that reached a terminal state hours ago:
+    // 307 requests to /api/index/* in 13 minutes on an idle tab. The tab still has to notice a
+    // run started elsewhere, so idle backs off rather than stopping: one poll every 30 s when
+    // nothing is running, 3 s while a run is live.
+    let timer: number | undefined;
+    const loop = async () => {
+      const live = await tick();
+      if (cancelled) return;
+      timer = window.setTimeout(() => void loop(), live ? INDEX_POLL_ACTIVE_MS : INDEX_POLL_IDLE_MS);
+    };
+    void loop();
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      if (timer !== undefined) window.clearTimeout(timer);
       if (foreignRunIdRef.current) {
         foreignRunIdRef.current = '';
         foreignEventsSeenRef.current = 0;
@@ -2042,29 +2059,75 @@ export function IndexingSubtab() {
               <TooltipIcon name="CHUNKING_STRATEGY" />
             </h4>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '20px' }}>
-              {chunkingStrategies.map((strat) => (
-                <button
-                  key={strat.id}
-                  onClick={() => setChunkingStrategy(strat.id)}
-                  style={{
-                    padding: '16px',
-                    background:
-                      String(chunkingStrategy || '').toLowerCase() === strat.id
-                        ? 'rgba(var(--accent-rgb), 0.1)'
-                        : 'var(--bg-elev2)',
-                    border:
-                      String(chunkingStrategy || '').toLowerCase() === strat.id ? '2px solid var(--accent)' : '1px solid var(--line)',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                    textAlign: 'left',
-                    transition: 'all 0.2s ease',
-                  }}
-                >
-                  <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--fg)', marginBottom: '4px' }}>{strat.label}</div>
-                  <div style={{ fontSize: '11px', color: 'var(--fg-muted)' }}>{strat.description}</div>
-                </button>
-              ))}
+            {/* One choice out of nine, so it is a radiogroup: screen readers announce the
+                selection, arrow keys move it, and the selected card carries a visible mark
+                rather than only a border colour a low-contrast display swallows. */}
+            <div
+              role="radiogroup"
+              aria-label="Chunking strategy"
+              data-testid="chunking-strategy-group"
+              onKeyDown={(e) => {
+                const keys = ['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp', 'Home', 'End'];
+                if (!keys.includes(e.key)) return;
+                e.preventDefault();
+                const ids = chunkingStrategies.map((s) => s.id);
+                const current = Math.max(0, ids.indexOf(String(chunkingStrategy || '').toLowerCase()));
+                const next =
+                  e.key === 'Home'
+                    ? 0
+                    : e.key === 'End'
+                      ? ids.length - 1
+                      : e.key === 'ArrowRight' || e.key === 'ArrowDown'
+                        ? (current + 1) % ids.length
+                        : (current - 1 + ids.length) % ids.length;
+                setChunkingStrategy(ids[next]);
+                const node = e.currentTarget.querySelector<HTMLElement>(`[data-strategy="${ids[next]}"]`);
+                node?.focus();
+              }}
+              style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '20px' }}
+            >
+              {chunkingStrategies.map((strat) => {
+                const selected = String(chunkingStrategy || '').toLowerCase() === strat.id;
+                return (
+                  <button
+                    key={strat.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    data-strategy={strat.id}
+                    data-testid={`chunking-strategy-${strat.id}`}
+                    tabIndex={selected ? 0 : -1}
+                    onClick={() => setChunkingStrategy(strat.id)}
+                    style={{
+                      padding: '16px',
+                      background: selected ? 'rgba(var(--accent-rgb), 0.1)' : 'var(--bg-elev2)',
+                      border: selected ? '2px solid var(--accent)' : '1px solid var(--line)',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      transition: 'all 0.2s ease',
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: '13px',
+                        fontWeight: 600,
+                        color: selected ? 'var(--accent-text)' : 'var(--fg)',
+                        marginBottom: '4px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                      }}
+                    >
+                      <span aria-hidden="true" style={{ color: selected ? 'var(--accent)' : 'var(--fg-muted)' }}>
+                        {selected ? '\u25c9' : '\u25cb'}
+                      </span>
+                      {strat.label}
+                    </div>
+                    <div style={{ fontSize: '11px', color: 'var(--fg-muted)' }}>{strat.description}</div>
+                  </button>
+                );
+              })}
             </div>
 
             <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px' }}>

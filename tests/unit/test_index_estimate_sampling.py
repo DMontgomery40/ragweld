@@ -156,3 +156,28 @@ def test_binary_files_the_indexer_skips_are_not_counted_as_text(tmp_path: Path) 
 
     assert sample.total_tokens == 0
     assert sample.total_chunks == 0
+
+
+def test_a_relative_corpus_root_resolves_against_the_runtime_root_not_the_cwd(tmp_path: Path) -> None:
+    """The recall corpus is registered as the relative "data/recall".
+
+    Resolved against the process CWD, that names a different directory for every process that
+    reads it -- so the estimate answered "repo_path not found: data/recall" while a uvicorn
+    started from the repo root would have found it. Anchoring to the runtime root that owns
+    data/ makes it one place.
+    """
+    from server.api.index import _RUNTIME_ROOT, _resolve_corpus_root
+
+    assert _resolve_corpus_root("data/recall") == (_RUNTIME_ROOT / "data" / "recall").resolve()
+    # An absolute path is left exactly where it points.
+    assert _resolve_corpus_root(str(tmp_path)) == tmp_path.resolve()
+    # And the resolution does not depend on where the process happens to be running.
+    assert _resolve_corpus_root("data/recall").is_absolute()
+
+
+def test_the_runtime_root_is_the_directory_that_owns_data(tmp_path: Path) -> None:
+    from server.api.index import _INDEX_RUNS_DIR, _RUNTIME_ROOT
+
+    assert (_RUNTIME_ROOT / "data").exists()
+    # Same anchor the persisted run directory already uses, so the two cannot drift apart.
+    assert _INDEX_RUNS_DIR.parent.parent == _RUNTIME_ROOT
