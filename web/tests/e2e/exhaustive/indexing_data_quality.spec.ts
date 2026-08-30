@@ -81,7 +81,9 @@ test('generating keywords fills the review panel from the stored corpus', async 
   });
   await expect(page.getByTestId('corpus-keywords-empty')).toBeVisible();
 
-  await page.getByRole('button', { name: /generate keywords/i }).click();
+  // Exact: the Synthetic Lab jump button beside it is now "Generate keywords in Synthetic
+  // Lab \u2192", which a loose match also picks up.
+  await page.getByRole('button', { name: 'Generate keywords', exact: true }).click();
   await expect(page.getByTestId('corpus-keywords-empty')).toHaveCount(0, { timeout: 120_000 });
 
   // Reload: the panel is populated from what was persisted, not from session state.
