@@ -363,6 +363,51 @@ async def test_generic_lineage_alias_endpoint_refuses_a_failed_synthetic_bundle(
         await client.delete(f"/api/corpora/{corpus_id}")
 
 
+@pytest.mark.requires_postgres
+@pytest.mark.asyncio
+async def test_generic_lineage_alias_endpoint_fails_closed_on_an_unreadable_run(client, tmp_path: Path) -> None:
+    """M-12 is a security gate, so it fails CLOSED: if the bundle posted to the generic alias
+    endpoint is owned by a synthetic run whose run.json no longer validates, promotion is refused
+    (we cannot verify it passed the gate) even though the raw record claims status=completed.
+    Corrupt/failed records are exactly M-12's population, so this must not escape the gate."""
+    corpus_id = f"pytest_synth_gate_unreadable_{uuid.uuid4().hex[:8]}"
+    corpus_root = tmp_path / "corpus"
+    corpus_root.mkdir()
+    created = await client.post("/api/corpora", json={"corpus_id": corpus_id, "name": corpus_id, "path": str(corpus_root)})
+    assert created.status_code == 200, created.text
+
+    run_dir = synthetic_runs_dir() / f"{corpus_id}__unreadable"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    unreadable_bundle = "bundle__unreadableseed000000000"
+    # Valid JSON, but not a valid SyntheticRun (a provider that no longer exists); it still names
+    # its corpus and bundle and even claims to have completed. Its record cannot be trusted.
+    (run_dir / "run.json").write_text(
+        json.dumps(
+            {
+                "run_id": f"{corpus_id}__unreadable",
+                "corpus_id": corpus_id,
+                "provider": "synthetic_data_kit",
+                "recipe": "full_stack",
+                "status": "completed",
+                "bundle_id": unreadable_bundle,
+            }
+        ),
+        encoding="utf-8",
+    )
+    try:
+        for alias in ("baseline", "canary", "current", "promoted"):
+            res = await client.post(
+                f"/api/lineage/aliases/{alias}?corpus_id={corpus_id}", json={"bundle_id": unreadable_bundle}
+            )
+            assert res.status_code == 409, (alias, res.text)
+            detail = str(res.json().get("detail", ""))
+            assert "PROMOTION_BLOCKED" in detail
+            assert "unreadable" in detail.lower()
+    finally:
+        shutil.rmtree(run_dir, ignore_errors=True)
+        await client.delete(f"/api/corpora/{corpus_id}")
+
+
 @pytest.mark.asyncio
 async def test_synthetic_publish_endpoints_blocked_when_quality_gate_failed(client) -> None:
     corpus_id = f"pytest_synth_gate_{uuid.uuid4().hex[:8]}"

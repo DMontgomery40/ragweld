@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 from datetime import UTC, datetime
 from pathlib import Path
@@ -34,6 +35,7 @@ from server.synthetic.storage import (
     append_event,
     list_runs,
     load_run,
+    runs_dir,
     save_run,
     write_artifact,
 )
@@ -147,30 +149,53 @@ def promotion_block_reason(run: SyntheticRun) -> str | None:
 
 
 def promotion_block_reason_for_bundle(repo_id: str, bundle_id: str) -> str | None:
-    """Block reason if ``bundle_id`` is a synthetic run's own bundle that may not be promoted.
+    """Block reason if ``bundle_id`` is owned by a synthetic run that may not be promoted.
 
-    Returns None when no synthetic run of ``repo_id`` owns that bundle (so benchmark/eval/
-    reranker bundles pass through untouched) or when the owning run is promotable. A synthetic
-    run's ``bundle_id`` is content-addressed and specific to that run, so matching on it
-    identifies exactly the run a promoter would be pointing an alias at. This lets the generic
-    lineage alias endpoint refuse a failed run's bundle for a direct caller, not just the UI.
+    Fails CLOSED (M-12 is a security gate): scans the corpus's ``run.json`` records raw, because
+    ``get_runs`` drops the bundle_id of any record that no longer validates. A synthetic run's
+    ``bundle_id`` is content-addressed and specific to that run, so matching on it identifies
+    exactly the run a promoter points an alias at. For the owning record:
+
+    - readable & promotable -> allow (None);
+    - readable & failed / un-evaluated / un-attached -> refuse with its reason;
+    - present but its record no longer validates -> REFUSE (we cannot verify it passed the gate).
+
+    When no ``run.json`` claims the bundle (a benchmark/eval/reranker bundle, or none at all) the
+    caller is allowed. A byte-corrupt run.json is skipped: its bundle_id is unrecoverable, so it
+    is unknowable to any caller and cannot be the posted bundle.
     """
     target = str(bundle_id or "").strip()
     if not target:
         return None
     try:
-        metas, _unreadable = get_runs(corpus_id=repo_id, limit=2000)
-    except Exception:
-        # No readable synthetic runs for this corpus -> nothing to block here. The
-        # authoritative UI-facing gate is /synthetic/run/{id}/promote/{alias}.
+        run_dirs = sorted(runs_dir().iterdir(), key=lambda p: p.name, reverse=True)
+    except OSError:
         return None
-    for meta in metas:
-        if str(getattr(meta, "bundle_id", "") or "").strip() != target:
+    scope = str(repo_id or "").strip()
+    for d in run_dirs:
+        if not d.is_dir():
+            continue
+        run_json = d / "run.json"
+        if not run_json.exists():
             continue
         try:
-            run = get_run(str(meta.run_id))
+            raw = json.loads(run_json.read_text(encoding="utf-8"))
         except Exception:
+            # Byte-corrupt: bundle_id unrecoverable, so it cannot be the posted bundle.
             continue
+        if not isinstance(raw, dict):
+            continue
+        if str(raw.get("bundle_id") or "").strip() != target:
+            continue
+        # A record whose corpus is readable and differs is not this scope's concern; one whose
+        # corpus cannot be read is still considered (fail closed).
+        claimed = str(raw.get("corpus_id") or raw.get("repo_id") or "").strip()
+        if claimed and scope and claimed != scope:
+            continue
+        try:
+            run = SyntheticRun.model_validate(raw)
+        except Exception:
+            return "run record unreadable — cannot verify it completed and passed the quality gate; promotion blocked."
         reason = promotion_block_reason(run)
         if reason is not None:
             return reason
