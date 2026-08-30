@@ -46,7 +46,7 @@ export function HelpSubtab() {
               margin: '0 0 16px 0',
               fontSize: '16px',
               fontWeight: '600',
-              color: 'var(--accent)',
+              color: 'var(--accent-text)',
               display: 'flex',
               alignItems: 'center',
               gap: '8px'
@@ -248,7 +248,7 @@ function ConceptCard({ title, description }: ConceptCardProps) {
         padding: '16px'
       }}
     >
-      <h5 style={{ margin: '0 0 8px 0', fontSize: '13px', fontWeight: '600', color: 'var(--accent)' }}>{title}</h5>
+      <h5 style={{ margin: '0 0 8px 0', fontSize: '13px', fontWeight: '600', color: 'var(--accent-text)' }}>{title}</h5>
       <p style={{ margin: 0, fontSize: '12px', lineHeight: '1.6', color: 'var(--fg-muted)' }}>{description}</p>
     </div>
   );

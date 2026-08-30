@@ -156,7 +156,7 @@ export function RepositoryConfig({ onExcludePathsChange }: RepositoryConfigProps
 
   return (
     <div style={{ background: 'var(--card-bg)', border: '1px solid var(--line)', borderRadius: '6px', padding: '16px', marginBottom: '16px' }}>
-      <h4 style={{ color: 'var(--accent)', fontSize: '14px', marginBottom: '12px' }}>Repo: {repoData.name}</h4>
+      <h4 style={{ color: 'var(--accent-text)', fontSize: '14px', marginBottom: '12px' }}>Repo: {repoData.name}</h4>
 
       {/* Path */}
       <div className="input-group" style={{ marginBottom: '12px' }}>
@@ -320,7 +320,7 @@ export function RepositoryConfig({ onExcludePathsChange }: RepositoryConfigProps
             border: '1px solid var(--accent)',
             borderRadius: '4px',
             fontSize: '12px',
-            color: 'var(--accent)',
+            color: 'var(--accent-text)',
             marginTop: '8px'
           }}
         >

@@ -111,7 +111,7 @@ export function LineageMeta({
         gap: '8px',
       }}
     >
-      <div style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.04em', color: 'var(--accent)' }}>
+      <div style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.04em', color: 'var(--accent-text)' }}>
         LINEAGE
       </div>
       {inputBundleId ? (

@@ -42,7 +42,7 @@ export function MCPSubtab() {
   return (
     <div style={{ padding: '24px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px' }}>
-        <span style={{ color: 'var(--accent)', fontSize: '8px' }}>●</span>
+        <span style={{ color: 'var(--accent-text)', fontSize: '8px' }}>●</span>
         <h3 style={{ margin: 0, fontSize: '16px', color: 'var(--fg)', display: 'flex', alignItems: 'center', gap: '8px' }}>
           MCP Server <TooltipIcon name="SYS_STATUS_MCP_SERVERS" />
         </h3>

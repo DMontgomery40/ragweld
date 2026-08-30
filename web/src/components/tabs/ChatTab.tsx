@@ -217,7 +217,7 @@ export default function ChatTab() {
             }}
             title="Latest routing trace steps (retrieve, bm25, vector, rrf, hydrate)"
           >
-            <summary style={{ cursor: 'pointer', fontWeight: 600, color: 'var(--accent)', fontSize: '13px' }}>
+            <summary style={{ cursor: 'pointer', fontWeight: 600, color: 'var(--accent-text)', fontSize: '13px' }}>
               Routing Trace {trace?.events?.length ? `(${trace.events.length} events)` : ''}
             </summary>
             {trace && (
@@ -273,7 +273,7 @@ export default function ChatTab() {
                     rel="noopener noreferrer"
                     style={{
                       fontSize: '11px',
-                      color: 'var(--accent)',
+                      color: 'var(--accent-text)',
                       textDecoration: 'none',
                       border: '1px solid var(--line)',
                       borderRadius: '999px',

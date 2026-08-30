@@ -220,7 +220,7 @@ export function IndexDisplayPanels() {
             style={{
               fontSize: '11px',
               fontWeight: 700,
-              color: 'var(--accent)',
+              color: 'var(--accent-text)',
               textTransform: 'uppercase',
               letterSpacing: '1px',
               marginBottom: '12px',
@@ -333,7 +333,7 @@ export function IndexDisplayPanels() {
           Total Index Storage
         </div>
         <div
-          style={{ fontSize: '24px', fontWeight: 900, color: 'var(--accent)', fontFamily: "'SF Mono', monospace" }}
+          style={{ fontSize: '24px', fontWeight: 900, color: 'var(--accent-text)', fontFamily: "'SF Mono', monospace" }}
         >
           {formatBytes(metadata.total_storage)}
         </div>
@@ -402,7 +402,7 @@ function CostStat({ label, value }: { label: string; value: string }) {
         style={{
           fontSize: '15px',
           fontWeight: 700,
-          color: 'var(--accent)',
+          color: 'var(--accent-text)',
           fontFamily: "'SF Mono', monospace"
         }}
       >

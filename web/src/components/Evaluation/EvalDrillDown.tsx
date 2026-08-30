@@ -400,7 +400,7 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
           <div style={{ fontSize: '12px', color: 'var(--fg-muted)', marginBottom: '8px' }}>
             Top-1 Accuracy
           </div>
-          <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--accent)' }}>
+          <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--accent-text)' }}>
             {((evalRun?.top1_accuracy ?? 0) * 100).toFixed(1)}%
           </div>
           <div style={{ fontSize: '11px', color: 'var(--fg-muted)' }}>
@@ -612,7 +612,7 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
                       <div style={{
                         fontSize: '10px',
                         fontWeight: 600,
-                        color: 'var(--accent)',
+                        color: 'var(--accent-text)',
                         textTransform: 'uppercase',
                         marginBottom: '8px',
                         letterSpacing: '0.5px'
@@ -761,7 +761,7 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
           <h2 style={{
             fontSize: '18px',
             fontWeight: 700,
-            color: 'var(--accent)',
+            color: 'var(--accent-text)',
             marginBottom: '8px',
             display: 'flex',
             alignItems: 'center',
@@ -864,7 +864,7 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
                   }}>
                     <summary style={{
                       fontWeight: 700,
-                      color: 'var(--accent)',
+                      color: 'var(--accent-text)',
                       fontFamily: 'monospace',
                       cursor: 'pointer',
                       display: 'flex',
@@ -949,7 +949,7 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
                 }}>
                   <div style={{
                     fontWeight: 600,
-                    color: 'var(--accent)',
+                    color: 'var(--accent-text)',
                     fontFamily: 'monospace',
                     minWidth: '160px',
                     fontSize: '13px'
@@ -994,7 +994,7 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
                     >
                       {formatValue(previous)}
                     </div>
-                    <span style={{ color: 'var(--accent)', fontSize: '14px' }}>→</span>
+                    <span style={{ color: 'var(--accent-text)', fontSize: '14px' }}>→</span>
                     <div 
                       title={JSON.stringify(current)}
                       style={{
@@ -1217,7 +1217,7 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
                       <h3 key={idx} style={{
                         fontSize: '15px',
                         fontWeight: 700,
-                        color: 'var(--accent)',
+                        color: 'var(--accent-text)',
                         marginTop: idx > 0 ? '20px' : 0,
                         marginBottom: '12px',
                         borderBottom: '1px solid var(--line)',
@@ -1264,7 +1264,7 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
                         <span style={{
                           position: 'absolute',
                           left: 0,
-                          color: 'var(--accent)'
+                          color: 'var(--accent-text)'
                         }}>
                           {line.startsWith('- ') ? '•' : line.match(/^[\d]+/)?.[0] + '.'}
                         </span>
@@ -1433,7 +1433,7 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
                           <div style={{ display: 'grid', gap: '16px', fontSize: '12px' }}>
                             {/* Expected Paths */}
                             <div>
-                              <div style={{ fontWeight: 600, color: 'var(--accent)', marginBottom: '8px' }}>
+                              <div style={{ fontWeight: 600, color: 'var(--accent-text)', marginBottom: '8px' }}>
                                 ✓ Expected Paths:
                                 <span style={{ fontSize: '10px', color: 'var(--fg-muted)', marginLeft: '8px' }}>
                                   (type: {typeof result.expected_paths}, array: {Array.isArray(result.expected_paths) ? 'yes' : 'no'}, count: {result.expected_paths?.length ?? 0})
@@ -1542,7 +1542,7 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
                                       borderRadius: '4px'
                                     }}>
                                       <span style={{ color: 'var(--fg)' }}>{doc.file_path}</span>
-                                      <span style={{ color: 'var(--accent)', fontWeight: 600 }}>
+                                      <span style={{ color: 'var(--accent-text)', fontWeight: 600 }}>
                                         {(doc?.score ?? 0).toFixed(4)}
                                       </span>
                                     </div>

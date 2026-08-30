@@ -3198,7 +3198,7 @@ export function IndexingSubtab() {
               <div style={{ flex: 1, minWidth: '260px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '12px' }}>
                   <span style={{ color: 'var(--fg)' }}>{progress.status}</span>
-                  <span style={{ color: 'var(--accent)', fontWeight: 800 }}>{progress.current}%</span>
+                  <span style={{ color: 'var(--accent-text)', fontWeight: 800 }}>{progress.current}%</span>
                 </div>
                 <div style={{ height: '6px', background: 'var(--line)', borderRadius: '3px', overflow: 'hidden' }}>
                   <div

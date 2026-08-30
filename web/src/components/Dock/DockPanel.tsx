@@ -402,7 +402,7 @@ export function DockPanel() {
             style={{
               background: 'transparent',
               border: '1px solid var(--accent)',
-              color: 'var(--accent)',
+              color: 'var(--accent-text)',
               borderRadius: '8px',
               padding: '6px 10px',
               cursor: 'pointer',

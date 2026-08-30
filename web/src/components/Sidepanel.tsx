@@ -207,7 +207,7 @@ export function Sidepanel() {
             marginBottom: '12px',
           }}
         >
-          <span style={{ color: 'var(--accent)', fontSize: '8px' }}>●</span>
+          <span style={{ color: 'var(--accent-text)', fontSize: '8px' }}>●</span>
           <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--fg)' }}>
             Quick Model Switcher
           </span>
@@ -353,7 +353,7 @@ export function Sidepanel() {
             marginBottom: '12px',
           }}
         >
-          <span style={{ color: 'var(--accent)', fontSize: '8px' }}>●</span>
+          <span style={{ color: 'var(--accent-text)', fontSize: '8px' }}>●</span>
           <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--fg)' }}>
             Secrets Ingest
           </span>

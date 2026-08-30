@@ -933,7 +933,7 @@ export const EvalAnalysisTab: React.FC = () => {
                     display: 'block', 
                     fontSize: '11px', 
                     fontWeight: 600, 
-                    color: 'var(--accent)',
+                    color: 'var(--accent-text)',
                     textTransform: 'uppercase',
                     marginBottom: '6px',
                     letterSpacing: '0.5px'
@@ -1133,7 +1133,7 @@ export const EvalAnalysisTab: React.FC = () => {
               fontSize: '12px'
             }}>
               <span style={{ color: 'var(--fg)' }}>{evalProgress.status}</span>
-              <span style={{ color: 'var(--accent)', fontWeight: 600 }}>{evalProgress.current}%</span>
+              <span style={{ color: 'var(--accent-text)', fontWeight: 600 }}>{evalProgress.current}%</span>
             </div>
             <div style={{
               height: '6px',

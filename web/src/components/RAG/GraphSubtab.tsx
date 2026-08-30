@@ -536,7 +536,7 @@ export function GraphSubtab() {
             }}
           >
             <span style={{ color: 'var(--fg)' }}>
-              <strong style={{ color: 'var(--accent)' }}>{indexProgressPercent}%</strong> complete
+              <strong style={{ color: 'var(--accent-text)' }}>{indexProgressPercent}%</strong> complete
             </span>
             {activeIndexStatus?.current_file ? (
               <span style={{ color: 'var(--fg-muted)' }}>
@@ -1032,7 +1032,7 @@ export function GraphSubtab() {
                     background: 'rgba(var(--accent-rgb), 0.1)',
                     border: '1px solid var(--accent)',
                     borderRadius: '8px',
-                    color: 'var(--accent)',
+                    color: 'var(--accent-text)',
                     fontSize: '11px',
                     fontWeight: 700,
                     cursor: filteredEntities.length === 0 ? 'not-allowed' : 'pointer',
@@ -1306,7 +1306,7 @@ export function GraphSubtab() {
                       backdropFilter: 'blur(8px)',
                     }}
                   >
-                    <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--accent)' }}>
+                    <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--accent-text)' }}>
                       {selectedEntity.name}
                     </div>
                     <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginTop: '4px' }}>

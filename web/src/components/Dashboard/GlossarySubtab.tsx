@@ -360,7 +360,7 @@ export function GlossarySubtab() {
                           <span className="glossary-icon" style={{ fontSize: '20px' }}>
                             {categoryInfo.icon}
                           </span>
-                          <strong style={{ fontSize: '14px', color: 'var(--accent)' }}>{item.title}</strong>
+                          <strong style={{ fontSize: '14px', color: 'var(--accent-text)' }}>{item.title}</strong>
                         </div>
                         <code
                           className="glossary-param-name"

@@ -87,7 +87,7 @@ export function ChatHistorySidebar({
               >
                 <span>{updatedAt ? new Date(updatedAt).toLocaleString() : '—'}</span>
                 <span>msgs: {messageCount}</span>
-                {isActive ? <span style={{ color: 'var(--accent)', fontWeight: 800 }}>active</span> : null}
+                {isActive ? <span style={{ color: 'var(--accent-text)', fontWeight: 800 }}>active</span> : null}
               </div>
             </button>
           );
@@ -105,7 +105,7 @@ export function ChatHistorySidebar({
           style={{
             width: '100%',
             background: 'var(--bg-elev2)',
-            color: 'var(--accent)',
+            color: 'var(--accent-text)',
             border: '1px solid var(--accent)',
             padding: '8px',
             borderRadius: '6px',

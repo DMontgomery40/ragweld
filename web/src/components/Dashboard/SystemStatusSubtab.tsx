@@ -194,7 +194,7 @@ export function SystemStatusSubtab() {
               style={{
                 fontSize: '14px',
                 marginBottom: '16px',
-                color: 'var(--accent)',
+                color: 'var(--accent-text)',
                 display: 'flex',
                 alignItems: 'center',
                 gap: '8px'
@@ -560,7 +560,7 @@ export function SystemStatusSubtab() {
               <tbody>
                 {topFolders.map(folder => (
                   <tr key={`${folder.profile || 'default'}-${folder.name}`}>
-                    <td style={{ padding: '4px 0', fontWeight: 600, color: 'var(--accent)' }}>
+                    <td style={{ padding: '4px 0', fontWeight: 600, color: 'var(--accent-text)' }}>
                       {folder.name}
                     </td>
                     <td style={{ padding: '4px 0', color: 'var(--fg-muted)' }}>

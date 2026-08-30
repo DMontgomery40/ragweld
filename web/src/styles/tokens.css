@@ -18,6 +18,12 @@ html, :root, [data-theme="dark"] {
   /* SURGICAL: Desaturated slate, NOT neon */
   --accent: #64748b;           /* slate-500 - matte steel */
   --accent-contrast: #ffffff;
+  /* Text-only variant of --accent: --accent itself is also a BUTTON
+     BACKGROUND (paired with --accent-contrast, e.g. .btn-primary), and
+     lightening it enough to pass as text on dark surfaces (3.72-4.18:1)
+     drops that background pairing below its own floor. Standalone text
+     call sites use --accent-text instead; --accent stays untouched. */
+  --accent-text: #74849b;
   --link: #94a3b8;             /* slate-400 - muted link */
   --on-link: #18181b;
 
@@ -78,6 +84,10 @@ html, :root, [data-theme="dark"] {
   /* SURGICAL: Desaturated slate on light */
   --accent: #475569;           /* slate-600 - matte steel */
   --accent-contrast: #ffffff;
+  /* Light --accent already clears the text floor (6.89-7.58:1), so the
+     text-only variant is the same value; see the dark block for why this
+     token exists. */
+  --accent-text: #475569;
   --link: #334155;             /* slate-700 */
   --on-link: #ffffff;
 

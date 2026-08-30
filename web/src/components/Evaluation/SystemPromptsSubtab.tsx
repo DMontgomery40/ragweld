@@ -305,7 +305,7 @@ export const SystemPromptsSubtab: React.FC<SystemPromptsSubtabProps> = ({ classN
                           padding: '6px 12px',
                           fontSize: '12px',
                           background: 'transparent',
-                          color: 'var(--accent)',
+                          color: 'var(--accent-text)',
                           border: '1px solid var(--accent)',
                           borderRadius: '4px',
                           cursor: 'pointer',

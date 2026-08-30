@@ -125,7 +125,7 @@ export function RepoSwitcherModal({ isOpen, onClose }: RepoSwitcherModalProps) {
         <h3 
           id="repo-switcher-title"
           style={{ 
-            color: 'var(--accent)', 
+            color: 'var(--accent-text)', 
             marginBottom: '8px',
             fontSize: '18px',
             fontWeight: 600,

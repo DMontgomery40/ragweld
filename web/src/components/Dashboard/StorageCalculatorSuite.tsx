@@ -446,7 +446,7 @@ export function StorageCalculatorSuite() {
 
             {/* Neo4j Graph Storage Inputs */}
             <div style={{ borderTop: '1px solid var(--line)', marginTop: '16px', paddingTop: '16px' }}>
-              <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--accent)', marginBottom: '12px' }}>
+              <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--accent-text)', marginBottom: '12px' }}>
                 📊 Neo4j Graph Storage
               </div>
               <div className="input-row">
@@ -551,7 +551,7 @@ export function StorageCalculatorSuite() {
 
               {/* Neo4j Graph Storage Results */}
               <div style={{ borderTop: '1px solid var(--line)', marginTop: '16px', paddingTop: '16px' }}>
-                <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--accent)', marginBottom: '8px' }}>
+                <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--accent-text)', marginBottom: '8px' }}>
                   📊 Neo4j Graph Storage
                 </div>
                 <div className="result-grid">
@@ -569,7 +569,7 @@ export function StorageCalculatorSuite() {
                   </div>
                   <div className="result-item">
                     <span className="result-label">Graph Total</span>
-                    <span className="result-value" style={{ color: 'var(--accent)' }}>{formatBytes(results1.neo4jTotal)}</span>
+                    <span className="result-value" style={{ color: 'var(--accent-text)' }}>{formatBytes(results1.neo4jTotal)}</span>
                   </div>
                 </div>
               </div>

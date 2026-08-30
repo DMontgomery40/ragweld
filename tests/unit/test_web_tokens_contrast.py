@@ -92,15 +92,15 @@ SURFACES = ("bg", "bg-elev1", "bg-elev2", "panel")
 # in several places (e.g. HelpGlossary.css, EmbeddingMismatchWarning.tsx), so
 # the same 4.5:1 support-text floor applies to them against the page surfaces.
 #
-# `--accent` is intentionally NOT included: it is dual-purpose (also a BUTTON
-# BACKGROUND paired with `--accent-contrast`, e.g. `.btn-primary`,
-# `.top-actions button`, ~20 sites). The dark value fails this floor as text
-# (3.72-4.18:1 on the four surfaces below) but lightening it to fix that drops
-# its background pairing with white `--accent-contrast` text from 4.76:1 to
-# 3.81:1 -- trading one violation for another. Fixing the ~48 standalone-text
-# call sites (across 22 files) needs a distinct `--accent-text` token and a
-# call-site migration, which is a separate, larger change than this token-only
-# pass; see the task report for the proposed value and the ready-to-add tuple.
+# `--accent` itself is intentionally NOT included: it is dual-purpose, also a
+# BUTTON BACKGROUND paired with `--accent-contrast` (e.g. `.btn-primary`,
+# `.top-actions button`, ~21 sites). Lightening the dark value enough to pass
+# as text (3.72-4.18:1) would drop that background pairing with white
+# `--accent-contrast` text from 4.76:1 to 3.81:1 -- trading one violation for
+# another. `--accent-text` is the text-only variant: all 48 standalone
+# `color: var(--accent)` call sites (across 22 files) were migrated to it;
+# every `background`/`border` use of `--accent` was left untouched (verified
+# by count before/after the migration -- see the task report).
 TEXT_TOKEN_FLOORS = (
     ("fg", 7.0),
     ("fg-muted", 4.5),
@@ -108,6 +108,7 @@ TEXT_TOKEN_FLOORS = (
     ("ok", 4.5),
     ("warn", 4.5),
     ("err", 4.5),
+    ("accent-text", 4.5),
 )
 
 

@@ -408,7 +408,7 @@ export function QuickActions() {
                     textAlign: 'left'
                   }}
                 >
-                  <span style={{ fontWeight: 600, color: 'var(--accent)' }}>{option.label}</span>
+                  <span style={{ fontWeight: 600, color: 'var(--accent-text)' }}>{option.label}</span>
                   <span style={{ fontSize: '11px', color: 'var(--fg-muted)' }}>{option.description}</span>
                 </button>
               ))}

@@ -111,7 +111,7 @@ export function MonitoringSubtab() {
                 padding: '16px'
               }}
             >
-              <h4 style={{ margin: '0 0 12px 0', color: 'var(--accent)', fontSize: '14px' }}>Recent Alerts</h4>
+              <h4 style={{ margin: '0 0 12px 0', color: 'var(--accent-text)', fontSize: '14px' }}>Recent Alerts</h4>
               <div id="alert-status-container" style={{ minHeight: '48px', fontSize: '12px', color: 'var(--fg)' }}>
                 {alertStatus}
               </div>

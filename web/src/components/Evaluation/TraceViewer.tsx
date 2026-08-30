@@ -159,7 +159,7 @@ export const TraceViewer: React.FC<TraceViewerProps> = ({ className = '' }) => {
               rel="noopener noreferrer"
               style={{
                 fontSize: '11px',
-                color: 'var(--accent)',
+                color: 'var(--accent-text)',
                 textDecoration: 'none',
                 border: '1px solid var(--line)',
                 borderRadius: '999px',
@@ -263,7 +263,7 @@ export const TraceViewer: React.FC<TraceViewerProps> = ({ className = '' }) => {
           <strong>Gate:</strong>{' '}
           top1&gt;={String(gateData.top1_thresh ?? '—')} avg5&gt;={String(gateData.avg5_thresh ?? '—')}
           {' → '}
-          <span style={{ color: 'var(--accent)', fontWeight: 600 }}>
+          <span style={{ color: 'var(--accent-text)', fontWeight: 600 }}>
             {String(gateData.outcome ?? '—')}
           </span>
         </div>

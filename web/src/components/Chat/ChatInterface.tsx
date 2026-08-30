@@ -650,7 +650,7 @@ function AssistantThreadMessage(props: AssistantThreadMessageProps) {
           <span>{message.createdAt.toLocaleTimeString()}</span>
           {providerName ? <span style={{ color: 'var(--fg-muted)' }}>{providerName}</span> : null}
           {message.role === 'assistant' && messageStatus?.type === 'running' ? (
-            <span style={{ color: 'var(--accent)', fontWeight: 700 }}>Streaming</span>
+            <span style={{ color: 'var(--accent-text)', fontWeight: 700 }}>Streaming</span>
           ) : null}
           {message.role === 'assistant' && webGrounding?.web_requested ? (
             <span
@@ -871,7 +871,7 @@ const ThreadWelcome = memo(function ThreadWelcome({ onPromptSelect }: { onPrompt
       }}
     >
       <div style={{ maxWidth: '620px' }}>
-        <div style={{ fontSize: '11px', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--accent)' }}>
+        <div style={{ fontSize: '11px', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--accent-text)' }}>
           assistant-ui rebuild
         </div>
         <h2 style={{ margin: '8px 0 10px 0', fontSize: '26px', lineHeight: 1.1 }}>
@@ -1776,7 +1776,7 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
             onClick={handleExport}
             style={{
               background: 'var(--bg-elev2)',
-              color: 'var(--accent)',
+              color: 'var(--accent-text)',
               border: '1px solid var(--accent)',
               padding: '8px 12px',
               borderRadius: '12px',
@@ -1810,7 +1810,7 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
             onClick={handleNewChat}
             style={{
               background: 'var(--bg-elev2)',
-              color: 'var(--accent)',
+              color: 'var(--accent-text)',
               border: '1px solid var(--accent)',
               padding: '8px 12px',
               borderRadius: '12px',
