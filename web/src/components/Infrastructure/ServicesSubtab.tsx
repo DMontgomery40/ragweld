@@ -174,6 +174,9 @@ export function ServicesSubtab() {
 
   const frontendMode = devStackStatus?.frontend_mode;
   const frontendLabel = frontendMode === 'dev_server' ? 'Host frontend (Vite dev server)' : 'Served frontend';
+  // Until the probe answers, the card says nothing rather than guessing. The
+  // first cut read `frontend_mode !== 'absent'`, which is true of `undefined`,
+  // so it painted "Running" in --ok above "status not loaded yet".
   const frontendStatusWord =
     frontendMode === 'dev_server'
       ? '● Dev server running'
@@ -181,7 +184,7 @@ export function ServicesSubtab() {
         ? '● Served from build'
         : frontendMode === 'absent'
           ? '○ Not built and no dev server'
-          : undefined;
+          : '— Checking…';
   const frontendDetail =
     frontendMode === 'dev_server'
       ? devStackStatus?.frontend_url || `port ${devStackStatus?.frontend_port ?? '55173'}`
@@ -249,7 +252,7 @@ export function ServicesSubtab() {
             {
               key: 'frontend',
               label: frontendLabel,
-              running: devStackStatus?.frontend_mode !== 'absent',
+              running: frontendMode !== undefined && frontendMode !== 'absent',
               status: frontendStatusWord,
               detail: frontendDetail,
             },
@@ -258,7 +261,13 @@ export function ServicesSubtab() {
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
                 <strong>{proc.label}</strong>
                 <span
-                  style={{ color: proc.running ? 'var(--ok)' : 'var(--err)' }}
+                  style={{
+                    color: devStackStatus === null || devStackStatus === undefined
+                      ? 'var(--fg-muted)'
+                      : proc.running
+                        ? 'var(--ok)'
+                        : 'var(--err)',
+                  }}
                   data-testid={`host-process-${proc.key}-status`}
                 >
                   {proc.status ?? (proc.running ? '● Running' : '○ Not running')}

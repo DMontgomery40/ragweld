@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
@@ -85,6 +85,31 @@ async def _set_alertmanager_url(client: AsyncClient, url: str) -> None:
     # httpx shorthand for it as unittest.mock, and no test here is allowlisted out of that.
     response = await client.request("PATCH", "/api/config/tracing", json={"alertmanager_base_url": url})
     assert response.status_code == 200, response.text
+
+
+@pytest.fixture(autouse=True)
+async def restore_alertmanager_url(client: AsyncClient) -> AsyncIterator[None]:
+    """Put `tracing.alertmanager_base_url` back after every test in this file.
+
+    These tests point it at ephemeral ports, at a torn-down port and at "".
+    Only the live test restored it, and only by coincidence - it happens to set
+    the real URL - so on a host without a live Alertmanager nothing put it back.
+    The langfuse and hysteresis suites already snapshot and restore; this one
+    now does too.
+
+    No regression test guards this: with the restore disabled the value still
+    reads back correct by the next test, so any such assertion would pass
+    either way. It is hygiene that matches the sibling suites, not a fix for a
+    reproduced leak - see the report.
+    """
+
+    baseline = await client.get("/api/config")
+    assert baseline.status_code == 200
+    original = str(baseline.json()["tracing"]["alertmanager_base_url"] or "")
+    try:
+        yield
+    finally:
+        await _set_alertmanager_url(client, original)
 
 
 @pytest.mark.asyncio

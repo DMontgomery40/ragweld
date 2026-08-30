@@ -149,6 +149,7 @@ export function ObservabilityOperatorDeck({
   const [latestTraceResponse, setLatestTraceResponse] = useState<TracesLatestResponse | null>(null);
   const [lokiStatus, setLokiStatus] = useState<LokiStatus | null>(null);
   const [langfuseAccess, setLangfuseAccess] = useState<LangfuseTraceAccess | null>(null);
+  const [langfuseAccessError, setLangfuseAccessError] = useState<string | null>(null);
   const [controlPlane, setControlPlane] = useState<AgentTrainControlPlaneStatusResponse | null>(null);
 
   useEffect(() => {
@@ -194,7 +195,23 @@ export function ObservabilityOperatorDeck({
         // holds the trace; the drive landed on "You do not have access to this
         // trace" twice from links the deck offered unconditionally.
         const traceId = String(nextTrace?.trace?.trace_id || '').trim();
-        setLangfuseAccess(traceId ? await DashAPI.getLangfuseTraceAccess(traceId).catch(() => null) : null);
+        if (!traceId) {
+          setLangfuseAccess(null);
+          setLangfuseAccessError(null);
+        } else {
+          try {
+            setLangfuseAccess(await DashAPI.getLangfuseTraceAccess(traceId));
+            setLangfuseAccessError(null);
+          } catch (accessError) {
+            // The check failing is not the same as Langfuse saying no. Without
+            // this the link was filtered out of deckLinks and nothing said why -
+            // the one case where the deck went quiet.
+            setLangfuseAccess(null);
+            setLangfuseAccessError(
+              accessError instanceof Error ? accessError.message : 'the check did not complete'
+            );
+          }
+        }
         setControlPlane(nextControlPlane);
         setLastUpdated(new Date().toISOString());
 
@@ -293,6 +310,11 @@ export function ObservabilityOperatorDeck({
         {langfuseTraceNotice ? (
           <div className="obs-banner obs-banner-subtle" data-testid="obs-langfuse-trace-notice">
             {`Langfuse trace link withheld: ${langfuseTraceNotice}`}
+          </div>
+        ) : null}
+        {langfuseAccessError ? (
+          <div className="obs-banner obs-banner-subtle" data-testid="obs-langfuse-check-failed">
+            {`Could not check the Langfuse trace (${langfuseAccessError}), so its link is not offered.`}
           </div>
         ) : null}
         {langfuseAccess?.exists ? (
