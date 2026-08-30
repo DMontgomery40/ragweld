@@ -129,6 +129,13 @@ The UI is organized into top-level tabs. Here’s the practical meaning of each:
     - You should see no requests until you click the Storage subtab.
     - This behavior is by design to reduce background load on Postgres at startup.
 
+### Dashboard → System: Recent Index Runs
+
+The System subtab’s **Recent Index Runs** panel lists one row per corpus: its latest persisted index run with status (`complete` in green, `error` in red, **never indexed** when the corpus has no runs), completion time, chunk count, figures described (with a failed count in parentheses when any), and the run’s figure-description cost ceiling. “Never indexed” and “unavailable” (the request failed) are different answers, and the panel colors them differently.
+
+!!! tip "This panel is deliberately off the 30-second poll"
+    Nothing in it changes without an indexing run, so fetching on mount and on the dashboard’s explicit refresh action is enough — one request per corpus every 30 seconds would be real load against the run store. The panel reads `GET /api/index/{corpus_id}/runs/latest?finalize=false`, a pure read that never rewrites a run summary as a side effect of displaying it. See [Indexing API](../api_indexing.md).
+
 !!! warning "If something looks empty"
     Most RAG panels depend on a **selected corpus** and a **completed index**. If you haven’t indexed yet, start at [Indexing](indexing.md).
 

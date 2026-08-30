@@ -146,6 +146,9 @@ For retrieval, this means figure evidence can be preferred or excluded by chunk 
 
 To measure whether these figure chunks actually move retrieval on a document corpus, score a page-grounded question set with the [figure grounding eval](../guides/eval_figure_grounding.md).
 
+!!! note "The counts and the cost survive the run"
+    These counts — plus a `figure_description_cost_usd` ceiling priced from catalog pricing for the run’s vision alias over its full completion budget — are persisted on the run summary under `GET /api/index/{corpus_id}/runs/latest`, so they stay auditable after the terminal stream is gone. The Dashboard cost card reads this record, and the Dashboard → System **Recent Index Runs** panel shows the counts per corpus.
+
 !!! note "Profiles are protocol, not configuration"
     The two prompt templates (`technical_figure`, `schematic`) live in `server/indexing/figure_prompts.py` as code — they are the reply-schema contract between ragweld and the vision alias, not per-corpus config. You choose the profile with `indexing.figures.prompt_profile`; the `schematic` profile additionally asks the model to put drawing number, sheet and revision into `references`, connector/pin/signal designators into `labels`, and every drawn connection into `connections` as `A -> B` with units exactly as printed.
 
@@ -204,11 +207,12 @@ Enable it per corpus:
 | `estimated_figures` | Figures expected to be described — PDF pages × 0.4 (rounded), only when `indexing.figures.enabled` **and** `describe` are on and the corpus has PDFs; omitted entirely when the heuristic rounds to zero |
 | `figure_description_cost_usd` | Vision-call cost for those figures: ~1,200 input tokens per figure (image crop at `images_scale=2.0` plus the prompt) plus `indexing.figures.max_completion_tokens` output tokens, priced from `data/models.json` for `indexing.figures.vision_model` |
 | `total_cost_usd` | Embedding + (optional) semantic KG + (optional) figures, or `null` when any priced component lacks catalog pricing |
+| `estimated_seconds_figures` | Estimated figure-phase wall clock — the same figure count at ~20 s per vision call, divided by `indexing.figures.concurrency`; folded into the total time range |
 
 !!! tip "Reading the numbers"
     The figure line is an estimate of an estimate: the 0.4 figures-per-page factor is a planning heuristic, not a measured count. Use it to decide *whether* to enable figure description on a large scanned corpus; the run summary's `figures_described` / `figures_failed` / `figures_undescribed` counts are the ground truth after indexing. If the figure line is missing entirely, either figures are disabled, `describe` is off, the corpus has no PDFs in scope, or the page count is too small for the heuristic to round up to a single figure.
 
-    In the **RAG → Indexing** tab the breakdown appears as `Embed $X + Semantic KG $Y + Figures $Z (~N)` next to the total, so you can compare the figure budget against the embedding budget before committing the run.
+    In the **RAG → Indexing** tab the cost breakdown appears as `Embed $X + Semantic KG $Y + Figures $Z (~N figures)` next to the total, and the time estimate splits as `Embed ~X + Semantic KG ~Y + Figures ~Z` — the Embed line is the remainder of the total, so enabling figures no longer silently inflates it.
 
 !!! tip "If you're not sure"
     Leave it off for text-heavy corpora. Turn it on for report/drawing corpora where "which chart shows X?" is a real question, start with the defaults, and check the run summary's described / failed / skipped counts before widening the filters.

@@ -215,6 +215,9 @@ flowchart LR
   CHUNK --> PG["Postgres chunk row\nwith provenance"]
 ```
 
+!!! note "Figures are part of the run record"
+    A completed run persists `figures_described`, `figures_failed`, `figures_undescribed`, and a `figure_description_cost_usd` ceiling on its `IndexRunSummary` (`GET /api/index/{corpus_id}/runs/latest`), so the counts stay auditable after the terminal stream is gone. The pre-run estimate answers in kind: `IndexEstimate.estimated_seconds_figures` prices the figure phase’s wall clock (~20 s per vision call, divided by `indexing.figures.concurrency`) alongside its cost, and the `GET /api/index/status` cost card adds a Figure Descriptions line when the latest committed run described any.
+
 For the operator walkthrough (cost estimation, per-corpus tuning, troubleshooting), see [Indexing a corpus](manual/indexing.md); every knob is in the [`indexing` config reference](reference/config/indexing.md).
 
 ??? info "Failure Modes"

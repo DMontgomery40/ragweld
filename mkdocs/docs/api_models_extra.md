@@ -12,7 +12,7 @@
 
     ---
 
-    `DashboardIndexCosts` estimates embedding costs.
+    `DashboardIndexCosts` estimates embedding, semantic KG, and figure-description costs.
 
 -   :material-database-cog:{ .lg .middle } **Embedding Config**
 
@@ -38,7 +38,11 @@
 | Model | Fields |
 |-------|--------|
 | `DashboardIndexStorageBreakdown` | `chunks_bytes`, `embeddings_bytes`, `pgvector_index_bytes`, `bm25_index_bytes`, `neo4j_store_bytes`, `total_storage_bytes` |
+| `DashboardIndexCosts` | `total_tokens`, `embedding_cost`, `semantic_kg_cost`, `figure_description_cost`, `figures_described`, `total_cost` |
 | `DashboardIndexStatusResponse` | `lines`, `metadata`, `running`, `progress`, `current_file` |
+
+!!! note "Figure spend is read off the latest committed run"
+    `figure_description_cost` and `figures_described` come from the latest **committed** indexing run summary, not the newest summary on disk: starting a re-index writes an `indexing` summary (zero figures, by design) immediately, and the cost card must keep reporting the live generation’s spend while that run is in flight — and keep it if that run errors. The figure cost is a ceiling: the run record prices the full completion budget per figure, so a real description spent less. `total_cost` sums exactly the phases that apply and is `null` when any applicable component has no known price — an unpriced component makes the total unknown rather than silently counting as zero.
 
 ```mermaid
 flowchart LR

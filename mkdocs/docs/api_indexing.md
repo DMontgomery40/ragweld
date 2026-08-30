@@ -40,7 +40,7 @@
 | `/index` | POST | Start indexing |
 | `/index/status` | GET | Current state |
 | `/index/stats` | GET | Storage stats |
-| `/index/{corpus_id}/runs/latest` | GET | Latest run summary for the corpus (run id, status, progress) |
+| `/index/{corpus_id}/runs/latest` | GET | Latest run summary (run id, status, progress, figure counts); `?finalize=false` for a pure read |
 | `/index/{corpus_id}/runs/{run_id}/events` | GET | Event log for a run (`?limit=500`), usable for replay or live tailing |
 
 !!! note "Runs are observable regardless of who started them"
@@ -55,6 +55,12 @@ flowchart LR
     Latest --> Events["GET /api/index/{corpus_id}/runs/{run_id}/events"]
 ```
 
+!!! note "Run summaries record the figure phase"
+    Every completed run’s `IndexRunSummary` persists `figures_described`, `figures_failed`, and `figures_undescribed`, plus `figure_description_cost_usd` — a ceiling on the vision-call cost, priced from catalog pricing for the run’s `indexing.figures.vision_model` over the full `max_completion_tokens` budget, and `null` when nothing was described or the alias is unpriced. A run that described no figures reports zero counts and no price, never a `$0.0000` line.
+
+!!! tip "Polling many corpora? Read runs with `?finalize=false`"
+    By default `GET /api/index/{corpus_id}/runs/latest` reconciles a persisted `indexing` run against the manifest and fence before answering — a fence read, a scoped-config load and an event-queue flush per call, and it rewrites the summary when the run turns out to have finished. Pass `finalize=false` for a pure read of the stored summary: no reconcile, no write, no event flush. A never-indexed corpus still answers `404`, so callers can tell “never indexed” from “could not be read”.
+
 !!! note "The estimate itemises optional vision costs"
     `POST /api/index/estimate` returns an `IndexEstimate` whose cost fields are additive:
 
@@ -62,7 +68,9 @@ flowchart LR
     - `semantic_kg_cost_usd` — present only when `graph_indexing.semantic_kg_enabled` is on
     - `estimated_figures` + `figure_description_cost_usd` — present only when `indexing.figures.enabled` **and** `indexing.figures.describe` are on *and* the corpus contains PDFs; the figure count is a heuristic (PDF pages × 0.4, rounded; omitted entirely when it rounds to zero) and the cost is priced from `data/models.json` for `indexing.figures.vision_model`
 
-    `total_cost_usd` sums whichever components apply and is `null` when any applicable component has no catalog price. When figures are off (or the corpus has no PDFs), the figure fields stay `null` — the estimate never shows a `$0` figure cost that isn't really zero. The **RAG → Indexing** tab renders the breakdown as `Embed $X + Semantic KG $Y + Figures $Z (~N)`.
+    `total_cost_usd` sums whichever components apply and is `null` when any applicable component has no catalog price. When figures are off (or the corpus has no PDFs), the figure fields stay `null` — the estimate never shows a `$0` figure cost that isn't really zero. The **RAG → Indexing** tab renders the breakdown as `Embed $X + Semantic KG $Y + Figures $Z (~N figures)`.
+
+    Time is itemized the same way: `estimated_seconds_figures` appears whenever the figure count does — the measured ~20 s per vision call divided by `indexing.figures.concurrency`, folded into the total time range — so the tab's `Embed ~X + Semantic KG ~Y + Figures ~Z` breakdown never double-counts the figure phase into the embedding line.
 
 === "Python"
 ```python
