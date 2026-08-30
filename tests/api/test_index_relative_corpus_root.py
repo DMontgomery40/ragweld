@@ -64,13 +64,15 @@ def test_the_resolved_root_is_what_the_run_and_the_registry_are_given(elsewhere_
 
 
 @pytest.mark.asyncio
-async def test_a_run_started_on_a_relative_registry_path_persists_the_absolute_root(
+async def test_a_run_on_a_relative_registry_path_walks_the_resolved_root(
     client: AsyncClient, tmp_path, elsewhere_cwd
 ) -> None:
-    """End to end: the corpus row after a run names the resolved root, not the relative string.
+    """End to end: the run indexes the resolved directory, from a CWD that is not the anchor.
 
-    The corpus is registered with a path relative to the RUNTIME root (not the CWD), a real
-    directory is materialised there, and the run is driven through the API the operator uses.
+    Before this, `_run_index` walked `Path(repo_path)` CWD-relative while the estimate and the
+    validation read the resolved root -- three readings of one registry row. The corpus here is
+    registered with a path relative to the PROJECT root, a real directory is materialised there,
+    and the run is driven through the API the operator uses.
     """
     repo_id = f"relroot_{uuid.uuid4().hex[:10]}"
     relative = Path("data") / "index_relroot_fixtures" / repo_id
@@ -110,16 +112,20 @@ async def test_a_run_started_on_a_relative_registry_path_persists_the_absolute_r
         final = await client.get(f"/api/index/{repo_id}/status")
         assert final.json().get("status") == "complete", final.text
 
-        row_after = await _corpus_row(repo_id)
-        persisted = str(row_after.get("path") or "")
-        assert Path(persisted).is_absolute(), f"corpora.path stayed relative: {persisted!r}"
-        assert persisted == str(absolute)
-
-        # And the run really walked that root rather than the CWD's reading of it: the file
-        # under the resolved directory is the one that got indexed.
+        # The run walked the RESOLVED root, not the CWD's reading of it: the only indexable
+        # file in the corpus lives under the resolved directory, and it produced chunks. The
+        # CWD (tmp_path) holds no such directory at all, so a CWD-relative walk yields nothing.
         stats = await client.get(f"/api/index/{repo_id}/stats")
         assert stats.status_code == 200
         assert int(stats.json().get("total_chunks") or 0) >= 1
+        assert not (Path.cwd() / relative).exists(), (
+            "the CWD must not also contain the corpus, or this proves nothing"
+        )
+
+        # And the shared registry row is left exactly as the operator registered it. Rewriting
+        # it here would repoint the corpus at whichever checkout happened to serve the request.
+        row_after = await _corpus_row(repo_id)
+        assert str(row_after.get("path") or "") == str(relative)
     finally:
         pg2 = PostgresClient("postgresql://ignored")
         await pg2.connect()

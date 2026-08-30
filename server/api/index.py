@@ -348,35 +348,6 @@ def _warm_sampler_in_background(cfg: TriBridConfig) -> None:
         asyncio.get_running_loop().create_task(_warm())
 
 
-async def _anchor_registry_root(repo_id: str, root: Path) -> None:
-    """Rewrite a relative ``corpora.path`` to the root this process actually resolved.
-
-    A relative row means every reader in every subsystem resolves it against its own CWD, and
-    nothing else fixes it: ``promote_staging_index`` writes ``root_path`` only when the active
-    corpus row does not exist yet, so an existing relative row survives every successful run
-    unchanged. Anchoring it here, at the one moment the resolved root is known and about to be
-    walked, is what stops the relative string outliving the run that used it.
-
-    Only a genuinely relative stored path is touched, and only to the value this run indexes, so
-    an absolute row is never rewritten and a corpus is never repointed at a different directory.
-    """
-    cfg_global = await load_scoped_config(repo_id=None)
-    postgres = PostgresClient(cfg_global.indexing.postgres_url)
-    try:
-        await postgres.connect()
-        row = await postgres.get_corpus(repo_id)
-        stored = str((row or {}).get("path") or "").strip()
-        if not stored or Path(stored).is_absolute():
-            return
-        await postgres.update_corpus(repo_id, path=str(root))
-    except Exception:
-        # Best effort: an unreachable registry must not stop a run whose root already resolved.
-        return
-    finally:
-        with contextlib.suppress(Exception):
-            await postgres.disconnect()
-
-
 def _resolve_corpus_root(repo_path: str) -> Path:
     """Absolute corpus root for a registered path, relative or not.
 
@@ -4040,8 +4011,16 @@ async def start_index(request: IndexRequest) -> IndexStatus:
     # on meant the run walked whatever the relative path meant to the process CWD. From here on
     # `request` names the absolute root, so the walk, the staged corpus row and the manifest all
     # agree, and nothing downstream has to know the difference.
+    #
+    # What this deliberately does NOT do is rewrite an existing `corpora.path`. Resolution is
+    # per checkout, and start_index is a request path any process can serve, so writing the
+    # resolved root back would let a lane worktree repoint the operator's corpus at its own
+    # tree -- shared state, last writer wins. That is the invariant
+    # server/chat/recall_indexer.py:ensure_recall_corpus states for the same field, and it is
+    # why a relative row is resolved on every read (here, the document viewer and the recall
+    # indexer all go through resolve_project_path) rather than normalised once by whoever
+    # happens to index next.
     request = request.model_copy(update={"repo_path": str(root)})
-    await _anchor_registry_root(request.repo_id, root)
     global _LAST_STARTED_REPO
 
     started_at = datetime.now(UTC)
