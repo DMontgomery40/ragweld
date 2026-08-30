@@ -25,6 +25,7 @@ from server.chat.generation import generate_chat_text
 from server.chat.handler import ChatGenerationError
 from server.chat.prompt_builder import get_system_prompt
 from server.chat.provider_router import select_provider_route
+from server.config_redaction import redact_run_record, redacted_config_snapshot
 from server.dependency_errors import DependencyUnavailableError
 from server.evaluation.path_match import path_matches
 from server.evaluation.promptfoo_runner import (
@@ -280,7 +281,9 @@ def _load_run(run_id: str) -> EvalRun:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read eval run: {e}") from e
-    return EvalRun.model_validate(raw)
+    # Read boundary: records written before the redaction existed still carry the
+    # credential on disk, so it is withheld on the way out as well as on the way in.
+    return redact_run_record(EvalRun.model_validate(raw))
 
 
 def _save_run(run: EvalRun) -> None:
@@ -517,12 +520,15 @@ async def evaluate_dataset_entries(
     top1_hits = sum(1 for r in results if r.top1_hit)
     topk_hits = sum(1 for r in results if r.topk_hit)
 
+    # One helper builds both snapshot forms, already redacted, so no call site can
+    # withhold the credential from one and leak it through the other (M-89).
+    _snapshot = redacted_config_snapshot(cfg)
     run = EvalRun(
         run_id=run_id,
         repo_id=repo_id,
         dataset_id=dataset_id,
-        config_snapshot=cfg.model_dump(mode="json"),
-        config=cfg.to_flat_dict(),
+        config_snapshot=_snapshot[0],
+        config=_snapshot[1],
         total=total,
         top1_hits=top1_hits,
         topk_hits=topk_hits,
@@ -994,12 +1000,15 @@ async def eval_run_stream(
             top1_accuracy = float(top1_hits / total) if total else 0.0
             topk_accuracy = float(topk_hits / total) if total else 0.0
 
+            # One helper builds both snapshot forms, already redacted, so no call site can
+            # withhold the credential from one and leak it through the other (M-89).
+            _snapshot = redacted_config_snapshot(cfg)
             run = EvalRun(
                 run_id=run_id,
                 repo_id=repo_id,
                 dataset_id="default",
-                config_snapshot=cfg.model_dump(mode="json"),
-                config=cfg.to_flat_dict(),
+                config_snapshot=_snapshot[0],
+                config=_snapshot[1],
                 total=total,
                 top1_hits=top1_hits,
                 topk_hits=topk_hits,

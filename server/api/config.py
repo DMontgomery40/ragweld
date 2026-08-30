@@ -25,6 +25,12 @@ from server.config_control_plane import (
     build_config_readiness_response,
     build_config_registry_response,
 )
+from server.config_redaction import (
+    SecretMarkerWriteError,
+    redact_config_secrets,
+    redact_registry_defaults,
+    restore_config_secrets,
+)
 from server.db.postgres import PostgresClient
 from server.dependency_errors import DependencyUnavailableError
 from server.gateway_catalog import gateway_rows_snapshot
@@ -35,6 +41,7 @@ from server.models.tribrid_config_model import (
     ConfigReadinessResponse,
     ConfigRegistryResponse,
     CorpusScope,
+    MCPConfig,
     MCPHTTPTransportStatus,
     MCPProbeRequest,
     MCPProbeResponse,
@@ -72,147 +79,6 @@ async def _load_config_for_api(repo_id: str | None, *, boundary: str) -> TriBrid
     except Exception as exc:
         raise_postgres_unavailable_if_applicable(exc, boundary=boundary)
         raise
-
-
-# ---------------------------------------------------------------------------
-# Secret redaction on the config wire
-# ---------------------------------------------------------------------------
-#
-# `GET /api/config` shipped `indexing.postgres_url` -- a DSN with an embedded
-# username/password pair -- into client-side JS on every page load (M-89), and rendered
-# it into a plain text input on Infrastructure > Paths & Stores where it sat in clear on
-# screen and in every screenshot (M-88). `tracing.otlp_headers` had the same shape: its
-# placeholder invites `Authorization=Bearer ...` and whatever is typed there is stored in
-# config and rendered back to anyone who opens the page (M-90).
-#
-# The credential never leaves the server. The operator keeps every non-secret part of the
-# value -- host, port, database, user, and any header that is not an authorization -- so
-# the field stays editable, and a value that comes back still wearing the marker is
-# restored from what is on disk. That round trip is the whole contract: there is no second
-# code path, no "unredacted" mode and no client-side toggle.
-
-SECRET_REDACTED = "[redacted]"
-
-# Header names whose VALUE is a credential. Everything else (X-Scope-OrgID and friends)
-# stays visible and editable, which is the point: only the auth material is withheld.
-_SECRET_HEADER_NAMES = ("authorization", "proxy-authorization", "api-key", "x-api-key")
-
-
-def _is_secret_header_name(name: str) -> bool:
-    lowered = name.strip().lower()
-    if lowered in _SECRET_HEADER_NAMES:
-        return True
-    return any(token in lowered for token in ("token", "secret", "password", "apikey"))
-
-
-_DSN_CREDENTIALS_RE = re.compile(r"^(?P<head>[a-zA-Z0-9+.\-]+://[^/@]*?:)(?P<password>[^@/]*)(?P<tail>@)")
-
-
-def _redact_dsn_password(dsn: str) -> str:
-    """Replace only the password component of a URL-shaped DSN."""
-    if not dsn:
-        return dsn
-    return _DSN_CREDENTIALS_RE.sub(lambda m: f"{m.group('head')}{SECRET_REDACTED}{m.group('tail')}", dsn, count=1)
-
-
-def _dsn_password(dsn: str) -> str | None:
-    match = _DSN_CREDENTIALS_RE.search(dsn or "")
-    return match.group("password") if match else None
-
-
-def _restore_dsn_password(incoming: str, stored: str) -> str:
-    """Put the stored password back when the client returned the marker."""
-    if _dsn_password(incoming) != SECRET_REDACTED:
-        return incoming
-    stored_password = _dsn_password(stored)
-    if stored_password is None:
-        return incoming
-    return _DSN_CREDENTIALS_RE.sub(
-        lambda m: f"{m.group('head')}{stored_password}{m.group('tail')}", incoming, count=1
-    )
-
-
-def _split_headers(raw: str) -> list[tuple[str, str | None]]:
-    """Parse a `k=v,k=v` header string, keeping malformed entries as (text, None)."""
-    entries: list[tuple[str, str | None]] = []
-    for part in (raw or "").split(","):
-        if not part.strip():
-            continue
-        name, sep, value = part.partition("=")
-        entries.append((name, value) if sep else (part, None))
-    return entries
-
-
-def _join_headers(entries: list[tuple[str, str | None]]) -> str:
-    return ",".join(name if value is None else f"{name}={value}" for name, value in entries)
-
-
-def _redact_headers(raw: str) -> str:
-    if not raw:
-        return raw
-    return _join_headers(
-        [
-            (name, SECRET_REDACTED if value is not None and _is_secret_header_name(name) else value)
-            for name, value in _split_headers(raw)
-        ]
-    )
-
-
-def _restore_headers(incoming: str, stored: str) -> str:
-    if not incoming:
-        return incoming
-    stored_by_name = {
-        name.strip().lower(): value for name, value in _split_headers(stored) if value is not None
-    }
-    restored: list[tuple[str, str | None]] = []
-    for name, value in _split_headers(incoming):
-        if value == SECRET_REDACTED:
-            kept = stored_by_name.get(name.strip().lower())
-            restored.append((name, kept if kept is not None else value))
-        else:
-            restored.append((name, value))
-    return _join_headers(restored)
-
-
-def redact_config_secrets(config: TriBridConfig) -> TriBridConfig:
-    """Return a copy of `config` with every credential replaced by the marker.
-
-    Always a copy: `load_config` hands out a shared object, and redacting it in place
-    would poison the in-process config and eventually write the marker to disk.
-    """
-    safe = config.model_copy(deep=True)
-    safe.indexing.postgres_url = _redact_dsn_password(safe.indexing.postgres_url)
-    safe.tracing.otlp_headers = _redact_headers(safe.tracing.otlp_headers)
-    return safe
-
-
-def restore_config_secrets(incoming: TriBridConfig, stored: TriBridConfig) -> TriBridConfig:
-    """Put back any credential the client returned still wearing the marker.
-
-    Covers PUT as well as PATCH: "Apply All Changes" PUTs whatever the browser holds,
-    which is the redacted document it was served.
-    """
-    merged = incoming.model_copy(deep=True)
-    merged.indexing.postgres_url = _restore_dsn_password(
-        merged.indexing.postgres_url, stored.indexing.postgres_url
-    )
-    merged.tracing.otlp_headers = _restore_headers(
-        merged.tracing.otlp_headers, stored.tracing.otlp_headers
-    )
-    return merged
-
-
-def _redact_registry_defaults(registry: ConfigRegistryResponse) -> ConfigRegistryResponse:
-    """The registry publishes each field's default; two of them are credential-shaped."""
-    safe = registry.model_copy(deep=True)
-    for field in safe.fields:
-        if not isinstance(field.default, str) or not field.default:
-            continue
-        if field.path == "indexing.postgres_url":
-            field.default = _redact_dsn_password(field.default)
-        elif field.path == "tracing.otlp_headers":
-            field.default = _redact_headers(field.default)
-    return safe
 
 
 def _get_config_write_lock(repo_id: str | None) -> asyncio.Lock:
@@ -673,7 +539,7 @@ async def validate_config(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> ModelValida
 
 @router.get("/config/registry", response_model=ConfigRegistryResponse)
 async def get_config_registry() -> ConfigRegistryResponse:
-    return _redact_registry_defaults(build_config_registry_response())
+    return redact_registry_defaults(build_config_registry_response())
 
 
 @router.get("/config/readiness", response_model=ConfigReadinessResponse)
@@ -705,7 +571,10 @@ async def update_config(
             existing_config = await load_scoped_config(repo_id=repo_id)
             # The browser is holding the redacted document it was served; a marker means
             # "unchanged", never "set the password to the literal [redacted]".
-            config = restore_config_secrets(config, existing_config)
+            try:
+                config = restore_config_secrets(config, existing_config)
+            except SecretMarkerWriteError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
             _validate_model_capabilities(config)
             await _enforce_index_contract_lock(
                 repo_id=repo_id,
@@ -757,7 +626,10 @@ async def update_config_section(
         except Exception as e:
             raise HTTPException(status_code=422, detail=str(e)) from e
 
-        new_config = restore_config_secrets(new_config, config)
+        try:
+            new_config = restore_config_secrets(new_config, config)
+        except SecretMarkerWriteError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         _validate_model_capabilities(new_config)
         await _enforce_index_contract_lock(
             repo_id=repo_id,
@@ -812,6 +684,27 @@ async def check_secrets(
 
     return {name: bool(os.getenv(name)) for name in names}
 
+
+
+
+_LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0")
+
+
+def _request_host(request: Request) -> str:
+    """The host a client actually used, as the deployment's proxy reports it."""
+    forwarded = (request.headers.get("x-forwarded-host") or "").split(",")[0].strip()
+    return forwarded or (request.headers.get("host") or "").strip()
+
+
+def _is_loopback_host(host: str) -> bool:
+    name = (host or "").strip().lower()
+    if not name:
+        return True
+    if name.startswith("[") and "]" in name:
+        name = name[: name.index("]") + 1]
+    else:
+        name = name.rsplit(":", 1)[0] if name.count(":") == 1 else name
+    return name in _LOOPBACK_HOSTS or name.startswith("127.")
 
 
 def _advertised_host_is_allowed(cfg: TriBridConfig, url: str) -> bool:
@@ -887,10 +780,23 @@ async def mcp_status(request: Request) -> MCPStatusResponse:
                 # Advertise the canonical URL that does not redirect for POST.
                 path = str(cfg.mcp.mount_path).rstrip("/") + "/"
                 url = f"{str(cfg.mcp.public_base_url).rstrip('/')}{path}"
+
+                # An unconfigured public origin is its own failure mode, and the quiet one.
+                # `public_base_url` defaults to loopback; on a proxied deployment that
+                # advertises an address no client on the public origin can reach, while the
+                # `allowed_hosts` check happily passes because loopback IS allowed. So the
+                # check is made against the host a client would really use.
+                request_host = _request_host(request)
+                public_base_url_configured = (
+                    str(cfg.mcp.public_base_url) != MCPConfig().public_base_url
+                    or _is_loopback_host(request_host)
+                )
                 # Asked of the transport's OWN validator rather than re-implemented here:
                 # two copies of the rule would drift silently, and a wrong answer here is
                 # an operator following a URL the server then answers 421 to.
-                host_allowed = _advertised_host_is_allowed(cfg, url)
+                host_allowed = _advertised_host_is_allowed(
+                    cfg, url if public_base_url_configured else f"//{request_host}/"
+                )
                 python_http = MCPHTTPTransportStatus(
                     host=str(host),
                     port=int(port),
@@ -898,6 +804,8 @@ async def mcp_status(request: Request) -> MCPStatusResponse:
                     running=True,
                     url=url,
                     host_allowed=host_allowed,
+                    public_base_url_configured=public_base_url_configured,
+                    request_host=request_host,
                 )
                 from server.mcp.server import get_mcp_server
 
@@ -909,7 +817,13 @@ async def mcp_status(request: Request) -> MCPStatusResponse:
                     f"Python HTTP MCP transport is enabled and mounted at {cfg.mcp.mount_path} "
                     f"(connect to {url})."
                 )
-                if not host_allowed:
+                if not public_base_url_configured:
+                    details.append(
+                        f"config.mcp.public_base_url is still the loopback default while "
+                        f"this request arrived on {request_host}, so the advertised URL "
+                        f"names an address no client on that origin can reach."
+                    )
+                elif not host_allowed:
                     details.append(
                         f"The advertised host is not in config.mcp.allowed_hosts, so the "
                         f"transport answers 421 to clients using {url}."

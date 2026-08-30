@@ -18,6 +18,7 @@ from starlette.responses import StreamingResponse
 from server.api.dataset import _dataset_path_for_corpus, _load_dataset
 from server.chat.context_formatter import format_context_for_llm
 from server.chat.prompt_builder import get_system_prompt
+from server.config_redaction import redact_run_record, redacted_config_snapshot
 from server.db.postgres import PostgresClient
 from server.lineage import (
     attach_refs_to_current_bundle,
@@ -679,7 +680,10 @@ def _load_run(run_id: str) -> AgentTrainRun:
     cfg = _cfg_from_run_snapshot(run)
     if cfg is not None:
         run = _apply_run_control_plane_metadata(run, cfg)
-    return run
+    # Redacted last: the control-plane metadata above is derived from the snapshot and
+    # needs the real values. Read boundary -- records written before the redaction
+    # existed still carry the credential on disk.
+    return redact_run_record(run)
 
 
 def _save_run(run: AgentTrainRun) -> None:
@@ -1738,14 +1742,17 @@ async def start_train_run(request: AgentTrainStartRequest) -> AgentTrainStartRes
     _mark_train_start_guard(corpus_id, run_id, at=started_at)
 
     # Resolved defaults mirror the reranker Studio knobs (epochs/batch/lr/warmup/max_length).
+    # One helper builds both snapshot forms, already redacted, so no call site can
+    # withhold the credential from one and leak it through the other (M-89).
+    _snapshot = redacted_config_snapshot(cfg)
     run = AgentTrainRun(
         run_id=run_id,
         repo_id=corpus_id,
         status="queued" if workflow_backend == "flyte" else "running",
         started_at=started_at,
         completed_at=None,
-        config_snapshot=cfg.model_dump(mode="json"),
-        config=cfg.to_flat_dict(),
+        config_snapshot=_snapshot[0],
+        config=_snapshot[1],
         primary_metric="eval_loss",
         primary_goal="minimize",
         metrics_available=["train_loss", "eval_loss"],

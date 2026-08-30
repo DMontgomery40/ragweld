@@ -25,6 +25,7 @@ from server.api.dependency_errors import (
 from server.api.eval import _load_run as load_eval_run
 from server.api.eval import latest_run_for_repo as latest_eval_run_for_repo
 from server.config import load_config
+from server.config_redaction import redact_run_record, redacted_config_snapshot
 from server.db.postgres import PostgresClient
 from server.dependency_errors import DependencyUnavailableError
 from server.lineage import (
@@ -103,6 +104,11 @@ from server.retrieval.mlx_qwen3 import (
 from server.retrieval.rerank import resolve_learning_backend
 from server.services.config_store import CorpusNotFoundError
 from server.services.config_store import get_config as load_scoped_config
+from server.training.artifact_store import (
+    ArtifactStoreError,
+    VersionedArtifactSwap,
+    resolve_active_artifact_dir,
+)
 from server.training.atomic_json import write_json_atomic
 from server.training.metric_policy import infer_corpus_eval_profile
 from server.training.metric_values import (
@@ -117,11 +123,6 @@ from server.training.mlx_qwen3_trainer import (
     deterministic_split_by_query,
     evaluate_mlx_qwen3_reranker,
     train_qwen3_lora_reranker,
-)
-from server.training.artifact_store import (
-    ArtifactStoreError,
-    VersionedArtifactSwap,
-    resolve_active_artifact_dir,
 )
 from server.training.promotion import (
     BaselineState,
@@ -751,7 +752,9 @@ def _load_run(run_id: str) -> RerankerTrainRun:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read train run: {e}") from e
-    return RerankerTrainRun.model_validate(raw)
+    # Read boundary: records written before the redaction existed still carry the
+    # credential on disk, so it is withheld on the way out as well as on the way in.
+    return redact_run_record(RerankerTrainRun.model_validate(raw))
 
 
 def _save_run(run: RerankerTrainRun) -> None:
@@ -2776,14 +2779,17 @@ async def start_train_run(request: RerankerTrainStartRequest) -> RerankerTrainSt
         dataset_path=str(_dataset_path_for_corpus(corpus_id)),
     )
 
+    # One helper builds both snapshot forms, already redacted, so no call site can
+    # withhold the credential from one and leak it through the other (M-89).
+    _snapshot = redacted_config_snapshot(cfg)
     run = RerankerTrainRun(
         run_id=run_id,
         repo_id=corpus_id,
         status="running",
         started_at=started_at,
         completed_at=None,
-        config_snapshot=cfg.model_dump(mode="json"),
-        config=cfg.to_flat_dict(),
+        config_snapshot=_snapshot[0],
+        config=_snapshot[1],
         primary_metric=primary_metric,
         primary_k=int(primary_k),
         metrics_available=[f"mrr@{int(primary_k)}", f"ndcg@{int(primary_k)}", "map"],

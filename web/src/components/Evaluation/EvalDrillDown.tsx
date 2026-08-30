@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { SECRET_REDACTED } from '@/api/secrets';
 import { evalApi } from '@/api';
 import { LineageMeta } from '@/components/ui/LineageMeta';
 import {
@@ -52,6 +53,21 @@ const CollapsibleValue: React.FC<{ value: string; maxLen?: number }> = ({ value,
 
 // Helper to format config values with proper wrapping
 const formatConfigValue = (value: any, key?: string): React.ReactNode => {
+  // A run pins the configuration that governed it, and that snapshot used to include the
+  // Postgres DSN password and the OTLP authorization header verbatim (M-89). The server
+  // withholds them now; without this the row would read as a literal value called
+  // "[redacted]" and an operator would reasonably try to "fix" it.
+  if (typeof value === 'string' && value.includes(SECRET_REDACTED)) {
+    return (
+      <span
+        data-testid="config-value-withheld"
+        title="Held in the backend and never sent to the browser."
+        style={{ color: 'var(--fg-muted)', fontStyle: 'italic', wordBreak: 'break-word' }}
+      >
+        {value.replace(SECRET_REDACTED, '••••• withheld')}
+      </span>
+    );
+  }
   if (Array.isArray(value)) {
     if (value.length === 0) return <span style={{ color: 'var(--fg-muted)' }}>[]</span>;
     if (value.length <= 3) {

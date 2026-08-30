@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from server.api.eval import evaluate_dataset_entries
+from server.config_redaction import redact_run_record, redacted_config_snapshot
 from server.db.postgres import PostgresClient
 from server.lineage import (
     attach_refs_to_current_bundle,
@@ -112,11 +113,14 @@ def _append_artifact(run_id: str, artifact: SyntheticArtifactRef) -> None:
 
 
 def get_run(run_id: str) -> SyntheticRun:
-    return load_run(run_id)
+    # Read boundary: records written before the redaction existed still carry the
+    # credential on disk, so it is withheld on the way out as well as on the way in.
+    return redact_run_record(load_run(run_id))
 
 
 def get_runs(*, corpus_id: str | None, limit: int) -> tuple[list[Any], list[Any]]:
-    return list_runs(corpus_id=corpus_id, limit=limit)
+    runs, artifacts = list_runs(corpus_id=corpus_id, limit=limit)
+    return [redact_run_record(run) for run in runs], artifacts
 
 
 def _coerce_eval_items(payload: Any) -> list[EvalDatasetItem]:
@@ -346,6 +350,9 @@ async def start_run(request: SyntheticRunStartRequest) -> SyntheticRun:
 def _new_run(
     *, run_id: str, repo_id: str, started_at: datetime, cfg: TriBridConfig, request: SyntheticRunStartRequest
 ) -> SyntheticRun:
+    # One helper builds both snapshot forms, already redacted, so no call site can
+    # withhold the credential from one and leak it through the other (M-89).
+    _snapshot = redacted_config_snapshot(cfg)
     return SyntheticRun(
         run_id=run_id,
         repo_id=repo_id,
@@ -354,8 +361,8 @@ def _new_run(
         completed_at=None,
         provider=request.provider,
         recipe=request.recipe,
-        config_snapshot=cfg.model_dump(mode="json"),
-        config=cfg.to_flat_dict(),
+        config_snapshot=_snapshot[0],
+        config=_snapshot[1],
         request=request,
         artifacts=[],
         summary=SyntheticRunSummary(),
