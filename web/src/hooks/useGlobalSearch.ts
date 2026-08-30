@@ -36,9 +36,35 @@ type ConfigIndexItem = GlobalSearchHit & { kind: 'config'; content: string };
 
 const MAX_RESULTS = 20;
 
+/**
+ * Humanise the path segments between the top-level section and the leaf.
+ *
+ * The registry labels a field by its leaf alone, so every nested setting arrived in the
+ * palette stripped of the only word that identified it: searching `figures` returned four
+ * rows titled "Classify", "Concurrency", "Describe" and "Enabled", none of which mentioned
+ * figures (M-135). The owning group is put back in front of the leaf; a two-segment path
+ * loses nothing to begin with and is left alone.
+ */
+function parentGroupLabel(path: string): string {
+  const parts = String(path || '').split('.').filter(Boolean);
+  if (parts.length < 3) return '';
+  return parts
+    .slice(1, -1)
+    .map((part) =>
+      part
+        .split('_')
+        .filter(Boolean)
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ')
+    )
+    .join(' · ');
+}
+
 function buildConfigIndex(fields: ConfigFieldDescriptor[]): ConfigIndexItem[] {
   return fields.map((field) => {
-    const label = String(field.label || field.path).trim();
+    const leaf = String(field.label || field.path).trim();
+    const group = parentGroupLabel(field.path);
+    const label = group && !leaf.toLowerCase().startsWith(group.toLowerCase()) ? `${group} · ${leaf}` : leaf;
     const description = String(field.description || '').trim();
     // A path with a purpose-built card names that card, so the row says where it will land
     // rather than naming the registry bucket it happens to be classified under.
@@ -51,7 +77,7 @@ function buildConfigIndex(fields: ConfigFieldDescriptor[]): ConfigIndexItem[] {
       location,
       path: field.path,
       description: description || undefined,
-      content: `${label} ${field.path} ${field.section} ${field.ui_surface} ${field.integration} ${description}`.toLowerCase(),
+      content: `${label} ${leaf} ${field.path} ${field.section} ${field.ui_surface} ${field.integration} ${description}`.toLowerCase(),
     };
   });
 }

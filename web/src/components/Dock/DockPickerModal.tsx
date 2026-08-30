@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { routes } from '@/config/routes';
 import { DOCK_DEFAULT_MODE_BY_PATH } from '@/config/dockCatalog';
 import type { DockTarget } from '@/stores/useDockStore';
@@ -93,6 +93,12 @@ function buildEntries(): DockEntry[] {
 
 export function DockPickerModal({ isOpen, onClose, onPick }: DockPickerModalProps) {
   const [query, setQuery] = useState('');
+  // Keyboard cursor over the flattened, visible row order. The picker used to be
+  // mouse-only: with the list filtered to a single result, Enter did nothing and
+  // Down-then-Enter did nothing, while the app's other palette (Ctrl+K) supported
+  // exactly that (M-137).
+  const [cursor, setCursor] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -106,6 +112,10 @@ export function DockPickerModal({ isOpen, onClose, onPick }: DockPickerModalProp
   useEffect(() => {
     if (!isOpen) setQuery('');
   }, [isOpen]);
+
+  useEffect(() => {
+    setCursor(0);
+  }, [query, isOpen]);
 
   const allEntries = useMemo(() => buildEntries(), []);
 
@@ -132,19 +142,58 @@ export function DockPickerModal({ isOpen, onClose, onPick }: DockPickerModalProp
 
   const showRecommended = query.trim().length === 0 && recommended.length > 0;
 
-  if (!isOpen) return null;
+  // Everything section excludes items already shown in recommended (when no query)
+  const recommendedIds = useMemo(() => new Set(recommended.map((e) => e.id)), [recommended]);
+  const everything = useMemo(
+    () => (showRecommended ? filtered.filter((e) => !recommendedIds.has(e.id)) : filtered),
+    [filtered, recommendedIds, showRecommended]
+  );
 
-  const handlePick = (entry: DockEntry) => {
-    onPick({
-      path: entry.path,
-      search: entry.search,
-      label: entry.label,
-      icon: entry.icon,
-      subtabTitle: entry.subtabTitle,
-      renderMode: entry.renderMode,
-    });
-    onClose();
+  // The cursor walks what is on screen, in the order it is on screen.
+  const visible = useMemo(
+    () => (showRecommended ? [...recommended, ...everything] : everything),
+    [everything, recommended, showRecommended]
+  );
+  const activeIndex = visible.length === 0 ? -1 : Math.min(cursor, visible.length - 1);
+  const optionId = (entry: DockEntry) => `dock-picker-option-${entry.id.replace(/[^a-zA-Z0-9]+/g, '-')}`;
+
+  const handlePick = useCallback(
+    (entry: DockEntry) => {
+      onPick({
+        path: entry.path,
+        search: entry.search,
+        label: entry.label,
+        icon: entry.icon,
+        subtabTitle: entry.subtabTitle,
+        renderMode: entry.renderMode,
+      });
+      onClose();
+    },
+    [onClose, onPick]
+  );
+
+  const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (visible.length === 0) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setCursor((prev) => Math.min(prev + 1, visible.length - 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setCursor((prev) => Math.max(prev - 1, 0));
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      setCursor(0);
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      setCursor(visible.length - 1);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const entry = visible[activeIndex];
+      if (entry) handlePick(entry);
+    }
   };
+
+  if (!isOpen) return null;
 
   const SectionTitle = ({ children }: { children: string }) => (
     <div
@@ -161,15 +210,23 @@ export function DockPickerModal({ isOpen, onClose, onPick }: DockPickerModalProp
     </div>
   );
 
-  const EntryRow = ({ entry }: { entry: DockEntry }) => (
+  const EntryRow = ({ entry }: { entry: DockEntry }) => {
+    const selected = visible[activeIndex]?.id === entry.id;
+    return (
     <button
       type="button"
+      role="option"
+      id={optionId(entry)}
+      aria-selected={selected}
+      // Options are reached with the arrow keys from the search box, not with Tab.
+      tabIndex={-1}
+      onMouseEnter={() => setCursor(visible.findIndex((v) => v.id === entry.id))}
       onClick={() => handlePick(entry)}
       style={{
         width: '100%',
-        background: 'var(--bg-elev2)',
+        background: selected ? 'var(--bg-elev1)' : 'var(--bg-elev2)',
         color: 'var(--fg)',
-        border: '1px solid var(--line)',
+        border: `1px solid ${selected ? 'var(--accent)' : 'var(--line)'}`,
         borderRadius: '10px',
         padding: '12px 12px',
         cursor: 'pointer',
@@ -221,11 +278,8 @@ export function DockPickerModal({ isOpen, onClose, onPick }: DockPickerModalProp
         ) : null}
       </div>
     </button>
-  );
-
-  // Everything section excludes items already shown in recommended (when no query)
-  const recommendedIds = new Set(recommended.map((e) => e.id));
-  const everything = showRecommended ? filtered.filter((e) => !recommendedIds.has(e.id)) : filtered;
+    );
+  };
 
   return (
     <div
@@ -242,7 +296,7 @@ export function DockPickerModal({ isOpen, onClose, onPick }: DockPickerModalProp
       onClick={onClose}
       role="dialog"
       aria-modal="true"
-      aria-labelledby="dock-picker-title"
+      aria-label="Choose something to dock"
     >
       <div
         style={{
@@ -295,9 +349,16 @@ export function DockPickerModal({ isOpen, onClose, onPick }: DockPickerModalProp
 
         <div style={{ marginTop: '14px' }}>
           <input
+            ref={inputRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={handleSearchKeyDown}
             placeholder="Search tabs and subtabs…"
+            role="combobox"
+            aria-label="Search tabs and subtabs"
+            aria-expanded={visible.length > 0}
+            aria-controls="dock-picker-listbox"
+            aria-activedescendant={activeIndex >= 0 ? optionId(visible[activeIndex]) : undefined}
             autoFocus
             style={{
               width: '100%',
@@ -312,37 +373,44 @@ export function DockPickerModal({ isOpen, onClose, onPick }: DockPickerModalProp
         </div>
 
         <div style={{ marginTop: '10px' }}>
-          {showRecommended ? (
-            <>
-              <SectionTitle>Recommended</SectionTitle>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {recommended.map((entry) => (
-                  <EntryRow key={entry.id} entry={entry} />
-                ))}
-              </div>
+          <div
+            id="dock-picker-listbox"
+            role="listbox"
+            aria-label="Dockable tabs and subtabs"
+            data-testid="dock-picker-listbox"
+          >
+            {showRecommended ? (
+              <>
+                <SectionTitle>Recommended</SectionTitle>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {recommended.map((entry) => (
+                    <EntryRow key={entry.id} entry={entry} />
+                  ))}
+                </div>
 
-              <SectionTitle>Everything</SectionTitle>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {everything.map((entry) => (
-                  <EntryRow key={entry.id} entry={entry} />
-                ))}
-              </div>
-            </>
-          ) : (
-            <>
-              <SectionTitle>{query.trim() ? 'Results' : 'Everything'}</SectionTitle>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {everything.map((entry) => (
-                  <EntryRow key={entry.id} entry={entry} />
-                ))}
-                {everything.length === 0 ? (
-                  <div style={{ padding: '14px 4px', color: 'var(--fg-muted)', fontSize: '12px' }}>
-                    No matches.
-                  </div>
-                ) : null}
-              </div>
-            </>
-          )}
+                <SectionTitle>Everything</SectionTitle>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {everything.map((entry) => (
+                    <EntryRow key={entry.id} entry={entry} />
+                  ))}
+                </div>
+              </>
+            ) : (
+              <>
+                <SectionTitle>{query.trim() ? 'Results' : 'Everything'}</SectionTitle>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {everything.map((entry) => (
+                    <EntryRow key={entry.id} entry={entry} />
+                  ))}
+                  {everything.length === 0 ? (
+                    <div style={{ padding: '14px 4px', color: 'var(--fg-muted)', fontSize: '12px' }}>
+                      No matches.
+                    </div>
+                  ) : null}
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
     </div>

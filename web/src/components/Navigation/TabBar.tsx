@@ -78,6 +78,13 @@ export function TabBar({ mobileOpen = false, onNavigate }: TabBarProps) {
           }
           onClick={handleDockAwareClick(route.path)}
           title={route.nav?.title}
+          // The link's name is its visible label. Two of the nine links carry a
+          // `nav.title` description sentence, and that sentence was what assistive tech
+          // announced ("Visible benchmark surface for runtime and prompt-regression
+          // triage" instead of "Benchmark"), so the sidebar read inconsistently
+          // (M-161/A-07). The description stays as the hover/`title` text.
+          aria-label={route.label}
+          aria-description={route.nav?.title}
         >
           {route.label}
           {pinned(route.path)}

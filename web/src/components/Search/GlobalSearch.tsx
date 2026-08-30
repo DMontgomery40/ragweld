@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useGlobalSearch } from '@/hooks/useGlobalSearch';
 
 export function GlobalSearch() {
@@ -16,13 +16,47 @@ export function GlobalSearch() {
   } = useGlobalSearch();
 
   const inputRef = useRef<HTMLInputElement>(null);
+  const triggerRef = useRef<HTMLInputElement>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
+  const wasOpen = useRef(false);
 
-  // Focus input when modal opens
+  // Focus input when modal opens; hand focus back to the trigger when it closes, so a
+  // keyboard user is not dropped at the top of the document (M-136).
   useEffect(() => {
     if (isOpen && inputRef.current) {
       inputRef.current.focus();
+      wasOpen.current = true;
+      return;
+    }
+    if (!isOpen && wasOpen.current) {
+      wasOpen.current = false;
+      triggerRef.current?.focus();
     }
   }, [isOpen]);
+
+  // Focus trap. Tabbing used to walk straight out of the open dialog and light up the
+  // sidebar behind it; nothing brought focus back (M-136).
+  const trapFocus = useCallback((e: React.KeyboardEvent) => {
+    if (e.key !== 'Tab') return;
+    const root = modalRef.current;
+    if (!root) return;
+    const focusable = Array.from(
+      root.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      )
+    ).filter((el) => el.offsetParent !== null || el === document.activeElement);
+    e.preventDefault();
+    if (focusable.length === 0) return;
+    const current = focusable.indexOf(document.activeElement as HTMLElement);
+    const next = e.shiftKey
+      ? (current <= 0 ? focusable.length - 1 : current - 1)
+      : (current === -1 || current === focusable.length - 1 ? 0 : current + 1);
+    focusable[next]?.focus();
+  }, []);
+
+  const activeOptionId = results[selectedIndex]
+    ? `global-search-option-${selectedIndex}`
+    : undefined;
 
   const highlightText = (text: string, query: string) => {
     if (!query) return text;
@@ -44,15 +78,25 @@ export function GlobalSearch() {
     <>
       {/* Topbar trigger input (keeps the old layout, opens the modal) */}
       <input
+        ref={triggerRef}
         id="global-search"
         type="search"
         placeholder="Search settings (Ctrl+K)"
         value={query}
         readOnly
-        onFocus={() => setIsOpen(true)}
+        // Deliberately NOT onFocus: tabbing across the top bar used to pop the modal open
+        // the moment this box received focus, which made the top bar untraversable by
+        // keyboard (M-136). It opens on a click, on Enter/Space, and on Ctrl+K.
         onClick={() => setIsOpen(true)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setIsOpen(true);
+          }
+        }}
         style={{ cursor: 'pointer' }}
         aria-label="Open global search"
+        aria-haspopup="dialog"
       />
 
       {isOpen && (
@@ -76,7 +120,9 @@ export function GlobalSearch() {
           }}
         >
           <div
+            ref={modalRef}
             className="global-search-modal"
+            onKeyDown={trapFocus}
             onClick={(e) => e.stopPropagation()}
             style={{
               width: '100%',
@@ -101,6 +147,11 @@ export function GlobalSearch() {
                   value={query}
                   onChange={(e) => search(e.target.value)}
                   onKeyDown={handleKeyDown as any}
+                  role="combobox"
+                  aria-label="Search all settings"
+                  aria-expanded={results.length > 0}
+                  aria-controls="global-search-listbox"
+                  aria-activedescendant={activeOptionId}
                   placeholder="Search all settings... (Ctrl+K)"
                   style={{
                     flex: 1,
@@ -128,13 +179,34 @@ export function GlobalSearch() {
 
         {/* Results */}
         {results.length > 0 && (
-          <div style={{
+          <>
+            <div
+              data-testid="global-search-count"
+              aria-live="polite"
+              style={{
+                padding: '8px 20px',
+                fontSize: '12px',
+                fontWeight: 600,
+                color: 'var(--fg-muted)',
+                borderBottom: '1px solid var(--line)',
+              }}
+            >
+              {results.length === 1 ? '1 result' : `${results.length} results`}
+            </div>
+          <div
+            id="global-search-listbox"
+            role="listbox"
+            aria-label="Search results"
+            style={{
             maxHeight: '400px',
             overflowY: 'auto'
           }}>
             {results.map((result, index) => (
               <div
                 key={`${result.kind}:${result.id}`}
+                id={`global-search-option-${index}`}
+                role="option"
+                aria-selected={index === selectedIndex}
                 onClick={() => navigateToResult(result)}
                 onMouseEnter={() => setCursor(index)}
                 data-testid="global-search-result"
@@ -148,7 +220,9 @@ export function GlobalSearch() {
                   transition: 'background 0.15s'
                 }}
               >
-                <div style={{
+                <div
+                  data-testid="global-search-result-title"
+                  style={{
                   fontSize: '14px',
                   fontWeight: 600,
                   marginBottom: '4px',
@@ -197,6 +271,7 @@ export function GlobalSearch() {
               </div>
             ))}
           </div>
+          </>
         )}
 
         {indexError ? (

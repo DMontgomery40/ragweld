@@ -202,9 +202,12 @@ function App() {
           <span className="tagline">Versioned Config · API / MCP</span>
         </h1>
         <div className="top-actions">
+          {/* One name for one thing. This was labelled LEARN, named "Open Parameter
+              Glossary" to assistive tech, and navigated to a tab called Glossary
+              (M-160/A-39). */}
           <button
             id="btn-learn"
-            title="Open Parameter Glossary"
+            title="Open the parameter glossary"
             className="icon-btn"
             onClick={() => navigate('/dashboard?subtab=glossary')}
           >
@@ -213,7 +216,7 @@ function App() {
               <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
               <line x1="12" y1="17" x2="12.01" y2="17"></line>
             </svg>
-            <span>Learn</span>
+            <span>Glossary</span>
           </button>
           <button
             id="btn-corpus"

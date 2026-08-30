@@ -799,6 +799,23 @@ button:focus-visible {
     outline-offset: 2px;
 }
 
+/* App-shell tab stops: a ring that is actually visible.
+   `--ring` is a 20%-alpha slate, so the `box-shadow: 0 0 0 3px var(--ring)` focus
+   treatment on `#global-search` and `.theme-mode-select` composites to almost nothing
+   over the panel, and the `input:focus-visible { outline: none }` rule above removed the
+   global ring on top of that -- the first tab stops on every page showed no focus
+   indicator at all (M-136, M-161). Solid, 2px, offset, and only on :focus-visible, so
+   nothing changes for pointer users. */
+.topbar a:focus-visible,
+.topbar button:focus-visible,
+.topbar input:focus-visible,
+.topbar select:focus-visible,
+.tab-bar a:focus-visible {
+    outline: 2px solid var(--accent-text);
+    outline-offset: 2px;
+    border-radius: 6px;
+}
+
 
 /* ============================================
    MISCELLANEOUS ENHANCEMENTS
