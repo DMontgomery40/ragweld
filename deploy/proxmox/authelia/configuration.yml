@@ -14,6 +14,15 @@ server:
           - name: CookieSession
 
 session:
+  name: authelia_session
+  same_site: lax
+  expiration: 12h
+  inactivity: 4h
+  remember_me: 30d
+  redis:
+    host: authelia-redis
+    port: 6379
+    database_index: 0
   cookies:
     - domain: ragweld.com
       authelia_url: https://auth.ragweld.com

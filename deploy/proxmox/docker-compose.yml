@@ -24,6 +24,29 @@ services:
       AUTH_DISABLE_USERNAME_PASSWORD: "true"
       AUTH_DISABLE_SIGNUP: "true"
 
+  authelia-redis:
+    image: redis:7-alpine
+    labels:
+      io.ragweld.managed: "true"
+    restart: unless-stopped
+    # Started as root the redis entrypoint chowns /data to uid 999 and re-execs
+    # under it, which would rewrite the owner of the bind mount and permanently
+    # fail the owner-only preflight in start-runtime.sh. Running as the runtime
+    # user that owns /etc/ragweld skips that branch entirely.
+    user: "${RAGWELD_RUNTIME_UID:-1000}:${RAGWELD_RUNTIME_GID:-1000}"
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1"]
+    volumes:
+      - type: bind
+        source: /etc/ragweld/authelia/redis
+        target: /data
+        bind:
+          create_host_path: false
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
   authelia:
     image: authelia/authelia:4.39.20
     labels:
@@ -42,6 +65,9 @@ services:
       - /etc/ragweld/authelia/oidc-rsa.pem:/config/oidc-rsa.pem:ro
       - /etc/ragweld/authelia/langfuse-client-secret-digest:/etc/ragweld/authelia/langfuse-client-secret-digest:ro
       - /etc/ragweld/authelia/state:/state
+    depends_on:
+      authelia-redis:
+        condition: service_healthy
     secrets:
       - authelia_session
       - authelia_storage

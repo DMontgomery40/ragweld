@@ -99,6 +99,8 @@ main() {
   source_private_env_file "$ETC_ROOT/langfuse.env"
   IFS= read -r LANGFUSE_OIDC_CLIENT_SECRET < "$ETC_ROOT/langfuse-oidc-client-secret"
   export LANGFUSE_OIDC_CLIENT_SECRET
+  export RAGWELD_RUNTIME_UID="$EXPECTED_UID"
+  export RAGWELD_RUNTIME_GID="$EXPECTED_GID"
 
   ./stop.sh --no-docker
   docker compose --project-name ragweld \

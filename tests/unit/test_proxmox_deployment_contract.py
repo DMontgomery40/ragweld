@@ -96,6 +96,7 @@ PROXMOX_PRODUCTION_SERVICES = [
     "langfuse-redis",
     "langfuse-minio",
     "flyte",
+    "authelia-redis",
     "authelia",
     "caddy",
 ]
@@ -510,6 +511,8 @@ def _build_secret_root(tmp_path: Path, *, include_tunnel: bool) -> Path:
     (secret_root / "authelia").chmod(0o700)
     (secret_root / "authelia" / "state").mkdir(parents=True, exist_ok=True)
     (secret_root / "authelia" / "state").chmod(0o700)
+    (secret_root / "authelia" / "redis").mkdir(parents=True, exist_ok=True)
+    (secret_root / "authelia" / "redis").chmod(0o700)
 
     _write_private_file(
         secret_root / "tribrid_config.json",
@@ -918,6 +921,38 @@ def test_proxmox_compose_uses_only_allowlisted_secret_mounts_and_origins() -> No
         assert "./infra/langfuse.env" not in block
 
 
+def test_proxmox_authelia_session_store_is_private_healthchecked_and_owner_run() -> None:
+    config = _compose_config(
+        "docker-compose.yml",
+        "infra/docker-compose.observability.yml",
+        "deploy/proxmox/docker-compose.yml",
+    )
+    services = config["services"]
+    authelia_redis = services["authelia-redis"]
+
+    assert authelia_redis["image"] == "redis:7-alpine"
+    assert authelia_redis["restart"] == "unless-stopped"
+    assert authelia_redis["labels"]["io.ragweld.managed"] == "true"
+    assert authelia_redis["command"] == ["redis-server", "--appendonly", "yes", "--save", "60", "1"]
+    # The redis entrypoint chowns /data to uid 999 and re-execs under it when it
+    # starts as root, which would rewrite the bind mount owner and permanently
+    # fail the owner-only preflight in start-runtime.sh.
+    assert authelia_redis["user"] == "1000:1000"
+    assert authelia_redis["volumes"] == [
+        {
+            "type": "bind",
+            "source": "/etc/ragweld/authelia/redis",
+            "target": "/data",
+            "bind": {"create_host_path": False},
+        }
+    ]
+    assert authelia_redis["healthcheck"]["test"] == ["CMD-SHELL", "redis-cli ping | grep PONG"]
+    assert authelia_redis["healthcheck"]["retries"] == 12
+    assert not authelia_redis.get("ports")
+    assert not authelia_redis.get("network_mode")
+    assert services["authelia"]["depends_on"]["authelia-redis"]["condition"] == "service_healthy"
+
+
 def test_proxmox_caddyfile_limits_public_routes_to_the_allowlist() -> None:
     source = PROXMOX_CADDYFILE.read_text(encoding="utf-8")
     _assert_caddy_contract(source)
@@ -1004,6 +1039,13 @@ def test_proxmox_authelia_configuration_is_owner_only_and_deny_by_default() -> N
             "default_redirection_url": "https://ragweld.dtmont.com/web/",
         },
     ]
+    session = payload["session"]
+    assert session["redis"] == {"host": "authelia-redis", "port": 6379, "database_index": 0}
+    assert session["name"] == "authelia_session"
+    assert session["same_site"] == "lax"
+    assert session["expiration"] == "12h"
+    assert session["inactivity"] == "4h"
+    assert session["remember_me"] == "30d"
     assert payload["authentication_backend"]["password_reset"]["disable"] is True
     assert payload["authentication_backend"]["password_change"]["disable"] is True
     assert payload["authentication_backend"]["file"]["path"] == "/config/users_database.yml"
@@ -1789,6 +1831,32 @@ def test_proxmox_lifecycle_start_runtime_fails_closed_on_insecure_secret_mode_be
     assert (not log_path.exists()) or all(" up " not in line for line in log_path.read_text(encoding="utf-8").splitlines())
 
 
+def test_proxmox_lifecycle_start_runtime_fails_closed_without_authelia_session_store_before_compose(
+    tmp_path: Path,
+) -> None:
+    assert PROXMOX_START_RUNTIME.is_file()
+    repo, log_path = _materialize_proxmox_runtime_repo(tmp_path)
+    secret_root = _build_secret_root(tmp_path, include_tunnel=False)
+    (secret_root / "authelia" / "redis").rmdir()
+
+    result = _run_shell_script(
+        repo / "deploy" / "proxmox" / "start-runtime.sh",
+        cwd=repo,
+        env={
+            PROXMOX_SECRET_ROOT_ENV: str(secret_root),
+            "RAGWELD_SKIP_TUNNEL": "1",
+            "FAKE_TOOL_LOG": str(log_path),
+            "PATH": f"{tmp_path / 'bin'}:{os.environ['PATH']}",
+        },
+    )
+
+    assert result.returncode != 0
+    assert "authelia/redis" in result.stderr
+    assert (not log_path.exists()) or all(
+        " up " not in line for line in log_path.read_text(encoding="utf-8").splitlines()
+    )
+
+
 def test_proxmox_lifecycle_start_runtime_fails_closed_without_working_lsof_before_compose(
     tmp_path: Path,
 ) -> None:
@@ -2019,6 +2087,7 @@ def test_proxmox_secret_bootstrap_generates_owner_only_runtime_material_and_exac
     assert _mode(secret_root) == 0o700
     assert _mode(secret_root / "authelia") == 0o700
     assert _mode(secret_root / "authelia" / "state") == 0o700
+    assert _mode(secret_root / "authelia" / "redis") == 0o700
     for relative_path in PROXMOX_BOOTSTRAP_OUTPUT_FILES:
         assert _mode(secret_root / relative_path) == 0o600
 

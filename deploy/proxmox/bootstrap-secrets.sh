@@ -200,6 +200,7 @@ main() {
   install -d -m 0700 "$staging_root"
   install -d -m 0700 "$staging_root/authelia"
   install -d -m 0700 "$staging_root/authelia/state"
+  install -d -m 0700 "$staging_root/authelia/redis"
 
   oidc_secret="$(random_alnum 72)"
   printf '%s\n' "$oidc_secret" | write_atomic_file "$staging_root/langfuse-oidc-client-secret"
@@ -302,7 +303,7 @@ users:
       - owners
 EOF
 
-  chmod 700 "$staging_root" "$staging_root/authelia" "$staging_root/authelia/state"
+  chmod 700 "$staging_root" "$staging_root/authelia" "$staging_root/authelia/state" "$staging_root/authelia/redis"
   find "$staging_root" -type f -exec chmod 600 {} +
   if [[ "$(id -u)" == "0" ]]; then
     chown -R "$service_owner_user:$service_owner_group" "$staging_root"

@@ -209,6 +209,26 @@ the exact ignored paths were removed from the Mac again.
   handled by the agent. Companion `*.ragweld.com` surfaces remain pending the
   Netlify registrar change.
 
+### Authelia session persistence — 2026-08-30
+
+- Authelia sessions persist in `authelia-redis` (AOF under
+  `/etc/ragweld/authelia/redis`) since 2026-08-30; restarts no longer log
+  operators out, and `remember_me` is 30d with a 12h expiration and 4h
+  inactivity window. Before this the `session:` block declared only `cookies:`,
+  so Authelia kept sessions in process memory and every
+  `stop-runtime.sh`/`start-runtime.sh` cycle invalidated the operator's browser
+  session — the cause of the lost session recorded under Public ingress above.
+- `authelia-redis` publishes no ports and is reachable only by service name on
+  the compose project network. It runs as the runtime uid/gid that owns
+  `/etc/ragweld` (`RAGWELD_RUNTIME_UID`/`RAGWELD_RUNTIME_GID`, exported by the
+  lifecycle scripts) because the redis entrypoint would otherwise chown the
+  bind mount to uid 999 and break the owner-only preflight.
+- `start-runtime.sh` now preflights `/etc/ragweld/authelia/redis` with the same
+  owner-only check as `/etc/ragweld/authelia/state`, so a missing session store
+  fails the whole runtime loudly before any compose action. On an already
+  bootstrapped host the directory must be created once by hand:
+  `install -d -o ragweld -g ragweld -m 0700 /etc/ragweld/authelia/redis`.
+
 ## Historical source state before the final execution addendum
 
 - Local branch/worktree canon: one local branch (`main`) and one worktree

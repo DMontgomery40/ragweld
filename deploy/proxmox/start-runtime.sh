@@ -35,6 +35,7 @@ readonly PRODUCTION_SERVICES=(
   "langfuse-redis"
   "langfuse-minio"
   "flyte"
+  "authelia-redis"
   "authelia"
   "caddy"
 )
@@ -194,6 +195,7 @@ main() {
   require_private_dir "$ETC_ROOT" "Ragweld secret root"
   require_private_dir "$ETC_ROOT/authelia" "Authelia secret directory"
   require_private_dir "$ETC_ROOT/authelia/state" "Authelia state directory"
+  require_private_dir "$ETC_ROOT/authelia/redis" "Authelia session store directory"
 
   for file_path in "${REQUIRED_SECRET_FILES[@]}"; do
     require_private_file "$ETC_ROOT/$file_path" "Required secret file"
@@ -226,6 +228,8 @@ main() {
   IFS= read -r LANGFUSE_OIDC_CLIENT_SECRET < "$ETC_ROOT/langfuse-oidc-client-secret"
   export LANGFUSE_OIDC_CLIENT_SECRET
   export RAGWELD_CONFIG_PATH="$ETC_ROOT/tribrid_config.json"
+  export RAGWELD_RUNTIME_UID="$EXPECTED_UID"
+  export RAGWELD_RUNTIME_GID="$EXPECTED_GID"
 
   compose_args=(docker compose --project-name ragweld)
   for file_path in "${COMPOSE_FILES[@]}"; do
