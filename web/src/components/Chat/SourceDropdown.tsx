@@ -55,9 +55,13 @@ export function SourceDropdown(props: SourceDropdownProps) {
   const availableCorpora = props.corpora.filter((c) => c.corpus_id !== RECALL_CORPUS_ID);
   const unindexedCount = availableCorpora.filter((c) => !c.last_indexed).length;
 
-  const selectedCount = corpusIds.length;
+  // Recall is a source, not a corpus. Counting it as one made "2 selected" read for a single
+  // corpus plus Recall, and would have said "1 selected" with no corpus at all (M-96/B-20).
+  const realCorpusCount = corpusIds.filter((id) => id && id !== RECALL_CORPUS_ID).length;
+  const recallSelected = corpusIds.includes(RECALL_CORPUS_ID);
   const summaryParts = [
-    selectedCount > 0 ? `${selectedCount} selected` : null,
+    realCorpusCount > 0 ? `${realCorpusCount} ${realCorpusCount === 1 ? 'corpus' : 'corpora'}` : null,
+    recallSelected ? 'Recall' : null,
     props.webEnabled ? 'Web' : null,
   ].filter(Boolean);
   const summaryLabel = summaryParts.length > 0 ? summaryParts.join(' + ') : 'None';
