@@ -6,6 +6,7 @@
 
 import { useConfigField } from '@/hooks/useConfig';
 import { useAPI } from '@/hooks';
+import { NumberField } from '@/components/ui/NumberField';
 import { useEffect, useState } from 'react';
 import { GRAFANA_DASHBOARD_PRESETS, findGrafanaPreset } from './dashboardPresets';
 import type { ObservabilityStatusResponse } from '@/types/generated';
@@ -181,14 +182,11 @@ export function GrafanaConfig() {
           <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: 'var(--fg)', marginBottom: '8px' }}>
             Org ID
           </label>
-          <input
-            type="number"
+          <NumberField
+            configPath="ui.grafana_org_id"
             min={1}
             value={orgId}
-            onChange={(e) => {
-              const n = Number.parseInt(e.target.value || '1', 10);
-              setOrgId(Number.isFinite(n) && n > 0 ? n : 1);
-            }}
+            onCommit={setOrgId}
             style={{
               width: '100%',
               background: 'var(--input-bg)',

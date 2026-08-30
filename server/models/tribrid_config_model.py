@@ -6053,6 +6053,10 @@ class UIConfig(BaseModel):
 
     grafana_org_id: int = Field(
         default=1,
+        # Grafana's own org numbering starts at 1; the UI has advertised this floor since the
+        # control existed but the model carried no matching constraint (M-25/X-11). No natural
+        # ceiling exists, so only a lower bound is added.
+        ge=1,
         description="Grafana organization ID"
     )
 
