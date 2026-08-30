@@ -49,6 +49,10 @@ export function NumberField({ value, onCommit, min, max, step, ...rest }: Number
   }, [value]);
 
   const commit = () => {
+    // Clearing here, not in the blur handler, is what re-arms the prop sync: after an Enter
+    // commit the field is no longer holding an edit, so a config load or corpus switch that
+    // lands before the next blur must be allowed to update the text.
+    editingRef.current = false;
     const element = inputRef.current;
     const next = element
       ? clampInputNumber(element, value)
@@ -60,7 +64,10 @@ export function NumberField({ value, onCommit, min, max, step, ...rest }: Number
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Enter') {
       event.preventDefault();
-      commit();
+      // Blur so the visual state matches the committed state; the blur handler is the single
+      // commit path, so Enter never sends the value twice.
+      if (inputRef.current) inputRef.current.blur();
+      else commit();
       return;
     }
     if (event.key === 'Escape') {
@@ -82,10 +89,7 @@ export function NumberField({ value, onCommit, min, max, step, ...rest }: Number
       onFocus={() => {
         editingRef.current = true;
       }}
-      onBlur={() => {
-        editingRef.current = false;
-        commit();
-      }}
+      onBlur={commit}
       onKeyDown={onKeyDown}
     />
   );
