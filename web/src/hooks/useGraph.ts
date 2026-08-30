@@ -52,6 +52,7 @@ export function useGraph() {
     isLoading,
     error,
     expansion,
+    scope,
     viewMode,
     totalMatched,
     activeQuery,
@@ -67,6 +68,7 @@ export function useGraph() {
     setIsLoading,
     setError,
     setExpansion,
+    setScope,
     setTotalMatched,
     setActiveQuery,
     setViewMode,
@@ -161,9 +163,13 @@ export function useGraph() {
           // A failed expansion leaves the operator's results and graph exactly as
           // they were and reports the server's reason. Blanking the view on 404
           // destroyed the search results and told nobody why (M-01).
-          const message = await failureDetail(response, 'Could not expand this entity');
-          setError(message);
-          setExpansion({ entityId, status: 'failed', detail: message });
+          // One surface per failure: the expansion banner carries this one. Mirroring it
+          // into `error` too rendered the same sentence in two stacked red boxes (F-02).
+          setExpansion({
+            entityId,
+            status: 'failed',
+            detail: await failureDetail(response, 'Could not expand this entity'),
+          });
           return null;
         }
 
@@ -174,17 +180,26 @@ export function useGraph() {
         setEntities(ents);
         setRelationships(rels);
         setExpansion({ entityId, status: 'ok', detail: '' });
+        setScope({ kind: 'neighborhood', entityId });
         return { entities: ents, relationships: rels };
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Could not expand this entity';
-        setError(message);
         setExpansion({ entityId, status: 'failed', detail: message });
         return null;
       } finally {
         setIsLoading(false);
       }
     },
-    [activeRepo, maxHops, setEntities, setRelationships, setIsLoading, setError, setExpansion]
+    [
+      activeRepo,
+      maxHops,
+      setEntities,
+      setRelationships,
+      setIsLoading,
+      setError,
+      setExpansion,
+      setScope,
+    ]
   );
 
   /**
@@ -233,17 +248,19 @@ export function useGraph() {
    */
   const selectEntity = useCallback(
     async (entity: Entity | null) => {
-      setSelectedCommunity(null);
       setExpansion(null);
       if (!entity) {
         setSelectedEntity(null);
         return;
       }
-      // The selection moves only once its neighborhood is on screen. Moving it first and
-      // keeping the previous results on a failure would label entity A's 180 relationships
-      // with entity B's name (M-01: keep the results, but do not misattribute them).
+      // Nothing about the current view changes until the neighborhood is on screen.
+      // Moving the selection first, or clearing the community first, would leave the
+      // previous scope's rows on screen under the new entity's name and under the
+      // corpus denominator (M-01 keeps the results; F-01 keeps them correctly labelled).
       const loaded = await getNeighbors(entity.entity_id);
-      if (loaded) setSelectedEntity(entity);
+      if (!loaded) return;
+      setSelectedEntity(entity);
+      setSelectedCommunity(null);
     },
     [setSelectedEntity, setSelectedCommunity, setExpansion, getNeighbors]
   );
@@ -253,21 +270,24 @@ export function useGraph() {
    */
   const selectCommunity = useCallback(
     async (community: Community | null) => {
+      setExpansion(null);
+      if (!community) {
+        setSelectedCommunity(null);
+        return;
+      }
+      const sub = await getCommunitySubgraph(community.community_id, 250);
+      if (sub === null) return;
+      setEntities(sub.entities);
+      setRelationships(sub.relationships);
       setSelectedCommunity(community);
       setSelectedEntity(null);
-      setExpansion(null);
-
-      if (community) {
-        const sub = await getCommunitySubgraph(community.community_id, 250);
-        if (sub === null) return;
-        setEntities(sub.entities);
-        setRelationships(sub.relationships);
-      }
+      setScope({ kind: 'community', communityId: community.community_id });
     },
     [
       setSelectedCommunity,
       setSelectedEntity,
       setExpansion,
+      setScope,
       getCommunitySubgraph,
       setEntities,
       setRelationships,
@@ -334,6 +354,7 @@ export function useGraph() {
         setActiveQuery(q);
         setSelectedEntity(null);
         setExpansion(null);
+        setScope(q ? { kind: 'search', query: q } : { kind: 'corpus' });
         return { entities: ents, relationships: rels };
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Could not load the corpus graph';
@@ -351,6 +372,7 @@ export function useGraph() {
       setActiveQuery,
       setSelectedEntity,
       setExpansion,
+      setScope,
       setIsLoading,
       setError,
     ]
@@ -381,6 +403,7 @@ export function useGraph() {
     isLoading,
     error,
     expansion,
+    scope,
     viewMode,
     totalMatched,
     activeQuery,

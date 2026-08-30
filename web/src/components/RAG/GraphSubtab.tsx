@@ -218,6 +218,7 @@ export function GraphSubtab() {
     isLoading,
     error,
     expansion,
+    scope,
     viewMode,
     maxHops,
     totalMatched,
@@ -652,23 +653,29 @@ export function GraphSubtab() {
   const entityCountLabel = useMemo(() => {
     const shown = filteredEntities.length;
     const fmt = (n: number) => n.toLocaleString();
-    if (selectedCommunity) return `${fmt(shown)} in this community`;
-    if (expansion?.status === 'ok' && selectedEntity) return `${fmt(shown)} in this neighborhood`;
-    const total = Math.max(totalMatched, shown);
-    const scope = activeQuery ? `matching \u201c${activeQuery}\u201d` : 'in this corpus';
     const hidden = visibleEntityTypes.length ? ' (type filter applied)' : '';
-    return shown < total
-      ? `Showing ${fmt(shown)} of ${fmt(total)} ${scope}${hidden}`
-      : `${fmt(shown)} ${scope}${hidden}`;
-  }, [
-    filteredEntities.length,
-    totalMatched,
-    activeQuery,
-    selectedCommunity,
-    selectedEntity,
-    expansion,
-    visibleEntityTypes.length,
-  ]);
+    // Derived from the scope the rows were LOADED under, never from the current
+    // selection: a failed expansion leaves the previous rows on screen, and reading
+    // the label off `selectedEntity`/`expansion` relabelled one entity's 86-node
+    // neighborhood as a slice of the corpus or of the last search (review F-01).
+    switch (scope.kind) {
+      case 'community':
+        return `${fmt(shown)} in this community${hidden}`;
+      case 'neighborhood':
+        return `${fmt(shown)} in this neighborhood${hidden}`;
+      case 'none':
+        return `${fmt(shown)} loaded${hidden}`;
+      case 'search':
+      case 'corpus': {
+        const total = Math.max(totalMatched, shown);
+        const where =
+          scope.kind === 'search' ? `matching \u201c${scope.query}\u201d` : 'in this corpus';
+        return shown < total
+          ? `Showing ${fmt(shown)} of ${fmt(total)} ${where}${hidden}`
+          : `${fmt(shown)} ${where}${hidden}`;
+      }
+    }
+  }, [filteredEntities.length, totalMatched, scope, visibleEntityTypes.length]);
 
   /**
    * Communities are absent for three different reasons and the operator needs the

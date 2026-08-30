@@ -13,6 +13,19 @@ import type { Entity, Relationship, Community, GraphStats } from '@/types/genera
  * results on screen and lets the details pane say what actually went wrong
  * instead of looping "select an entity to load its neighborhood" (M-01, M-65).
  */
+/**
+ * What the entities currently on screen ARE. Set only when a load succeeds, so a failed
+ * expansion cannot relabel the previous scope's data: keeping entity A's neighborhood on
+ * screen is right, calling those 86 rows "the first 86 of 5,179 in this corpus" is not
+ * (review F-01). Local UI state, not a wire contract.
+ */
+export type LoadedScope =
+  | { kind: 'none' }
+  | { kind: 'corpus' }
+  | { kind: 'search'; query: string }
+  | { kind: 'neighborhood'; entityId: string }
+  | { kind: 'community'; communityId: string };
+
 export interface EntityExpansion {
   entityId: string;
   status: 'ok' | 'failed';
@@ -31,6 +44,8 @@ interface GraphStore {
   isLoading: boolean;
   error: string | null;
   expansion: EntityExpansion | null;
+  /** What the loaded entities are; only a successful load changes it. */
+  scope: LoadedScope;
   viewMode: 'viz' | 'table';
   /** Entities matching the last load before the display limit was applied (the denominator). */
   totalMatched: number;
@@ -52,6 +67,7 @@ interface GraphStore {
   setIsLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   setExpansion: (expansion: EntityExpansion | null) => void;
+  setScope: (scope: LoadedScope) => void;
   setTotalMatched: (total: number) => void;
   setActiveQuery: (query: string) => void;
   setViewMode: (mode: 'viz' | 'table') => void;
@@ -80,6 +96,7 @@ export const useGraphStore = create<GraphStore>()((set) => ({
   isLoading: false,
   error: null,
   expansion: null,
+  scope: { kind: 'none' },
   viewMode: 'viz',
   totalMatched: 0,
   activeQuery: '',
@@ -97,6 +114,7 @@ export const useGraphStore = create<GraphStore>()((set) => ({
   setIsLoading: (isLoading) => set({ isLoading }),
   setError: (error) => set({ error }),
   setExpansion: (expansion) => set({ expansion }),
+  setScope: (scope) => set({ scope }),
   setTotalMatched: (totalMatched) => set({ totalMatched: Math.max(0, totalMatched) }),
   setActiveQuery: (activeQuery) => set({ activeQuery }),
   setViewMode: (viewMode) => set({ viewMode }),
@@ -114,6 +132,7 @@ export const useGraphStore = create<GraphStore>()((set) => ({
       isLoading: false,
       error: null,
       expansion: null,
+      scope: { kind: 'none' },
       totalMatched: 0,
       activeQuery: '',
       viewMode: state.viewMode,

@@ -290,14 +290,24 @@ test.describe('Graph Explorer on the ragweld_code code graph', () => {
     // tell the operator to do the thing that just failed - M-65).
     const selectedBefore = await page.getByTestId('graph-entity-details').innerText();
     const relsBefore = await relRows.count();
+    // The label must describe what is on screen BEFORE the failure, and still describe it
+    // after: these rows are one entity's neighborhood, not the first N of the corpus.
+    const labelBefore = await page.getByTestId('graph-entity-count').innerText();
+    expect(labelBefore).toContain('in this neighborhood');
+
     await context.setOffline(true);
     await page.locator('[data-testid^="graph-entity-row-"]').nth(1).click();
 
     await expect(page.getByTestId('graph-expansion-failed')).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId('graph-expansion-failed')).toContainText('unchanged');
-    await expect(page.getByTestId('graph-error')).toBeVisible();
+    // One error surface, not two stacked red boxes saying the same sentence (F-02).
+    await expect(page.getByTestId('graph-error')).toHaveCount(0);
     expect(await entityRows.count(), 'a failed expansion must not clear the results').toBe(afterExpand);
     expect(await relRows.count(), 'a failed expansion must not clear the graph').toBe(relsBefore);
+    // F-01: the count label must not relabel a neighborhood as a slice of the corpus.
+    const labelAfter = await page.getByTestId('graph-entity-count').innerText();
+    expect(labelAfter, 'a failed expansion must not relabel the loaded scope').toBe(labelBefore);
+    expect(labelAfter).not.toContain('in this corpus');
     // The selection must not move to an entity whose neighborhood never loaded, or the
     // panel would show the previous entity's relationships under the new entity's name.
     expect(await page.getByTestId('graph-entity-details').innerText()).toBe(selectedBefore);
