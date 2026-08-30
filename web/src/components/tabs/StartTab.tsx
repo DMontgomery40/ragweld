@@ -139,7 +139,9 @@ export default function StartTab() {
       message: [
         `Index estimate for "${corpus.name}"`,
         `Files: ${estimate.total_files} (${estimate.skipped_large_files ?? 0} skipped as too large)`,
-        `Estimated tokens: ${estimate.estimated_total_tokens.toLocaleString()} → ~${estimate.estimated_total_chunks.toLocaleString()} chunks`,
+        `Estimated tokens: ${estimate.estimated_total_tokens.toLocaleString()} (${estimate.estimated_tokens_low.toLocaleString()}–${estimate.estimated_tokens_high.toLocaleString()})`,
+        `Estimated chunks: ${estimate.estimated_total_chunks.toLocaleString()} (${estimate.estimated_chunks_low.toLocaleString()}–${estimate.estimated_chunks_high.toLocaleString()})`,
+        `Measured by chunking ${estimate.sampled_files.toLocaleString()} sampled files, band ±${Math.round(estimate.estimate_relative_error * 100)}%`,
         `Embeddings: ${estimate.embedding_backend} (${estimate.embedding_provider || 'n/a'} / ${estimate.embedding_model || 'n/a'})${estimate.skip_dense ? ' — dense skipped' : ''}`,
         `Estimated cost: ${cost == null ? 'N/A' : `$${Number(cost).toFixed(4)}`}`,
         estimate.estimated_seconds_low != null && estimate.estimated_seconds_high != null

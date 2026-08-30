@@ -3962,7 +3962,7 @@ export interface IndexDeletionIncompleteResponse {
   detail: IndexDeletionIncompleteDetail;
 }
 
-/** Best-effort estimate for indexing cost/time before running the indexer.  Notes: - Token count is an approximation (byte-based heuristic). - Time is an intentionally rough range (depends on machine, provider latency,   GraphRAG extraction scope, and local hardware throughput). */
+/** Best-effort estimate for indexing cost/time before running the indexer.  Notes: - Tokens and chunks are measured: a sample of the corpus is extracted and run through the   configured chunker, then scaled by byte share. ``sampled_files``/``sampled_bytes`` say   how much was measured and the ``*_low``/``*_high`` bounds carry the error band. - Time is an intentionally rough range (depends on machine, provider latency,   GraphRAG extraction scope, and local hardware throughput). */
 export interface IndexEstimate {
   /** Corpus identifier */
   corpus_id: string;
@@ -3976,8 +3976,22 @@ export interface IndexEstimate {
   skipped_large_files: number;
   /** Estimated total tokens to be chunked/embedded */
   estimated_total_tokens: number;
-  /** Estimated number of chunks (heuristic) */
+  /** Estimated number of chunks, measured on the sample */
   estimated_total_chunks: number;
+  /** Low end of the token estimate's error band */
+  estimated_tokens_low: number;
+  /** High end of the token estimate's error band */
+  estimated_tokens_high: number;
+  /** Low end of the chunk estimate's error band */
+  estimated_chunks_low: number;
+  /** High end of the chunk estimate's error band */
+  estimated_chunks_high: number;
+  /** Half-width of the token/chunk error band as a fraction of the point estimate (model error plus a sampling term for the files that were not measured) */
+  estimate_relative_error: number;
+  /** Files opened, extracted and chunked to produce the estimate */
+  sampled_files: number;
+  /** Bytes covered by the sampled files */
+  sampled_bytes: number;
   /** Embedding backend used for indexing (deterministic has no external cost) */
   embedding_backend: "deterministic" | "provider";
   /** Embedding provider used for indexing (embedding.embedding_type) */

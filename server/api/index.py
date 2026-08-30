@@ -36,6 +36,7 @@ from server.db.postgres import PostgresClient
 from server.indexing.chunker import Chunker
 from server.indexing.code_graph import CODE_GRAPH_LANGUAGES, extract_code_graph
 from server.indexing.embedder import Embedder, configure_postgres_embedding_cache_backend
+from server.indexing.estimate import sample_corpus
 from server.indexing.generations import (
     DeletionIncompleteError,
     FenceClaim,
@@ -233,8 +234,8 @@ async def _write_code_graph(
     return result.deferred_relationships
 
 
-# Index estimate heuristics (intentionally rough).
-_EST_BYTES_PER_TOKEN = 4.0  # common rule-of-thumb for English-ish text
+# Index estimate heuristics (intentionally rough). Token and chunk counts are NOT heuristics:
+# they are measured by sampling the corpus through the configured chunker (server/indexing/estimate.py).
 _EST_TOKENS_PER_SECOND_CLOUD = 50_000
 _EST_TOKENS_PER_SECOND_DETERMINISTIC = 120_000
 _EST_OVERHEAD_SECONDS = 12.0
@@ -1029,20 +1030,6 @@ async def index_run_conflict(
         ),
     )
     return HTTPException(status_code=409, detail=detail.model_dump(mode="json"))
-
-
-def _estimate_tokens_from_bytes(total_bytes: int) -> int:
-    b = max(0, int(total_bytes or 0))
-    return int(float(b) / float(_EST_BYTES_PER_TOKEN)) if b > 0 else 0
-
-
-def _estimate_chunks_from_tokens(*, tokens: int, target_tokens: int, overlap_tokens: int) -> int:
-    t = max(0, int(tokens or 0))
-    target = max(1, int(target_tokens or 0))
-    overlap = max(0, int(overlap_tokens or 0))
-    stride = max(1, target - min(overlap, target - 1))
-    # Ceiling division
-    return int((t + stride - 1) // stride) if t > 0 else 0
 
 
 def _looks_cloud_provider(provider: str) -> bool:
@@ -3645,6 +3632,7 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
     total_bytes = 0
     skipped_large_files = 0
     pdf_paths: list[Path] = []
+    sized_files: list[tuple[Path, int]] = []
 
     root = Path(repo_path).expanduser().resolve()
     if not root.exists():
@@ -3660,15 +3648,19 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
             continue
         total_files += 1
         total_bytes += max(0, size_bytes)
+        sized_files.append((p, max(0, size_bytes)))
         if p.suffix.lower() == ".pdf":
             pdf_paths.append(p)
 
-    est_tokens = _estimate_tokens_from_bytes(total_bytes)
-    est_chunks = _estimate_chunks_from_tokens(
-        tokens=est_tokens,
-        target_tokens=int(getattr(cfg.chunking, "target_tokens", 512) or 512),
-        overlap_tokens=int(getattr(cfg.chunking, "overlap_tokens", 64) or 64),
+    # Measured, not a byte ratio: a sample of every format is extracted and run through the
+    # chunker the operator just configured. Off the event loop -- it opens files and tokenizes.
+    sample = await asyncio.to_thread(
+        sample_corpus,
+        files=sized_files,
+        chunker=Chunker(cfg.chunking, cfg.tokenization),
     )
+    est_tokens = sample.total_tokens
+    est_chunks = sample.total_chunks
 
     skip_dense = bool(getattr(cfg.indexing, "skip_dense", False))
     embedding_backend = str(
@@ -3722,10 +3714,7 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
     est_high: float | None = None
     estimated_seconds_semantic_kg: float | None = None
     estimated_seconds_figures: float | None = None
-    assumptions: list[str] = [
-        f"tokens≈bytes/{_EST_BYTES_PER_TOKEN:g}",
-        "time range is a heuristic (very rough)",
-    ]
+    assumptions: list[str] = [*sample.assumptions, "time range is a heuristic (very rough)"]
     if skipped_large_files > 0:
         assumptions.append(f"skips files > {max_indexable_bytes} bytes")
     if estimated_figures is not None:
@@ -3806,6 +3795,13 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
         skipped_large_files=int(skipped_large_files),
         estimated_total_tokens=int(est_tokens),
         estimated_total_chunks=int(est_chunks),
+        estimated_tokens_low=int(sample.tokens_low),
+        estimated_tokens_high=int(sample.tokens_high),
+        estimated_chunks_low=int(sample.chunks_low),
+        estimated_chunks_high=int(sample.chunks_high),
+        estimate_relative_error=float(sample.relative_error),
+        sampled_files=int(sample.sampled_files),
+        sampled_bytes=int(sample.sampled_bytes),
         embedding_backend="provider" if embedding_backend == "provider" else "deterministic",
         embedding_provider=embedding_provider,
         embedding_model=embedding_model,

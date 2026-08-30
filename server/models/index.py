@@ -215,7 +215,9 @@ class IndexEstimate(BaseModel):
     """Best-effort estimate for indexing cost/time before running the indexer.
 
     Notes:
-    - Token count is an approximation (byte-based heuristic).
+    - Tokens and chunks are measured: a sample of the corpus is extracted and run through the
+      configured chunker, then scaled by byte share. ``sampled_files``/``sampled_bytes`` say
+      how much was measured and the ``*_low``/``*_high`` bounds carry the error band.
     - Time is an intentionally rough range (depends on machine, provider latency,
       GraphRAG extraction scope, and local hardware throughput).
     """
@@ -232,7 +234,33 @@ class IndexEstimate(BaseModel):
     estimated_total_tokens: int = Field(
         ge=0, description="Estimated total tokens to be chunked/embedded"
     )
-    estimated_total_chunks: int = Field(ge=0, description="Estimated number of chunks (heuristic)")
+    estimated_total_chunks: int = Field(
+        ge=0, description="Estimated number of chunks, measured on the sample"
+    )
+    estimated_tokens_low: int = Field(
+        ge=0, description="Low end of the token estimate's error band"
+    )
+    estimated_tokens_high: int = Field(
+        ge=0, description="High end of the token estimate's error band"
+    )
+    estimated_chunks_low: int = Field(
+        ge=0, description="Low end of the chunk estimate's error band"
+    )
+    estimated_chunks_high: int = Field(
+        ge=0, description="High end of the chunk estimate's error band"
+    )
+    estimate_relative_error: float = Field(
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Half-width of the token/chunk error band as a fraction of the point estimate "
+            "(model error plus a sampling term for the files that were not measured)"
+        ),
+    )
+    sampled_files: int = Field(
+        ge=0, description="Files opened, extracted and chunked to produce the estimate"
+    )
+    sampled_bytes: int = Field(ge=0, description="Bytes covered by the sampled files")
     embedding_backend: Literal["deterministic", "provider"] = Field(
         description="Embedding backend used for indexing (deterministic has no external cost)"
     )
