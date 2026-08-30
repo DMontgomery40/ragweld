@@ -899,17 +899,57 @@ def test_proxmox_compose_uses_only_allowlisted_secret_mounts_and_origins() -> No
     assert langfuse_env["AUTH_DISABLE_SIGNUP"] == "true"
     assert langfuse_env["AUTH_DISABLE_USERNAME_PASSWORD"] == "true"
     assert langfuse_env["NEXTAUTH_URL"] == "https://ragweld-langfuse.dtmont.com"
-    for inherited_key in (
+
+    # Langfuse cannot function without DATABASE_URL/NEXTAUTH_SECRET as plain env vars
+    # (NEXTAUTH_SECRET in particular has no alternative -- it's read directly from
+    # process.env on every request per Langfuse's own docs), so this contract cannot
+    # ban their presence outright. What it CAN verify is provenance: each secret's
+    # value is delivered only through the Langfuse-specific secret file (never
+    # hardcoded into a compose file, never present in the cluster-wide runtime.env),
+    # and it is never the dev-committed placeholder from infra/langfuse.env.example --
+    # the actual regression class this contract exists to catch (a dev secret leaking
+    # to prod). Excludes LANGFUSE_INIT_ORG_ID/ORG_NAME/PROJECT_ID/PROJECT_NAME: those
+    # are non-secret cosmetic identifiers that intentionally match across dev and prod.
+    langfuse_example_values: dict[str, str] = {}
+    for line in (ROOT / "infra" / "langfuse.env.example").read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if "=" in stripped and not stripped.startswith("#"):
+            key, _, value = stripped.partition("=")
+            langfuse_example_values[key] = value
+
+    langfuse_secret_keys = {
         "DATABASE_URL",
         "NEXTAUTH_SECRET",
         "LANGFUSE_INIT_USER_EMAIL",
+        "LANGFUSE_INIT_USER_PASSWORD",
         "LANGFUSE_INIT_PROJECT_PUBLIC_KEY",
         "LANGFUSE_INIT_PROJECT_SECRET_KEY",
-    ):
-        assert inherited_key not in langfuse_env
+    }
+    deploy_compose_sources = "\n".join(
+        path.read_text(encoding="utf-8") for path in sorted(ROOT.joinpath("deploy").rglob("*.y*ml"))
+    )
+    runtime_env_path = Path("/etc/ragweld/runtime.env")
+    runtime_env_text = runtime_env_path.read_text(encoding="utf-8") if runtime_env_path.exists() else ""
 
     worker_env = services["langfuse-worker"].get("environment") or {}
-    assert worker_env == {}
+    # langfuse-worker has no explicit `environment:` block in the overlay (only
+    # env_file), so its rendered environment carries the same secrets as `langfuse`
+    # for the same reason -- check both the same way instead of asserting
+    # worker_env == {} (host-state-dependent for the same reason DATABASE_URL was).
+    for service_env in (langfuse_env, worker_env):
+        for secret_key in langfuse_secret_keys:
+            assert not re.search(
+                rf"^\s*{re.escape(secret_key)}:\s", deploy_compose_sources, re.MULTILINE
+            ), f"{secret_key} must never be hardcoded into a compose file under deploy/"
+            assert not re.search(
+                rf"^{re.escape(secret_key)}=", runtime_env_text, re.MULTILINE
+            ), f"{secret_key} is a Langfuse-app secret; it must not be in the cluster-wide runtime.env"
+            rendered_value = service_env.get(secret_key)
+            if rendered_value is not None and secret_key in langfuse_example_values:
+                assert (
+                    rendered_value != langfuse_example_values[secret_key]
+                ), f"{secret_key} rendered as the dev-committed infra/langfuse.env.example placeholder"
+
     assert services["alloy"]["environment"]["ALLOY_FARO_CORS_ORIGIN"] == "https://ragweld.dtmont.com"
     overlay_source = PROXMOX_COMPOSE.read_text(encoding="utf-8")
     service_blocks = _compose_service_blocks(overlay_source)
