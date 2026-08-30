@@ -62,9 +62,13 @@ function ErrorBanner({ message, testId }: { message: string; testId: string }) {
       data-testid={testId}
       role="alert"
       style={{
-        background: 'var(--error-bg, rgba(229,72,77,0.12))',
-        border: '1px solid var(--err, #e5484d)',
-        color: 'var(--err, #e5484d)',
+        // --bg-elev2 rather than an undefined --error-bg with a literal fallback: the
+        // fallback always won, and it put --err on a surface the contrast suite cannot
+        // see. --err on --bg-elev2 is 4.65:1 in light, 6.3:1 in dark, and both surfaces
+        // are already covered by tests/unit/test_web_tokens_contrast.py.
+        background: 'var(--bg-elev2)',
+        border: '1px solid var(--err)',
+        color: 'var(--err)',
         padding: '10px 12px',
         borderRadius: '6px',
         marginBottom: '12px',
@@ -292,9 +296,14 @@ export function CorpusRegistry({ isOpen, onClose }: CorpusRegistryProps) {
                       )}
                       {isActive && (
                         <span
+                          data-testid={`corpus-active-${corpusId}`}
                           style={{
+                            // An outline badge, like Runtime-managed. The previous white
+                            // wash over --accent composited to 3.14:1 (dark) / 4.33:1
+                            // (light) under white text; transparent leaves the row's own
+                            // --accent-contrast on --accent, which is 4.76:1.
                             fontWeight: 600,
-                            background: 'rgba(255,255,255,0.22)',
+                            border: '1px solid currentColor',
                             padding: '3px 7px',
                             borderRadius: '4px',
                             ...labelText,
@@ -320,8 +329,8 @@ export function CorpusRegistry({ isOpen, onClose }: CorpusRegistryProps) {
                     style={{
                       minWidth: '76px',
                       background: 'transparent',
-                      color: isInternal ? 'var(--fg-muted)' : 'var(--err, #e5484d)',
-                      border: `1px solid ${isInternal ? 'var(--line)' : 'var(--err, #e5484d)'}`,
+                      color: isInternal ? 'var(--fg-muted)' : 'var(--err)',
+                      border: `1px solid ${isInternal ? 'var(--line)' : 'var(--err)'}`,
                       borderRadius: '8px',
                       cursor: switching || isInternal ? 'not-allowed' : 'pointer',
                       fontWeight: 600,
