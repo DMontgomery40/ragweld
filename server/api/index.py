@@ -1058,8 +1058,14 @@ def _resolve_semantic_kg_route(cfg: TriBridConfig) -> ProviderRoute:
     return route
 
 
-def _figure_model_spec(alias: str) -> dict[str, Any] | None:
-    """The catalog row served under one gateway alias, or None when the alias is unknown."""
+def _gateway_model_spec(alias: str) -> dict[str, Any] | None:
+    """The catalog row served under one gateway alias, or None when the alias is unknown.
+
+    Every model the runtime actually reaches is named by its LiteLLM alias (`z-ai.glm-5.3-flash`),
+    which is never the catalog's `model` id (`z-ai/glm-5.3-flash`) -- the alias validator forbids
+    the slash. Anything pricing a configured alias resolves it here, not through
+    `_find_model_spec`, which matches provider/model ids and can match no alias at all.
+    """
     for m in _load_models_json():
         if str(m.get("gateway_alias") or "").strip() == alias:
             return m
@@ -1096,7 +1102,7 @@ def _resolve_figure_route(cfg: TriBridConfig, *, as_http: bool = True) -> Figure
     if not figures.enabled or not figures.describe:
         return None
     alias = str(figures.vision_model or "").strip()
-    spec = _figure_model_spec(alias)
+    spec = _gateway_model_spec(alias)
     if spec is None or not bool(spec.get("supports_vision")):
         raise _figure_route_refusal(
             alias,
@@ -1211,23 +1217,24 @@ def _estimate_local_tokens_per_second(*, cfg: TriBridConfig, provider: str) -> i
     return est
 
 
-def _resolve_semantic_kg_model_and_provider(cfg: TriBridConfig) -> tuple[str, str]:
-    return _semantic_kg_model_override(cfg), "litellm"
-
-
 def _estimate_semantic_kg_cost_usd(
     *,
-    provider_hint: str,
-    model: str,
+    alias: str,
     chunks_in_scope: int,
     enrich_max_chars: int,
 ) -> float | None:
-    """Estimate semantic KG LLM extraction cost from models.json GEN pricing."""
+    """Estimate semantic KG LLM extraction cost from the catalog GEN pricing of one alias.
+
+    `alias` is the LiteLLM alias the run would call (`graph_indexing.semantic_kg_llm_model`,
+    else the gateway default), so it is resolved through the alias lookup the figure price
+    uses. Resolving it as a provider/model id instead priced nothing at all: no priced GEN
+    row's model id is ever slash-free, and an alias never contains a slash.
+    """
     count = max(0, int(chunks_in_scope or 0))
     if count <= 0:
         return 0.0
-    mname = str(model or "").strip()
-    if not mname:
+    name = str(alias or "").strip()
+    if not name:
         return None
 
     # Per chunk heuristic: fixed prompt overhead + bounded chunk text + concise JSON output.
@@ -1236,7 +1243,7 @@ def _estimate_semantic_kg_cost_usd(
     total_input_tokens = count * input_tokens_per_chunk
     total_output_tokens = count * output_tokens_per_chunk
 
-    spec = _find_model_spec(_load_models_json(), provider=provider_hint, model=mname)
+    spec = _gateway_model_spec(name)
     if not spec or not _model_has_component(spec, "GEN"):
         return None
     if str(spec.get("unit") or "").strip() != "1k_tokens":
@@ -1266,7 +1273,7 @@ def _estimate_figure_description_cost_usd(
     count = max(0, int(figures or 0))
     if count <= 0:
         return 0.0
-    spec = _figure_model_spec(str(alias or "").strip())
+    spec = _gateway_model_spec(str(alias or "").strip())
     if not spec or str(spec.get("unit") or "").strip() != "1k_tokens":
         return None
     in_rate = _to_float(spec.get("input_per_1k"))
@@ -1361,10 +1368,8 @@ def _status_costs(
     semantic_kg_enabled = bool(cfg.graph_indexing.semantic_kg_enabled)
     semantic_kg_cost: float | None = None
     if semantic_kg_enabled:
-        semantic_model, semantic_provider_hint = _resolve_semantic_kg_model_and_provider(cfg)
         semantic_kg_cost = _estimate_semantic_kg_cost_usd(
-            provider_hint=semantic_provider_hint,
-            model=semantic_model,
+            alias=_semantic_kg_model_override(cfg),
             chunks_in_scope=min(
                 int(total_chunks), max(0, int(cfg.graph_indexing.semantic_kg_max_chunks or 0))
             ),
@@ -3628,7 +3633,7 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
         if semantic_kg_enabled
         else 0
     )
-    semantic_model, semantic_provider_hint = _resolve_semantic_kg_model_and_provider(cfg)
+    semantic_alias = _semantic_kg_model_override(cfg)
 
     # Pricing (models.json): deterministic backend and skip_dense imply $0 external embedding cost.
     embedding_cost: float | None
@@ -3644,8 +3649,7 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
     semantic_kg_cost: float | None = None
     if semantic_kg_enabled:
         semantic_kg_cost = _estimate_semantic_kg_cost_usd(
-            provider_hint=semantic_provider_hint,
-            model=semantic_model,
+            alias=semantic_alias,
             chunks_in_scope=semantic_kg_chunks,
             enrich_max_chars=int(cfg.enrichment.enrich_max_chars or 1000),
         )
@@ -3707,12 +3711,10 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
         base_embedding_seconds = float(est_tokens) / float(tps)
         base_total_seconds = base_embedding_seconds
         if semantic_kg_enabled and semantic_kg_chunks > 0:
-            semantic_provider_for_time = semantic_provider_hint
-            resolved_semantic_spec = _find_model_spec(
-                _load_models_json(),
-                provider=semantic_provider_hint,
-                model=semantic_model,
-            )
+            # The throughput table is keyed by provider, and the only way from a gateway
+            # alias to its provider is the same alias lookup that prices it.
+            semantic_provider_for_time = "litellm"
+            resolved_semantic_spec = _gateway_model_spec(semantic_alias)
             if resolved_semantic_spec is not None:
                 semantic_provider_for_time = str(
                     resolved_semantic_spec.get("provider") or semantic_provider_for_time

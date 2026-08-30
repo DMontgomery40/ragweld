@@ -25,8 +25,9 @@ from server.api.index import (
     _estimate_semantic_kg_cost_usd,
     _flush_run_events_sync,
     _load_latest_run_summary,
+    _load_models_json,
     _persist_run_summary,
-    _resolve_semantic_kg_model_and_provider,
+    _semantic_kg_model_override,
     _status_costs,
 )
 from server.models.index import IndexRunSummary
@@ -34,6 +35,10 @@ from server.models.tribrid_config_model import DashboardIndexCosts, TriBridConfi
 
 FIGURE_ALIAS = "z-ai.glm-5.3-flash"
 FIGURE_BUDGET = 2500
+# A priced GEN row in data/models.json, so a semantic KG phase costs real money here.
+SEMANTIC_ALIAS = "z-ai.glm-5.3-flash"
+# The default local lane: a real catalog row priced 0.0/0.0.
+LOCAL_ALIAS = "ragweld-local"
 
 
 @pytest.fixture(autouse=True)
@@ -52,6 +57,7 @@ def _paid_config(*, semantic_kg: bool) -> TriBridConfig:
     cfg.embedding.embedding_backend = "provider"
     cfg.indexing.skip_dense = False
     cfg.graph_indexing.semantic_kg_enabled = semantic_kg
+    cfg.graph_indexing.semantic_kg_llm_model = SEMANTIC_ALIAS
     cfg.indexing.figures.vision_model = FIGURE_ALIAS
     cfg.indexing.figures.max_completion_tokens = FIGURE_BUDGET
     return cfg
@@ -101,9 +107,6 @@ def test_the_total_is_the_sum_of_exactly_the_phases_that_ran(
 
     Each component is re-derived here from the same pricing primitives the API uses but through
     an independent call, so this pins the composition rule rather than restating the answer.
-    Note that ``semantic_kg_cost`` is None for every gateway alias in the current catalog
-    (``_find_model_spec`` matches ``model``, and every priced GEN row's model id carries a slash
-    that a LiteLLM alias may not) -- a pre-existing gap, and exactly why the None rule matters.
     """
     cfg = _paid_config(semantic_kg=semantic_kg)
     figure_cost = (
@@ -126,17 +129,18 @@ def test_the_total_is_the_sum_of_exactly_the_phases_that_ran(
     assert embedding is not None and embedding > 0
     assert costs.embedding_cost == pytest.approx(embedding)
 
-    semantic_model, semantic_provider = _resolve_semantic_kg_model_and_provider(cfg)
     semantic = (
         _estimate_semantic_kg_cost_usd(
-            provider_hint=semantic_provider,
-            model=semantic_model,
+            alias=_semantic_kg_model_override(cfg),
             chunks_in_scope=min(100, int(cfg.graph_indexing.semantic_kg_max_chunks or 0)),
             enrich_max_chars=int(cfg.enrichment.enrich_max_chars or 1000),
         )
         if semantic_kg
         else None
     )
+    if semantic_kg:
+        # A priced alias: the semantic component is a real number, so it is really summed.
+        assert semantic is not None and semantic > 0
     assert costs.semantic_kg_cost == semantic
 
     if figures_described:
@@ -286,3 +290,73 @@ async def test_the_unfiltered_loader_still_answers_with_the_newest_run() -> None
     newest = await asyncio.to_thread(_load_latest_run_summary, repo_id)
     assert newest is not None and newest.run_id == "run-new-error"
     assert newest.status == "error"
+
+
+def test_the_semantic_kg_cost_prices_the_gateway_alias_the_run_would_actually_use() -> None:
+    """Semantic KG was structurally unpriced, and nothing said so.
+
+    `_find_model_spec` matches a catalog row's `model` -- every priced GEN row's model id
+    carries a slash (`z-ai/glm-5.3-flash`) -- while the semantic-KG model is a LiteLLM alias,
+    which the config validator forbids from containing one (`z-ai.glm-5.3-flash`). Zero rows
+    could ever match, so `semantic_kg_cost_usd` was None for every corpus, and a None
+    component makes Total Cost unknown: a corpus with semantic KG on showed no total at all.
+
+    The expected price is derived here from the catalog row itself, found by the alias, so
+    this pins the resolution rather than restating whatever the helper resolved.
+    """
+    chunks, enrich_chars = 200, 1000
+    cost = _estimate_semantic_kg_cost_usd(
+        alias=SEMANTIC_ALIAS, chunks_in_scope=chunks, enrich_max_chars=enrich_chars
+    )
+    row = next(
+        model
+        for model in _load_models_json()
+        if str(model.get("gateway_alias") or "") == SEMANTIC_ALIAS
+    )
+    assert "/" in str(row["model"]), row["model"]  # the id the old lookup demanded
+    input_tokens = chunks * (500 + enrich_chars // 4)
+    output_tokens = chunks * 100
+    expected = (input_tokens / 1000.0) * float(row["input_per_1k"]) + (
+        output_tokens / 1000.0
+    ) * float(row["output_per_1k"])
+    assert cost is not None
+    assert cost > 0
+    assert cost == pytest.approx(expected)
+
+
+def test_the_default_local_alias_is_priced_at_zero_rather_than_unknown() -> None:
+    """`ragweld-local` is a real catalog row priced 0.0/0.0. Free is a price; unknown is not,
+    and a None here would make Total Cost unknown for every default-config corpus.
+    """
+    assert (
+        _estimate_semantic_kg_cost_usd(
+            alias=LOCAL_ALIAS, chunks_in_scope=200, enrich_max_chars=1000
+        )
+        == 0.0
+    )
+
+
+@pytest.mark.parametrize("alias", ["not-a-gateway-alias", "z-ai/glm-5.3-flash", ""])
+def test_an_alias_the_catalog_does_not_serve_has_no_price(alias: str) -> None:
+    """Including the catalog `model` id: it is not an alias, and resolving it would price a
+    row the gateway would never route to.
+    """
+    assert (
+        _estimate_semantic_kg_cost_usd(alias=alias, chunks_in_scope=200, enrich_max_chars=1000)
+        is None
+    )
+
+
+def test_the_status_total_folds_in_the_semantic_kg_spend() -> None:
+    """The card's Total Cost has to include the semantic KG phase, not go unknown because of it."""
+    cfg = _paid_config(semantic_kg=True)
+    costs = _status_costs(cfg=cfg, total_tokens=50_000, total_chunks=100, latest_run=None)
+    semantic = _estimate_semantic_kg_cost_usd(
+        alias=SEMANTIC_ALIAS,
+        chunks_in_scope=min(100, int(cfg.graph_indexing.semantic_kg_max_chunks)),
+        enrich_max_chars=int(cfg.enrichment.enrich_max_chars),
+    )
+    assert semantic is not None and semantic > 0
+    assert costs.semantic_kg_cost == pytest.approx(semantic)
+    assert costs.embedding_cost is not None
+    assert costs.total_cost == pytest.approx(float(costs.embedding_cost) + semantic)
