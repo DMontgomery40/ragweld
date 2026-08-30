@@ -461,7 +461,8 @@ class MCPConfig(BaseModel):
             "Its host must also appear in `allowed_hosts`: with DNS rebinding protection "
             "on, the transport answers 421 to any Host header it does not recognise, so "
             "advertising a host that is not allowed trades one broken instruction for "
-            "another."
+            "another. Writing the mount path here too (`https://host/mcp`) is accepted "
+            "and not doubled -- both spellings advertise the same URL."
         ),
     )
     stateless_http: bool = Field(

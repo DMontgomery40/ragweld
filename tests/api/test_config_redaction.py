@@ -492,3 +492,34 @@ async def test_an_unset_public_base_url_is_reported_against_the_host_a_client_wo
         assert forwarded["public_base_url_configured"] is False
         assert forwarded["request_host"] == "ragweld.dtmont.com"
 
+
+@pytest.mark.asyncio
+async def test_the_advertised_url_is_the_same_however_the_public_base_is_spelled(
+    client: AsyncClient,
+) -> None:
+    """`https://host` and `https://host/mcp` must advertise the same endpoint.
+
+    `public_base_url` is documented as an ORIGIN because the server appends
+    `mcp.mount_path`, but "the URL clients use" is naturally written with the path
+    included, and that reading has already been asked for once. Left alone, the second
+    spelling would silently advertise `/mcp/mcp/` -- a 404 nobody would look for. Both are
+    accepted and neither doubles the path.
+    """
+    original = await load_scoped_config(repo_id=None)
+    try:
+        seen = []
+        for base in ("https://mcp-spelling.example", "https://mcp-spelling.example/mcp"):
+            edited = original.model_copy(deep=True)
+            edited.mcp.public_base_url = base
+            await save_scoped_config(edited, repo_id=None)
+            http = (
+                await client.get("/api/mcp/status", headers={"Host": "mcp-spelling.example"})
+            ).json().get("python_http")
+            if not http:
+                pytest.skip("the MCP HTTP transport is not enabled in this environment")
+            seen.append(http["url"])
+
+        assert seen[0] == seen[1] == "https://mcp-spelling.example/mcp/", seen
+    finally:
+        await save_scoped_config(original, repo_id=None)
+

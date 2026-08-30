@@ -779,7 +779,16 @@ async def mcp_status(request: Request) -> MCPStatusResponse:
                 # Starlette mounts require a trailing slash for the mount root.
                 # Advertise the canonical URL that does not redirect for POST.
                 path = str(cfg.mcp.mount_path).rstrip("/") + "/"
-                url = f"{str(cfg.mcp.public_base_url).rstrip('/')}{path}"
+                # Idempotent in the mount path. `public_base_url` is documented as an
+                # ORIGIN and the mount path is appended here, but "the URL clients use" is
+                # naturally written `https://host/mcp`, and that reading has already been
+                # asked for once. Rather than let the two spellings disagree -- silently
+                # advertising `/mcp/mcp/` -- a base that already ends in the mount path is
+                # accepted and not doubled.
+                base = str(cfg.mcp.public_base_url).rstrip("/")
+                if base.endswith(path.rstrip("/")):
+                    base = base[: -len(path.rstrip("/"))].rstrip("/")
+                url = f"{base}{path}"
 
                 # An unconfigured public origin is its own failure mode, and the quiet one.
                 # `public_base_url` defaults to loopback; on a proxied deployment that
