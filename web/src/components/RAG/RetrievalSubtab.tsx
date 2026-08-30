@@ -10,6 +10,7 @@ import { PromptLink } from '@/components/ui/PromptLink';
 import { ApiKeyStatus } from '@/components/ui/ApiKeyStatus';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { createAlertError, createInlineError } from '@/utils/errorHelpers';
+import { clampInputNumber } from '@/utils/numbers';
 import { useAPI, useConfig, useConfigField } from '@/hooks';
 import { tracesApi } from '@/api';
 import { useRepoStore } from '@/stores/useRepoStore';
@@ -475,7 +476,7 @@ export function RetrievalSubtab() {
               min={1}
               max={200}
               value={finalK}
-              onChange={(e) => setFinalK(snapNumber(e.target.value, 10))}
+              onChange={(e) => setFinalK(clampInputNumber(e.target, 10))}
             />
           </div>
 
@@ -489,7 +490,7 @@ export function RetrievalSubtab() {
               min={1}
               max={10}
               value={multiQueryRewrites}
-              onChange={(e) => setMultiQueryRewrites(snapNumber(e.target.value, 2))}
+              onChange={(e) => setMultiQueryRewrites(clampInputNumber(e.target, 2))}
             />
           </div>
         </div>
@@ -640,7 +641,7 @@ export function RetrievalSubtab() {
                       min={1}
                       max={200}
                       value={vectorSearchTopK}
-                      onChange={(e) => setVectorSearchTopK(snapNumber(e.target.value, 50))}
+                      onChange={(e) => setVectorSearchTopK(clampInputNumber(e.target, 50))}
                       disabled={!vectorSearchEnabled}
                     />
                   </div>
@@ -654,7 +655,7 @@ export function RetrievalSubtab() {
                       max={1}
                       step={0.01}
                       value={vectorSimilarityThreshold}
-                      onChange={(e) => setVectorSimilarityThreshold(snapNumber(e.target.value, 0.0))}
+                      onChange={(e) => setVectorSimilarityThreshold(clampInputNumber(e.target, 0.0))}
                       disabled={!vectorSearchEnabled}
                     />
                   </div>
@@ -671,7 +672,7 @@ export function RetrievalSubtab() {
                       min={1}
                       max={200}
                       value={sparseSearchTopK}
-                      onChange={(e) => setSparseSearchTopK(snapNumber(e.target.value, 50))}
+                      onChange={(e) => setSparseSearchTopK(clampInputNumber(e.target, 50))}
                       disabled={!sparseSearchEnabled}
                     />
                   </div>
@@ -685,7 +686,7 @@ export function RetrievalSubtab() {
                       max={3}
                       step={0.1}
                       value={sparseBm25K1}
-                      onChange={(e) => setSparseBm25K1(snapNumber(e.target.value, 1.2))}
+                      onChange={(e) => setSparseBm25K1(clampInputNumber(e.target, 1.2))}
                       disabled={!sparseSearchEnabled}
                     />
                   </div>
@@ -699,7 +700,7 @@ export function RetrievalSubtab() {
                       max={1}
                       step={0.05}
                       value={sparseBm25B}
-                      onChange={(e) => setSparseBm25B(snapNumber(e.target.value, 0.4))}
+                      onChange={(e) => setSparseBm25B(clampInputNumber(e.target, 0.4))}
                       disabled={!sparseSearchEnabled}
                     />
                   </div>
@@ -716,7 +717,7 @@ export function RetrievalSubtab() {
                       min={1}
                       max={200}
                       value={graphSearchTopK}
-                      onChange={(e) => setGraphSearchTopK(snapNumber(e.target.value, 30))}
+                      onChange={(e) => setGraphSearchTopK(clampInputNumber(e.target, 30))}
                       disabled={!graphSearchEnabled}
                     />
                   </div>
@@ -743,7 +744,7 @@ export function RetrievalSubtab() {
                       min={1}
                       max={5}
                       value={graphMaxHops}
-                      onChange={(e) => setGraphMaxHops(snapNumber(e.target.value, 2))}
+                      onChange={(e) => setGraphMaxHops(clampInputNumber(e.target, 2))}
                       disabled={!graphSearchEnabled}
                     />
                   </div>
@@ -772,7 +773,7 @@ export function RetrievalSubtab() {
                           min={0}
                           max={10}
                           value={chunkNeighborWindow}
-                          onChange={(e) => setChunkNeighborWindow(snapNumber(e.target.value, 1))}
+                          onChange={(e) => setChunkNeighborWindow(clampInputNumber(e.target, 1))}
                           disabled={!graphSearchEnabled}
                         />
                       </div>
@@ -785,7 +786,7 @@ export function RetrievalSubtab() {
                           min={1}
                           max={50}
                           value={chunkSeedOverfetchMultiplier}
-                          onChange={(e) => setChunkSeedOverfetchMultiplier(snapNumber(e.target.value, 10))}
+                          onChange={(e) => setChunkSeedOverfetchMultiplier(clampInputNumber(e.target, 10))}
                           disabled={!graphSearchEnabled}
                         />
                       </div>
@@ -810,7 +811,7 @@ export function RetrievalSubtab() {
                           max={1}
                           step={0.05}
                           value={chunkEntityExpansionWeight}
-                          onChange={(e) => setChunkEntityExpansionWeight(snapNumber(e.target.value, 0.8))}
+                          onChange={(e) => setChunkEntityExpansionWeight(clampInputNumber(e.target, 0.8))}
                           disabled={!graphSearchEnabled || !chunkEntityExpansionEnabled}
                         />
                       </div>
@@ -837,7 +838,7 @@ export function RetrievalSubtab() {
                     min={1}
                     max={50}
                     value={maxChunksPerFile}
-                    onChange={(e) => setMaxChunksPerFile(snapNumber(e.target.value, 3))}
+                    onChange={(e) => setMaxChunksPerFile(clampInputNumber(e.target, 3))}
                   />
                 </div>
                 <div className="input-group">
@@ -858,7 +859,7 @@ export function RetrievalSubtab() {
                     min={0}
                     max={10}
                     value={neighborWindow}
-                    onChange={(e) => setNeighborWindow(snapNumber(e.target.value, 1))}
+                    onChange={(e) => setNeighborWindow(clampInputNumber(e.target, 1))}
                     disabled={dedupBy === 'file_path'}
                   />
                 </div>
@@ -881,7 +882,7 @@ export function RetrievalSubtab() {
                     max={1}
                     step={0.05}
                     value={mmrLambda}
-                    onChange={(e) => setMmrLambda(snapNumber(e.target.value, 0.7))}
+                    onChange={(e) => setMmrLambda(clampInputNumber(e.target, 0.7))}
                     disabled={!enableMmr}
                   />
                 </div>
@@ -899,7 +900,7 @@ export function RetrievalSubtab() {
                     max={1}
                     step={0.01}
                     value={minScoreVector}
-                    onChange={(e) => setMinScoreVector(snapNumber(e.target.value, 0.0))}
+                    onChange={(e) => setMinScoreVector(clampInputNumber(e.target, 0.0))}
                   />
                 </div>
                 <div className="input-group">
@@ -912,7 +913,7 @@ export function RetrievalSubtab() {
                     max={10}
                     step={0.01}
                     value={minScoreSparse}
-                    onChange={(e) => setMinScoreSparse(snapNumber(e.target.value, 0.0))}
+                    onChange={(e) => setMinScoreSparse(clampInputNumber(e.target, 0.0))}
                   />
                 </div>
                 <div className="input-group">
@@ -925,7 +926,7 @@ export function RetrievalSubtab() {
                     max={10}
                     step={0.01}
                     value={minScoreGraph}
-                    onChange={(e) => setMinScoreGraph(snapNumber(e.target.value, 0.0))}
+                    onChange={(e) => setMinScoreGraph(clampInputNumber(e.target, 0.0))}
                   />
                 </div>
               </div>
@@ -982,7 +983,7 @@ export function RetrievalSubtab() {
                     min={1}
                     max={200}
                     value={fusionRrfK}
-                    onChange={(e) => setFusionRrfK(snapNumber(e.target.value, 60))}
+                    onChange={(e) => setFusionRrfK(clampInputNumber(e.target, 60))}
                     disabled={fusionMethod !== 'rrf'}
                   />
                 </div>
@@ -996,7 +997,7 @@ export function RetrievalSubtab() {
                     max={1}
                     step={0.05}
                     value={fusionVectorWeight}
-                    onChange={(e) => setFusionVectorWeight(snapNumber(e.target.value, 0.4))}
+                    onChange={(e) => setFusionVectorWeight(clampInputNumber(e.target, 0.4))}
                     disabled={fusionMethod !== 'weighted'}
                   />
                 </div>
@@ -1010,7 +1011,7 @@ export function RetrievalSubtab() {
                     max={1}
                     step={0.05}
                     value={fusionSparseWeight}
-                    onChange={(e) => setFusionSparseWeight(snapNumber(e.target.value, 0.3))}
+                    onChange={(e) => setFusionSparseWeight(clampInputNumber(e.target, 0.3))}
                     disabled={fusionMethod !== 'weighted'}
                   />
                 </div>
@@ -1024,7 +1025,7 @@ export function RetrievalSubtab() {
                     max={1}
                     step={0.05}
                     value={fusionGraphWeight}
-                    onChange={(e) => setFusionGraphWeight(snapNumber(e.target.value, 0.3))}
+                    onChange={(e) => setFusionGraphWeight(clampInputNumber(e.target, 0.3))}
                     disabled={fusionMethod !== 'weighted'}
                   />
                 </div>
@@ -1048,7 +1049,7 @@ export function RetrievalSubtab() {
                     max={1}
                     step={0.01}
                     value={cardBonus}
-                    onChange={(e) => setCardBonus(snapNumber(e.target.value, 0.08))}
+                    onChange={(e) => setCardBonus(clampInputNumber(e.target, 0.08))}
                   />
                 </div>
                 <div className="input-group">
@@ -1061,7 +1062,7 @@ export function RetrievalSubtab() {
                     max={5}
                     step={0.1}
                     value={filenameBoostExact}
-                    onChange={(e) => setFilenameBoostExact(snapNumber(e.target.value, 1.5))}
+                    onChange={(e) => setFilenameBoostExact(clampInputNumber(e.target, 1.5))}
                   />
                 </div>
                 <div className="input-group">
@@ -1074,7 +1075,7 @@ export function RetrievalSubtab() {
                     max={5}
                     step={0.1}
                     value={filenameBoostPartial}
-                    onChange={(e) => setFilenameBoostPartial(snapNumber(e.target.value, 1.2))}
+                    onChange={(e) => setFilenameBoostPartial(clampInputNumber(e.target, 1.2))}
                   />
                 </div>
               </div>
@@ -1128,7 +1129,7 @@ export function RetrievalSubtab() {
                     max={0.5}
                     step={0.01}
                     value={layerBonusGui}
-                    onChange={(e) => setLayerBonusGui(snapNumber(e.target.value, 0.15))}
+                    onChange={(e) => setLayerBonusGui(clampInputNumber(e.target, 0.15))}
                   />
                 </div>
                 <div className="input-group">
@@ -1141,7 +1142,7 @@ export function RetrievalSubtab() {
                     max={0.5}
                     step={0.01}
                     value={layerBonusRetrieval}
-                    onChange={(e) => setLayerBonusRetrieval(snapNumber(e.target.value, 0.15))}
+                    onChange={(e) => setLayerBonusRetrieval(clampInputNumber(e.target, 0.15))}
                   />
                 </div>
                 <div className="input-group">
@@ -1154,7 +1155,7 @@ export function RetrievalSubtab() {
                     max={0.5}
                     step={0.01}
                     value={layerBonusIndexer}
-                    onChange={(e) => setLayerBonusIndexer(snapNumber(e.target.value, 0.15))}
+                    onChange={(e) => setLayerBonusIndexer(clampInputNumber(e.target, 0.15))}
                   />
                 </div>
                 <div className="input-group">
@@ -1167,7 +1168,7 @@ export function RetrievalSubtab() {
                     max={0}
                     step={0.01}
                     value={vendorPenalty}
-                    onChange={(e) => setVendorPenalty(snapNumber(e.target.value, -0.1))}
+                    onChange={(e) => setVendorPenalty(clampInputNumber(e.target, -0.1))}
                   />
                 </div>
                 <div className="input-group">
@@ -1180,7 +1181,7 @@ export function RetrievalSubtab() {
                     max={0.3}
                     step={0.01}
                     value={freshnessBonus}
-                    onChange={(e) => setFreshnessBonus(snapNumber(e.target.value, 0.05))}
+                    onChange={(e) => setFreshnessBonus(clampInputNumber(e.target, 0.05))}
                   />
                 </div>
               </div>
@@ -1344,7 +1345,7 @@ export function RetrievalSubtab() {
                     max={2}
                     step={0.01}
                     value={genTemperature}
-                    onChange={(e) => setGenTemperature(snapNumber(e.target.value, 0.0))}
+                    onChange={(e) => setGenTemperature(clampInputNumber(e.target, 0.0))}
                   />
                 </div>
                 <div className="input-group">
@@ -1357,7 +1358,7 @@ export function RetrievalSubtab() {
                     max={8192}
                     step={1}
                     value={genMaxTokens}
-                    onChange={(e) => setGenMaxTokens(snapNumber(e.target.value, 512))}
+                    onChange={(e) => setGenMaxTokens(clampInputNumber(e.target, 512))}
                   />
                 </div>
                 <div className="input-group">
@@ -1370,7 +1371,7 @@ export function RetrievalSubtab() {
                     max={1}
                     step={0.01}
                     value={genTopP}
-                    onChange={(e) => setGenTopP(snapNumber(e.target.value, 1.0))}
+                    onChange={(e) => setGenTopP(clampInputNumber(e.target, 1.0))}
                   />
                 </div>
               </div>
@@ -1392,7 +1393,7 @@ export function RetrievalSubtab() {
                     min={10}
                     max={900}
                     value={genTimeout}
-                    onChange={(e) => setGenTimeout(snapNumber(e.target.value, 600))}
+                    onChange={(e) => setGenTimeout(clampInputNumber(e.target, 600))}
                   />
                 </div>
               </div>
@@ -1487,7 +1488,7 @@ export function RetrievalSubtab() {
                         min={200}
                         max={20000}
                         value={hydrationMaxChars || retrievalHydrationMaxChars}
-                        onChange={(e) => setUnifiedHydrationMaxChars(snapNumber(e.target.value, 2000))}
+                        onChange={(e) => setUnifiedHydrationMaxChars(clampInputNumber(e.target, 2000))}
                       />
                     </div>
                   </div>
@@ -1509,7 +1510,7 @@ export function RetrievalSubtab() {
                         min={1}
                         max={100}
                         value={evalFinalK}
-                        onChange={(e) => setEvalFinalK(snapNumber(e.target.value, 5))}
+                        onChange={(e) => setEvalFinalK(clampInputNumber(e.target, 5))}
                       />
                     </div>
                     <div className="input-group">
@@ -1570,7 +1571,7 @@ export function RetrievalSubtab() {
                         max={1}
                         step={0.01}
                         value={confTop1}
-                        onChange={(e) => setConfTop1(snapNumber(e.target.value, 0.62))}
+                        onChange={(e) => setConfTop1(clampInputNumber(e.target, 0.62))}
                       />
                     </div>
                     <div className="input-group">
@@ -1583,7 +1584,7 @@ export function RetrievalSubtab() {
                         max={1}
                         step={0.01}
                         value={confAvg5}
-                        onChange={(e) => setConfAvg5(snapNumber(e.target.value, 0.55))}
+                        onChange={(e) => setConfAvg5(clampInputNumber(e.target, 0.55))}
                       />
                     </div>
                     <div className="input-group">
@@ -1596,7 +1597,7 @@ export function RetrievalSubtab() {
                         max={1}
                         step={0.01}
                         value={confAny}
-                        onChange={(e) => setConfAny(snapNumber(e.target.value, 0.55))}
+                        onChange={(e) => setConfAny(clampInputNumber(e.target, 0.55))}
                       />
                     </div>
                     <div className="input-group">
@@ -1608,7 +1609,7 @@ export function RetrievalSubtab() {
                         min={1}
                         max={20}
                         value={multiQueryM}
-                        onChange={(e) => setMultiQueryM(snapNumber(e.target.value, 4))}
+                        onChange={(e) => setMultiQueryM(clampInputNumber(e.target, 4))}
                       />
                     </div>
                   </div>
@@ -1623,7 +1624,7 @@ export function RetrievalSubtab() {
                         min={1}
                         max={100}
                         value={langgraphFinalK}
-                        onChange={(e) => setLanggraphFinalK(snapNumber(e.target.value, 20))}
+                        onChange={(e) => setLanggraphFinalK(clampInputNumber(e.target, 20))}
                       />
                     </div>
                     <div className="input-group">
@@ -1635,7 +1636,7 @@ export function RetrievalSubtab() {
                         min={0}
                         max={10}
                         value={langgraphMaxQueryRewrites}
-                        onChange={(e) => setLanggraphMaxQueryRewrites(snapNumber(e.target.value, 2))}
+                        onChange={(e) => setLanggraphMaxQueryRewrites(clampInputNumber(e.target, 2))}
                       />
                     </div>
                     <div className="input-group">
@@ -1648,7 +1649,7 @@ export function RetrievalSubtab() {
                         max={1}
                         step={0.01}
                         value={fallbackConfidence}
-                        onChange={(e) => setFallbackConfidence(snapNumber(e.target.value, 0.55))}
+                        onChange={(e) => setFallbackConfidence(clampInputNumber(e.target, 0.55))}
                       />
                     </div>
                   </div>
@@ -1670,7 +1671,7 @@ export function RetrievalSubtab() {
                         min={1}
                         max={200}
                         value={rrfKDiv}
-                        onChange={(e) => setRrfKDiv(snapNumber(e.target.value, 60))}
+                        onChange={(e) => setRrfKDiv(clampInputNumber(e.target, 60))}
                       />
                     </div>
                     <div className="input-group">
@@ -1683,7 +1684,7 @@ export function RetrievalSubtab() {
                         max={1}
                         step={0.01}
                         value={retrievalBm25Weight}
-                        onChange={(e) => setRetrievalBm25Weight(snapNumber(e.target.value, 0.3))}
+                        onChange={(e) => setRetrievalBm25Weight(clampInputNumber(e.target, 0.3))}
                       />
                     </div>
                     <div className="input-group">
@@ -1696,7 +1697,7 @@ export function RetrievalSubtab() {
                         max={1}
                         step={0.01}
                         value={retrievalVectorWeight}
-                        onChange={(e) => setRetrievalVectorWeight(snapNumber(e.target.value, 0.7))}
+                        onChange={(e) => setRetrievalVectorWeight(clampInputNumber(e.target, 0.7))}
                       />
                     </div>
                     <div className="input-group">
@@ -1708,7 +1709,7 @@ export function RetrievalSubtab() {
                         min={1}
                         max={200}
                         value={topkDense}
-                        onChange={(e) => setTopkDense(snapNumber(e.target.value, 75))}
+                        onChange={(e) => setTopkDense(clampInputNumber(e.target, 75))}
                       />
                     </div>
                     <div className="input-group">
@@ -1720,7 +1721,7 @@ export function RetrievalSubtab() {
                         min={1}
                         max={200}
                         value={topkSparse}
-                        onChange={(e) => setTopkSparse(snapNumber(e.target.value, 75))}
+                        onChange={(e) => setTopkSparse(clampInputNumber(e.target, 75))}
                       />
                     </div>
                   </div>
@@ -1767,7 +1768,7 @@ export function RetrievalSubtab() {
                         min={100}
                         max={500000}
                         value={semanticCacheMaxEntries}
-                        onChange={(e) => setSemanticCacheMaxEntries(snapNumber(e.target.value, 5000))}
+                        onChange={(e) => setSemanticCacheMaxEntries(clampInputNumber(e.target, 5000))}
                         disabled={!semanticCacheEnabled}
                       />
                     </div>
@@ -1778,7 +1779,7 @@ export function RetrievalSubtab() {
                         min={1}
                         max={200}
                         value={semanticCacheMinQueryChars}
-                        onChange={(e) => setSemanticCacheMinQueryChars(snapNumber(e.target.value, 3))}
+                        onChange={(e) => setSemanticCacheMinQueryChars(clampInputNumber(e.target, 3))}
                         disabled={!semanticCacheEnabled}
                       />
                     </div>
@@ -1793,7 +1794,7 @@ export function RetrievalSubtab() {
                         max={1}
                         step={0.01}
                         value={semanticCacheThresholdSearch}
-                        onChange={(e) => setSemanticCacheThresholdSearch(snapNumber(e.target.value, 0.9))}
+                        onChange={(e) => setSemanticCacheThresholdSearch(clampInputNumber(e.target, 0.9))}
                         disabled={!semanticCacheEnabled}
                       />
                     </div>
@@ -1805,7 +1806,7 @@ export function RetrievalSubtab() {
                         max={1}
                         step={0.01}
                         value={semanticCacheThresholdAnswer}
-                        onChange={(e) => setSemanticCacheThresholdAnswer(snapNumber(e.target.value, 0.93))}
+                        onChange={(e) => setSemanticCacheThresholdAnswer(clampInputNumber(e.target, 0.93))}
                         disabled={!semanticCacheEnabled}
                       />
                     </div>
@@ -1817,7 +1818,7 @@ export function RetrievalSubtab() {
                         max={1}
                         step={0.01}
                         value={semanticCacheThresholdChat}
-                        onChange={(e) => setSemanticCacheThresholdChat(snapNumber(e.target.value, 0.95))}
+                        onChange={(e) => setSemanticCacheThresholdChat(clampInputNumber(e.target, 0.95))}
                         disabled={!semanticCacheEnabled}
                       />
                     </div>
@@ -1831,7 +1832,7 @@ export function RetrievalSubtab() {
                         min={10}
                         max={86400}
                         value={semanticCacheTtlSearch}
-                        onChange={(e) => setSemanticCacheTtlSearch(snapNumber(e.target.value, 900))}
+                        onChange={(e) => setSemanticCacheTtlSearch(clampInputNumber(e.target, 900))}
                         disabled={!semanticCacheEnabled}
                       />
                     </div>
@@ -1842,7 +1843,7 @@ export function RetrievalSubtab() {
                         min={10}
                         max={86400}
                         value={semanticCacheTtlAnswer}
-                        onChange={(e) => setSemanticCacheTtlAnswer(snapNumber(e.target.value, 1800))}
+                        onChange={(e) => setSemanticCacheTtlAnswer(clampInputNumber(e.target, 1800))}
                         disabled={!semanticCacheEnabled}
                       />
                     </div>
@@ -1853,7 +1854,7 @@ export function RetrievalSubtab() {
                         min={10}
                         max={86400}
                         value={semanticCacheTtlChat}
-                        onChange={(e) => setSemanticCacheTtlChat(snapNumber(e.target.value, 600))}
+                        onChange={(e) => setSemanticCacheTtlChat(clampInputNumber(e.target, 600))}
                         disabled={!semanticCacheEnabled}
                       />
                     </div>
@@ -1867,7 +1868,7 @@ export function RetrievalSubtab() {
                         min={0}
                         max={50}
                         value={semanticCacheChatHistoryWindow}
-                        onChange={(e) => setSemanticCacheChatHistoryWindow(snapNumber(e.target.value, 6))}
+                        onChange={(e) => setSemanticCacheChatHistoryWindow(clampInputNumber(e.target, 6))}
                         disabled={!semanticCacheEnabled}
                       />
                     </div>
@@ -1895,7 +1896,7 @@ export function RetrievalSubtab() {
                         max={2}
                         step={0.05}
                         value={semanticCacheMaxTemperatureForWrite}
-                        onChange={(e) => setSemanticCacheMaxTemperatureForWrite(snapNumber(e.target.value, 0.5))}
+                        onChange={(e) => setSemanticCacheMaxTemperatureForWrite(clampInputNumber(e.target, 0.5))}
                         disabled={!semanticCacheEnabled}
                       />
                     </div>
@@ -1990,7 +1991,7 @@ export function RetrievalSubtab() {
                         max={1}
                         step={0.01}
                         value={traceSamplingRate}
-                        onChange={(e) => setTraceSamplingRate(snapNumber(e.target.value, 1.0))}
+                        onChange={(e) => setTraceSamplingRate(clampInputNumber(e.target, 1.0))}
                       />
                     </div>
                     <div className="input-group">
@@ -2002,7 +2003,7 @@ export function RetrievalSubtab() {
                         min={1}
                         max={1000}
                         value={traceRetention}
-                        onChange={(e) => setTraceRetention(snapNumber(e.target.value, 50))}
+                        onChange={(e) => setTraceRetention(clampInputNumber(e.target, 50))}
                       />
                     </div>
                   </div>
@@ -2083,7 +2084,7 @@ export function RetrievalSubtab() {
                         min={1}
                         max={60}
                         value={alertWebhookTimeout}
-                        onChange={(e) => setAlertWebhookTimeout(snapNumber(e.target.value, 5))}
+                        onChange={(e) => setAlertWebhookTimeout(clampInputNumber(e.target, 5))}
                       />
                     </div>
                     <div className="input-group">
@@ -2252,12 +2253,6 @@ export function RetrievalSubtab() {
       </div>
     </div>
   );
-}
-
-function snapNumber(value: string, fallback: number) {
-  if (value === '') return fallback;
-  const next = Number(value);
-  return Number.isFinite(next) ? next : fallback;
 }
 
 function formatTracePayload(payload: TracesLatestResponse, vectorBackend: string): string {

@@ -30,6 +30,7 @@ import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { confirmDialog } from '@/components/ui/confirmDialog';
 import { indexingApi } from '@/api';
 import { formatBytes, formatCurrency, formatDuration, formatNumber } from '@/utils/formatters';
+import { clampNumber } from '@/utils/numbers';
 import type {
   ChatModelInfo,
   ChatModelsResponse,
@@ -76,24 +77,23 @@ const FALLBACK_CHUNKING_STRATEGIES = [
  */
 const FIGURES_SKIP_CLASSES_DEFAULT: string[] = ['logo', 'signature', 'icon'];
 
-/** Trim, drop blanks and de-duplicate a comma-separated class list. */
+/**
+ * Trim, drop blanks and de-duplicate a comma-separated class list.
+ *
+ * Entries are lower-cased: Docling's classifier emits lower-case class names and the skip
+ * is matched against them, so "Logo" and "logo" are the same rule and must collapse rather
+ * than persist as two entries of which only one can ever match.
+ */
 function parseSkipClasses(raw: string): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const entry of raw.split(',')) {
-    const value = entry.trim();
+    const value = entry.trim().toLowerCase();
     if (!value || seen.has(value)) continue;
     seen.add(value);
     out.push(value);
   }
   return out;
-}
-
-/** Numeric input value, falling back while the field is empty or mid-edit. */
-function figureNumber(raw: string, fallback: number): number {
-  if (raw === '') return fallback;
-  const next = Number(raw);
-  return Number.isFinite(next) ? next : fallback;
 }
 
 export function IndexingSubtab() {
@@ -2968,7 +2968,7 @@ export function IndexingSubtab() {
                           max={4}
                           step={0.5}
                           value={figuresImagesScale}
-                          onChange={(e) => setFiguresImagesScale(figureNumber(e.target.value, 2.0))}
+                          onChange={(e) => setFiguresImagesScale(clampNumber(e.target.value, { min: 1, max: 4, step: 0.5, fallback: 2.0 }))}
                           style={{ width: '100%' }}
                         />
                       </div>
@@ -2984,7 +2984,7 @@ export function IndexingSubtab() {
                           max={1}
                           step={0.01}
                           value={figuresMinAreaFraction}
-                          onChange={(e) => setFiguresMinAreaFraction(figureNumber(e.target.value, 0.02))}
+                          onChange={(e) => setFiguresMinAreaFraction(clampNumber(e.target.value, { min: 0, max: 1, step: 0.01, fallback: 0.02 }))}
                           style={{ width: '100%' }}
                         />
                       </div>
@@ -3000,7 +3000,7 @@ export function IndexingSubtab() {
                           max={8000}
                           step={1}
                           value={figuresMaxCompletionTokens}
-                          onChange={(e) => setFiguresMaxCompletionTokens(figureNumber(e.target.value, 2500))}
+                          onChange={(e) => setFiguresMaxCompletionTokens(clampNumber(e.target.value, { min: 64, max: 8000, step: 1, fallback: 2500 }))}
                           style={{ width: '100%' }}
                         />
                       </div>
@@ -3019,7 +3019,7 @@ export function IndexingSubtab() {
                           max={16}
                           step={1}
                           value={figuresConcurrency}
-                          onChange={(e) => setFiguresConcurrency(figureNumber(e.target.value, 4))}
+                          onChange={(e) => setFiguresConcurrency(clampNumber(e.target.value, { min: 1, max: 16, step: 1, fallback: 4 }))}
                           style={{ width: '100%' }}
                         />
                       </div>
@@ -3035,7 +3035,7 @@ export function IndexingSubtab() {
                           max={600}
                           step={1}
                           value={figuresTimeoutS}
-                          onChange={(e) => setFiguresTimeoutS(figureNumber(e.target.value, 90))}
+                          onChange={(e) => setFiguresTimeoutS(clampNumber(e.target.value, { min: 5, max: 600, step: 1, fallback: 90 }))}
                           style={{ width: '100%' }}
                         />
                       </div>
