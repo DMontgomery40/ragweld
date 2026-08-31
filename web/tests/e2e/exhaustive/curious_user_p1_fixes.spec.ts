@@ -217,8 +217,8 @@ test.describe.serial('curious-user drive P1 fixes on an isolated corpus', () => 
   });
 });
 
-test.describe.serial('G1/G2/G3 on a semantic-KG graph corpus provisioned by the suite', () => {
-  // The acceptance corpus indexed with the semantic knowledge graph on (four
+test.describe.serial('G1/G2/G3 on a semantic graph corpus provisioned by the suite', () => {
+  // The acceptance corpus indexed under the derived semantic policy (four
   // paid extraction calls through the cheap alias); no dependency on any
   // pre-existing corpus, so the graph assertions can never skip.
   let graphCorpus: ExhaustiveCorpus;
@@ -229,8 +229,8 @@ test.describe.serial('G1/G2/G3 on a semantic-KG graph corpus provisioned by the 
     graphCorpus = await provisionExhaustiveCorpus(request, { index: false });
     graphCorpusId = graphCorpus.corpusId;
     await patchCorpusConfigSection(request, graphCorpusId, 'graph_indexing', {
-      semantic_kg_enabled: true,
-      semantic_kg_mode: 'llm',
+      enabled: true,
+      build_code_graph: false,
       semantic_kg_llm_model: EXHAUSTIVE_CHAT_MODEL,
     });
     await indexCorpus(request, graphCorpusId, graphCorpus.corpusPath);
@@ -392,7 +392,7 @@ test.describe.serial('M1/M5: onboarding runs on the real corpus, index and chat 
     // wizard's own gate is the estimate + confirmation asserted below.
     await patchCorpusConfigSection(request, createdCorpusId, 'embedding', { embedding_backend: 'deterministic' });
     await patchCorpusConfigSection(request, createdCorpusId, 'generation', { enrich_disabled: true });
-    await patchCorpusConfigSection(request, createdCorpusId, 'graph_indexing', { semantic_kg_enabled: false });
+    await patchCorpusConfigSection(request, createdCorpusId, 'graph_indexing', { enabled: false });
     await patchCorpusConfigSection(request, createdCorpusId, 'reranking', { reranker_mode: 'none' });
     await patchCorpusConfigSection(request, createdCorpusId, 'chat', { litellm: { default_model: EXHAUSTIVE_CHAT_MODEL } });
     await patchCorpusConfigSection(request, createdCorpusId, 'ui', { chat_default_model: EXHAUSTIVE_CHAT_MODEL });

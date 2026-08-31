@@ -51,7 +51,40 @@ GitNexus refresh note: the incremental refresh first failed because the derived 
 
 ## Task 2 - Corpus graph policy
 
-Status: pending
+Status: in progress
+
+### Pre-edit impact analysis
+
+- `GraphStorageConfig`: CRITICAL, 96 direct / 121 total backend dependants; generated interface 94 direct / 141 total.
+- `GraphSearchConfig`: CRITICAL, 96 direct / 121 total backend dependants; generated interface 94 direct / 141 total.
+- `GraphIndexingConfig`: CRITICAL, 96 direct / 122 total, eight indexed flows; generated interface 94 direct / 141 total.
+- `_run_index_body`: LOW, one direct / five total, `start_index` flow.
+- `_run_index`: LOW, two direct / five total.
+- `estimate_index`: LOW, no indexed upstream caller.
+- `_background_index_job`: LOW, one direct caller (`start_index`).
+- `extract_semantic_kg_with_graphrag`: LOW, one direct / four total.
+- `IndexingSubtab` and `RetrievalSubtab`: LOW, each one direct caller through `RAGTab`.
+
+The CRITICAL config blast radius was reported before mutation. The change is guarded by boundary serialization tests, generated-contract validation, API tests, TypeScript compilation, build, and a real headed browser flow.
+
+### TDD and verification evidence
+
+- RED 1: policy suite failed collection with `ModuleNotFoundError: server.indexing.graph_policy`.
+- RED 2: the semantic ceiling contract failed import because `require_graph_chunk_ceiling` did not exist.
+- GREEN: 128/128 focused policy/config/API/indexing/status/GraphRAG tests passed on LXC100.
+- Six affected live integration modules collected 11 tests successfully after removed-field cleanup.
+- Generated TypeScript validation, glossary mirror validation, banned-pattern check, TypeScript lint, and Vite production build all passed.
+- Headed Playwright on the isolated overlay API/UI: 1/1 passed in 5.0s. Visible external corpus badge was `Semantic entity graph`; visible selection of `recall_default` changed it to `Excluded internal corpus`, disabled graph enablement, and removed semantic settings.
+- Replacement search: no removed graph-config field remains in production/config/generated/UI code. Only negative assertions and the stale-key API regression payload retain removed names.
+
+### DeepSeek V4 Flash review
+
+- Response id: `gen-1788206832-mje3prsndu5MmjwKOXgt`.
+- Resolved model: `deepseek.deepseek-v4-flash`.
+- Usage: 23,220 prompt + 11,176 completion = 34,396 tokens.
+- Cost: `$0.005104064`.
+- Findings/fixes: no P1/P2 findings.
+- Final verdict: **PASS**.
 
 ## Task 3 - Reviewed per-corpus schema
 

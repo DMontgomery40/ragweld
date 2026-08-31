@@ -24,8 +24,18 @@ async def test_get_config(client: AsyncClient) -> None:
     assert "chunking" in data   # LAW uses 'chunking' not 'chunker'
     assert "retrieval" in data
     assert "scoring" in data
-    assert data["graph_indexing"]["semantic_kg_mode"] == "llm"
-    assert data["graph_indexing"]["semantic_kg_typed_entities_enabled"] is True
+    for removed_key in {
+        "semantic_kg_enabled",
+        "semantic_kg_mode",
+        "semantic_kg_typed_entities_enabled",
+        "semantic_kg_require_llm_success",
+        "semantic_kg_relation_weight_llm",
+        "semantic_kg_relation_weight_heuristic",
+        "semantic_kg_max_concepts_per_chunk",
+        "semantic_kg_min_concept_len",
+        "semantic_kg_max_relations_per_chunk",
+    }:
+        assert removed_key not in data["graph_indexing"]
     assert data["graph_indexing"]["semantic_kg_allowed_entity_types"] == [
         "person",
         "org",
@@ -51,7 +61,9 @@ async def test_get_config(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_patch_graph_indexing_preserves_semantic_kg_max_chunks_default(client: AsyncClient) -> None:
+async def test_patch_graph_indexing_ignores_removed_semantic_toggle_and_preserves_schema_defaults(
+    client: AsyncClient,
+) -> None:
     response = await client.patch(
         "/api/config/graph_indexing",
         json={"semantic_kg_enabled": True},
@@ -59,9 +71,9 @@ async def test_patch_graph_indexing_preserves_semantic_kg_max_chunks_default(cli
     assert response.status_code == 200
 
     graph_indexing = response.json()["graph_indexing"]
-    assert graph_indexing["semantic_kg_enabled"] is True
-    assert graph_indexing["semantic_kg_mode"] == "llm"
-    assert graph_indexing["semantic_kg_typed_entities_enabled"] is True
+    assert "semantic_kg_enabled" not in graph_indexing
+    assert "semantic_kg_mode" not in graph_indexing
+    assert "semantic_kg_typed_entities_enabled" not in graph_indexing
     assert graph_indexing["semantic_kg_allowed_entity_types"] == [
         "person",
         "org",

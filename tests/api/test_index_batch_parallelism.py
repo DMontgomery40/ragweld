@@ -217,21 +217,21 @@ def test_cross_file_chunk_batching_enabled_only_without_graph_or_semantic_work()
     assert (
         index_api._allow_cross_file_chunk_batching(
             has_graph_upserts=False,
-            semantic_kg_enabled=False,
+            semantic_graph_active=False,
         )
         is True
     )
     assert (
         index_api._allow_cross_file_chunk_batching(
             has_graph_upserts=True,
-            semantic_kg_enabled=False,
+            semantic_graph_active=False,
         )
         is False
     )
     assert (
         index_api._allow_cross_file_chunk_batching(
             has_graph_upserts=False,
-            semantic_kg_enabled=True,
+            semantic_graph_active=True,
         )
         is False
     )
@@ -327,7 +327,6 @@ async def test_run_index_body_batches_small_files_across_files_when_graph_work_i
     cfg.indexing.indexing_workers = 4
     cfg.graph_indexing.enabled = False
     cfg.graph_indexing.build_lexical_graph = False
-    cfg.graph_indexing.semantic_kg_enabled = False
 
     chunker = Chunker(cfg.chunking, cfg.tokenization)
     loader = FileLoader()
@@ -341,6 +340,7 @@ async def test_run_index_body_batches_small_files_across_files_when_graph_work_i
         force_reindex=False,
         run_id="run-small-files",
         cfg=cfg,
+        graph_policy="off",
         chunker=chunker,
         max_indexable_bytes=10_000_000,
         skip_dense=False,

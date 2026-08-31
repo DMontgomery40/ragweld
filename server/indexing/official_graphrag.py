@@ -288,7 +288,7 @@ async def extract_semantic_kg_with_graphrag(
             base_url=base_url,
         ),
         create_lexical_graph=True,
-        on_error=OnError.RAISE if cfg.graph_indexing.semantic_kg_require_llm_success else OnError.IGNORE,
+        on_error=OnError.RAISE,
         max_concurrency=max(1, int(getattr(cfg.indexing, "indexing_workers", 1) or 1)),
         use_structured_output=True,
     )

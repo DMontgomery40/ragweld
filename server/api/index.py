@@ -64,6 +64,12 @@ from server.indexing.generations import (
     reclaim_stale_run,
     staging_repo_id,
 )
+from server.indexing.graph_policy import (
+    GraphChunkCeilingExceeded,
+    GraphPolicy,
+    require_graph_chunk_ceiling,
+    resolve_graph_policy,
+)
 from server.indexing.loader import FileLoader
 from server.indexing.official_graphrag import (
     _lexical_graph_config,
@@ -621,7 +627,7 @@ def _allow_parallel_chunk_batches(
 def _allow_cross_file_chunk_batching(
     *,
     has_graph_upserts: bool,
-    semantic_kg_enabled: bool,
+    semantic_graph_active: bool,
 ) -> bool:
     """Whether small-file chunks can be batched across files before embedding/upsert.
 
@@ -630,7 +636,7 @@ def _allow_cross_file_chunk_batching(
     """
     if has_graph_upserts:
         return False
-    if semantic_kg_enabled:
+    if semantic_graph_active:
         return False
     return True
 
@@ -1478,6 +1484,7 @@ def _figure_run_totals(
 def _status_costs(
     *,
     cfg: TriBridConfig,
+    graph_policy: GraphPolicy,
     total_tokens: int,
     total_chunks: int,
     latest_run: IndexRunSummary | None,
@@ -1507,14 +1514,12 @@ def _status_costs(
             total_tokens=int(total_tokens),
         )
 
-    semantic_kg_enabled = bool(cfg.graph_indexing.semantic_kg_enabled)
+    semantic_graph_active = graph_policy == "semantic"
     semantic_kg_cost: float | None = None
-    if semantic_kg_enabled:
+    if semantic_graph_active:
         semantic_kg_cost = _estimate_semantic_kg_cost_usd(
             alias=_semantic_kg_model_override(cfg),
-            chunks_in_scope=min(
-                int(total_chunks), max(0, int(cfg.graph_indexing.semantic_kg_max_chunks or 0))
-            ),
+            chunks_in_scope=int(total_chunks),
             enrich_max_chars=int(cfg.enrichment.enrich_max_chars or 1000),
         )
 
@@ -1524,7 +1529,7 @@ def _status_costs(
     )
 
     components: list[float | None] = [embedding_cost]
-    if semantic_kg_enabled:
+    if semantic_graph_active:
         components.append(semantic_kg_cost)
     if figures_described > 0:
         components.append(figure_cost)
@@ -1871,6 +1876,11 @@ async def _run_index(
     await postgres.connect()
     active_corpus = await postgres.get_corpus(repo_id)
     active_meta = (active_corpus.get("meta") or {}) if active_corpus else {}
+    graph_policy = resolve_graph_policy(
+        internal=bool(active_meta.get("system_kind")) if isinstance(active_meta, dict) else False,
+        enabled=bool(cfg.graph_indexing.enabled),
+        build_code_graph=bool(cfg.graph_indexing.build_code_graph),
+    )
     active_name = str((active_corpus or {}).get("name") or repo_id)
     active_description = (active_corpus or {}).get("description")
     await postgres.upsert_corpus(
@@ -1964,7 +1974,7 @@ async def _run_index(
 
     neo4j: Neo4jClient | None = None
     try:
-        if cfg.graph_indexing.enabled:
+        if graph_policy in {"semantic", "code"}:
             db_name = cfg.graph_storage.resolve_database(repo_id)
             neo4j = Neo4jClient(
                 cfg.graph_storage.neo4j_uri,
@@ -2034,6 +2044,7 @@ async def _run_index(
             force_reindex=force_reindex,
             run_id=run_id,
             cfg=cfg,
+            graph_policy=graph_policy,
             chunker=chunker,
             max_indexable_bytes=max_indexable_bytes,
             skip_dense=skip_dense,
@@ -2327,6 +2338,7 @@ async def _run_index_body(
     force_reindex: bool,
     run_id: str,
     cfg: TriBridConfig,
+    graph_policy: GraphPolicy,
     chunker: Chunker,
     max_indexable_bytes: int,
     skip_dense: bool,
@@ -2395,11 +2407,10 @@ async def _run_index_body(
             drop_oldest=True,
         )
 
-    semantic_budget = (
-        int(cfg.graph_indexing.semantic_kg_max_chunks)
-        if cfg.graph_indexing.semantic_kg_enabled
-        else 0
+    semantic_ceiling = (
+        int(cfg.graph_indexing.semantic_kg_max_chunks) if graph_policy == "semantic" else 0
     )
+    semantic_eligible_chunks = 0
     semantic_processed = 0
     semantic_entities_total = 0
     semantic_relations_total = 0
@@ -2418,11 +2429,22 @@ async def _run_index_body(
     has_graph_upserts = bool(neo4j is not None and cfg.graph_indexing.build_lexical_graph)
     cross_file_chunk_batching = _allow_cross_file_chunk_batching(
         has_graph_upserts=has_graph_upserts,
-        semantic_kg_enabled=bool(neo4j is not None and cfg.graph_indexing.semantic_kg_enabled),
+        semantic_graph_active=bool(neo4j is not None and graph_policy == "semantic"),
     )
     pending_cross_file_chunks: list[Chunk] = []
     indexing_batch = max(10, int(getattr(cfg.indexing, "indexing_batch_size", 100) or 100))
     cross_file_flush_size = max(indexing_batch, indexing_batch * max(1, indexing_workers))
+
+    def _queue_semantic_chunks(target: list[Chunk], chunks: list[Chunk]) -> None:
+        nonlocal semantic_eligible_chunks
+        if graph_policy != "semantic" or neo4j is None or not chunks:
+            return
+        semantic_eligible_chunks = require_graph_chunk_ceiling(
+            policy=graph_policy,
+            eligible_chunks=semantic_eligible_chunks + len(chunks),
+            ceiling=semantic_ceiling,
+        )
+        target.extend(chunks)
 
     async def _upsert_chunk_batch(chunks: list[Chunk]) -> list[Chunk]:
         nonlocal total_chunks, total_tokens
@@ -2459,7 +2481,7 @@ async def _run_index_body(
                         graph,
                         lexical_graph_config=lexical_graph_config,
                     )
-            if neo4j is not None and cfg.graph_indexing.build_code_graph:
+            if neo4j is not None and graph_policy == "code":
                 code_graph_deferred.extend(
                     await _write_code_graph(
                         neo4j, cfg=cfg, repo_id=write_repo_id, run_id=run_id, repo_path=repo_path, chunks=chunks
@@ -2504,7 +2526,7 @@ async def _run_index_body(
                     graph,
                     lexical_graph_config=lexical_graph_config,
                 )
-        if neo4j is not None and cfg.graph_indexing.build_code_graph:
+        if neo4j is not None and graph_policy == "code":
             code_graph_deferred.extend(
                 await _write_code_graph(
                     neo4j, cfg=cfg, repo_id=write_repo_id, run_id=run_id, repo_path=repo_path, chunks=embedded
@@ -2653,14 +2675,9 @@ async def _run_index_body(
                                 continue
                             stamp_provenance(chunks, extraction="direct", spans=())
                             embedded_batches = await _upsert_chunk_batches(chunks)
-                            if (
-                                semantic_budget > 0
-                                and semantic_processed < semantic_budget
-                                and cfg.graph_indexing.semantic_kg_enabled
-                                and neo4j is not None
-                            ):
-                                remaining = max(0, semantic_budget - semantic_processed)
-                                semantic_pending_chunks.extend(embedded_batches[:remaining])
+                            _queue_semantic_chunks(semantic_pending_chunks, embedded_batches)
+            except GraphChunkCeilingExceeded:
+                raise
             except Exception as exc:
                 INDEX_STAGE_ERRORS_TOTAL.labels(stage="file_read_stream").inc()
                 _emit_event(
@@ -2798,14 +2815,7 @@ async def _run_index_body(
                     continue
                 stamp_provenance(chunks, extraction=extracted.extraction, spans=extracted.spans)
                 embedded_batches = await _upsert_chunk_batches(chunks)
-                if (
-                    semantic_budget > 0
-                    and semantic_processed < semantic_budget
-                    and cfg.graph_indexing.semantic_kg_enabled
-                    and neo4j is not None
-                ):
-                    remaining = max(0, semantic_budget - semantic_processed)
-                    semantic_pending_chunks.extend(embedded_batches[:remaining])
+                _queue_semantic_chunks(semantic_pending_chunks, embedded_batches)
                 continue
 
             with INDEX_STAGE_LATENCY_SECONDS.labels(stage="chunk").time():
@@ -2822,25 +2832,12 @@ async def _run_index_body(
                 await _flush_pending_cross_file_chunks(force=False)
                 continue
             embedded_batches = await _upsert_chunk_batches(chunks)
-            if (
-                semantic_budget > 0
-                and semantic_processed < semantic_budget
-                and cfg.graph_indexing.semantic_kg_enabled
-                and neo4j is not None
-            ):
-                remaining = max(0, semantic_budget - semantic_processed)
-                semantic_pending_chunks.extend(embedded_batches[:remaining])
+            _queue_semantic_chunks(semantic_pending_chunks, embedded_batches)
 
         # Optional semantic KG extraction (typed entities + relations linked to chunk_ids).
-        if (
-            neo4j is not None
-            and cfg.graph_indexing.semantic_kg_enabled
-            and semantic_budget > 0
-            and semantic_processed < semantic_budget
-        ):
+        if neo4j is not None and graph_policy == "semantic" and semantic_pending_chunks:
             try:
-                remaining_budget = max(0, semantic_budget - semantic_processed)
-                chunks_for_semantic = semantic_pending_chunks[:remaining_budget]
+                chunks_for_semantic = semantic_pending_chunks
                 if chunks_for_semantic:
                     semantic_processed += len(chunks_for_semantic)
                     semantic_route = _resolve_semantic_kg_route(cfg)
@@ -2884,24 +2881,16 @@ async def _run_index_body(
                         )
             except Exception as exc:
                 INDEX_STAGE_ERRORS_TOTAL.labels(stage="semantic_kg").inc()
-                if bool(cfg.graph_indexing.semantic_kg_require_llm_success):
-                    raise
-                logger.warning(
-                    "GraphRAG semantic extraction failed for repo_id=%s run_id=%s: %s",
-                    repo_id,
-                    run_id,
-                    exc,
-                    exc_info=True,
-                )
                 if event_queue is not None:
                     _emit_event(
                         event_queue,
                         {
-                            "type": "warning",
+                            "type": "error",
                             "message": f"GraphRAG semantic extraction failed: {exc}",
                         },
-                        drop_oldest=True,
+                        guarantee=True,
                     )
+                raise
             finally:
                 # Important: only process each queued chunk once.
                 semantic_pending_chunks.clear()
@@ -2916,7 +2905,7 @@ async def _run_index_body(
                 lexical_graph_config=_lexical_graph_config(),
             )
 
-    if neo4j is not None and cfg.graph_indexing.semantic_kg_enabled:
+    if neo4j is not None and graph_policy == "semantic":
         # A semantic-KG build without communities is an incomplete graph; fail the
         # run (the staging resources are cleaned up) instead of promoting it.
         communities = await neo4j.detect_communities(write_repo_id)
@@ -2953,7 +2942,7 @@ async def _run_index_body(
     except Exception:
         pass
 
-    if event_queue is not None and cfg.graph_indexing.semantic_kg_enabled:
+    if event_queue is not None and graph_policy == "semantic":
         _emit_event(
             event_queue,
             {
@@ -3335,6 +3324,23 @@ async def _background_index_job(
             drop_oldest=True,
         )
         cfg = await load_scoped_config(repo_id=repo_id)
+        policy_pg = PostgresClient(cfg.indexing.postgres_url)
+        await policy_pg.connect()
+        try:
+            policy_corpus = await policy_pg.get_corpus(repo_id)
+        finally:
+            await policy_pg.disconnect()
+        policy_meta = (policy_corpus or {}).get("meta") or {}
+        graph_policy = resolve_graph_policy(
+            internal=bool(policy_meta.get("system_kind")) if isinstance(policy_meta, dict) else False,
+            enabled=bool(cfg.graph_indexing.enabled),
+            build_code_graph=bool(cfg.graph_indexing.build_code_graph),
+        )
+        _emit_event(
+            queue,
+            {"type": "log", "message": f"🧭 Graph policy: {graph_policy}"},
+            drop_oldest=True,
+        )
         heartbeat = _FenceHeartbeat(cfg, repo_id, run_id)
         heartbeat.start()
         # Every claim drains the durable reclaim backlog (a failed reclaim from an
@@ -3349,7 +3355,9 @@ async def _background_index_job(
         # The fence names what this run is about to build BEFORE it exists, so a
         # crash at any later point can be reclaimed exactly.
         staged_collection = qdrant.generation_name(repo_id)
-        staged_graph_recorded = staging_repo_id if cfg.graph_indexing.enabled else None
+        staged_graph_recorded = (
+            staging_repo_id if graph_policy in {"semantic", "code"} else None
+        )
         pg_fence = PostgresClient(cfg.indexing.postgres_url)
         await pg_fence.connect()
         try:
@@ -3790,6 +3798,7 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
     """Estimate indexing cost/time for a corpus before running the indexer."""
     repo_id = str(request.repo_id or "").strip()
     repo_path = str(request.repo_path or "").strip()
+    corpus: dict[str, Any] | None = None
     if not repo_id:
         raise HTTPException(status_code=422, detail="repo_id is required")
 
@@ -3844,6 +3853,13 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
             await pg2.disconnect()
     except Exception:
         extra_gitignore_patterns = []
+
+    corpus_meta = (corpus or {}).get("meta") or {}
+    graph_policy = resolve_graph_policy(
+        internal=bool(corpus_meta.get("system_kind")) if isinstance(corpus_meta, dict) else False,
+        enabled=bool(cfg.graph_indexing.enabled),
+        build_code_graph=bool(cfg.graph_indexing.build_code_graph),
+    )
 
     loader = FileLoader(
         ignore_patterns=ignore_patterns, extra_gitignore_patterns=extra_gitignore_patterns
@@ -3946,12 +3962,15 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
     embedding_provider = str(getattr(cfg.embedding, "embedding_type", "") or "").strip()
     embedding_model = str(getattr(cfg.embedding, "effective_model", "") or "").strip()
 
-    semantic_kg_enabled = bool(cfg.graph_indexing.semantic_kg_enabled)
-    semantic_kg_chunks = (
-        min(est_chunks, max(0, int(cfg.graph_indexing.semantic_kg_max_chunks or 0)))
-        if semantic_kg_enabled
-        else 0
-    )
+    semantic_graph_active = graph_policy == "semantic"
+    try:
+        semantic_kg_chunks = require_graph_chunk_ceiling(
+            policy=graph_policy,
+            eligible_chunks=est_chunks,
+            ceiling=int(cfg.graph_indexing.semantic_kg_max_chunks),
+        )
+    except GraphChunkCeilingExceeded as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     semantic_alias = _semantic_kg_model_override(cfg)
 
     # Pricing (models.json): deterministic backend and skip_dense imply $0 external embedding cost.
@@ -3966,7 +3985,7 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
         )
 
     semantic_kg_cost: float | None = None
-    if semantic_kg_enabled:
+    if semantic_graph_active:
         semantic_kg_cost = _estimate_semantic_kg_cost_usd(
             alias=semantic_alias,
             chunks_in_scope=semantic_kg_chunks,
@@ -3976,7 +3995,7 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
     estimated_figures, figure_cost = _estimate_figures(cfg, pdf_paths)
 
     cost_components: list[float | None] = [embedding_cost]
-    if semantic_kg_enabled:
+    if semantic_graph_active:
         cost_components.append(semantic_kg_cost)
     if estimated_figures is not None:
         cost_components.append(figure_cost)
@@ -4026,7 +4045,7 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
 
     if est_tokens > 0 and tps > 0:
         base_embedding_seconds = float(est_tokens) / float(tps)
-        if semantic_kg_enabled and semantic_kg_chunks > 0:
+        if semantic_graph_active and semantic_kg_chunks > 0:
             # The throughput table is keyed by provider, and the only way from a gateway
             # alias to its provider is the same alias lookup that prices it.
             semantic_provider_for_time = "litellm"
@@ -4321,6 +4340,11 @@ async def get_dashboard_index_status(
     latest_run = await asyncio.to_thread(_load_latest_run_summary, repo_id, ("complete",))
     costs = _status_costs(
         cfg=cfg,
+        graph_policy=resolve_graph_policy(
+            internal=bool(meta.get("system_kind")) if isinstance(meta, dict) else False,
+            enabled=bool(cfg.graph_indexing.enabled),
+            build_code_graph=bool(cfg.graph_indexing.build_code_graph),
+        ),
         total_tokens=total_tokens,
         total_chunks=total_chunks,
         latest_run=latest_run,

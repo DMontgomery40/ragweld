@@ -166,7 +166,7 @@ export async function provisionExhaustiveCorpus(
   try {
     await patchCorpusConfigSection(request, corpusId, 'embedding', { embedding_backend: 'deterministic' });
     await patchCorpusConfigSection(request, corpusId, 'generation', { enrich_disabled: true });
-    await patchCorpusConfigSection(request, corpusId, 'graph_indexing', { semantic_kg_enabled: false });
+    await patchCorpusConfigSection(request, corpusId, 'graph_indexing', { enabled: false });
     await patchCorpusConfigSection(request, corpusId, 'reranking', { reranker_mode: 'none' });
     await patchCorpusConfigSection(request, corpusId, 'chat', { litellm: { default_model: EXHAUSTIVE_CHAT_MODEL } });
     await patchCorpusConfigSection(request, corpusId, 'ui', { chat_default_model: EXHAUSTIVE_CHAT_MODEL });

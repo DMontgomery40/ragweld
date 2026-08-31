@@ -1131,8 +1131,6 @@ export interface GraphIndexingConfig {
   build_code_graph?: boolean; // default: False
   /** Store chunk embeddings on Chunk nodes for Neo4j vector search (requires dense embeddings) */
   store_chunk_embeddings?: boolean; // default: True
-  /** Build an official Neo4j GraphRAG semantic graph with typed entities and relationships linked to chunks during indexing */
-  semantic_kg_enabled?: boolean; // default: False
   /** Edge weight for AST containment relationships (module->class/function, class->method). */
   ast_contains_weight?: number; // default: 1.0
   /** Edge weight for AST inheritance relationships (class->base). */
@@ -1141,34 +1139,18 @@ export interface GraphIndexingConfig {
   ast_imports_weight?: number; // default: 1.0
   /** Edge weight for AST call relationships (function->callee). */
   ast_calls_weight?: number; // default: 1.0
-  /** Semantic KG extraction mode. This branch targets the official Neo4j GraphRAG LLM path; 'heuristic' is a stale legacy setting. */
-  semantic_kg_mode?: "heuristic" | "llm"; // default: "llm"
-  /** When true, semantic KG extraction preserves typed entities (person, org, location, event, concept). */
-  semantic_kg_typed_entities_enabled?: boolean; // default: True
   /** Allowed semantic KG entity types produced by extraction. */
   semantic_kg_allowed_entity_types?: ("person" | "org" | "location" | "event" | "concept")[]; // default: ["person", "org", "location", "event", "concept"]
   /** Allowed semantic KG relationship types produced by extraction. */
   semantic_kg_allowed_relation_types?: ("associated_with" | "met_with" | "communicated_with" | "works_for" | "member_of" | "founded" | "owns" | "funded" | "participated_in" | "located_in" | "references" | "related_to")[]; // default: ["associated_with", "met_with", "communicated_w...
-  /** When true, fail the indexing run if GraphRAG semantic extraction fails for a chunk. */
-  semantic_kg_require_llm_success?: boolean; // default: False
   /** Reasoning effort for semantic KG extraction when using OpenAI Responses-compatible models. */
   semantic_kg_reasoning_effort?: "minimal" | "low" | "medium" | "high" | "xhigh"; // default: "medium"
-  /** Edge weight for semantic concept relations in LLM mode. */
-  semantic_kg_relation_weight_llm?: number; // default: 0.7
-  /** Edge weight for semantic concept relations in heuristic fallback mode. */
-  semantic_kg_relation_weight_heuristic?: number; // default: 0.5
-  /** Maximum semantic concepts to extract per chunk */
-  semantic_kg_max_concepts_per_chunk?: number; // default: 8
-  /** Minimum length for semantic concept tokens */
-  semantic_kg_min_concept_len?: number; // default: 4
-  /** Maximum semantic relations to retain per chunk during GraphRAG extraction */
-  semantic_kg_max_relations_per_chunk?: number; // default: 12
-  /** Maximum chunks to process for semantic KG extraction per indexing run (0 = disabled) */
+  /** Maximum eligible chunks for a semantic GraphRAG run. Runs above this ceiling fail before promotion; the corpus is never sliced into a partial graph. */
   semantic_kg_max_chunks?: number; // default: 40000
   /** Optional LiteLLM alias for GraphRAG semantic extraction; empty uses the gateway default */
   semantic_kg_llm_model?: string; // default: ""
   /** Timeout (seconds) for semantic KG LLM extraction per chunk */
-  semantic_kg_llm_timeout_s?: number; // default: 30
+  semantic_kg_llm_timeout_s?: number; // default: 90
   /** Neo4j vector index name for Chunk embeddings (mode='chunk') */
   chunk_vector_index_name?: string; // default: "tribrid_chunk_embeddings"
   /** Chunk node property that stores the embedding vector */

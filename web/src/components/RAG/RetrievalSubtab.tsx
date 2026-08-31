@@ -227,6 +227,8 @@ export function RetrievalSubtab() {
   // graph search on, top-k 30, weight 0.3 and entity expansion enabled, with nothing to
   // suggest the entity half could not fire.
   const [graphReadiness, setGraphReadiness] = useState<GraphStats | null>(null);
+  const [graphIndexingEnabled] = useConfigField<boolean>('graph_indexing.enabled', true);
+  const [buildCodeGraph] = useConfigField<boolean>('graph_indexing.build_code_graph', false);
   const [graphMode, setGraphMode] = useConfigField<'chunk' | 'entity'>('graph_search.mode', 'chunk');
   const [graphSearchEnabled, setGraphSearchEnabled] = useConfigField<boolean>('graph_search.enabled', true);
   const [chunkNeighborWindow, setChunkNeighborWindow] = useConfigField<number>('graph_search.chunk_neighbor_window', 1);
@@ -239,6 +241,16 @@ export function RetrievalSubtab() {
   const [graphMaxHops, setGraphMaxHops] = useConfigField<number>('graph_search.max_hops', 2);
   const [graphIncludeCommunities, setGraphIncludeCommunities] = useConfigField<boolean>('graph_search.include_communities', true);
   const [graphSearchTopK, setGraphSearchTopK] = useConfigField<number>('graph_search.top_k', 30);
+  const activeCorpus = repos.find(
+    (corpus) => corpus.corpus_id === activeRepo || corpus.slug === activeRepo || corpus.name === activeRepo,
+  );
+  const graphPolicyLabel = activeCorpus?.internal
+    ? 'Excluded internal corpus'
+    : !graphIndexingEnabled
+      ? 'Graph disabled'
+      : buildCodeGraph
+        ? 'Code AST graph'
+        : 'Semantic entity graph';
 
   // --- Fusion -------------------------------------------------------------
   const [fusionMethod, setFusionMethod] = useConfigField<'rrf' | 'weighted'>('fusion.method', 'rrf');
@@ -717,6 +729,21 @@ export function RetrievalSubtab() {
 
                 <div style={INNER_PANEL_STYLE}>
                   <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--fg)', marginBottom: 10 }}>Graph Leg</div>
+                  <div
+                    data-testid="retrieval-graph-policy-badge"
+                    style={{
+                      display: 'inline-flex',
+                      marginBottom: 10,
+                      borderRadius: 999,
+                      padding: '5px 9px',
+                      background: activeCorpus?.internal ? 'rgba(var(--warn-rgb), 0.12)' : 'rgba(var(--accent-rgb), 0.1)',
+                      color: activeCorpus?.internal ? 'var(--warn)' : 'var(--fg)',
+                      fontSize: 12,
+                      fontWeight: 700,
+                    }}
+                  >
+                    {graphPolicyLabel}
+                  </div>
                   {graphReadiness ? (
                     <div
                       style={{
@@ -738,8 +765,8 @@ export function RetrievalSubtab() {
                         <>
                           <strong>This corpus has no entity graph.</strong> Entity mode and entity expansion cannot
                           contribute for it; only chunk mode can, over{' '}
-                          {(graphReadiness.total_chunks ?? 0).toLocaleString()} chunk nodes. Enable Semantic KG or
-                          code-entity indexing in RAG &gt; Indexing and re-index to populate it.
+                          {(graphReadiness.total_chunks ?? 0).toLocaleString()} chunk nodes. Enable graph indexing in
+                          RAG &gt; Indexing, confirm the derived corpus policy, and re-index to populate it.
                         </>
                       ) : (
                         <>

@@ -56,7 +56,8 @@ def _paid_config(*, semantic_kg: bool) -> TriBridConfig:
     cfg = TriBridConfig()
     cfg.embedding.embedding_backend = "provider"
     cfg.indexing.skip_dense = False
-    cfg.graph_indexing.semantic_kg_enabled = semantic_kg
+    cfg.graph_indexing.enabled = semantic_kg
+    cfg.graph_indexing.build_code_graph = False
     cfg.graph_indexing.semantic_kg_llm_model = SEMANTIC_ALIAS
     cfg.indexing.figures.vision_model = FIGURE_ALIAS
     cfg.indexing.figures.max_completion_tokens = FIGURE_BUDGET
@@ -85,7 +86,11 @@ def _run(
 
 def test_status_costs_returns_the_registered_costs_model() -> None:
     costs = _status_costs(
-        cfg=_paid_config(semantic_kg=False), total_tokens=0, total_chunks=0, latest_run=None
+        cfg=_paid_config(semantic_kg=False),
+        graph_policy="off",
+        total_tokens=0,
+        total_chunks=0,
+        latest_run=None,
     )
     assert isinstance(costs, DashboardIndexCosts)
 
@@ -118,7 +123,13 @@ def test_the_total_is_the_sum_of_exactly_the_phases_that_ran(
     )
     latest = _run(described=figures_described, cost=figure_cost)
 
-    costs = _status_costs(cfg=cfg, total_tokens=50_000, total_chunks=100, latest_run=latest)
+    costs = _status_costs(
+        cfg=cfg,
+        graph_policy="semantic" if semantic_kg else "off",
+        total_tokens=50_000,
+        total_chunks=100,
+        latest_run=latest,
+    )
 
     assert costs.total_tokens == 50_000
     embedding = _estimate_embedding_cost_usd(
@@ -168,6 +179,7 @@ def test_a_run_that_described_figures_at_an_unpriced_alias_makes_the_total_unkno
     """
     costs = _status_costs(
         cfg=_paid_config(semantic_kg=False),
+        graph_policy="off",
         total_tokens=50_000,
         total_chunks=100,
         latest_run=_run(described=10, cost=None),
@@ -188,6 +200,7 @@ def test_a_deterministic_backend_still_reports_the_figure_spend() -> None:
     )
     costs = _status_costs(
         cfg=cfg,
+        graph_policy="off",
         total_tokens=50_000,
         total_chunks=100,
         latest_run=_run(described=10, cost=figure_cost),
@@ -199,7 +212,11 @@ def test_a_deterministic_backend_still_reports_the_figure_spend() -> None:
 
 def test_a_corpus_with_no_persisted_run_reports_no_figure_line() -> None:
     costs = _status_costs(
-        cfg=_paid_config(semantic_kg=False), total_tokens=50_000, total_chunks=100, latest_run=None
+        cfg=_paid_config(semantic_kg=False),
+        graph_policy="off",
+        total_tokens=50_000,
+        total_chunks=100,
+        latest_run=None,
     )
     assert costs.figures_described == 0
     assert costs.figure_description_cost is None
@@ -222,6 +239,7 @@ async def test_the_figure_spend_survives_the_round_trip_the_status_read_makes() 
 
     costs = _status_costs(
         cfg=_paid_config(semantic_kg=False),
+        graph_policy="off",
         total_tokens=50_000,
         total_chunks=100,
         latest_run=latest,
@@ -265,6 +283,7 @@ async def test_a_newer_non_terminal_run_does_not_erase_the_live_index_spend() ->
 
         costs = _status_costs(
             cfg=_paid_config(semantic_kg=False),
+            graph_policy="off",
             total_tokens=50_000,
             total_chunks=100,
             latest_run=latest,
@@ -350,7 +369,13 @@ def test_an_alias_the_catalog_does_not_serve_has_no_price(alias: str) -> None:
 def test_the_status_total_folds_in_the_semantic_kg_spend() -> None:
     """The card's Total Cost has to include the semantic KG phase, not go unknown because of it."""
     cfg = _paid_config(semantic_kg=True)
-    costs = _status_costs(cfg=cfg, total_tokens=50_000, total_chunks=100, latest_run=None)
+    costs = _status_costs(
+        cfg=cfg,
+        graph_policy="semantic",
+        total_tokens=50_000,
+        total_chunks=100,
+        latest_run=None,
+    )
     semantic = _estimate_semantic_kg_cost_usd(
         alias=SEMANTIC_ALIAS,
         chunks_in_scope=min(100, int(cfg.graph_indexing.semantic_kg_max_chunks)),

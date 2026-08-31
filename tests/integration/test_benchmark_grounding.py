@@ -93,7 +93,8 @@ async def test_benchmark_grounds_every_model_on_the_corpus(client: AsyncClient, 
         )
         assert created.status_code in (200, 201), created.text
         cfg.embedding.embedding_backend = "deterministic"
-        cfg.graph_indexing.semantic_kg_enabled = False
+        cfg.graph_indexing.enabled = False
+        cfg.graph_search.enabled = False
         cfg.reranking.reranker_mode = "none"
         cfg.semantic_cache.enabled = False
         cfg.chat.litellm.enabled = True

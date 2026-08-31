@@ -104,12 +104,12 @@ def test_tribrid_config_nested_access() -> None:
 
 def test_graph_indexing_config_weight_defaults() -> None:
     cfg = GraphIndexingConfig()
+    assert cfg.enabled is True
+    assert cfg.build_code_graph is False
     assert cfg.ast_contains_weight == 1.0
     assert cfg.ast_inherits_weight == 1.0
     assert cfg.ast_imports_weight == 1.0
     assert cfg.ast_calls_weight == 1.0
-    assert cfg.semantic_kg_mode == "llm"
-    assert cfg.semantic_kg_typed_entities_enabled is True
     assert cfg.semantic_kg_allowed_entity_types == ["person", "org", "location", "event", "concept"]
     assert cfg.semantic_kg_allowed_relation_types == [
         "associated_with",
@@ -125,15 +125,32 @@ def test_graph_indexing_config_weight_defaults() -> None:
         "references",
         "related_to",
     ]
+    assert cfg.semantic_kg_reasoning_effort == "medium"
     assert cfg.semantic_kg_max_chunks == 40000
-    assert cfg.semantic_kg_relation_weight_llm == 0.7
-    assert cfg.semantic_kg_relation_weight_heuristic == 0.5
+    assert cfg.semantic_kg_llm_timeout_s == 90
+
+
+def test_graph_config_has_one_policy_surface_without_a_second_semantic_toggle() -> None:
+    payload = TriBridConfig().model_dump(mode="json")
+    assert payload["graph_indexing"]["enabled"] is True
+    for key in {
+        "semantic_kg_enabled",
+        "semantic_kg_mode",
+        "semantic_kg_typed_entities_enabled",
+        "semantic_kg_require_llm_success",
+        "semantic_kg_relation_weight_llm",
+        "semantic_kg_relation_weight_heuristic",
+        "semantic_kg_max_concepts_per_chunk",
+        "semantic_kg_min_concept_len",
+        "semantic_kg_max_relations_per_chunk",
+    }:
+        assert key not in payload["graph_indexing"]
 
 
 def test_checked_in_global_config_matches_graph_branch_defaults() -> None:
     cfg = load_config(DEFAULT_CONFIG_PATH).graph_indexing
-    assert cfg.semantic_kg_mode == "llm"
-    assert cfg.semantic_kg_typed_entities_enabled is True
+    assert cfg.enabled is True
+    assert cfg.build_code_graph is False
     assert cfg.semantic_kg_allowed_entity_types == ["person", "org", "location", "event", "concept"]
     assert cfg.semantic_kg_allowed_relation_types == [
         "associated_with",
@@ -150,6 +167,7 @@ def test_checked_in_global_config_matches_graph_branch_defaults() -> None:
         "related_to",
     ]
     assert cfg.semantic_kg_max_chunks == 40000
+    assert cfg.semantic_kg_llm_timeout_s == 90
 
 
 def test_graph_indexing_config_weight_validation() -> None:
@@ -157,6 +175,8 @@ def test_graph_indexing_config_weight_validation() -> None:
         GraphIndexingConfig(ast_contains_weight=-0.01)
     with pytest.raises(ValidationError):
         GraphIndexingConfig(ast_inherits_weight=1.01)
+    with pytest.raises(ValidationError):
+        GraphIndexingConfig(semantic_kg_max_chunks=0)
 
 
 def test_chunking_config_rejects_semantic_strategy() -> None:

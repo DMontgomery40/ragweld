@@ -85,7 +85,8 @@ async def test_status_and_incidents_reflect_real_queries_on_the_corpus(client: A
         )
         assert created.status_code in (200, 201), created.text
         cfg.embedding.embedding_backend = "deterministic"
-        cfg.graph_indexing.semantic_kg_enabled = False
+        cfg.graph_indexing.enabled = False
+        cfg.graph_search.enabled = False
         cfg.reranking.reranker_mode = "none"
         cfg.chat.litellm.enabled = False
         cfg.semantic_cache.enabled = False

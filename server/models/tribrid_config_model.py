@@ -5045,11 +5045,6 @@ class GraphIndexingConfig(BaseModel):
         description="Store chunk embeddings on Chunk nodes for Neo4j vector search (requires dense embeddings)",
     )
 
-    semantic_kg_enabled: bool = Field(
-        default=False,
-        description="Build an official Neo4j GraphRAG semantic graph with typed entities and relationships linked to chunks during indexing",
-    )
-
     ast_contains_weight: float = Field(
         default=1.0,
         ge=0.0,
@@ -5076,16 +5071,6 @@ class GraphIndexingConfig(BaseModel):
         ge=0.0,
         le=1.0,
         description="Edge weight for AST call relationships (function->callee).",
-    )
-
-    semantic_kg_mode: Literal["heuristic", "llm"] = Field(
-        default="llm",
-        description="Semantic KG extraction mode. This branch targets the official Neo4j GraphRAG LLM path; 'heuristic' is a stale legacy setting.",
-    )
-
-    semantic_kg_typed_entities_enabled: bool = Field(
-        default=True,
-        description="When true, semantic KG extraction preserves typed entities (person, org, location, event, concept).",
     )
 
     semantic_kg_allowed_entity_types: list[Literal["person", "org", "location", "event", "concept"]] = Field(
@@ -5126,56 +5111,19 @@ class GraphIndexingConfig(BaseModel):
         description="Allowed semantic KG relationship types produced by extraction.",
     )
 
-    semantic_kg_require_llm_success: bool = Field(
-        default=False,
-        description="When true, fail the indexing run if GraphRAG semantic extraction fails for a chunk.",
-    )
-
     semantic_kg_reasoning_effort: Literal["minimal", "low", "medium", "high", "xhigh"] = Field(
         default="medium",
         description="Reasoning effort for semantic KG extraction when using OpenAI Responses-compatible models.",
     )
 
-    semantic_kg_relation_weight_llm: float = Field(
-        default=0.7,
-        ge=0.0,
-        le=1.0,
-        description="Edge weight for semantic concept relations in LLM mode.",
-    )
-
-    semantic_kg_relation_weight_heuristic: float = Field(
-        default=0.5,
-        ge=0.0,
-        le=1.0,
-        description="Edge weight for semantic concept relations in heuristic fallback mode.",
-    )
-
-    semantic_kg_max_concepts_per_chunk: int = Field(
-        default=8,
-        ge=0,
-        le=50,
-        description="Maximum semantic concepts to extract per chunk",
-    )
-
-    semantic_kg_min_concept_len: int = Field(
-        default=4,
-        ge=3,
-        le=20,
-        description="Minimum length for semantic concept tokens",
-    )
-
-    semantic_kg_max_relations_per_chunk: int = Field(
-        default=12,
-        ge=0,
-        le=200,
-        description="Maximum semantic relations to retain per chunk during GraphRAG extraction",
-    )
-
     semantic_kg_max_chunks: int = Field(
         default=40000,
-        ge=0,
+        ge=1,
         le=100000,
-        description="Maximum chunks to process for semantic KG extraction per indexing run (0 = disabled)",
+        description=(
+            "Maximum eligible chunks for a semantic GraphRAG run. Runs above this ceiling fail before "
+            "promotion; the corpus is never sliced into a partial graph."
+        ),
     )
 
     semantic_kg_llm_model: str = Field(
@@ -5189,9 +5137,9 @@ class GraphIndexingConfig(BaseModel):
         return validate_litellm_alias(value, allow_empty=True)
 
     semantic_kg_llm_timeout_s: int = Field(
-        default=30,
+        default=90,
         ge=5,
-        le=120,
+        le=600,
         description="Timeout (seconds) for semantic KG LLM extraction per chunk",
     )
 

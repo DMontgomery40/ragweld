@@ -369,10 +369,17 @@ export function IndexingSubtab() {
   const [graphIndexingEnabled, setGraphIndexingEnabled] = useConfigField<boolean>('graph_indexing.enabled', true);
   const [lexicalGraphEnabled, setLexicalGraphEnabled] = useConfigField<boolean>('graph_indexing.build_lexical_graph', true);
   const [storeChunkEmbeddings, setStoreChunkEmbeddings] = useConfigField<boolean>('graph_indexing.store_chunk_embeddings', true);
-  const [semanticKgEnabled, setSemanticKgEnabled] = useConfigField<boolean>('graph_indexing.semantic_kg_enabled', false);
-  const [semanticKgMode, setSemanticKgMode] = useConfigField<'heuristic' | 'llm'>('graph_indexing.semantic_kg_mode', 'llm');
+  const [buildCodeGraph, setBuildCodeGraph] = useConfigField<boolean>('graph_indexing.build_code_graph', false);
   const [semanticKgMaxChunks, setSemanticKgMaxChunks] = useConfigField<number>('graph_indexing.semantic_kg_max_chunks', 40000);
   const [semanticKgLlmModel, setSemanticKgLlmModel] = useConfigField<string>('graph_indexing.semantic_kg_llm_model', '');
+  const [semanticKgReasoningEffort, setSemanticKgReasoningEffort] = useConfigField<
+    'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+  >('graph_indexing.semantic_kg_reasoning_effort', 'medium');
+  const [semanticKgTimeoutS, setSemanticKgTimeoutS] = useConfigField<number>('graph_indexing.semantic_kg_llm_timeout_s', 90);
+  const [astContainsWeight, setAstContainsWeight] = useConfigField<number>('graph_indexing.ast_contains_weight', 1);
+  const [astInheritsWeight, setAstInheritsWeight] = useConfigField<number>('graph_indexing.ast_inherits_weight', 1);
+  const [astImportsWeight, setAstImportsWeight] = useConfigField<number>('graph_indexing.ast_imports_weight', 1);
+  const [astCallsWeight, setAstCallsWeight] = useConfigField<number>('graph_indexing.ast_calls_weight', 1);
 
   // Figure description (indexing.figures.*). Nested paths: `useConfigField` reads the dotted
   // path off the loaded config and writes `{ figures: { <field>: value } }` into the `indexing`
@@ -505,6 +512,16 @@ export function IndexingSubtab() {
     return repos.find(r => r.corpus_id === id || r.slug === id || r.name === id);
   }, [activeRepo, repos]);
 
+  const graphCorpusIsInternal = Boolean(activeCorpus?.internal);
+  const graphPolicyLabel = graphCorpusIsInternal
+    ? 'Excluded internal corpus'
+    : !graphIndexingEnabled
+      ? 'Graph disabled'
+      : buildCodeGraph
+        ? 'Code AST graph'
+        : 'Semantic entity graph';
+  const semanticGraphActive = !graphCorpusIsInternal && graphIndexingEnabled && !buildCodeGraph;
+
   const resolvedPath = useMemo(() => String(activeCorpus?.path || ''), [activeCorpus]);
   const effectivePath = useMemo(() => (pathOverride.trim() ? pathOverride.trim() : resolvedPath), [pathOverride, resolvedPath]);
 
@@ -532,12 +549,6 @@ export function IndexingSubtab() {
   useEffect(() => {
     setIndexEstimate(null);
   }, [activeRepo, effectivePath]);
-
-  useEffect(() => {
-    if (semanticKgEnabled && semanticKgMode !== 'llm') {
-      setSemanticKgMode('llm');
-    }
-  }, [semanticKgEnabled, semanticKgMode, setSemanticKgMode]);
 
   useEffect(() => {
     activeRepoRef.current = String(activeRepo || '').trim();
@@ -689,7 +700,7 @@ export function IndexingSubtab() {
   const indexBlockingReason = useMemo(() => {
     const semanticAlias = String(semanticKgLlmModel || '').trim();
     if (
-      semanticKgEnabled
+      semanticGraphActive
       && semanticAlias
       && !generationModels.some((model) => String(model.id || '').trim() === semanticAlias)
     ) {
@@ -711,7 +722,7 @@ export function IndexingSubtab() {
     forceReindex,
     normalizedEmbeddingType,
     generationModels,
-    semanticKgEnabled,
+    semanticGraphActive,
     semanticKgLlmModel,
     skipDense,
     supportedRuntimeProvider,
@@ -3112,21 +3123,49 @@ export function IndexingSubtab() {
                   border: graphIndexingEnabled ? '2px solid var(--accent)' : '1px solid var(--line)',
                 }}
               >
-                <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
+                <label
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px',
+                    cursor: graphCorpusIsInternal ? 'not-allowed' : 'pointer',
+                  }}
+                >
                   <input
                     data-testid="graph-indexing-enabled"
                     type="checkbox"
                     checked={graphIndexingEnabled}
+                    disabled={graphCorpusIsInternal}
                     onChange={(e) => setGraphIndexingEnabled(e.target.checked)}
                     style={{ width: '18px', height: '18px' }}
                   />
                   <div>
-                    <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--fg)' }}>Build graph during indexing</div>
+                    <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--fg)' }}>Build a real graph during indexing</div>
                     <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginTop: '2px' }}>
-                      When enabled, indexing also extracts entities/relationships into Neo4j for GraphRAG.
+                      External documents use semantic extraction by default; code corpora can select the AST policy below.
                     </div>
                   </div>
                 </label>
+                <div
+                  data-testid="graph-policy-badge"
+                  style={{
+                    display: 'inline-flex',
+                    marginTop: 12,
+                    borderRadius: 999,
+                    padding: '5px 9px',
+                    background: graphCorpusIsInternal ? 'rgba(var(--warn-rgb), 0.12)' : 'rgba(var(--accent-rgb), 0.12)',
+                    color: graphCorpusIsInternal ? 'var(--warn)' : 'var(--fg)',
+                    fontSize: 12,
+                    fontWeight: 700,
+                  }}
+                >
+                  {graphPolicyLabel}
+                </div>
+                {graphCorpusIsInternal ? (
+                  <div style={{ marginTop: 8, color: 'var(--fg-muted)', fontSize: 12, lineHeight: 1.45 }}>
+                    Runtime-managed corpora are excluded from this graph phase. Their own indexing path remains authoritative.
+                  </div>
+                ) : null}
               </div>
 
               <div
@@ -3144,7 +3183,7 @@ export function IndexingSubtab() {
                     type="checkbox"
                     checked={lexicalGraphEnabled}
                     onChange={(e) => setLexicalGraphEnabled(e.target.checked)}
-                    disabled={!graphIndexingEnabled}
+                    disabled={graphCorpusIsInternal || !graphIndexingEnabled}
                     style={{ width: '18px', height: '18px' }}
                   />
                   <div>
@@ -3171,7 +3210,7 @@ export function IndexingSubtab() {
                     type="checkbox"
                     checked={storeChunkEmbeddings}
                     onChange={(e) => setStoreChunkEmbeddings(e.target.checked)}
-                    disabled={!graphIndexingEnabled || !lexicalGraphEnabled}
+                    disabled={graphCorpusIsInternal || !graphIndexingEnabled || !lexicalGraphEnabled}
                     style={{ width: '18px', height: '18px' }}
                   />
                   <div>
@@ -3202,76 +3241,112 @@ export function IndexingSubtab() {
                   padding: '16px',
                   background: 'var(--bg-elev2)',
                   borderRadius: '8px',
-                  border: semanticKgEnabled ? '2px solid rgba(var(--accent-rgb), 0.6)' : '1px solid var(--line)',
-                  opacity: graphIndexingEnabled && lexicalGraphEnabled ? 1 : 0.6,
+                  border: buildCodeGraph ? '2px solid rgba(var(--accent-rgb), 0.6)' : '1px solid var(--line)',
+                  opacity: graphIndexingEnabled && lexicalGraphEnabled && !graphCorpusIsInternal ? 1 : 0.6,
                 }}
               >
                 <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
                   <input
-                    data-testid="semantic-kg-enabled"
+                    data-testid="graph-build-code"
                     type="checkbox"
-                    checked={semanticKgEnabled}
-                    onChange={(e) => setSemanticKgEnabled(e.target.checked)}
-                    disabled={!graphIndexingEnabled || !lexicalGraphEnabled}
+                    checked={buildCodeGraph}
+                    onChange={(e) => setBuildCodeGraph(e.target.checked)}
+                    disabled={graphCorpusIsInternal || !graphIndexingEnabled || !lexicalGraphEnabled}
                     style={{ width: '18px', height: '18px' }}
                   />
                   <div>
-                    <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--fg)' }}>Neo4j GraphRAG semantic graph</div>
+                    <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--fg)' }}>Use the code AST graph policy</div>
                     <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginTop: '2px' }}>
-                      Uses Neo4j GraphRAG over an OpenAI-compatible route to extract typed entities and relationships, then links them to chunk nodes for graph expansion.
+                      Select this only for code corpora. Otherwise every enabled external corpus uses semantic entity extraction.
                     </div>
                   </div>
                 </label>
 
-                {semanticKgEnabled && (
-                  <div style={{ marginTop: '12px' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
-                      <div className="input-group">
-                        <label style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '6px' }}>Engine</label>
-                        <select
-                          data-testid="semantic-kg-mode"
-                          value={semanticKgMode}
-                          onChange={(e) => setSemanticKgMode(e.target.value as any)}
-                          disabled
-                          style={{ width: '100%' }}
-                        >
-                          <option value="llm">Neo4j GraphRAG (OpenAI-compatible)</option>
-                        </select>
-                      </div>
-                      <div className="input-group">
-                        <label style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '6px' }}>Max chunks</label>
+                {buildCodeGraph ? (
+                  <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
+                    {[
+                      ['Contains weight', astContainsWeight, setAstContainsWeight],
+                      ['Inherits weight', astInheritsWeight, setAstInheritsWeight],
+                      ['Imports weight', astImportsWeight, setAstImportsWeight],
+                      ['Calls weight', astCallsWeight, setAstCallsWeight],
+                    ].map(([label, value, onCommit]) => (
+                      <div className="input-group" key={String(label)}>
+                        <label>{String(label)}</label>
                         <NumberField
-                          data-testid="semantic-kg-max-chunks"
                           min={0}
-                          max={100000}
-                          step={1}
-                          value={semanticKgMaxChunks}
-                          onCommit={setSemanticKgMaxChunks}
-                          style={{ width: '100%' }}
+                          max={1}
+                          step={0.05}
+                          value={Number(value)}
+                          onCommit={onCommit as (next: number) => void}
                         />
                       </div>
-                    </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
 
-                    <div style={{ marginTop: '12px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', alignItems: 'end' }}>
-                      <div className="input-group">
-                        <label>KG LLM Alias</label>
-                        <ChatModelPicker
-                          value={semanticKgLlmModel}
-                          onChange={setSemanticKgLlmModel}
-                          models={generationModels}
-                          valueMode="id"
-                          allowEmpty
-                        />
-                      </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                        <span style={{ fontSize: '11px', color: 'var(--fg-muted)' }}>
-                          Choose a LiteLLM alias. Empty uses the configured gateway default.
-                        </span>
-                      </div>
+              {!buildCodeGraph && !graphCorpusIsInternal && graphIndexingEnabled ? (
+                <div
+                  data-testid="semantic-graph-settings"
+                  style={{
+                    padding: 16,
+                    background: 'var(--bg-elev2)',
+                    borderRadius: 8,
+                    border: '2px solid rgba(var(--accent-rgb), 0.6)',
+                  }}
+                >
+                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg)' }}>Semantic extraction policy</div>
+                  <div style={{ marginTop: 4, color: 'var(--fg-muted)', fontSize: 11, lineHeight: 1.45 }}>
+                    Neo4j GraphRAG structured extraction is required for this external corpus. Failed extraction fails the run; the chunk ceiling refuses a partial graph instead of truncating it.
+                  </div>
+                  <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
+                    <div className="input-group">
+                      <label>KG LLM Alias</label>
+                      <ChatModelPicker
+                        value={semanticKgLlmModel}
+                        onChange={setSemanticKgLlmModel}
+                        models={generationModels}
+                        valueMode="id"
+                        allowEmpty
+                      />
+                    </div>
+                    <div className="input-group">
+                      <label>Reasoning effort</label>
+                      <select
+                        data-testid="semantic-kg-reasoning-effort"
+                        value={semanticKgReasoningEffort}
+                        onChange={(event) => setSemanticKgReasoningEffort(event.target.value as typeof semanticKgReasoningEffort)}
+                      >
+                        {['minimal', 'low', 'medium', 'high', 'xhigh'].map((effort) => (
+                          <option key={effort} value={effort}>{effort}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="input-group">
+                      <label>Semantic chunk ceiling</label>
+                      <NumberField
+                        data-testid="semantic-kg-max-chunks"
+                        min={1}
+                        max={100000}
+                        step={1}
+                        value={semanticKgMaxChunks}
+                        onCommit={setSemanticKgMaxChunks}
+                      />
+                    </div>
+                    <div className="input-group">
+                      <label>Per-chunk timeout (seconds)</label>
+                      <NumberField
+                        data-testid="semantic-kg-timeout"
+                        min={5}
+                        max={600}
+                        step={5}
+                        value={semanticKgTimeoutS}
+                        onCommit={setSemanticKgTimeoutS}
+                      />
                     </div>
                   </div>
-                )}
-              </div>
+                </div>
+              ) : null}
 
               <div
                 style={{

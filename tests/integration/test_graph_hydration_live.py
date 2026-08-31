@@ -58,7 +58,6 @@ class SeededGraph:
     corpus_id: str
     content_by_id: dict[str, str]
     vector_seed_ids: list[str]  # the Qdrant dense leg's top-_SEED_K chunk ids for _QUESTION
-    kg_skip: str | None  # None when the semantic knowledge graph was extracted
 
 
 async def _wait_for_index(client: AsyncClient, corpus_id: str, *, timeout_s: float = 300.0) -> dict:
@@ -133,7 +132,8 @@ async def seeded() -> AsyncIterator[SeededGraph]:
     corpus_id = f"graph-hydrate-{uuid.uuid4().hex[:8]}"
     pg = PostgresClient(require_env("POSTGRES_DSN"))
     cfg = load_config()
-    kg_skip = await _gateway_serves(str(cfg.chat.litellm.base_url), _KG_MODEL)
+    kg_error = await _gateway_serves(str(cfg.chat.litellm.base_url), _KG_MODEL)
+    assert kg_error is None, f"semantic graph gateway is required: {kg_error}"
     # ASGITransport does not run the lifespan: warm the gateway catalog the way
     # the shared client fixture does, or semantic-KG route resolution has no catalog.
     await asyncio.to_thread(warm_gateway_catalog)
@@ -168,13 +168,8 @@ async def seeded() -> AsyncIterator[SeededGraph]:
             cfg.graph_indexing.enabled = True
             cfg.graph_indexing.build_lexical_graph = True
             cfg.graph_indexing.store_chunk_embeddings = True
-            cfg.graph_indexing.semantic_kg_enabled = kg_skip is None
-            if kg_skip is None:
-                cfg.graph_indexing.semantic_kg_mode = "llm"
-                cfg.graph_indexing.semantic_kg_llm_model = _KG_MODEL
-                # The seed must be real: a failed extraction fails the run, never an empty graph.
-                cfg.graph_indexing.semantic_kg_require_llm_success = True
-            cfg.chat.litellm.enabled = kg_skip is None
+            cfg.graph_indexing.semantic_kg_llm_model = _KG_MODEL
+            cfg.chat.litellm.enabled = True
             cfg.reranking.reranker_mode = "none"
             cfg.semantic_cache.enabled = False
             await pg.upsert_corpus_config_json(corpus_id, cfg.model_dump(mode="serialization"))
@@ -191,11 +186,10 @@ async def seeded() -> AsyncIterator[SeededGraph]:
             assert started.status_code == 200, started.text
             final = await _wait_for_index(client, corpus_id)
             assert final["status"] == "complete", final
-            if kg_skip is None:
-                graph_stats = await client.get(f"/api/graph/{corpus_id}/stats")
-                assert (
-                    graph_stats.status_code == 200 and graph_stats.json()["total_entities"] > 0
-                ), graph_stats.text
+            graph_stats = await client.get(f"/api/graph/{corpus_id}/stats")
+            assert (
+                graph_stats.status_code == 200 and graph_stats.json()["total_entities"] > 0
+            ), graph_stats.text
 
             rows = await pg.list_chunks_for_repo(corpus_id, limit=None)
             content_by_id = {str(row.chunk_id): row.content for row in rows}
@@ -215,7 +209,6 @@ async def seeded() -> AsyncIterator[SeededGraph]:
                 corpus_id=corpus_id,
                 content_by_id=content_by_id,
                 vector_seed_ids=vector_seed_ids,
-                kg_skip=kg_skip,
             )
         finally:
             config_store._store = None
@@ -298,8 +291,6 @@ async def test_chunk_mode_hydrates_exactly_the_vector_seeds(
 async def test_chunk_mode_entity_expansion_adds_chunks_beyond_the_seeds(
     client: AsyncClient, seeded: SeededGraph
 ) -> None:
-    if seeded.kg_skip:
-        pytest.skip(f"entity expansion needs the semantic KG through the gateway: {seeded.kg_skip}")
     pg = PostgresClient(require_env("POSTGRES_DSN"))
     await pg.connect()
     try:
@@ -351,8 +342,6 @@ async def test_chunk_mode_entity_expansion_adds_chunks_beyond_the_seeds(
 async def test_entity_mode_hydrates_the_matched_entities_chunks(
     client: AsyncClient, seeded: SeededGraph
 ) -> None:
-    if seeded.kg_skip:
-        pytest.skip(f"entity mode needs the semantic KG through the gateway: {seeded.kg_skip}")
     pg = PostgresClient(require_env("POSTGRES_DSN"))
     await pg.connect()
     try:

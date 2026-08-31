@@ -9936,7 +9936,7 @@
     {
       "term": "Semantic KG LLM Model",
       "key": "SEMANTIC_KG_LLM_MODEL",
-      "definition": "LLM used for semantic knowledge-graph extraction when KG mode is set to LLM-based extraction. This model is responsible for entity detection, relation typing, and canonicalization decisions that become graph nodes and edges, so it directly controls graph quality and downstream traversal precision. Prefer models that are stable on structured extraction, handle long technical context, and support deterministic formatting or schema-constrained outputs. In practice, tune temperature low, enforce strict relation schemas, and validate extracted triples before write-back; weaker models can over-generate relations, confuse entity aliases, or miss cross-sentence links.",
+      "definition": "LLM used for semantic knowledge-graph extraction whenever graph indexing is enabled for an external document corpus. There is no second semantic toggle: the corpus policy derives semantic, code, off, or excluded behavior from graph enablement, code-graph selection, and the corpus's internal-system ownership. This model controls entity detection and relation typing, so use a stable structured-extraction route and keep the configured chunk ceiling and timeout visible before indexing.",
       "category": "graph",
       "related": [],
       "links": [

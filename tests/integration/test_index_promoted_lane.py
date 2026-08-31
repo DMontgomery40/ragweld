@@ -102,8 +102,8 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         cfg.graph_indexing.enabled = True
         cfg.graph_indexing.build_lexical_graph = True
         cfg.graph_indexing.store_chunk_embeddings = True
-        cfg.graph_indexing.semantic_kg_enabled = False
-        cfg.chat.litellm.enabled = False
+        cfg.graph_indexing.semantic_kg_llm_model = "deepseek.deepseek-v4-flash"
+        cfg.chat.litellm.enabled = True
         cfg.semantic_cache.enabled = False
         await pg.upsert_corpus_config_json(corpus_id, cfg.model_dump(mode="serialization"))
         config_store._store = None

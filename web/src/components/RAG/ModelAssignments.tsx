@@ -85,9 +85,10 @@ export function ModelAssignments() {
         model: enrichModel,
       },
       {
-        task: 'Semantic KG LLM',
-        provider: 'litellm',
-        model: kgModel,
+        task: graph?.build_code_graph ? 'Code AST Graph' : 'Semantic Graph Extraction',
+        provider: graph?.build_code_graph ? 'tree-sitter' : 'litellm',
+        model: graph?.build_code_graph ? '(AST extraction)' : kgModel,
+        fallbackNote: graph?.enabled ? 'derived corpus policy' : 'graph disabled',
       },
       {
         task: 'Query Expansion',

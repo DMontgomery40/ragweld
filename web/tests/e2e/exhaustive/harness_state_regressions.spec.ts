@@ -232,7 +232,7 @@ test('contract lock disables every index-content control across chunking, tokeni
   await expectAll(page, ['graph-skip-dense'], 'disabled');
   await expectAll(
     page,
-    ['graph-indexing-enabled', 'graph-lexical-enabled', 'graph-store-chunk-embeddings', 'semantic-kg-enabled'],
+    ['graph-indexing-enabled', 'graph-lexical-enabled', 'graph-store-chunk-embeddings', 'graph-build-code'],
     'enabled'
   );
 });
