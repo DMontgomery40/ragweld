@@ -475,9 +475,13 @@ test('numeric figure fields clamp to their bounds, stage on blur, and restore on
   // Apply -> one whole-config PUT carrying every clamped value, deep-merged into indexing.figures.
   const { putBody } = await applyStagedConfig(page, corpus.corpusId);
   page.off('request', onReq);
-  expect(putBody).toContain('"images_scale":4');
-  expect(putBody).toContain('"skip_classes":["logo"]');
-  expect(putBody).toContain('"max_completion_tokens":128');
+  // Field-scoped (parse the body, compare the exact field) so a wrong-but-superstring value like
+  // images_scale:40 or max_completion_tokens:1280 cannot satisfy a substring match — matches the
+  // JSON-parsed assertions in this file's other three config tests.
+  const putFigures = (JSON.parse(putBody) as { indexing: { figures: Record<string, unknown> } }).indexing.figures;
+  expect(putFigures.images_scale, 'the Apply PUT carries the clamped images_scale').toBe(4);
+  expect(putFigures.skip_classes, 'the Apply PUT carries the staged skip_classes').toEqual(['logo']);
+  expect(putFigures.max_completion_tokens, 'the Apply PUT carries the clamped max_completion_tokens').toBe(128);
   for (const body of bodies) {
     // Field-scoped: an unrelated default may legitimately hold these digits elsewhere in the
     // whole-config PUT, so assert the raw out-of-range value never reached THESE fields.

@@ -156,7 +156,7 @@ test('changing Top-K tunes this conversation and writes to no corpus at all', as
 
   await topK.fill(String(expectedFinalK + 2));
   await topK.blur();
-  await page.waitForTimeout(1500); // longer than the config store's ~300ms debounce
+  await page.waitForTimeout(1500); // settle window: under the staged model a chat quick-setting stages, never auto-writes
 
   expect(configWrites, 'a chat quick setting must not write a corpus config').toEqual([]);
   const after = await request.get(`${API_BASE}/config`, { params: { corpus_id: otherCorpusId } });
