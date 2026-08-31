@@ -4228,6 +4228,9 @@ async def stop_index_for_corpus(corpus_id: str) -> IndexStatus:
     "/index/status",
     response_model=DashboardIndexStatusResponse,
     responses={
+        404: {
+            "description": "The named corpus does not exist (e.g. a status poll from a tab open on a since-deleted corpus).",
+        },
         409: {
             "model": IndexRunConflictResponse | PersistedStateCorruptResponse,
             "description": "A malformed fence (index_fence_corrupt) or malformed persisted index state: manifest, tombstone, fence or reclaim backlog (persisted_state_corrupt).",
@@ -4280,7 +4283,12 @@ async def get_dashboard_index_status(
     keywords_count = len(keywords) if isinstance(keywords, list) else 0
 
     # Config + costs + storage breakdown (best-effort)
-    cfg = await load_scoped_config(repo_id=repo_id)
+    try:
+        cfg = await load_scoped_config(repo_id=repo_id)
+    except CorpusNotFoundError as exc:
+        # A dashboard status poll from a stale tab can name a corpus deleted since the
+        # tab loaded; the honest answer is a typed 404, not a 500.
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     # The Dashboard is the landing page, so warming from here gives the tokenizer load the whole
     # time it takes an operator to reach Indexing and click, not just the tab's own mount.
     _warm_sampler_in_background(cfg)
@@ -4389,6 +4397,9 @@ async def get_dashboard_index_status(
     "/index/stats",
     response_model=DashboardIndexStatsResponse,
     responses={
+        404: {
+            "description": "The named corpus does not exist (e.g. a stats poll on a since-deleted corpus).",
+        },
         409: {
             "model": IndexRunConflictResponse | PersistedStateCorruptResponse,
             "description": "A malformed fence (index_fence_corrupt) or malformed persisted index state: manifest, tombstone, fence or reclaim backlog (persisted_state_corrupt).",
@@ -4424,7 +4435,11 @@ async def get_dashboard_index_stats(
     keywords = meta.get("keywords") if isinstance(meta, dict) else None
     keywords_count = len(keywords) if isinstance(keywords, list) else 0
 
-    storage_breakdown = await _compute_dashboard_storage_breakdown(repo_id=repo_id)
+    try:
+        storage_breakdown = await _compute_dashboard_storage_breakdown(repo_id=repo_id)
+    except CorpusNotFoundError as exc:
+        # Same as the status endpoint: a stats poll on a deleted corpus is a typed 404.
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     return DashboardIndexStatsResponse(
         repo_id=repo_id,

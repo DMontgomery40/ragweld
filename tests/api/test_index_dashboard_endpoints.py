@@ -247,3 +247,20 @@ async def test_deleting_the_index_discards_the_persisted_runs(client: AsyncClien
         assert "ready to index" in " ".join(response.json()["lines"]).lower()
     finally:
         await _drop(corpus_id)
+
+
+async def test_dashboard_status_and_stats_are_404_for_an_unregistered_corpus(
+    client: AsyncClient,
+) -> None:
+    """A poll from a tab open on a since-deleted corpus is a typed 404, not a 500.
+
+    The corpus is never registered, so `load_scoped_config` raises CorpusNotFoundError
+    inside both dashboard endpoints; that must surface as 404, not an unhandled 500.
+    """
+    missing = f"pytest_dash_missing_{uuid.uuid4().hex[:10]}"
+
+    status = await client.get("/api/index/status", params={"corpus_id": missing})
+    assert status.status_code == 404, status.text
+
+    stats = await client.get("/api/index/stats", params={"corpus_id": missing})
+    assert stats.status_code == 404, stats.text
