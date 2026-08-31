@@ -13,7 +13,7 @@ from uuid import uuid4
 
 import pytest
 from httpx import AsyncClient
-from neo4j_graphrag.experimental.components.types import Neo4jGraph, Neo4jNode, Neo4jRelationship
+from neo4j_graphrag.components.types import Neo4jGraph, Neo4jNode, Neo4jRelationship
 
 from server.db.neo4j import Neo4jClient
 from server.db.postgres import PostgresClient

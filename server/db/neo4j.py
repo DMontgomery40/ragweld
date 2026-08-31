@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Literal, TypeVar, cast
 
 from neo4j import AsyncDriver, AsyncGraphDatabase
-from neo4j_graphrag.experimental.components.types import LexicalGraphConfig, Neo4jGraph
+from neo4j_graphrag.components.types import LexicalGraphConfig, Neo4jGraph
 
 from server.models.graph import Community, Entity, GraphNeighborsResponse, GraphStats, Relationship
 from server.models.retrieval import ChunkMatch

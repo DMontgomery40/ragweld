@@ -4,19 +4,19 @@ import re
 from collections import defaultdict
 from dataclasses import dataclass
 
-from neo4j_graphrag.experimental.components.entity_relation_extractor import (
+from neo4j_graphrag.components.entity_relation_extractor import (
     LLMEntityRelationExtractor,
     OnError,
 )
-from neo4j_graphrag.experimental.components.lexical_graph import LexicalGraphBuilder
-from neo4j_graphrag.experimental.components.schema import (
+from neo4j_graphrag.components.lexical_graph import LexicalGraphBuilder
+from neo4j_graphrag.components.schema import (
     GraphSchema,
     NodeType,
     Pattern,
     PropertyType,
     RelationshipType,
 )
-from neo4j_graphrag.experimental.components.types import (
+from neo4j_graphrag.components.types import (
     DocumentInfo,
     LexicalGraphConfig,
     Neo4jGraph,

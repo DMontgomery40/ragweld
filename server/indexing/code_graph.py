@@ -27,7 +27,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from neo4j_graphrag.experimental.components.types import (
+from neo4j_graphrag.components.types import (
     LexicalGraphConfig,
     Neo4jGraph,
     Neo4jNode,

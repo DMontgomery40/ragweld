@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any, Literal, TypeVar
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from neo4j_graphrag.experimental.components.types import Neo4jGraph, Neo4jRelationship
+from neo4j_graphrag.components.types import Neo4jGraph, Neo4jRelationship
 from starlette.responses import StreamingResponse
 
 from server.api.dependency_errors import (
