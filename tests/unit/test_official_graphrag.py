@@ -15,7 +15,7 @@ from server.models.index import Chunk
 
 
 @pytest.mark.asyncio
-async def test_write_lexical_graph_with_graphrag_tags_document_and_chunk_nodes() -> None:
+async def test_write_lexical_graph_with_graphrag_uses_unscoped_official_contract() -> None:
     chunks = [
         Chunk(
             chunk_id="chunk-1",
@@ -37,19 +37,27 @@ async def test_write_lexical_graph_with_graphrag_tags_document_and_chunk_nodes()
 
     assert lexical_graph_config.chunk_node_label == GRAPH_RAG_CHUNK_LABEL
     assert lexical_graph_config.document_node_label == GRAPH_RAG_DOCUMENT_LABEL
+    assert lexical_graph_config.chunk_to_document_relationship_type == "FROM_DOCUMENT"
+    assert lexical_graph_config.next_chunk_relationship_type == "NEXT_CHUNK"
+    assert lexical_graph_config.node_to_chunk_relationship_type == "FROM_CHUNK"
 
     chunk_node = next(node for node in graph.nodes if node.label == GRAPH_RAG_CHUNK_LABEL)
     document_node = next(node for node in graph.nodes if node.label == GRAPH_RAG_DOCUMENT_LABEL)
 
-    assert chunk_node.properties["repo_id"] == "repo-1"
-    assert chunk_node.properties["run_id"] == "run-1"
     assert chunk_node.properties["chunk_id"] == "chunk-1"
     assert chunk_node.properties["file_path"] == "docs/test.txt"
+    assert "embedding" not in chunk_node.properties
 
-    assert document_node.properties["repo_id"] == "repo-1"
-    assert document_node.properties["run_id"] == "run-1"
     assert document_node.properties["file_path"] == "docs/test.txt"
-    assert document_node.properties["document_id"] == "repo-1:docs/test.txt"
+    assert not any(
+        {"repo_id", "run_id", "graphJoinId"} & set(node.properties)
+        for node in graph.nodes
+    )
+    assert not any(
+        {"repo_id", "run_id", "graphJoinId"} & set(rel.properties)
+        for rel in graph.relationships
+    )
+    assert all(rel.type != "IN_CHUNK" for rel in graph.relationships)
 
 
 def test_count_semantic_edges_counts_entities_relations_and_empty_chunks() -> None:

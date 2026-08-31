@@ -114,20 +114,28 @@ def test_python_graph_keeps_local_edges_immediate_and_defers_cross_file_edges(tm
     assert _deferred(result, REL_INHERITS) == {(child, a_base)}
     assert _deferred(result, REL_CALLS) == {(run, a_helper), (run, a_base)}
     for r in result.deferred_relationships:
-        assert r.properties["repo_id"] == "code" and r.properties["run_id"] == "run-1"
+        assert not ({"repo_id", "run_id", "graphJoinId"} & set(r.properties))
 
     assert result.unresolved_imports == ["os", "typing"]
     assert result.unresolved_calls == ["other -> getcwd"]
     assert result.unresolved_bases == []
 
-    in_chunk = {(r.start_node_id, r.end_node_id) for r in result.graph.relationships if r.type == result.lexical_graph_config.node_to_chunk_relationship_type}
+    in_chunk_type = result.lexical_graph_config.node_to_chunk_relationship_type
+    in_chunk = {
+        (r.start_node_id, r.end_node_id)
+        for r in result.graph.relationships
+        if r.type == in_chunk_type
+    }
     assert (child, f"{file_path}:1-8:1") in in_chunk  # class Child starts on line 7
     assert (go, f"{file_path}:9-16:9") in in_chunk  # def go on line 11
     assert (mod, f"{file_path}:1-8:1") in in_chunk
 
+    assert in_chunk_type == "FROM_CHUNK"
+    assert all(r.type != "IN_CHUNK" for r in result.graph.relationships)
+
     props = {n.id: n.properties for n in result.graph.nodes}
     assert props[run]["kind"] == "method" and props[run]["start_line"] == 8 and props[run]["signature"] == "def run(self, x):"
-    assert props[child]["entity_type"] == ENTITY_CLASS and props[child]["repo_id"] == "code" and props[child]["run_id"] == "run-1"
+    assert not ({"repo_id", "run_id", "graphJoinId"} & set(props[child]))
     weights = {r.type: r.properties["weight"] for r in result.graph.relationships + result.deferred_relationships if "weight" in r.properties}
     assert weights[REL_CALLS] == cfg.graph_indexing.ast_calls_weight
     assert weights[REL_INHERITS] == cfg.graph_indexing.ast_inherits_weight

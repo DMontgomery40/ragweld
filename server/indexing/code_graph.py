@@ -3,8 +3,8 @@
 Extracts module / class / function entities and their `contains`, `inherits`,
 `imports` and `calls` relationships from Python, TypeScript and JavaScript
 sources with tree-sitter, links every entity to the chunk it is defined in
-(`IN_CHUNK`), and returns a package-shaped ``Neo4jGraph`` so the existing
-``Neo4jClient.upsert_graphrag_graph`` writes it exactly like the semantic KG.
+(`FROM_CHUNK`), and returns a package-shaped ``Neo4jGraph`` for the official
+scoped GraphRAG writer.
 
 Entity ids are corpus-relative (`path` for a module, `path::qualname` for a
 symbol); uniqueness in Neo4j is scoped by ``repo_id`` so the staging id never
@@ -35,7 +35,6 @@ from neo4j_graphrag.components.types import (
 )
 from tree_sitter import Language, Node, Parser
 
-from server.indexing.official_graphrag import _annotate_graph, _lexical_graph_config
 from server.models.index import Chunk
 from server.models.tribrid_config_model import TriBridConfig
 
@@ -396,7 +395,9 @@ def extract_code_graph(
     cfg: TriBridConfig,
     root: Path,
 ) -> CodeGraphResult:
-    lexical_graph_config = _lexical_graph_config()
+    # Keep the package's lexical contract exact. Scope is server-owned and is
+    # stamped only by ScopedNeo4jWriter after reserved-key validation.
+    lexical_graph_config = LexicalGraphConfig()
     lang = _language_for(str(language or ""), file_path)
     if lang is None:
         return CodeGraphResult(Neo4jGraph(nodes=[], relationships=[]), lexical_graph_config, [], [])
@@ -529,14 +530,7 @@ def extract_code_graph(
                 )
             )
 
-    graph = _annotate_graph(
-        Neo4jGraph(nodes=list(nodes.values()), relationships=relationships),
-        repo_id=repo_id,
-        run_id=run_id,
-        lexical_graph_config=lexical_graph_config,
-    )
-    for item in deferred:
-        item.properties = {**dict(item.properties or {}), "repo_id": repo_id, "run_id": run_id}
+    graph = Neo4jGraph(nodes=list(nodes.values()), relationships=relationships)
     return CodeGraphResult(
         graph=graph,
         lexical_graph_config=lexical_graph_config,

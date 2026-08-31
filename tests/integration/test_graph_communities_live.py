@@ -8,16 +8,24 @@ draw). Real Neo4j, real Postgres corpus row, no mocks.
 
 from __future__ import annotations
 
+import asyncio
 import os
 from uuid import uuid4
 
 import pytest
 from httpx import AsyncClient
-from neo4j_graphrag.components.types import Neo4jGraph, Neo4jNode, Neo4jRelationship
+from neo4j import GraphDatabase
+from neo4j_graphrag.components.types import (
+    LexicalGraphConfig,
+    Neo4jGraph,
+    Neo4jNode,
+    Neo4jRelationship,
+)
 
 from server.db.neo4j import Neo4jClient
 from server.db.postgres import PostgresClient
 from server.indexing.generations import build_generation
+from server.indexing.graphrag_pipeline import ScopedNeo4jWriter
 from server.indexing.official_graphrag import write_lexical_graph_with_graphrag
 from server.models.index import Chunk
 from tests.service_requirements import require_env
@@ -45,9 +53,35 @@ def _rel(a: str, b: str) -> Neo4jRelationship:
     return Neo4jRelationship(start_node_id=a, end_node_id=b, type="associated_with", properties={"weight": 1.0})
 
 
+async def _write_graph(
+    repo_id: str,
+    run_id: str,
+    graph: Neo4jGraph,
+    lexical: LexicalGraphConfig,
+) -> None:
+    driver = GraphDatabase.driver(
+        os.environ.get("NEO4J_URI", "bolt://127.0.0.1:7687"),
+        auth=(
+            os.environ.get("NEO4J_USER", "neo4j"),
+            os.environ.get("NEO4J_PASSWORD", "password"),
+        ),
+    )
+    try:
+        writer = await asyncio.to_thread(
+            ScopedNeo4jWriter,
+            driver=driver,
+            repo_id=repo_id,
+            run_id=run_id,
+        )
+        await writer.run(graph, lexical)
+    finally:
+        await asyncio.to_thread(driver.close)
+
+
 async def test_label_propagation_communities_survive_promotion_and_feed_the_subgraph(client: AsyncClient) -> None:
     active = f"graph-comm-{uuid4().hex[:8]}"
-    staging = f"__staging__{active}__{uuid4().hex[:6]}"
+    run_id = uuid4().hex
+    staging = f"__staging__{active}__{run_id}"
     neo = Neo4jClient(
         os.environ.get("NEO4J_URI", "bolt://127.0.0.1:7687"),
         os.environ.get("NEO4J_USER", "neo4j"),
@@ -59,7 +93,6 @@ async def test_label_propagation_communities_survive_promotion_and_feed_the_subg
     assert created.status_code in (200, 201), created.text
     await neo.connect()
     try:
-        await neo.ensure_schema()
         chunk = Chunk(
             chunk_id="obs-1",
             content="Aurora Tidal Observatory overview",
@@ -70,9 +103,9 @@ async def test_label_propagation_communities_survive_promotion_and_feed_the_subg
             embedding=[0.1, 0.2],
         )
         lexical, lexical_cfg = await write_lexical_graph_with_graphrag(
-            repo_id=staging, run_id="communities-live", file_path="observatory-overview.md", chunks=[chunk]
+            repo_id=staging, run_id=run_id, file_path="observatory-overview.md", chunks=[chunk]
         )
-        await neo.upsert_graphrag_graph(staging, lexical, lexical_graph_config=lexical_cfg)
+        await _write_graph(staging, run_id, lexical, lexical_cfg)
 
         # Two linked groups (a triangle and a chain) plus one isolated entity.
         entities = Neo4jGraph(
@@ -97,7 +130,7 @@ async def test_label_propagation_communities_survive_promotion_and_feed_the_subg
                 _rel("a3", "b1"),
             ],
         )
-        await neo.upsert_graphrag_graph(staging, entities, lexical_graph_config=lexical_cfg)
+        await _write_graph(staging, run_id, entities, lexical_cfg)
 
         detected = await neo.detect_communities(staging)
         assert len(detected) == 2, [c.model_dump() for c in detected]
@@ -116,7 +149,7 @@ async def test_label_propagation_communities_survive_promotion_and_feed_the_subg
         await pg.connect()
         try:
             await pg.set_generation(
-                active, build_generation(run_id="communities-live", qdrant_collection=None, graph_repo_id=staging)
+                active, build_generation(run_id=run_id, qdrant_collection=None, graph_repo_id=staging)
             )
         finally:
             await pg.disconnect()
@@ -197,7 +230,8 @@ async def test_code_entity_ids_round_trip_and_a_search_carries_its_own_edges(
     denominator instead of an undenominated "200 shown".
     """
     active = f"graph-code-{uuid4().hex[:8]}"
-    staging = f"__staging__{active}__{uuid4().hex[:6]}"
+    run_id = uuid4().hex
+    staging = f"__staging__{active}__{run_id}"
     neo = Neo4jClient(
         os.environ.get("NEO4J_URI", "bolt://127.0.0.1:7687"),
         os.environ.get("NEO4J_USER", "neo4j"),
@@ -216,7 +250,6 @@ async def test_code_entity_ids_round_trip_and_a_search_carries_its_own_edges(
 
     await neo.connect()
     try:
-        await neo.ensure_schema()
         chunk = Chunk(
             chunk_id="code-1",
             content="class Reranker: ...",
@@ -228,7 +261,7 @@ async def test_code_entity_ids_round_trip_and_a_search_carries_its_own_edges(
         )
         _lexical, lexical_cfg = await write_lexical_graph_with_graphrag(
             repo_id=staging,
-            run_id="code-live",
+            run_id=run_id,
             file_path="server/retrieval/rerank.py",
             chunks=[chunk],
         )
@@ -248,13 +281,13 @@ async def test_code_entity_ids_round_trip_and_a_search_carries_its_own_edges(
                 _rel(mlx_reranker, unrelated),
             ],
         )
-        await neo.upsert_graphrag_graph(staging, graph, lexical_graph_config=lexical_cfg)
+        await _write_graph(staging, run_id, graph, lexical_cfg)
 
         pg = PostgresClient(require_env("POSTGRES_DSN"))
         await pg.connect()
         try:
             await pg.set_generation(
-                active, build_generation(run_id="code-live", qdrant_collection=None, graph_repo_id=staging)
+                active, build_generation(run_id=run_id, qdrant_collection=None, graph_repo_id=staging)
             )
         finally:
             await pg.disconnect()
@@ -356,7 +389,8 @@ async def test_neighbors_never_return_the_centre_twice_on_a_cyclic_graph(
     max hops is operator-settable 1-5, so this is reachable from the UI.
     """
     active = f"graph-cycle-{uuid4().hex[:8]}"
-    staging = f"__staging__{active}__{uuid4().hex[:6]}"
+    run_id = uuid4().hex
+    staging = f"__staging__{active}__{run_id}"
     neo = Neo4jClient(
         os.environ.get("NEO4J_URI", "bolt://127.0.0.1:7687"),
         os.environ.get("NEO4J_USER", "neo4j"),
@@ -370,7 +404,6 @@ async def test_neighbors_never_return_the_centre_twice_on_a_cyclic_graph(
     a, b, c = "pkg/a.py::A", "pkg/b.py::B", "pkg/c.py::C"
     await neo.connect()
     try:
-        await neo.ensure_schema()
         chunk = Chunk(
             chunk_id="cycle-1",
             content="class A: ...",
@@ -381,10 +414,11 @@ async def test_neighbors_never_return_the_centre_twice_on_a_cyclic_graph(
             embedding=[0.3, 0.4],
         )
         _lexical, lexical_cfg = await write_lexical_graph_with_graphrag(
-            repo_id=staging, run_id="cycle-live", file_path="pkg/a.py", chunks=[chunk]
+            repo_id=staging, run_id=run_id, file_path="pkg/a.py", chunks=[chunk]
         )
-        await neo.upsert_graphrag_graph(
+        await _write_graph(
             staging,
+            run_id,
             Neo4jGraph(
                 nodes=[
                     _code_entity(a, "A", "class"),
@@ -393,14 +427,14 @@ async def test_neighbors_never_return_the_centre_twice_on_a_cyclic_graph(
                 ],
                 relationships=[_rel(a, b), _rel(b, c), _rel(c, a)],
             ),
-            lexical_graph_config=lexical_cfg,
+            lexical_cfg,
         )
 
         pg = PostgresClient(require_env("POSTGRES_DSN"))
         await pg.connect()
         try:
             await pg.set_generation(
-                active, build_generation(run_id="cycle-live", qdrant_collection=None, graph_repo_id=staging)
+                active, build_generation(run_id=run_id, qdrant_collection=None, graph_repo_id=staging)
             )
         finally:
             await pg.disconnect()

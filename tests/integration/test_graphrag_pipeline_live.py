@@ -1,0 +1,440 @@
+from __future__ import annotations
+
+import asyncio
+import os
+from pathlib import Path
+from uuid import uuid4
+
+import pytest
+from httpx import AsyncClient
+from neo4j import GraphDatabase
+from neo4j_graphrag.components.schema import (
+    GraphSchema,
+    NodeType,
+    Pattern,
+    PropertyType,
+    RelationshipType,
+)
+from neo4j_graphrag.components.types import Neo4jGraph, Neo4jNode
+
+from server.api.index import _resolve_semantic_kg_route
+from server.config import load_config
+from server.db.neo4j import Neo4jClient
+from server.db.postgres import PostgresClient
+from server.gateway_catalog import warm_gateway_catalog
+from server.indexing.generations import GenerationManifest
+from server.indexing.graphrag_pipeline import (
+    GraphScopeCollisionError,
+    ScopedNeo4jWriter,
+    build_semantic_pipeline,
+    write_code_file_graph,
+    write_deferred_code_relationships,
+    write_semantic_file_graph,
+)
+from server.models.index import Chunk
+from server.services import config_store
+from tests.service_requirements import require_env
+
+pytestmark = [
+    pytest.mark.requires_postgres,
+    pytest.mark.requires_neo4j,
+    pytest.mark.requires_qdrant,
+    pytest.mark.asyncio,
+]
+
+
+def _driver_and_database(corpus_id: str):
+    cfg = load_config()
+    driver = GraphDatabase.driver(
+        os.environ.get("NEO4J_URI", cfg.graph_storage.neo4j_uri),
+        auth=(
+            os.environ.get("NEO4J_USER", cfg.graph_storage.neo4j_user),
+            os.environ.get("NEO4J_PASSWORD", cfg.graph_storage.resolve_password()),
+        ),
+    )
+    return cfg, driver, cfg.graph_storage.resolve_database(corpus_id)
+
+
+def _schema() -> GraphSchema:
+    named = [PropertyType(name="name", type="STRING")]
+    return GraphSchema(
+        node_types=[
+            NodeType(label="Person", description="A named person", properties=named),
+            NodeType(
+                label="Organization",
+                description="A named organization",
+                properties=named,
+            ),
+            NodeType(label="Location", description="A named place", properties=named),
+        ],
+        relationship_types=[
+            RelationshipType(label="WORKS_FOR", description="Employment"),
+            RelationshipType(label="LOCATED_IN", description="Location"),
+        ],
+        patterns=[
+            Pattern(source="Person", relationship="WORKS_FOR", target="Organization"),
+            Pattern(
+                source="Organization", relationship="LOCATED_IN", target="Location"
+            ),
+        ],
+        additional_node_types=False,
+        additional_relationship_types=False,
+        additional_patterns=False,
+    )
+
+
+async def _count(neo: Neo4jClient, query: str, repo_id: str) -> int:
+    rows = await neo.execute_cypher(query, {"repo_id": repo_id})
+    return int((rows[0] if rows else {}).get("n") or 0)
+
+
+async def _wait_for_index(
+    client: AsyncClient, corpus_id: str, *, timeout_s: float = 300.0
+) -> dict:
+    deadline = asyncio.get_running_loop().time() + timeout_s
+    last: dict = {}
+    while asyncio.get_running_loop().time() < deadline:
+        response = await client.get(f"/api/index/{corpus_id}/status")
+        assert response.status_code == 200, response.text
+        last = response.json()
+        if last.get("status") in {"complete", "error", "cancelled"}:
+            return last
+        await asyncio.sleep(0.5)
+    raise AssertionError(f"index did not finish within {timeout_s}s: {last}")
+
+
+async def test_semantic_and_code_files_use_scoped_official_writer_contract(
+    tmp_path: Path,
+) -> None:
+    semantic_run = uuid4().hex
+    code_run = uuid4().hex
+    semantic_repo = f"__staging__pipeline-semantic__{semantic_run}"
+    code_repo = f"__staging__pipeline-code__{code_run}"
+    cfg, driver, database = _driver_and_database("pipeline-live")
+    cfg.graph_indexing.semantic_kg_llm_model = os.environ.get(
+        "GRAPH_E2E_KG_MODEL", "deepseek.deepseek-v4-flash"
+    )
+    await asyncio.to_thread(warm_gateway_catalog)
+    route = _resolve_semantic_kg_route(cfg)
+    await asyncio.to_thread(driver.verify_connectivity)
+    neo = Neo4jClient(
+        os.environ.get("NEO4J_URI", cfg.graph_storage.neo4j_uri),
+        os.environ.get("NEO4J_USER", cfg.graph_storage.neo4j_user),
+        os.environ.get("NEO4J_PASSWORD", cfg.graph_storage.resolve_password()),
+        database=database,
+    )
+    await neo.connect()
+    try:
+        pipeline = await asyncio.to_thread(
+            build_semantic_pipeline,
+            driver=driver,
+            neo4j_database=database,
+            repo_id=semantic_repo,
+            run_id=semantic_run,
+            route_model=str(route.model or ""),
+            route_base_url=str(route.base_url or ""),
+            route_api_key=str(route.api_key or ""),
+            max_concurrency=2,
+        )
+        semantic_chunks = [
+            Chunk(
+                chunk_id="mission.md:1-3:0",
+                content=(
+                    "Alice Chen works for Northwind Labs. "
+                    "Northwind Labs is located in Denver."
+                ),
+                file_path="mission.md",
+                start_line=1,
+                end_line=3,
+                embedding=[0.1, 0.2],
+            )
+        ]
+        telemetry = await write_semantic_file_graph(
+            pipeline=pipeline,
+            file_path="mission.md",
+            chunks=semantic_chunks,
+            schema=_schema(),
+        )
+        assert telemetry.succeeded_chunks == 1
+        assert telemetry.extracted_entities >= 3
+        assert telemetry.semantic_relationships >= 2
+        assert telemetry.from_chunk_relationships >= 1
+
+        code_writer = await asyncio.to_thread(
+            ScopedNeo4jWriter,
+            driver=driver,
+            neo4j_database=database,
+            repo_id=code_repo,
+            run_id=code_run,
+            clean_db=False,
+        )
+        source = "def helper(x):\n    return x\n\nclass Runner:\n    def run(self):\n        return helper(1)\n"
+        code_file = "pkg/runner.py"
+        code_path = tmp_path / code_file
+        code_path.parent.mkdir(parents=True)
+        code_path.write_text(source, encoding="utf-8")
+        code_chunks = [
+            Chunk(
+                chunk_id=f"{code_file}:1-6:0",
+                content=source,
+                file_path=code_file,
+                start_line=1,
+                end_line=6,
+                language="python",
+                embedding=[0.3, 0.4],
+            )
+        ]
+        deferred = []
+        code_telemetry = await write_code_file_graph(
+            writer=code_writer,
+            cfg=cfg,
+            repo_root=tmp_path,
+            file_path=code_file,
+            source=source,
+            language="python",
+            chunks=code_chunks,
+            deferred_relationships=deferred,
+        )
+        await write_deferred_code_relationships(code_writer, deferred)
+        assert code_telemetry.extracted_entities >= 3
+        assert code_telemetry.from_chunk_relationships >= 3
+
+        for repo_id, run_id in (
+            (semantic_repo, semantic_run),
+            (code_repo, code_run),
+        ):
+            bad_nodes = await neo.execute_cypher(
+                """
+                MATCH (n {repo_id: $repo_id})
+                WHERE n.run_id IS NULL OR n.run_id <> $run_id
+                RETURN count(n) AS n
+                """,
+                {"repo_id": repo_id, "run_id": run_id},
+            )
+            bad_relationships = await neo.execute_cypher(
+                """
+                MATCH (a {repo_id: $repo_id})-[r]->(b)
+                WHERE r.repo_id IS NULL OR r.run_id <> $run_id
+                RETURN count(r) AS n
+                """,
+                {"repo_id": repo_id, "run_id": run_id},
+            )
+            assert int(bad_nodes[0]["n"]) == 0
+            assert int(bad_relationships[0]["n"]) == 0
+
+        invalid = await neo.execute_cypher(
+            """
+            MATCH (n {repo_id: $repo_id})
+            OPTIONAL MATCH (n)-[r]->()
+            WITH collect(DISTINCT n) AS nodes, collect(DISTINCT r) AS rels
+            RETURN
+              size([n IN nodes WHERE n:Chunk AND (n.graphJoinId IS NULL OR n.embedding IS NOT NULL)]) AS bad_chunks,
+              size([n IN nodes WHERE n:__Entity__ AND (n.entity_id IS NULL OR n.entity_type IS NULL)]) AS bad_entities,
+              size([r IN rels WHERE type(r) IN ['IN_CHUNK', 'IN_COMMUNITY']]) AS legacy_rels,
+              size([n IN nodes WHERE n:Community]) AS communities
+            """,
+            {"repo_id": semantic_repo},
+        )
+        assert invalid == [
+            {"bad_chunks": 0, "bad_entities": 0, "legacy_rels": 0, "communities": 0}
+        ]
+        assert await _count(
+            neo,
+            "MATCH (:__Entity__ {repo_id: $repo_id})-[r:FROM_CHUNK]->(:Chunk) RETURN count(r) AS n",
+            semantic_repo,
+        ) >= 1
+
+        writer = pipeline.get_node_by_name("writer").component
+        before = await _count(
+            neo, "MATCH (n {repo_id: $repo_id}) RETURN count(n) AS n", semantic_repo
+        )
+        with pytest.raises(GraphScopeCollisionError, match="repo_id"):
+            await writer.run(
+                Neo4jGraph(
+                    nodes=[
+                        Neo4jNode(
+                            id="reserved",
+                            label="Person",
+                            properties={"name": "Reserved", "repo_id": "attacker"},
+                        )
+                    ]
+                )
+            )
+        after = await _count(
+            neo, "MATCH (n {repo_id: $repo_id}) RETURN count(n) AS n", semantic_repo
+        )
+        assert after == before
+    finally:
+        for repo_id in (semantic_repo, code_repo):
+            await neo.delete_graph(repo_id)
+        await neo.disconnect()
+        await asyncio.to_thread(driver.close)
+
+
+async def test_live_writer_keeps_event_loop_responsive_for_ten_thousand_nodes() -> None:
+    run_id = uuid4().hex
+    repo_id = f"__staging__pipeline-ticker__{run_id}"
+    cfg, driver, database = _driver_and_database("pipeline-ticker")
+    await asyncio.to_thread(driver.verify_connectivity)
+    neo = Neo4jClient(
+        os.environ.get("NEO4J_URI", cfg.graph_storage.neo4j_uri),
+        os.environ.get("NEO4J_USER", cfg.graph_storage.neo4j_user),
+        os.environ.get("NEO4J_PASSWORD", cfg.graph_storage.resolve_password()),
+        database=database,
+    )
+    await neo.connect()
+    writer = await asyncio.to_thread(
+        ScopedNeo4jWriter,
+        driver=driver,
+        neo4j_database=database,
+        repo_id=repo_id,
+        run_id=run_id,
+        batch_size=1000,
+    )
+    graph = Neo4jGraph(
+        nodes=[
+            Neo4jNode(id=f"entity-{index}", label="LoadNode", properties={"name": f"N{index}"})
+            for index in range(10_000)
+        ]
+    )
+    ticks = 0
+    finished = asyncio.Event()
+
+    async def _ticker() -> None:
+        nonlocal ticks
+        while not finished.is_set():
+            ticks += 1
+            await asyncio.sleep(0)
+
+    ticker = asyncio.create_task(_ticker())
+    try:
+        await writer.run(graph)
+        finished.set()
+        await ticker
+        assert ticks > 10
+        assert await _count(
+            neo, "MATCH (n:LoadNode {repo_id: $repo_id}) RETURN count(n) AS n", repo_id
+        ) == 10_000
+    finally:
+        finished.set()
+        await ticker
+        await neo.delete_graph(repo_id)
+        await neo.disconnect()
+        await asyncio.to_thread(driver.close)
+
+
+async def test_full_index_promotes_the_approved_official_pipeline_generation(
+    client: AsyncClient,
+    tmp_path: Path,
+) -> None:
+    corpus_id = f"pipeline-index-{uuid4().hex[:8]}"
+    fixture_root = Path(__file__).resolve().parents[1] / "fixtures" / "acceptance_corpus"
+    corpus_path = tmp_path / "acceptance_corpus"
+    corpus_path.mkdir()
+    combined_fixture = "\n\n".join(
+        fixture.read_text(encoding="utf-8") for fixture in sorted(fixture_root.iterdir())
+    )
+    (corpus_path / "combined-acceptance-corpus.md").write_text(
+        combined_fixture,
+        encoding="utf-8",
+    )
+    model_alias = os.environ.get("GRAPH_E2E_KG_MODEL", "deepseek.deepseek-v4-flash")
+    pg = PostgresClient(require_env("POSTGRES_DSN"))
+    await pg.connect()
+    created = await client.post(
+        "/api/corpora",
+        json={"corpus_id": corpus_id, "name": corpus_id, "path": str(corpus_path)},
+    )
+    assert created.status_code in (200, 201), created.text
+    neo: Neo4jClient | None = None
+    try:
+        cfg = load_config()
+        cfg.embedding.embedding_backend = "deterministic"
+        cfg.chunking.chunking_strategy = "fixed_chars"
+        cfg.chunking.chunk_size = 200
+        cfg.chunking.chunk_overlap = 0
+        cfg.indexing.indexing_batch_size = 10
+        cfg.indexing.figures.enabled = False
+        cfg.graph_indexing.enabled = True
+        cfg.graph_indexing.build_code_graph = False
+        cfg.graph_indexing.semantic_kg_llm_model = model_alias
+        cfg.chat.litellm.enabled = True
+        await pg.upsert_corpus_config_json(corpus_id, cfg.model_dump(mode="serialization"))
+        config_store._store = None
+
+        proposed = await client.post(
+            f"/api/index/{corpus_id}/graph-schema/proposal",
+            json={"force_refresh": False},
+            timeout=180,
+        )
+        assert proposed.status_code == 200, proposed.text
+        schema_hash = proposed.json()["schema_hash"]
+
+        started = await client.post(
+            "/api/index",
+            json={
+                "corpus_id": corpus_id,
+                "repo_path": str(corpus_path),
+                "force_reindex": True,
+                "approved_graph_schema_hash": schema_hash,
+            },
+        )
+        assert started.status_code == 200, started.text
+        final = await _wait_for_index(client, corpus_id)
+        assert final["status"] == "complete", final
+
+        corpus = await pg.get_corpus(corpus_id)
+        manifest = GenerationManifest.model_validate((corpus or {})["meta"]["generation"])
+        assert manifest.graph_repo_id
+        assert manifest.graph_metadata is not None
+        assert manifest.graph_metadata.schema_hash == schema_hash
+        assert manifest.graph_metadata.policy == "semantic"
+
+        neo = Neo4jClient(
+            os.environ.get("NEO4J_URI", cfg.graph_storage.neo4j_uri),
+            os.environ.get("NEO4J_USER", cfg.graph_storage.neo4j_user),
+            os.environ.get("NEO4J_PASSWORD", cfg.graph_storage.resolve_password()),
+            database=cfg.graph_storage.resolve_database(corpus_id),
+        )
+        await neo.connect()
+        graph_repo_id = str(manifest.graph_repo_id)
+        assert await _count(
+            neo,
+            "MATCH (:__Entity__ {repo_id: $repo_id})-[r:FROM_CHUNK]->(:Chunk) RETURN count(r) AS n",
+            graph_repo_id,
+        ) > 0
+        assert await _count(
+            neo,
+            "MATCH (c:Chunk {repo_id: $repo_id}) WHERE c.embedding IS NOT NULL RETURN count(c) AS n",
+            graph_repo_id,
+        ) == 0
+        assert await _count(
+            neo,
+            "MATCH ()-[r:IN_CHUNK|IN_COMMUNITY]->() WHERE r.repo_id = $repo_id RETURN count(r) AS n",
+            graph_repo_id,
+        ) == 0
+        file_chains = await neo.execute_cypher(
+            """
+            MATCH (d:Document {repo_id: $repo_id})<-[:FROM_DOCUMENT]-(c:Chunk)
+            WITH d, count(c) AS chunks
+            RETURN max(chunks) AS max_chunks, sum(chunks) AS total_chunks, count(d) AS documents
+            """,
+            {"repo_id": graph_repo_id},
+        )
+        chain = file_chains[0]
+        assert int(chain["max_chunks"]) > cfg.indexing.indexing_batch_size, (
+            "fixture must cross a complete vector batch so NEXT_CHUNK proves file-level graph assembly"
+        )
+        next_edges = await _count(
+            neo,
+            "MATCH (:Chunk {repo_id: $repo_id})-[r:NEXT_CHUNK]->(:Chunk {repo_id: $repo_id}) RETURN count(r) AS n",
+            graph_repo_id,
+        )
+        assert next_edges == int(chain["total_chunks"]) - int(chain["documents"])
+    finally:
+        config_store._store = None
+        if neo is not None:
+            await neo.disconnect()
+        await client.delete(f"/api/index/{corpus_id}")
+        await client.delete(f"/api/corpora/{corpus_id}")
+        await pg.disconnect()

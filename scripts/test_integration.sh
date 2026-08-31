@@ -122,7 +122,6 @@ async def main() -> None:
         await postgres.connect()
         await neo4j.connect()
         await neo4j.ping()
-        await neo4j.ensure_schema()
     finally:
         await neo4j.disconnect()
         await PostgresClient.close_shared_pools()
@@ -131,6 +130,6 @@ async def main() -> None:
 asyncio.run(main())
 PY
 
-echo "[integration] schemas ready; running strict live-service tests"
+echo "[integration] live dependencies ready; running strict live-service tests"
 UV_CACHE_DIR="${UV_CACHE_DIR:-${TMPDIR:-/tmp}/ragweld-uv-cache}" \
 uv run --no-sync pytest -q -m "requires_postgres or requires_neo4j or requires_qdrant" "$@"

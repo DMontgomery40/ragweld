@@ -24,8 +24,10 @@ from pathlib import Path
 from typing import Any, Literal, TypeVar
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from neo4j import Driver, GraphDatabase
 from neo4j_graphrag.components.schema import GraphSchema
-from neo4j_graphrag.components.types import Neo4jGraph, Neo4jRelationship
+from neo4j_graphrag.components.types import Neo4jRelationship
+from neo4j_graphrag.experimental.pipeline import Pipeline
 from starlette.responses import StreamingResponse
 
 from server.api.dependency_errors import (
@@ -36,7 +38,6 @@ from server.chat.provider_router import ProviderRoute, select_provider_route
 from server.db.neo4j import Neo4jClient
 from server.db.postgres import PostgresClient
 from server.indexing.chunker import Chunker
-from server.indexing.code_graph import CODE_GRAPH_LANGUAGES, extract_code_graph
 from server.indexing.embedder import Embedder, configure_postgres_embedding_cache_backend
 from server.indexing.estimate import (
     ParquetBounds,
@@ -72,16 +73,18 @@ from server.indexing.graph_policy import (
     require_graph_chunk_ceiling,
     resolve_graph_policy,
 )
+from server.indexing.graphrag_pipeline import (
+    ScopedNeo4jWriter,
+    build_semantic_pipeline,
+    write_code_file_graph,
+    write_deferred_code_relationships,
+    write_semantic_file_graph,
+)
 from server.indexing.graphrag_schema import (
     derive_graph_schema_proposal,
     select_schema_chunks,
 )
 from server.indexing.loader import FileLoader
-from server.indexing.official_graphrag import (
-    _lexical_graph_config,
-    extract_semantic_kg_with_graphrag,
-    write_lexical_graph_with_graphrag,
-)
 from server.indexing.provenance import stamp_provenance
 from server.indexing.text_extractors import (
     ExtractedDocument,
@@ -226,48 +229,6 @@ _UNKNOWN_COMMITS: dict[str, str] = {}  # runs whose promotion outcome awaits man
 _STATUS_RUN_ID: dict[str, str] = {}  # the run each process-local terminal status describes
 _CANCELLED_AFTER_COMMIT: dict[str, str] = {}  # runs whose cancellation landed after their commit
 _QUEUE_RUN_CONTEXT: dict[int, tuple[str, str]] = {}
-
-async def _write_code_graph(
-    neo4j: Neo4jClient,
-    *,
-    cfg: TriBridConfig,
-    repo_id: str,
-    run_id: str,
-    repo_path: str,
-    chunks: list[Chunk],
-) -> list[Neo4jRelationship]:
-    """AST entities for one source file, written through the same GraphRAG upsert as the lexical graph.
-
-    Returns the file's cross-file relationships; the caller writes them once
-    after every file of the run is in Neo4j, so both endpoints can MATCH.
-    """
-    if not chunks:
-        return []
-    file_path = str(chunks[0].file_path or "")
-    language = str(chunks[0].language or "")
-    if language not in CODE_GRAPH_LANGUAGES:
-        return []
-    source_path = Path(repo_path).expanduser() / file_path
-    try:
-        source = source_path.read_text(encoding="utf-8", errors="ignore")
-    except OSError:
-        return []
-    result = extract_code_graph(
-        repo_id=repo_id,
-        run_id=run_id,
-        file_path=file_path,
-        source=source,
-        language=language,
-        chunks=chunks,
-        cfg=cfg,
-        root=Path(repo_path).expanduser(),
-    )
-    if not result.graph.nodes:
-        return []
-    with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_upsert_code_graph").time():
-        await neo4j.upsert_graphrag_graph(repo_id, result.graph, lexical_graph_config=result.lexical_graph_config)
-    return result.deferred_relationships
-
 
 # Index estimate heuristics (intentionally rough). Token and chunk counts are NOT heuristics:
 # they are measured by sampling the corpus through the configured chunker (server/indexing/estimate.py).
@@ -1835,6 +1796,15 @@ def _emit_event(
             return
 
 
+def _create_sync_graph_driver(cfg: TriBridConfig) -> Driver:
+    uri = str(os.getenv("NEO4J_URI") or cfg.graph_storage.neo4j_uri).strip()
+    user = str(os.getenv("NEO4J_USER") or cfg.graph_storage.neo4j_user).strip()
+    password = str(
+        os.getenv("NEO4J_PASSWORD") or cfg.graph_storage.resolve_password()
+    )
+    return GraphDatabase.driver(uri, auth=(user, password))
+
+
 async def _run_index(
     repo_id: str,
     repo_path: str,
@@ -1987,6 +1957,9 @@ async def _run_index(
     )
 
     neo4j: Neo4jClient | None = None
+    sync_graph_driver: Driver | None = None
+    semantic_pipeline: Pipeline | None = None
+    code_writer: ScopedNeo4jWriter | None = None
     try:
         if graph_policy in {"semantic", "code"}:
             db_name = cfg.graph_storage.resolve_database(repo_id)
@@ -1997,50 +1970,32 @@ async def _run_index(
                 database=db_name,
             )
             await neo4j.connect()
-            try:
-                await neo4j.ensure_schema()
-            except Exception as exc:
-                _emit_event(
-                    event_queue,
-                    {"type": "error", "message": f"Neo4j schema initialization failed: {exc}"},
-                    guarantee=True,
+            sync_graph_driver = await asyncio.to_thread(_create_sync_graph_driver, cfg)
+            await asyncio.to_thread(sync_graph_driver.verify_connectivity)
+            if graph_policy == "semantic":
+                if graph_schema is None:
+                    raise RuntimeError("Semantic graph policy requires an approved graph schema")
+                route = _resolve_semantic_kg_route(cfg)
+                semantic_pipeline = await asyncio.to_thread(
+                    build_semantic_pipeline,
+                    driver=sync_graph_driver,
+                    neo4j_database=db_name,
+                    repo_id=target_repo_id,
+                    run_id=run_id,
+                    route_model=str(route.model or "").strip(),
+                    route_base_url=str(route.base_url or "").strip(),
+                    route_api_key=str(route.api_key or "").strip(),
+                    max_concurrency=max(1, int(cfg.indexing.indexing_workers)),
                 )
-                raise RuntimeError(f"Neo4j schema initialization failed: {exc}") from exc
-            # Lexical chunk vector index (Neo4j native vector indexes)
-            if (
-                cfg.graph_indexing.build_lexical_graph
-                and cfg.graph_indexing.store_chunk_embeddings
-                and not skip_dense
-            ):
-                try:
-                    assert embedder is not None
-                    online = await neo4j.ensure_vector_index(
-                        index_name=cfg.graph_indexing.chunk_vector_index_name,
-                        label="Chunk",
-                        embedding_property=cfg.graph_indexing.chunk_embedding_property,
-                        dimensions=int(embedder.dim),
-                        similarity_function=cfg.graph_indexing.vector_similarity_function,
-                        wait_online=cfg.graph_indexing.wait_vector_index_online,
-                        timeout_s=float(cfg.graph_indexing.vector_index_online_timeout_s),
-                    )
-                    if not online:
-                        raise RuntimeError(
-                            "Neo4j chunk vector index did not reach ONLINE state "
-                            f"({cfg.graph_indexing.chunk_vector_index_name}); chunk-mode graph "
-                            "retrieval would be unable to query this corpus, so the run fails closed"
-                        )
-                except Exception as exc:
-                    # Chunk embeddings are stored for chunk-mode graph retrieval: an
-                    # index that cannot serve them is a promotion prerequisite, not a warning.
-                    _emit_event(
-                        event_queue,
-                        {
-                            "type": "error",
-                            "message": f"Neo4j chunk vector index setup failed: {exc}",
-                        },
-                        guarantee=True,
-                    )
-                    raise RuntimeError(f"Neo4j chunk vector index setup failed: {exc}") from exc
+            else:
+                code_writer = await asyncio.to_thread(
+                    ScopedNeo4jWriter,
+                    driver=sync_graph_driver,
+                    neo4j_database=db_name,
+                    repo_id=target_repo_id,
+                    run_id=run_id,
+                    clean_db=False,
+                )
     except Exception as exc:
         # Explicitly fail when graph indexing was requested but cannot initialize.
         logger.warning(
@@ -2060,6 +2015,8 @@ async def _run_index(
             cfg=cfg,
             graph_policy=graph_policy,
             graph_schema=graph_schema,
+            semantic_pipeline=semantic_pipeline,
+            code_writer=code_writer,
             chunker=chunker,
             max_indexable_bytes=max_indexable_bytes,
             skip_dense=skip_dense,
@@ -2073,6 +2030,9 @@ async def _run_index(
             qdrant_generation=qdrant_generation,
         )
     finally:
+        if sync_graph_driver is not None:
+            with contextlib.suppress(Exception):
+                await asyncio.to_thread(sync_graph_driver.close)
         if neo4j is not None:
             with contextlib.suppress(Exception):
                 await neo4j.disconnect()
@@ -2355,6 +2315,8 @@ async def _run_index_body(
     cfg: TriBridConfig,
     graph_policy: GraphPolicy,
     graph_schema: GraphSchema | None,
+    semantic_pipeline: Pipeline | None,
+    code_writer: ScopedNeo4jWriter | None,
     chunker: Chunker,
     max_indexable_bytes: int,
     skip_dense: bool,
@@ -2392,7 +2354,7 @@ async def _run_index_body(
     # Collect file paths once so we can report progress deterministically,
     # without loading every file's contents into memory.
     with INDEX_STAGE_LATENCY_SECONDS.labels(stage="collect_file_paths").time():
-        file_entries = list(loader.iter_repo_files(repo_path))
+        file_entries = await asyncio.to_thread(lambda: list(loader.iter_repo_files(repo_path)))
     total_files = len(file_entries)
     if total_files == 0:
         # An index with nothing in it must never be staged and promoted over a
@@ -2442,7 +2404,7 @@ async def _run_index_body(
         str(getattr(cfg.embedding, "contextual_chunk_embeddings", "off") or "off").strip().lower()
     )
     indexing_workers = max(1, int(getattr(cfg.indexing, "indexing_workers", 1) or 1))
-    has_graph_upserts = bool(neo4j is not None and cfg.graph_indexing.build_lexical_graph)
+    has_graph_upserts = bool(semantic_pipeline is not None or code_writer is not None)
     cross_file_chunk_batching = _allow_cross_file_chunk_batching(
         has_graph_upserts=has_graph_upserts,
         semantic_graph_active=bool(neo4j is not None and graph_policy == "semantic"),
@@ -2451,15 +2413,16 @@ async def _run_index_body(
     indexing_batch = max(10, int(getattr(cfg.indexing, "indexing_batch_size", 100) or 100))
     cross_file_flush_size = max(indexing_batch, indexing_batch * max(1, indexing_workers))
 
-    def _queue_semantic_chunks(target: list[Chunk], chunks: list[Chunk]) -> None:
+    def _queue_graph_chunks(target: list[Chunk], chunks: list[Chunk]) -> None:
         nonlocal semantic_eligible_chunks
-        if graph_policy != "semantic" or neo4j is None or not chunks:
+        if not has_graph_upserts or not chunks:
             return
-        semantic_eligible_chunks = require_graph_chunk_ceiling(
-            policy=graph_policy,
-            eligible_chunks=semantic_eligible_chunks + len(chunks),
-            ceiling=semantic_ceiling,
-        )
+        if graph_policy == "semantic":
+            semantic_eligible_chunks = require_graph_chunk_ceiling(
+                policy=graph_policy,
+                eligible_chunks=semantic_eligible_chunks + len(chunks),
+                ceiling=semantic_ceiling,
+            )
         target.extend(chunks)
 
     async def _upsert_chunk_batch(chunks: list[Chunk]) -> list[Chunk]:
@@ -2478,30 +2441,6 @@ async def _run_index_body(
             with INDEX_STAGE_LATENCY_SECONDS.labels(stage="qdrant_write_chunks").time():
                 await qdrant.write_chunks(
                     repo_id, qdrant_generation, chunks, embedding_dim=vector_dim
-                )
-            if neo4j is not None and cfg.graph_indexing.build_lexical_graph:
-                batch_paths = {str(ch.file_path or "") for ch in chunks}
-                if len(batch_paths) != 1:
-                    raise RuntimeError("Lexical graph upserts require a single-file chunk batch")
-                with INDEX_STAGE_LATENCY_SECONDS.labels(
-                    stage="neo4j_upsert_document_chunks"
-                ).time():
-                    graph, lexical_graph_config = await write_lexical_graph_with_graphrag(
-                        repo_id=write_repo_id,
-                        run_id=run_id,
-                        file_path=next(iter(batch_paths)),
-                        chunks=chunks,
-                    )
-                    await neo4j.upsert_graphrag_graph(
-                        write_repo_id,
-                        graph,
-                        lexical_graph_config=lexical_graph_config,
-                    )
-            if neo4j is not None and graph_policy == "code":
-                code_graph_deferred.extend(
-                    await _write_code_graph(
-                        neo4j, cfg=cfg, repo_id=write_repo_id, run_id=run_id, repo_path=repo_path, chunks=chunks
-                    )
                 )
             return chunks
 
@@ -2525,28 +2464,6 @@ async def _run_index_body(
         with INDEX_STAGE_LATENCY_SECONDS.labels(stage="qdrant_write_chunks").time():
             await qdrant.write_chunks(
                 repo_id, qdrant_generation, embedded, embedding_dim=vector_dim
-            )
-        if neo4j is not None and cfg.graph_indexing.build_lexical_graph:
-            batch_paths = {str(ch.file_path or "") for ch in embedded}
-            if len(batch_paths) != 1:
-                raise RuntimeError("Lexical graph upserts require a single-file chunk batch")
-            with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_upsert_document_chunks").time():
-                graph, lexical_graph_config = await write_lexical_graph_with_graphrag(
-                    repo_id=write_repo_id,
-                    run_id=run_id,
-                    file_path=next(iter(batch_paths)),
-                    chunks=embedded,
-                )
-                await neo4j.upsert_graphrag_graph(
-                    write_repo_id,
-                    graph,
-                    lexical_graph_config=lexical_graph_config,
-                )
-        if neo4j is not None and graph_policy == "code":
-            code_graph_deferred.extend(
-                await _write_code_graph(
-                    neo4j, cfg=cfg, repo_id=write_repo_id, run_id=run_id, repo_path=repo_path, chunks=embedded
-                )
             )
         return embedded
 
@@ -2585,6 +2502,73 @@ async def _run_index_body(
                 merged.extend(r)
         return merged
 
+    async def _write_complete_file_graph(file_path: str, chunks: list[Chunk]) -> None:
+        nonlocal semantic_processed
+        nonlocal semantic_entities_total
+        nonlocal semantic_relations_total
+        nonlocal semantic_empty_chunks
+        if not chunks or graph_policy not in {"semantic", "code"}:
+            return
+        if graph_policy == "semantic":
+            if semantic_pipeline is None or graph_schema is None:
+                raise RuntimeError("Semantic graph writer was not initialized")
+            with INDEX_STAGE_LATENCY_SECONDS.labels(
+                stage="neo4j_write_semantic_file"
+            ).time():
+                telemetry = await write_semantic_file_graph(
+                    pipeline=semantic_pipeline,
+                    file_path=file_path,
+                    chunks=chunks,
+                    schema=graph_schema,
+                )
+        else:
+            if code_writer is None:
+                raise RuntimeError("Code graph writer was not initialized")
+            source_path = Path(repo_path).expanduser() / file_path
+            try:
+                source = await asyncio.to_thread(
+                    source_path.read_text, encoding="utf-8", errors="ignore"
+                )
+            except OSError as exc:
+                raise RuntimeError(
+                    f"Code graph source became unreadable: {file_path}"
+                ) from exc
+            with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_write_code_file").time():
+                telemetry = await write_code_file_graph(
+                    writer=code_writer,
+                    cfg=cfg,
+                    repo_root=Path(repo_path).expanduser(),
+                    file_path=file_path,
+                    source=source,
+                    language=str(chunks[0].language or "") or None,
+                    chunks=chunks,
+                    deferred_relationships=code_graph_deferred,
+                )
+        semantic_processed += telemetry.attempted_chunks
+        semantic_entities_total += telemetry.extracted_entities
+        semantic_relations_total += telemetry.semantic_relationships
+        semantic_empty_chunks += max(
+            0,
+            telemetry.selected_chunks
+            - min(telemetry.selected_chunks, telemetry.from_chunk_relationships),
+        )
+        if event_queue is not None:
+            _emit_event(
+                event_queue,
+                {
+                    "type": "log",
+                    "message": (
+                        f"🧠 GraphRAG {graph_policy} file: {file_path} "
+                        f"chunks={telemetry.succeeded_chunks}/{telemetry.attempted_chunks} "
+                        f"entities={telemetry.extracted_entities} "
+                        f"relations={telemetry.semantic_relationships} "
+                        f"from_chunk={telemetry.from_chunk_relationships} "
+                        f"pruned={telemetry.pruned_nodes}/{telemetry.pruned_relationships}"
+                    ),
+                },
+                drop_oldest=True,
+            )
+
     async def _flush_pending_cross_file_chunks(*, force: bool = False) -> None:
         nonlocal pending_cross_file_chunks
         if not cross_file_chunk_batching or not pending_cross_file_chunks:
@@ -2621,7 +2605,7 @@ async def _run_index_body(
             )
 
         try:
-            size_bytes = int(abs_path.stat().st_size)
+            size_bytes = int((await asyncio.to_thread(abs_path.stat)).st_size)
         except Exception:
             size_bytes = None
         if size_bytes is not None and size_bytes > max_indexable_bytes:
@@ -2653,10 +2637,10 @@ async def _run_index_body(
             and size_bytes >= stream_block_chars
         )
 
-        # Chunks queued for semantic KG extraction during this file iteration.
-        # Keep this as a per-iteration queue; reprocessing prior chunks on every
-        # file causes quadratic work and makes indexing appear stalled.
-        semantic_pending_chunks: list[Chunk] = []
+        # Accumulate the complete file after its vector batches finish. GraphRAG
+        # writes one lexical/semantic or lexical/AST graph per file so Document
+        # and NEXT_CHUNK boundaries never split at a vector batch edge.
+        file_graph_chunks: list[Chunk] = []
 
         if use_stream:
             await _flush_pending_cross_file_chunks(force=True)
@@ -2669,15 +2653,19 @@ async def _run_index_body(
                 INDEX_FILES_PROCESSED_TOTAL.inc()
                 await _record_document(postgres, write_repo_id, rel_path, abs_path, None)
                 with INDEX_STAGE_LATENCY_SECONDS.labels(stage="file_read_stream").time():
-                    with abs_path.open("r", encoding="utf-8", errors="ignore") as f:
+                    stream = await asyncio.to_thread(
+                        abs_path.open, "r", encoding="utf-8", errors="ignore"
+                    )
+                    try:
                         while True:
-                            block = f.read(stream_block_chars)
+                            block = await asyncio.to_thread(stream.read, stream_block_chars)
                             if not block:
                                 break
                             if "\x00" in block:
                                 break
                             with INDEX_STAGE_LATENCY_SECONDS.labels(stage="chunk").time():
-                                chunks = chunker.chunk_text(
+                                chunks = await asyncio.to_thread(
+                                    chunker.chunk_text,
                                     rel_path,
                                     block,
                                     base_char_offset=base_char,
@@ -2691,7 +2679,9 @@ async def _run_index_body(
                                 continue
                             stamp_provenance(chunks, extraction="direct", spans=())
                             embedded_batches = await _upsert_chunk_batches(chunks)
-                            _queue_semantic_chunks(semantic_pending_chunks, embedded_batches)
+                            _queue_graph_chunks(file_graph_chunks, embedded_batches)
+                    finally:
+                        await asyncio.to_thread(stream.close)
             except GraphChunkCeilingExceeded:
                 raise
             except Exception as exc:
@@ -2823,22 +2813,33 @@ async def _run_index_body(
                         "late_chunking_local_only requires chunking.chunking_strategy='fixed_tokens'"
                     )
                 with INDEX_STAGE_LATENCY_SECONDS.labels(stage="late_chunking").time():
-                    chunks = late_chunk_document(
-                        rel_path, content, chunking=cfg.chunking, embedding=cfg.embedding
+                    chunks = await asyncio.to_thread(
+                        late_chunk_document,
+                        rel_path,
+                        content,
+                        chunking=cfg.chunking,
+                        embedding=cfg.embedding,
                     )
                 INDEX_FILES_PROCESSED_TOTAL.inc()
                 if not chunks:
                     continue
                 stamp_provenance(chunks, extraction=extracted.extraction, spans=extracted.spans)
                 embedded_batches = await _upsert_chunk_batches(chunks)
-                _queue_semantic_chunks(semantic_pending_chunks, embedded_batches)
+                _queue_graph_chunks(file_graph_chunks, embedded_batches)
+                await _write_complete_file_graph(rel_path, file_graph_chunks)
                 continue
 
             with INDEX_STAGE_LATENCY_SECONDS.labels(stage="chunk").time():
                 # Figure-aware: a described figure block is kept as one atomic chunk so a
                 # citation can never land on a mid-word fragment of its description. Degrades
                 # to ordinary windowing when the document has no described figures.
-                chunks = chunk_document_with_figures(chunker, rel_path, content, extracted.spans)
+                chunks = await asyncio.to_thread(
+                    chunk_document_with_figures,
+                    chunker,
+                    rel_path,
+                    content,
+                    extracted.spans,
+                )
             INDEX_FILES_PROCESSED_TOTAL.inc()
             if not chunks:
                 continue
@@ -2848,56 +2849,11 @@ async def _run_index_body(
                 await _flush_pending_cross_file_chunks(force=False)
                 continue
             embedded_batches = await _upsert_chunk_batches(chunks)
-            _queue_semantic_chunks(semantic_pending_chunks, embedded_batches)
+            _queue_graph_chunks(file_graph_chunks, embedded_batches)
 
-        # Optional semantic KG extraction (typed entities + relations linked to chunk_ids).
-        if neo4j is not None and graph_policy == "semantic" and semantic_pending_chunks:
+        if file_graph_chunks:
             try:
-                if graph_schema is None:
-                    raise RuntimeError("Semantic indexing requires the approved graph schema")
-                chunks_for_semantic = semantic_pending_chunks
-                if chunks_for_semantic:
-                    semantic_processed += len(chunks_for_semantic)
-                    semantic_route = _resolve_semantic_kg_route(cfg)
-                    graphrag_result = await extract_semantic_kg_with_graphrag(
-                        repo_id=write_repo_id,
-                        run_id=run_id,
-                        cfg=cfg,
-                        schema=graph_schema,
-                        chunks=chunks_for_semantic,
-                        route_model=str(semantic_route.model or "").strip(),
-                        route_base_url=str(semantic_route.base_url or "").strip(),
-                        route_api_key=str(semantic_route.api_key or "").strip() or None,
-                    )
-
-                    with INDEX_STAGE_LATENCY_SECONDS.labels(
-                        stage="neo4j_upsert_semantic_graph"
-                    ).time():
-                        await neo4j.upsert_graphrag_graph(
-                            write_repo_id,
-                            graphrag_result.graph,
-                            lexical_graph_config=graphrag_result.lexical_graph_config,
-                        )
-
-                    semantic_entities_total += graphrag_result.entity_count
-                    semantic_relations_total += graphrag_result.relationship_count
-                    semantic_empty_chunks += graphrag_result.empty_chunks
-
-                    if event_queue is not None:
-                        _emit_event(
-                            event_queue,
-                            {
-                                "type": "log",
-                                "message": (
-                                    "🧠 GraphRAG semantic batch: "
-                                    f"chunks={graphrag_result.processed_chunks} "
-                                    f"entities={graphrag_result.entity_count} "
-                                    f"relations={graphrag_result.relationship_count} "
-                                    f"empty_chunks={graphrag_result.empty_chunks}"
-                                ),
-                            },
-                            drop_oldest=True,
-                        )
+                await _write_complete_file_graph(rel_path, file_graph_chunks)
             except Exception as exc:
                 INDEX_STAGE_ERRORS_TOTAL.labels(stage="semantic_kg").inc()
                 if event_queue is not None:
@@ -2905,35 +2861,19 @@ async def _run_index_body(
                         event_queue,
                         {
                             "type": "error",
-                            "message": f"GraphRAG semantic extraction failed: {exc}",
+                            "message": f"GraphRAG {graph_policy} file write failed: {exc}",
                         },
                         guarantee=True,
                     )
                 raise
             finally:
-                # Important: only process each queued chunk once.
-                semantic_pending_chunks.clear()
+                file_graph_chunks.clear()
 
     await _flush_pending_cross_file_chunks(force=True)
 
-    if neo4j is not None and code_graph_deferred:
-        with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_upsert_code_graph_edges").time():
-            await neo4j.upsert_graphrag_graph(
-                write_repo_id,
-                Neo4jGraph(nodes=[], relationships=code_graph_deferred),
-                lexical_graph_config=_lexical_graph_config(),
-            )
-
-    if neo4j is not None and graph_policy == "semantic":
-        # A semantic-KG build without communities is an incomplete graph; fail the
-        # run (the staging resources are cleaned up) instead of promoting it.
-        communities = await neo4j.detect_communities(write_repo_id)
-        if event_queue is not None:
-            _emit_event(
-                event_queue,
-                {"type": "log", "message": f"🧩 Graph communities detected: {len(communities)}"},
-                drop_oldest=True,
-            )
+    if code_writer is not None:
+        with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_write_code_deferred").time():
+            await write_deferred_code_relationships(code_writer, code_graph_deferred)
 
     if skip_dense:
         await postgres.update_corpus_embedding_meta(
@@ -3453,7 +3393,7 @@ async def _background_index_job(
                 if graph_policy == "semantic":
                     from_chunk_rows = await neo4j_verify.execute_cypher(
                         """
-                        MATCH (:__Entity__ {repo_id: $repo_id})-[r:IN_CHUNK]->
+                        MATCH (:__Entity__ {repo_id: $repo_id})-[r:FROM_CHUNK]->
                               (:Chunk {repo_id: $repo_id})
                         RETURN count(r) AS n
                         """,
@@ -4447,7 +4387,10 @@ async def start_index(request: IndexRequest) -> IndexStatus:
     global _LAST_STARTED_REPO
 
     started_at = datetime.now(UTC)
-    run_id = f"{started_at.strftime('%Y%m%dT%H%M%S')}_{uuid.uuid4().hex[:10]}"
+    # The scoped official writer validates this before driver construction and
+    # the staging id embeds it verbatim. One canonical 32-hex id keeps every
+    # graph scope server-generated and Cypher-safe.
+    run_id = uuid.uuid4().hex
     # Durable per-corpus run fence (compare-and-set on the corpus row): a second
     # worker or process cannot build and retire against the same corpus.
     corpus, cfg = await load_corpus_and_scoped_config(request.repo_id)

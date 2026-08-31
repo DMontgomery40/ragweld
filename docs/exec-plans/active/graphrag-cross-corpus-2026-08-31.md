@@ -124,7 +124,37 @@ The HIGH/CRITICAL public boundary blast radius was reported before mutation. Con
 
 ## Task 4 - Official pipeline and lexical graph
 
-Status: pending
+Status: complete
+
+### Pre-edit impact analysis
+
+- `_run_index_body`: LOW, one direct / five total dependants, one `start_index` flow.
+- `_write_code_graph`: LOW, one direct / five total dependants.
+- `extract_semantic_kg_with_graphrag`: LOW, one direct / four total dependants.
+- `write_lexical_graph_with_graphrag`: LOW, one direct / five total dependants.
+- `Neo4jClient.upsert_graphrag_graph`: LOW, three direct / nine total dependants.
+- `Neo4jClient._upsert_graphrag_nodes` and `_upsert_graphrag_relationships`: LOW, one direct / seven total dependants each.
+- `extract_code_graph`: LOW, one direct / four total dependants.
+- `start_index`: LOW, no indexed upstream caller.
+
+The first incremental GitNexus update for this task exposed null bytes in the derived index and produced a false CRITICAL blast radius. The derived index was cleaned and fully rebuilt before the exact impacts above were accepted: 18,623 nodes, 39,387 edges, 746 clusters, and 300 flows.
+
+### TDD and verification evidence
+
+- RED: the new official-pipeline contract tests failed collection with `ModuleNotFoundError: server.indexing.graphrag_pipeline`.
+- GREEN: 32/32 focused official pipeline, lexical/code graph, API batching, corpus-root, and schema endpoint tests passed on LXC100 in 27.70s; the banned-pattern gate and Ruff passed first.
+- Direct live coverage: eight Neo4j integration tests passed in 283.06s across semantic writer, code writer, graph community compatibility, and a deterministic 10,000-node event-loop ticker.
+- Full API promotion: 1/1 passed in 97.92s through the production `deepseek.deepseek-v4-flash` alias. A single acceptance document crossed the real ten-chunk vector batch boundary; the promoted manifest retained approved schema metadata and the graph proved complete per-file `FROM_DOCUMENT`/`NEXT_CHUNK` chains, official `FROM_CHUNK`, no chunk embeddings, and no legacy `IN_CHUNK`/`IN_COMMUNITY` relationships.
+- Blocking boundaries: synchronous Neo4j GraphRAG driver calls, file inventory/stat/stream reads, chunking, code source reads, and writer execution now run off the API event loop.
+
+### DeepSeek V4 Flash review
+
+- Response id: `gen-1788217082-fGdvujDsB3EUEqZ1Ongt`.
+- Resolved model: `deepseek.deepseek-v4-flash`.
+- Usage: 33,082 prompt + 10,433 completion = 43,515 tokens.
+- Cost: `$0.00428239224`.
+- Findings: no P1/P2 findings. Five P3 notes covered the still-used `neo4j` cleanup parameter, a source boundary assertion already backed by real Apollo/full-index execution, deletion of a mock-heavy proposal unit test superseded by those live tests, pinned 1.19 pipeline-store cleanup used to bound per-file memory, and no-op semantic writer finalization under `clean_db=False`.
+- Final verdict: **PASS**.
 
 ## Task 5 - Resolution and promotion invariants
 

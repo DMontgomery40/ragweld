@@ -90,6 +90,11 @@ async def test_a_run_on_a_relative_registry_path_walks_the_resolved_root(
     try:
         row_before = await _corpus_row(repo_id)
         assert row_before.get("path") == str(relative), "precondition: the row starts relative"
+        graph_off = await client.patch(
+            f"/api/config/graph_indexing?corpus_id={repo_id}",
+            json={"enabled": False},
+        )
+        assert graph_off.status_code == 200, graph_off.text
 
         started = await client.post(
             "/api/index",
