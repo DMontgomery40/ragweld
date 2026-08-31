@@ -350,7 +350,7 @@ function App() {
                   title="Discard staged edits and reload the current server config"
                   style={{
                     background: 'transparent',
-                    color: 'var(--accent)',
+                    color: 'var(--accent-text)',
                     border: '1px solid var(--accent)',
                     boxShadow: 'none',
                     fontWeight: 600,
