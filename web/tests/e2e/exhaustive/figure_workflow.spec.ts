@@ -6,7 +6,8 @@
 // calls before anything is spent, a real index describes the figures through the gateway,
 // and the resulting figure chunk is retrieved, badged in the citation list and opened in
 // the source viewer. The last three tests are the GUI contract the Figures controls ship
-// with: bounds clamping, commit-on-blur, Escape, and the nested-PATCH deep merge.
+// with, under the M-08 staged commit model: bounds clamping, blur-to-stage (nothing is written
+// until "Apply"), Escape, and the deep merge of nested staged edits into the whole-config PUT.
 //
 // `mode: 'serial'` — the corpus is provisioned once and each test builds on the previous
 // one's state. A failure therefore SKIPS the tests after it; a red run must be read as
@@ -139,15 +140,34 @@ function figureCitationCard(page: Page): Locator {
     .first();
 }
 
-async function waitForIndexingPatch(page: Page, corpusId: string): Promise<void> {
-  const response = await page.waitForResponse(
+/** The footer's live count of staged (not-yet-applied) config edits. */
+async function dirtyCount(page: Page): Promise<number> {
+  return Number((await page.getByTestId('apply-changes').getAttribute('data-dirty-count')) ?? '0') || 0;
+}
+
+/**
+ * Click "Apply" and return the whole-config PUT it issues. Under the M-08 staged commit model a
+ * field edit stages locally and is written only by Apply, which PUTs the ENTIRE config scoped to
+ * the corpus (`update_config`, server/api/config.py) -- there is no per-section PATCH-on-blur any
+ * more. `indexing`/`retrieval` are not index-invalidating sections (INDEX_INVALIDATING_SECTIONS,
+ * utils/configDiff.ts), so Apply writes straight through without a confirm dialog; if one ever
+ * appeared, `apply.click()` would issue no PUT and this would fail on the 30s timeout rather than
+ * pass silently.
+ */
+async function applyStagedConfig(page: Page, corpusId: string): Promise<{ putBody: string; url: string }> {
+  const apply = page.getByTestId('apply-changes');
+  await expect(apply).toBeEnabled();
+  const put = page.waitForResponse(
     (res) =>
-      res.request().method() === 'PATCH' &&
-      res.url().includes('/api/config/indexing') &&
-      res.url().includes(encodeURIComponent(corpusId)),
+      res.request().method() === 'PUT' &&
+      /\/api\/config(\?|$)/.test(res.url()) &&
+      res.url().includes(`corpus_id=${encodeURIComponent(corpusId)}`),
     { timeout: 30_000 },
   );
-  expect(response.status(), 'PATCH /api/config/indexing failed').toBe(200);
+  await apply.click();
+  const response = await put;
+  expect(response.status(), 'PUT /api/config failed').toBe(200);
+  return { putBody: response.request().postData() ?? '', url: response.url() };
 }
 
 test.beforeAll(async ({ request }) => {
@@ -185,7 +205,8 @@ test('Figures are enabled from the Indexing tab, persist per corpus, and leave t
   await expect(page.getByTestId('figures-describe')).toHaveCount(0);
   await expect(page.getByTestId('figures-max-completion-tokens')).toHaveCount(0);
 
-  const patched = waitForIndexingPatch(page, corpus.corpusId);
+  // Staged commit model (M-08): toggling stages the edit locally; nothing is written until Apply.
+  const countBefore = await dirtyCount(page);
   await enabled.check();
 
   await expect(page.getByTestId('figures-describe')).toBeChecked();
@@ -206,7 +227,16 @@ test('Figures are enabled from the Indexing tab, persist per corpus, and leave t
   // The configured alias must actually be a vision-capable route in the live catalog, or
   // the run would be refused with 409 figure_vision_alias.
   await expect(page.getByTestId('figures-vision-model-warning')).toHaveCount(0);
-  await patched;
+
+  // The toggle staged at least the `enabled` leaf and wrote nothing yet (revealing the nested
+  // controls may stage more than one leaf, so assert an increase, not exactly one).
+  await expect.poll(() => dirtyCount(page)).toBeGreaterThan(countBefore);
+
+  // Apply -> one whole-config PUT scoped to THIS corpus; assert it carries figures.enabled=true.
+  const { putBody, url } = await applyStagedConfig(page, corpus.corpusId);
+  const putFigures = (JSON.parse(putBody) as { indexing: { figures: { enabled: boolean } } }).indexing.figures;
+  expect(putFigures.enabled, 'the Apply PUT carries figures.enabled=true').toBe(true);
+  expect(url, 'the Apply PUT is scoped to this corpus').toContain(`corpus_id=${encodeURIComponent(corpus.corpusId)}`);
 
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.getByTestId('indexing-component-card-figures').click();
@@ -217,7 +247,7 @@ test('Figures are enabled from the Indexing tab, persist per corpus, and leave t
   expect(scoped.enabled).toBe(true);
   expect(scoped.max_completion_tokens).toBe(2500);
   expect(scoped.describe).toBe(true);
-  // A corpus-scoped PATCH must not leak into the operator's global config.
+  // A corpus-scoped Apply must not leak into the operator's global config.
   expect(await figureSettings(request)).toEqual(globalFiguresBaseline);
   expect(globalFiguresBaseline.enabled).toBe(false);
 });
@@ -387,64 +417,82 @@ test('the figure badge is conditional: ordinary citations in the same list carry
   expect(badged, 'every citation was badged; the badge is not conditional').toBeLessThan(total);
 });
 
-test('numeric figure fields clamp to their bounds, commit on blur, and restore on Escape', async ({ page, request }) => {
+test('numeric figure fields clamp to their bounds, stage on blur, and restore on Escape', async ({ page, request }) => {
   if (!corpus) throw new Error('corpus not provisioned');
   await gotoFiguresPanel(page, corpus.corpusId);
 
-  // (a) above the maximum: images_scale is le=4.
+  // Staged commit model (M-08): each blur clamps in the box and STAGES the value; nothing is
+  // written until the single Apply below, which PUTs all four edits as one deep-merged config.
+  // Record every PATCH/PUT body so we can prove no raw out-of-range value ever left the page.
+  const bodies: string[] = [];
+  const onReq = (req: Request) => {
+    if (req.method() === 'PATCH' || req.method() === 'PUT') {
+      const body = req.postData();
+      if (body) bodies.push(body);
+    }
+  };
+  page.on('request', onReq);
+  const countStart = await dirtyCount(page);
+
+  // (a) above the maximum: images_scale is le=4 -> clamps in the box, stages 4.
   const scale = page.getByTestId('figures-images-scale');
-  let patched = waitForIndexingPatch(page, corpus.corpusId);
   await scale.fill('99');
   await scale.blur();
   await expect(scale).toHaveValue('4');
-  await patched;
-  expect((await figureSettings(request, corpus.corpusId)).images_scale).toBe(4);
 
   // (b) skip classes collapse case-insensitively: "Logo, logo" is one rule.
   const skip = page.getByTestId('figures-skip-classes');
-  patched = waitForIndexingPatch(page, corpus.corpusId);
   await skip.fill('Logo, logo');
   await skip.blur();
-  await patched;
-  expect((await figureSettings(request, corpus.corpusId)).skip_classes).toEqual(['logo']);
 
-  // (c) below the minimum: max_completion_tokens is ge=64.
+  // (c) below the minimum: max_completion_tokens is ge=64 -> clamps in the box.
   const tokens = page.getByTestId('figures-max-completion-tokens');
-  patched = waitForIndexingPatch(page, corpus.corpusId);
   await tokens.fill('1');
   await tokens.blur();
   await expect(tokens).toHaveValue('64');
-  await patched;
 
-  // (d) a value whose first keystroke is below the minimum must survive: typing "128" into
-  // a ge=64 field commits 128, not 64 (the regression fixed by committing on blur).
-  patched = waitForIndexingPatch(page, corpus.corpusId);
+  // (d) a value whose first keystroke is below the minimum must survive: typing "128" into a
+  // ge=64 field stages 128, not 64 (the clamp-on-blur behaviour, unchanged by staging).
   await tokens.fill('128');
   await tokens.press('Tab');
   await expect(tokens).toHaveValue('128');
-  await patched;
-  expect((await figureSettings(request, corpus.corpusId)).max_completion_tokens).toBe(128);
 
-  // (e) Escape restores the last committed value and saves nothing. The window opens after
-  // (d)'s PATCH has landed, so a stale request cannot be mistaken for a new one.
-  const patchesDuringEscape: string[] = [];
-  const record = (sent: Request) => {
-    if (sent.method() === 'PATCH' && sent.url().includes('/api/config/')) {
-      patchesDuringEscape.push(`${sent.url()} ${sent.postData() ?? ''}`);
-    }
-  };
-  page.on('request', record);
+  // Four edits staged, nothing written yet.
+  expect(bodies, 'blur must write nothing under the staged model').toEqual([]);
+  await expect.poll(() => dirtyCount(page)).toBeGreaterThan(countStart);
+
+  // (e) Escape restores the last STAGED value (128) and stages nothing new. The old "no PATCH
+  // fired" check is now vacuous (no field PATCHes at all under staging), so the real invariant
+  // is on the store: the box reverts to 128 and the dirty count is unchanged by the abandoned
+  // edit.
+  const countBeforeEscape = await dirtyCount(page);
   await tokens.fill('256');
   await tokens.press('Escape');
   await expect(tokens).toHaveValue('128');
   await tokens.blur();
-  await page.waitForTimeout(1_500);
-  page.off('request', record);
-  expect(patchesDuringEscape, 'Escape must not persist the abandoned edit').toEqual([]);
-  expect((await figureSettings(request, corpus.corpusId)).max_completion_tokens).toBe(128);
+  await expect.poll(() => dirtyCount(page)).toBe(countBeforeEscape);
+
+  // Apply -> one whole-config PUT carrying every clamped value, deep-merged into indexing.figures.
+  const { putBody } = await applyStagedConfig(page, corpus.corpusId);
+  page.off('request', onReq);
+  expect(putBody).toContain('"images_scale":4');
+  expect(putBody).toContain('"skip_classes":["logo"]');
+  expect(putBody).toContain('"max_completion_tokens":128');
+  for (const body of bodies) {
+    // Field-scoped: an unrelated default may legitimately hold these digits elsewhere in the
+    // whole-config PUT, so assert the raw out-of-range value never reached THESE fields.
+    expect(body, 'no request carried the raw images_scale').not.toContain('"images_scale":99');
+    expect(body, 'no request carried the abandoned max_completion_tokens').not.toContain('"max_completion_tokens":256');
+  }
+
+  // The server persisted exactly the clamped values.
+  const scoped = await figureSettings(request, corpus.corpusId);
+  expect(scoped.images_scale).toBe(4);
+  expect(scoped.skip_classes).toEqual(['logo']);
+  expect(scoped.max_completion_tokens).toBe(128);
 });
 
-test('a Retrieval numeric field commits on blur too', async ({ page, request }) => {
+test('a Retrieval numeric field stages on blur and Applies as a corpus-scoped PUT', async ({ page, request }) => {
   if (!corpus) throw new Error('corpus not provisioned');
   await page.goto(`rag?subtab=retrieval&corpus=${encodeURIComponent(corpus.corpusId)}`, {
     waitUntil: 'domcontentloaded',
@@ -455,17 +503,17 @@ test('a Retrieval numeric field commits on blur too', async ({ page, request }) 
 
   const field = page.getByTestId('max-chunks-per-file');
   await expect(field).toBeVisible();
-  const patched = page.waitForResponse(
-    (res) =>
-      res.request().method() === 'PATCH' &&
-      res.url().includes('/api/config/retrieval') &&
-      res.url().includes(encodeURIComponent(corpus!.corpusId)),
-    { timeout: 30_000 },
-  );
+  const countBefore = await dirtyCount(page);
   await field.fill('7');
   await field.press('Tab');
   await expect(field).toHaveValue('7');
-  expect((await patched).status()).toBe(200);
+  // Staged, not written on blur (M-08): the edit only shows in the footer's dirty count.
+  await expect.poll(() => dirtyCount(page)).toBeGreaterThan(countBefore);
+
+  // Apply -> whole-config PUT scoped to this corpus, carrying the staged retrieval value.
+  const { putBody } = await applyStagedConfig(page, corpus.corpusId);
+  const putConfig = JSON.parse(putBody) as { retrieval: { max_chunks_per_file: number } };
+  expect(putConfig.retrieval.max_chunks_per_file, 'the Apply PUT carries the staged value').toBe(7);
 
   const response = await request.get(`${API_BASE}/config?corpus_id=${encodeURIComponent(corpus.corpusId)}`);
   expect(response.ok()).toBe(true);
@@ -473,7 +521,7 @@ test('a Retrieval numeric field commits on blur too', async ({ page, request }) 
   expect(config.retrieval.max_chunks_per_file).toBe(7);
 });
 
-test('two nested figures edits inside the debounce window are sent as one deep-merged PATCH', async ({
+test('two nested figures edits stage and Apply as one deep-merged PUT', async ({
   page,
   request,
 }) => {
@@ -482,25 +530,24 @@ test('two nested figures edits inside the debounce window are sent as one deep-m
   await expect(page.getByTestId('figures-classify')).toBeChecked();
   await expect(page.getByTestId('figures-prompt-profile')).toHaveValue('technical_figure');
 
-  const carriesBothKeys = (sent: Request): boolean => {
-    if (sent.method() !== 'PATCH' || !sent.url().includes('/api/config/indexing')) return false;
-    let body: unknown = null;
-    try {
-      body = sent.postDataJSON();
-    } catch {
-      return false;
-    }
-    const figures = (body as { figures?: Record<string, unknown> } | null)?.figures;
-    return Boolean(figures && 'classify' in figures && 'prompt_profile' in figures);
-  };
-  const merged = page.waitForRequest(carriesBothKeys, { timeout: 30_000 });
-  // Two nested `indexing.figures.*` edits inside the 300 ms debounce window. A shallow
-  // merge of the pending patch would drop the first one entirely.
+  // Two nested `indexing.figures.*` edits. useConfigField stages each via stageSection, which
+  // deep-merges into the working config, so both survive to the single Apply; the whole-config
+  // PUT then carries the merged figures object. A shallow merge would have dropped the first.
+  const countBefore = await dirtyCount(page);
   await page.getByTestId('figures-classify').uncheck();
   await page.getByTestId('figures-prompt-profile').selectOption('schematic');
-  const body = (await merged).postDataJSON() as { figures: Record<string, unknown> };
-  expect(body.figures.classify).toBe(false);
-  expect(body.figures.prompt_profile).toBe('schematic');
+  await expect.poll(() => dirtyCount(page)).toBeGreaterThan(countBefore);
+
+  const { putBody } = await applyStagedConfig(page, corpus.corpusId);
+  const putFigures = (JSON.parse(putBody) as { indexing: { figures: Record<string, unknown> } }).indexing.figures;
+  expect(putFigures.classify).toBe(false);
+  expect(putFigures.prompt_profile).toBe('schematic');
+  // Both edits are present in the ONE PUT (the deep merge), and the siblings of the two edited
+  // keys survived it -- a shallow merge would have lost one edit or clobbered the siblings.
+  expect(putFigures.enabled).toBe(true);
+  expect(putFigures.max_completion_tokens).toBe(128);
+  expect(putFigures.images_scale).toBe(4);
+  expect(putFigures.skip_classes).toEqual(['logo']);
 
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.getByTestId('indexing-component-card-figures').click();
@@ -510,7 +557,7 @@ test('two nested figures edits inside the debounce window are sent as one deep-m
   const scoped = await figureSettings(request, corpus.corpusId);
   expect(scoped.classify).toBe(false);
   expect(scoped.prompt_profile).toBe('schematic');
-  // The siblings of the two patched keys survived the merge on both sides.
+  // The siblings survived the merge on the server side too.
   expect(scoped.enabled).toBe(true);
   expect(scoped.max_completion_tokens).toBe(128);
   expect(scoped.images_scale).toBe(4);
