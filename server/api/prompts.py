@@ -89,9 +89,6 @@ def _build_prompts_payload(cfg: TriBridConfig) -> PromptsResponse:
     chat = cfg.chat
     chat_fields = type(chat).model_fields
     chat_prompts: list[tuple[str, str]] = [
-        ("system_prompt_base", "Base prompt (legacy)"),
-        ("system_prompt_rag_suffix", "RAG suffix (legacy)"),
-        ("system_prompt_recall_suffix", "Recall suffix (legacy)"),
         ("system_prompt_direct", "Direct (no context)"),
         ("system_prompt_rag", "RAG only"),
         ("system_prompt_recall", "Recall only"),

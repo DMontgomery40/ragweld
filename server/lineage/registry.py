@@ -369,9 +369,6 @@ def capture_path_version(
 
 def build_prompt_set_payload(cfg: TriBridConfig) -> dict[str, Any]:
     chat_fields = [
-        "system_prompt_base",
-        "system_prompt_rag_suffix",
-        "system_prompt_recall_suffix",
         "system_prompt_direct",
         "system_prompt_rag",
         "system_prompt_recall",

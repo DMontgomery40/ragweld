@@ -30,19 +30,24 @@ async def test_prompts_list_update_reset(client, tmp_path) -> None:
         assert "eval_analysis" in prompts
         assert "synthetic_judge" in prompts
         assert "semantic_kg_extraction" in prompts
-        assert "chat.system_prompt_base" in prompts
+        # Legacy base+suffix chat prompt composition was removed (M-101/E-53); only the
+        # four state prompts remain exposed.
+        assert "chat.system_prompt_base" not in prompts
+        assert "chat.system_prompt_rag_suffix" not in prompts
+        assert "chat.system_prompt_recall_suffix" not in prompts
         assert "chat.system_prompt_direct" in prompts
-        assert "chat.system_prompt_rag_suffix" in prompts
-        assert "chat.system_prompt_recall_suffix" in prompts
+        assert "chat.system_prompt_rag" in prompts
+        assert "chat.system_prompt_recall" in prompts
+        assert "chat.system_prompt_rag_and_recall" in prompts
 
         assert "main_rag_chat" in meta
         assert "eval_analysis" in meta
         assert "synthetic_judge" in meta
         assert "semantic_kg_extraction" in meta
-        assert "chat.system_prompt_base" in meta
+        assert "chat.system_prompt_base" not in meta
+        assert "chat.system_prompt_rag_suffix" not in meta
+        assert "chat.system_prompt_recall_suffix" not in meta
         assert "chat.system_prompt_direct" in meta
-        assert "chat.system_prompt_rag_suffix" in meta
-        assert "chat.system_prompt_recall_suffix" in meta
 
         synthetic_meta = meta["synthetic_judge"]
         assert synthetic_meta.get("category") == "evaluation"

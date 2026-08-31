@@ -6772,15 +6772,6 @@ class ChatConfig(BaseModel):
     )
     web: ChatWebConfig = Field(default_factory=ChatWebConfig)
 
-    # Legacy prompt composition (kept for backwards compatibility; prefer the 4 state prompts below).
-    system_prompt_base: str = Field(default="You are a helpful assistant.")
-    system_prompt_recall_suffix: str = Field(
-        default=" You have access to conversation history. Reference past discussions when relevant."
-    )
-    system_prompt_rag_suffix: str = Field(
-        default=" Answer questions using the provided database information."
-    )
-
     # Four-state prompts (selected based on whether RAG/Recall context is present).
     system_prompt_direct: str = Field(
         default="""You are a helpful agentic RAG database assistant.

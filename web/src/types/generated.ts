@@ -202,9 +202,6 @@ export interface ChatConfig {
   /** Default checked user-facing corpus IDs for new conversations. */
   default_corpus_ids?: string[]; // default: ["recall_default"]
   web?: ChatWebConfig;
-  system_prompt_base?: string; // default: "You are a helpful assistant."
-  system_prompt_recall_suffix?: string; // default: " You have access to conversation history. Refer..."
-  system_prompt_rag_suffix?: string; // default: " Answer questions using the provided database i..."
   /** State 1: No context. Nothing checked or retrieval returned empty. */
   system_prompt_direct?: string; // default: "You are a helpful agentic RAG database assistan..."
   /** State 2: RAG only. Code corpora returned results; Recall did not. */

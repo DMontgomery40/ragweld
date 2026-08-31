@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from scripts.check_config_reality import (
     MAP_PATH,
@@ -8,8 +9,14 @@ from scripts.check_config_reality import (
     load_reality_map,
     validate_reality_map,
 )
-from server.models.tribrid_config_model import TriBridConfig
+from server.models.tribrid_config_model import ChatConfig, TriBridConfig
 from server.services.config_store import _upgrade_raw_config
+
+LEGACY_CHAT_PROMPT_FIELDS = (
+    "system_prompt_base",
+    "system_prompt_rag_suffix",
+    "system_prompt_recall_suffix",
+)
 
 
 def test_config_reality_map_covers_all_tribrid_leaf_keys() -> None:
@@ -131,3 +138,53 @@ def test_upgrade_raw_config_replaces_uncataloged_local_embedding_default() -> No
     assert changed is True
     assert cfg.embedding.embedding_model_local == "BAAI/bge-small-en-v1.5"
     assert "embedding.embedding_model_local" in set(migrated)
+
+
+def test_legacy_base_suffix_chat_prompt_fields_are_removed() -> None:
+    """The legacy base+suffix chat prompt composition was deleted (M-101/E-53).
+
+    The live prompt builder selects one of the four state prompts; the base+suffix
+    fields were a dead dual path and must not exist on ChatConfig anymore.
+    """
+    fields = set(ChatConfig.model_fields)
+    for name in LEGACY_CHAT_PROMPT_FIELDS:
+        assert name not in fields, f"{name} should be deleted from ChatConfig"
+    # The four state prompts that replaced them remain.
+    for name in (
+        "system_prompt_direct",
+        "system_prompt_rag",
+        "system_prompt_recall",
+        "system_prompt_rag_and_recall",
+    ):
+        assert name in fields
+
+
+def test_chatconfig_forbids_persisted_legacy_prompt_keys_without_migration() -> None:
+    """RED guard: with extra="forbid", a stored config carrying the legacy keys would
+    fail to validate — proving the migration below is load-bearing, not cosmetic."""
+    for name in LEGACY_CHAT_PROMPT_FIELDS:
+        with pytest.raises(ValidationError):
+            TriBridConfig.model_validate({"chat": {name: "stale value"}})
+
+
+def test_upgrade_raw_config_strips_legacy_base_suffix_chat_prompt_keys() -> None:
+    """A persisted config that still carries the removed base+suffix keys must load
+    cleanly through the upgrade path, which strips them (no ValidationError)."""
+    raw = {
+        "chat": {
+            "system_prompt_base": "You are a helpful assistant.",
+            "system_prompt_rag_suffix": " Answer using the provided information.",
+            "system_prompt_recall_suffix": " You have conversation history.",
+            "system_prompt_direct": "Kept: a live state prompt.",
+        }
+    }
+
+    cfg, changed, migrated = _upgrade_raw_config(raw)
+
+    assert changed is True
+    migrated_set = set(migrated)
+    for name in LEGACY_CHAT_PROMPT_FIELDS:
+        assert f"chat.{name}" in migrated_set
+        assert not hasattr(cfg.chat, name)
+    # The surviving state prompt is preserved through the migration.
+    assert cfg.chat.system_prompt_direct == "Kept: a live state prompt."

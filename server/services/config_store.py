@@ -50,6 +50,11 @@ _REMOVED_NESTED_KEYS: tuple[str, ...] = (
     "chat.recall.vector_backend",
     "graph_storage.neo4j_password",
     "chat.litellm.api_key",
+    # Removed legacy base+suffix chat prompt composition (M-101/B-22/E-53): the 4-state
+    # prompts replaced it. Strip the dead keys so persisted (extra="forbid") configs load.
+    "chat.system_prompt_base",
+    "chat.system_prompt_rag_suffix",
+    "chat.system_prompt_recall_suffix",
 )
 
 _REMOVED_FLAT_KEYS: tuple[str, ...] = (
