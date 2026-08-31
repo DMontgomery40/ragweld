@@ -232,11 +232,20 @@ export function IndexingSubtab() {
   // same hazard `useSubtab` guards. Docked, the param still selects the card; it just is not
   // rewritten -- and a docked URL is neither shared nor reloaded, so nothing sticks.
   const isDockContext = (location as { key?: string })?.key === 'dock';
+  // A docked location's synthetic URL cannot be rewritten, so `component=` cannot be
+  // stripped after it is read there. This latches consumption instead, so the param is
+  // applied once and a later return to a docked `/rag` never reopens the card it named.
+  const componentConsumedRef = useRef(false);
 
   useEffect(() => {
     if (componentParam === null) return;
+    if (isDockContext) {
+      if (componentConsumedRef.current) return;
+      componentConsumedRef.current = true;
+      if (isIndexingComponent(componentParam)) setSelectedComponent(componentParam);
+      return;
+    }
     if (isIndexingComponent(componentParam)) setSelectedComponent(componentParam);
-    if (isDockContext) return;
     // Stripped whether or not it named a real card, so a typo cannot stick either.
     // `replace` keeps the consumed link out of the back stack.
     const next = new URLSearchParams(location.search || '');
