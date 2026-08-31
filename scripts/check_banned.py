@@ -11,12 +11,11 @@ Exit codes:
     0 - No violations found
     1 - Violations found (see output for details)
 """
-import json
 import importlib.util
+import json
 import re
 import sys
 from pathlib import Path
-from typing import List, Tuple
 
 # =============================================================================
 # Zero-mocked tests policy (TriBrid direction)
@@ -59,7 +58,7 @@ ZERO_MOCK_ALLOWLIST = {
 }
 
 # Banned import patterns (regex)
-BANNED_IMPORTS: List[Tuple[str, str]] = [
+BANNED_IMPORTS: list[tuple[str, str]] = [
     (r'from\s+redis\s+import', 'Redis has been removed from this project'),
     (r'import\s+redis\b', 'Redis has been removed from this project'),
     (r'from\s+langchain\s+import', 'Use langgraph directly, not langchain wrappers'),
@@ -67,9 +66,24 @@ BANNED_IMPORTS: List[Tuple[str, str]] = [
 ]
 
 # Banned terms in code (not imports)
-BANNED_TERMS: List[Tuple[str, str]] = [
+BANNED_TERMS: list[tuple[str, str]] = [
     (r'\bcards\b', 'Use "chunk_summaries" instead of "cards"'),
     (r'golden.?question', 'Use "eval_dataset" instead of "golden questions"'),
+]
+
+# Pytest mocking patterns (zero-mocked tests policy). Mock usage is caught at the
+# import so every access route is covered; only a *bare* `patch(` is matched at the
+# call site — a lookbehind excludes object method calls like httpx `client.patch(`
+# so a PATCH request is never mistaken for `unittest.mock.patch`.
+PYTEST_MOCK_PATTERNS: list[tuple[str, str]] = [
+    (r"\bmonkeypatch\b", "Zero-mocked tests: remove pytest monkeypatch usage."),
+    (r"\bfrom\s+unittest\.mock\s+import\b", "Zero-mocked tests: remove unittest.mock usage."),
+    (r"\bimport\s+unittest\.mock\b", "Zero-mocked tests: remove unittest.mock usage."),
+    (r"\bfrom\s+unittest\s+import\b[^\n]*\bmock\b", "Zero-mocked tests: remove unittest.mock usage."),
+    (r"^\s*import\s+mock\b", "Zero-mocked tests: remove the third-party mock backport."),
+    (r"\bMagicMock\b", "Zero-mocked tests: remove unittest.mock MagicMock usage."),
+    (r"\bAsyncMock\b", "Zero-mocked tests: remove unittest.mock AsyncMock usage."),
+    (r"(?<![\w.])patch\(", "Zero-mocked tests: remove unittest.mock patch() usage."),
 ]
 
 # =============================================================================
@@ -235,7 +249,7 @@ def should_skip(path: Path) -> bool:
     return any(skip in path_str for skip in SKIP_PATTERNS)
 
 
-def check_python_files() -> List[str]:
+def check_python_files() -> list[str]:
     """Check Python files for banned patterns."""
     errors: list[str] = []
 
@@ -266,7 +280,7 @@ def check_python_files() -> List[str]:
     return errors
 
 
-def check_typescript_files(web_src: Path = Path('web/src')) -> List[str]:
+def check_typescript_files(web_src: Path = Path('web/src')) -> list[str]:
     """Check TypeScript files for banned patterns."""
     errors: list[str] = []
 
@@ -334,11 +348,15 @@ def _normalize_relpath(p: Path) -> str:
     return str(rel).replace("\\", "/")
 
 
-def check_zero_mock_tests() -> List[str]:
+def check_zero_mock_tests(
+    web_tests_root: Path = Path(".tests"),
+    pytests_root: Path = Path("tests"),
+) -> list[str]:
     """Fail on mocked tests (Playwright route stubs, pytest mocks).
 
     Note: while migrating, files in ZERO_MOCK_ALLOWLIST are permitted to contain
-    these patterns. The allowlist should shrink toward empty.
+    these patterns. The allowlist should shrink toward empty. The roots are
+    parameters so tests can drive the scanner over a fixture tree.
     """
     errors: list[str] = []
 
@@ -350,9 +368,8 @@ def check_zero_mock_tests() -> List[str]:
         (r"\broute\.(abort|continue|fallback)\(", "Zero-mocked tests: remove request interception (route.abort/continue/fallback)."),
     ]
 
-    tests_root = Path(".tests")
-    if tests_root.exists():
-        for f in tests_root.rglob("*"):
+    if web_tests_root.exists():
+        for f in web_tests_root.rglob("*"):
             if should_skip(f) or not f.is_file():
                 continue
             if f.suffix not in {".ts", ".tsx", ".js"}:
@@ -370,29 +387,23 @@ def check_zero_mock_tests() -> List[str]:
                             continue
                         errors.append(f"{rel}:{i}: {message}")
 
-    # Pytest mocking patterns
-    pytest_patterns: list[tuple[str, str]] = [
-        (r"\bmonkeypatch\b", "Zero-mocked tests: remove pytest monkeypatch usage."),
-        (r"\bfrom\s+unittest\.mock\s+import\b", "Zero-mocked tests: remove unittest.mock usage."),
-        (r"\bimport\s+unittest\.mock\b", "Zero-mocked tests: remove unittest.mock usage."),
-        (r"\bMagicMock\b", "Zero-mocked tests: remove unittest.mock MagicMock usage."),
-        (r"\bAsyncMock\b", "Zero-mocked tests: remove unittest.mock AsyncMock usage."),
-        (r"\bpatch\(", "Zero-mocked tests: remove unittest.mock patch() usage."),
-    ]
-
-    pytests_root = Path("tests")
     if pytests_root.exists():
         for py_file in pytests_root.rglob("*.py"):
             if should_skip(py_file):
                 continue
             rel = _normalize_relpath(py_file)
+            # The checker's own test file carries these patterns as fixture strings to
+            # prove the checker detects them; excluding it mirrors check_python_files,
+            # which already skips `check_banned` paths for the banned-terms scan.
+            if "check_banned" in str(py_file):
+                continue
             try:
                 content = py_file.read_text()
             except Exception:
                 continue
             lines = content.split("\n")
             for i, line in enumerate(lines, 1):
-                for pattern, message in pytest_patterns:
+                for pattern, message in PYTEST_MOCK_PATTERNS:
                     if re.search(pattern, line):
                         if rel in ZERO_MOCK_ALLOWLIST:
                             continue
@@ -401,7 +412,7 @@ def check_zero_mock_tests() -> List[str]:
     return errors
 
 
-def check_no_legacy_web_modules() -> List[str]:
+def check_no_legacy_web_modules() -> list[str]:
     """Fail if legacy JS modules exist under web/src.
 
     TriBridRAG is TypeScript-first on the frontend. Legacy JS modules are banned
@@ -425,7 +436,7 @@ def check_no_legacy_web_modules() -> List[str]:
     return errors
 
 
-def check_legacy_project_name() -> List[str]:
+def check_legacy_project_name() -> list[str]:
     """Fail if the legacy project name substring appears anywhere.
 
     Note: Implemented without embedding the forbidden substring in this source file.
@@ -459,7 +470,7 @@ def check_legacy_project_name() -> List[str]:
     return errors
 
 
-def check_env_example_legacy_keys() -> List[str]:
+def check_env_example_legacy_keys() -> list[str]:
     """Fail if .env.example contains legacy/no-op config keys.
 
     .env.example is tracked and serves as onboarding documentation. It must not
@@ -483,7 +494,7 @@ def check_env_example_legacy_keys() -> List[str]:
     return errors
 
 
-def check_server_env_getenv_allowlist() -> List[str]:
+def check_server_env_getenv_allowlist() -> list[str]:
     """Fail if server/ reads a non-allowlisted env key via os.getenv("...")."""
     errors: list[str] = []
     rx = re.compile(r"os\.getenv\(\s*['\"]([^'\"]+)['\"]")
@@ -517,7 +528,7 @@ def check_server_env_getenv_allowlist() -> List[str]:
     return errors
 
 
-def check_studio_no_inline_styles() -> List[str]:
+def check_studio_no_inline_styles() -> list[str]:
     """Fail when inline style props appear in studio scope files."""
     errors: list[str] = []
     pattern = re.compile(r"\bstyle\s*=\s*\{")
@@ -539,7 +550,7 @@ def check_studio_no_inline_styles() -> List[str]:
     return errors
 
 
-def check_no_frontend_runtime_models_json_fetches() -> List[str]:
+def check_no_frontend_runtime_models_json_fetches() -> list[str]:
     """Fail when frontend runtime code fetches static models.json directly."""
     errors: list[str] = []
     web_src = Path("web/src")
@@ -580,7 +591,7 @@ def check_no_frontend_runtime_models_json_fetches() -> List[str]:
     return errors
 
 
-def check_models_catalog_mirror_sync() -> List[str]:
+def check_models_catalog_mirror_sync() -> list[str]:
     """Fail when data/models.json and web/public/models.json diverge."""
     errors: list[str] = []
     data_path = Path("data/models.json")
@@ -612,7 +623,7 @@ def check_models_catalog_mirror_sync() -> List[str]:
     return errors
 
 
-def check_retrieval_config_surface() -> List[str]:
+def check_retrieval_config_surface() -> list[str]:
     """Run Retrieval UI/Pydantic surface coverage validation."""
     errors: list[str] = []
     validator_path = Path(__file__).resolve().parent / "validate_retrieval_config_surface.py"
