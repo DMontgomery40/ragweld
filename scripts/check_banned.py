@@ -107,7 +107,7 @@ PYTEST_MOCK_PATTERNS: list[tuple[str, str]] = [
 # - `profile(s)` is intentionally NOT enforced: it has many legitimate uses (Colima profile,
 #   latency profile, corpus eval profile, prompt profile). The removed "Profiles" feature is
 #   already gone; its residue is only "... removed" comments.
-WEB_GLOSSARY_BANNED_TERMS: List[Tuple[str, str]] = [
+WEB_GLOSSARY_BANNED_TERMS: list[tuple[str, str]] = [
     (r'\branker\b', 'Use "reranker" not "ranker" (terminology.md).'),
     (r'golden.?questions?', 'Use "eval_dataset"/"eval entries" not "golden questions" (terminology.md).'),
 ]
@@ -651,7 +651,7 @@ def check_retrieval_config_surface() -> list[str]:
     return errors
 
 
-def check_web_and_glossary_terminology() -> List[str]:
+def check_web_and_glossary_terminology() -> list[str]:
     """Forbid banned operator-facing terminology in web/src and data/glossary.json.
 
     See WEB_GLOSSARY_BANNED_TERMS / GLOSSARY_CARDS_BANNED for the exact rules and rationale.
