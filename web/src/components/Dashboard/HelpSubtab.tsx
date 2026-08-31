@@ -58,15 +58,15 @@ export function HelpSubtab() {
 
           <ol style={{ margin: 0, paddingLeft: '24px', lineHeight: '2', fontSize: '14px', color: 'var(--fg)' }}>
             <li>
-              <strong>Index Your Repository:</strong> Navigate to the Dashboard and click "Run Indexer" to create embeddings
-              and indices for your codebase.
+              <strong>Index your corpus:</strong> Register a folder of documents or code as a corpus in Get Started, then
+              build its indexes (embeddings, chunk rows, and the knowledge graph) from RAG &rsaquo; Indexing.
             </li>
             <li>
               <strong>Configure RAG Settings:</strong> Use the RAG tab to adjust retrieval parameters like top_k, hybrid search
               alpha, and reranking options.
             </li>
             <li>
-              <strong>Test Your Setup:</strong> Go to the Chat tab to test queries against your indexed repository.
+              <strong>Test your setup:</strong> Go to the Chat tab to run queries against your indexed corpus.
             </li>
             <li>
               <strong>Evaluate Performance:</strong> Use Eval Analysis → Eval Dataset to manage questions, then run evals
@@ -118,8 +118,8 @@ export function HelpSubtab() {
               description="Pre-computed document summaries that provide context without full content. Enables faster RAG with lower token costs."
             />
             <ConceptCard
-              title="Learning Ranker"
-              description="Train custom reranking models on your query patterns. Uses user feedback (clicks, ratings) to improve relevance over time."
+              title="Learning Reranker"
+              description="Train a custom reranker on your corpus query patterns. Uses operator feedback to improve relevance over time."
             />
             <ConceptCard
               title="Multi-Query Rewrites"
@@ -167,8 +167,8 @@ export function HelpSubtab() {
               description="Try adjusting hybrid_alpha (0.3-0.7), enabling reranking, or increasing final_k in RAG → Retrieval settings."
             />
             <TaskLink
-              title="How do I add a new repository?"
-              description="Use Admin → General to add repository paths, then run the indexer for each repo."
+              title="How do I add a new corpus?"
+              description="Register a folder as a corpus in Get Started (the same flow the corpus picker uses), then build its indexes from RAG → Indexing."
             />
             <TaskLink
               title="How do I set up evaluation datasets?"

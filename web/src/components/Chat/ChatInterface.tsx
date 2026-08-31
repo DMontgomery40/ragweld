@@ -75,9 +75,9 @@ const DEFAULT_CHAT_REQUEST_TIMEOUT_MS = 600_000;
 const MAX_CHAT_SESSIONS = 50;
 
 const WELCOME_PROMPTS = [
-  'Where is auth token validation implemented?',
-  'Summarize the retrieval and recall pipeline.',
-  'Show me the operator-facing observability surfaces.',
+  'What are the main topics covered in this corpus?',
+  'Summarize the most relevant document for a question I ask.',
+  'What kinds of questions can I ask about this corpus?',
 ];
 
 export interface TraceStep {
@@ -346,7 +346,7 @@ const ChatComposer = memo(function ChatComposer({ blockedReason, multimodal, onC
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
-          placeholder="Ask ragweld about your codebase..."
+          placeholder="Ask ragweld about this corpus..."
           disabled={sending || Boolean(blockedReason)}
           style={{
             flex: 1,
