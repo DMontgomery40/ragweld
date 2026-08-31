@@ -19,13 +19,27 @@ ROOT = Path(__file__).resolve().parents[2]
 WEB_SRC = ROOT / "web" / "src"
 SHARED_RENDERER = WEB_SRC / "components" / "Observability" / "TraceExternalLinks.tsx"
 
+# AgentTraining/RunOverview renders `run.external_links` for a *training run* --
+# Flyte / MLflow / tracking-backend links, not one Langfuse trace. It has no single
+# trace id, and the shared renderer hides langfuse links when it cannot check a
+# trace id, so routing these through it would drop them. Reviewed exception, not a
+# missed surface.
+_EXEMPT = {
+    SHARED_RENDERER,
+    WEB_SRC / "components" / "AgentTraining" / "RunOverview.tsx",
+}
+
 
 def _sources() -> list[Path]:
-    return [path for path in WEB_SRC.rglob("*.tsx") if path != SHARED_RENDERER]
+    return [path for path in WEB_SRC.rglob("*.tsx") if path not in _EXEMPT]
 
 
 def test_only_the_shared_renderer_maps_a_trace_s_external_links() -> None:
-    mapping = re.compile(r"external_links\s*(?:\?\.)?\.?map\(|external_links\.map\(")
+    # Catches `external_links.map(`, `external_links?.map(`, and the guarded idiom
+    # `(x.external_links || []).map(` / `(x.external_links ?? []).map(` -- the last
+    # form previously slipped the invariant entirely.
+    guard = r"(?:\s*(?:\|\||\?\?)\s*\[\]\s*\))?"
+    mapping = re.compile(rf"external_links{guard}\s*(?:\?\.)?\.?map\(")
     offenders = [
         str(path.relative_to(ROOT)) for path in _sources() if mapping.search(path.read_text(encoding="utf-8"))
     ]

@@ -215,10 +215,14 @@ def _load_eval_runs(repo_id: str | None, *, limit: int = 2) -> list[EvalRun]:
 
 
 def _benchmark_results_dir(path_str: str) -> Path:
+    # Read-only: this resolves where benchmark runs are read from at scrape time.
+    # It must not create the directory -- a Prometheus scrape (a read) creating
+    # `data/benchmarks/` is a write-on-read side effect. The writer
+    # (server/api/benchmark.py) creates it; a missing dir here simply reads as
+    # "no runs yet" because the callers glob it and tolerate absence.
     path = Path(str(path_str or "data/benchmarks/"))
     if not path.is_absolute():
         path = _ROOT / path
-    path.mkdir(parents=True, exist_ok=True)
     return path
 
 

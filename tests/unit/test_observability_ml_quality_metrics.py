@@ -299,3 +299,23 @@ def test_every_persisted_benchmark_run_on_this_host_validates_unpatched() -> Non
         pytest.skip("this host has persisted no benchmark runs to validate against")
     for path in runs:
         BenchmarkRun.model_validate(json.loads(path.read_text(encoding="utf-8")))
+
+
+def test_resolving_the_benchmark_dir_does_not_create_it(tmp_path) -> None:
+    """A Prometheus scrape is a read; resolving where benchmark runs live must not
+    create `data/benchmarks/` as a side effect of being scraped."""
+    from server.observability.ml_quality import _benchmark_results_dir
+
+    target = tmp_path / "benchmarks_unwritten"
+    resolved = _benchmark_results_dir(str(target))
+    assert resolved == target
+    assert not target.exists()
+
+    # And the read path tolerates the absent directory: no runs, still no creation.
+    values = latest_quality_values(
+        eval_dir=tmp_path / "eval_none",
+        promptfoo_dir=tmp_path / "pf_none",
+        benchmark_dir=tmp_path / "benchmarks_none",
+    )
+    assert values.benchmark_average_latency_ms is None
+    assert not (tmp_path / "benchmarks_none").exists()
