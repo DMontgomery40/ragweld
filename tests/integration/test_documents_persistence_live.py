@@ -6,7 +6,6 @@ paths. Real Postgres only (``requires_postgres``); nothing is mocked.
 
 from __future__ import annotations
 
-import os
 import uuid
 from datetime import UTC, datetime
 
@@ -16,6 +15,7 @@ from httpx import AsyncClient
 from server.db.postgres import PostgresClient
 from server.indexing.generations import staging_repo_id
 from server.models.index import Chunk, ChunkProvenance, IndexedDocumentRecord, PageRegion
+from tests.service_requirements import require_env
 
 pytestmark = [pytest.mark.requires_postgres, pytest.mark.asyncio]
 
@@ -48,7 +48,7 @@ async def test_provenance_and_documents_round_trip_promote_and_delete(client: As
     corpus_id = f"docs-persist-{uuid.uuid4().hex[:8]}"
     run_id = f"run-{uuid.uuid4().hex[:8]}"
     staging = staging_repo_id(corpus_id, run_id)
-    pg = PostgresClient(os.environ["POSTGRES_DSN"])
+    pg = PostgresClient(require_env("POSTGRES_DSN"))
     await pg.connect()
     try:
         created = await client.post(

@@ -8,7 +8,6 @@ so the status route must resolve the CORPUS config, not the global one.
 from __future__ import annotations
 
 import contextlib
-import os
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -21,6 +20,7 @@ from server.db.postgres import PostgresClient
 from server.indexing.generations import ReclaimEntry, staging_repo_id
 from server.retrieval.qdrant_store import QdrantChunkStore
 from server.services import config_store
+from tests.service_requirements import require_env
 
 pytestmark = [pytest.mark.requires_postgres, pytest.mark.asyncio]
 
@@ -29,7 +29,7 @@ async def test_index_status_reads_the_fence_with_the_corpus_scoped_lease(
     client: AsyncClient,
 ) -> None:
     corpus_id = f"scoped-lease-{uuid.uuid4().hex[:8]}"
-    pg = PostgresClient(os.environ["POSTGRES_DSN"])
+    pg = PostgresClient(require_env("POSTGRES_DSN"))
     await pg.connect()
     try:
         created = await client.post(
@@ -108,7 +108,7 @@ async def test_deindex_repairs_a_corrupt_reclaim_backlog(client: AsyncClient) ->
     the key whatever its shape, leaves no tombstone, and the next start succeeds.
     """
     corpus_id = f"backlog-repair-{uuid.uuid4().hex[:8]}"
-    pg = PostgresClient(os.environ["POSTGRES_DSN"])
+    pg = PostgresClient(require_env("POSTGRES_DSN"))
     cfg = load_config()
     qdrant = QdrantChunkStore(cfg)
     neo4j: Neo4jClient | None = None
@@ -215,7 +215,7 @@ async def test_deindex_absorbs_a_dead_runs_fence_inventory_and_orphan_staging_ro
     """
     corpus_id = f"fence-inventory-{uuid.uuid4().hex[:8]}"
     sibling_id = f"{corpus_id}__b"
-    pg = PostgresClient(os.environ["POSTGRES_DSN"])
+    pg = PostgresClient(require_env("POSTGRES_DSN"))
     cfg = load_config()
     qdrant = QdrantChunkStore(cfg)
     neo4j: Neo4jClient | None = None

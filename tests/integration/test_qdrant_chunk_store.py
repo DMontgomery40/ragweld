@@ -6,7 +6,6 @@ a Qdrant alias: readers pass the manifest's physical collection explicitly.
 
 from __future__ import annotations
 
-import os
 import uuid
 
 import pytest
@@ -21,6 +20,7 @@ from server.retrieval.qdrant_store import (
     QdrantGenerationExistsError,
     corpus_collection_prefix,
 )
+from tests.service_requirements import require_env
 
 pytestmark = [pytest.mark.requires_qdrant, pytest.mark.asyncio]
 
@@ -171,7 +171,7 @@ async def test_incremental_upsert_records_a_manifest_then_appends() -> None:
     """Recall-style writers get a generation and its manifest on first write (real Postgres corpus row)."""
     store = QdrantChunkStore(load_config())
     corpus_id = f"qdrant-recall-{uuid.uuid4().hex[:8]}"
-    pg = PostgresClient(os.environ["POSTGRES_DSN"])
+    pg = PostgresClient(require_env("POSTGRES_DSN"))
     await pg.connect()
     try:
         await pg.upsert_corpus(
@@ -274,7 +274,6 @@ async def test_wiped_physical_generation_reads_as_missing() -> None:
 @pytest.mark.requires_postgres
 async def test_fusion_keeps_same_chunk_id_distinct_across_corpora() -> None:
     """Same chunk_id in different corpora must not collide in fusion (real Postgres + Qdrant)."""
-    import os
 
     from server.db.postgres import PostgresClient
     from server.indexing.embedder import Embedder
@@ -295,7 +294,7 @@ async def test_fusion_keeps_same_chunk_id_distinct_across_corpora() -> None:
     cfg.retrieval.final_k = 10
     store = QdrantChunkStore(cfg)
     embedder = Embedder(cfg.embedding, cfg.tokenization)
-    pg = PostgresClient(os.environ["POSTGRES_DSN"])
+    pg = PostgresClient(require_env("POSTGRES_DSN"))
     try:
         await pg.connect()
         for cid in corpus_ids:
@@ -363,7 +362,7 @@ async def test_startup_upgrade_records_manifests_for_pre_manifest_corpora() -> N
     store = QdrantChunkStore(cfg)
     legacy_id = f"legacy-alias-{uuid.uuid4().hex[:8]}"
     fresh_id = f"never-indexed-{uuid.uuid4().hex[:8]}"
-    pg = PostgresClient(os.environ["POSTGRES_DSN"])
+    pg = PostgresClient(require_env("POSTGRES_DSN"))
     await pg.connect()
     try:
         for cid in (legacy_id, fresh_id):

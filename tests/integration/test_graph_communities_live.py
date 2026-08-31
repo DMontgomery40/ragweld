@@ -20,6 +20,7 @@ from server.db.postgres import PostgresClient
 from server.indexing.generations import build_generation
 from server.indexing.official_graphrag import write_lexical_graph_with_graphrag
 from server.models.index import Chunk
+from tests.service_requirements import require_env
 
 pytestmark = [pytest.mark.requires_postgres, pytest.mark.requires_neo4j, pytest.mark.asyncio]
 
@@ -111,7 +112,7 @@ async def test_label_propagation_communities_survive_promotion_and_feed_the_subg
 
         # Promotion is the manifest write on the corpus row (no relabel); the API
         # resolves the graph generation id from it and community ids stay valid.
-        pg = PostgresClient(os.environ["POSTGRES_DSN"])
+        pg = PostgresClient(require_env("POSTGRES_DSN"))
         await pg.connect()
         try:
             await pg.set_generation(
@@ -249,7 +250,7 @@ async def test_code_entity_ids_round_trip_and_a_search_carries_its_own_edges(
         )
         await neo.upsert_graphrag_graph(staging, graph, lexical_graph_config=lexical_cfg)
 
-        pg = PostgresClient(os.environ["POSTGRES_DSN"])
+        pg = PostgresClient(require_env("POSTGRES_DSN"))
         await pg.connect()
         try:
             await pg.set_generation(
@@ -395,7 +396,7 @@ async def test_neighbors_never_return_the_centre_twice_on_a_cyclic_graph(
             lexical_graph_config=lexical_cfg,
         )
 
-        pg = PostgresClient(os.environ["POSTGRES_DSN"])
+        pg = PostgresClient(require_env("POSTGRES_DSN"))
         await pg.connect()
         try:
             await pg.set_generation(

@@ -7,7 +7,6 @@ advancing, or another worker would take over a live run.
 
 from __future__ import annotations
 
-import os
 import time
 import uuid
 from datetime import UTC, datetime
@@ -18,13 +17,14 @@ from httpx import AsyncClient
 from server.api.index import _FenceHeartbeat
 from server.db.postgres import PostgresClient
 from server.services import config_store
+from tests.service_requirements import require_env
 
 pytestmark = [pytest.mark.requires_postgres, pytest.mark.asyncio]
 
 
 async def test_heartbeat_advances_while_the_event_loop_is_blocked(client: AsyncClient) -> None:
     corpus_id = f"heartbeat-{uuid.uuid4().hex[:8]}"
-    pg = PostgresClient(os.environ["POSTGRES_DSN"])
+    pg = PostgresClient(require_env("POSTGRES_DSN"))
     await pg.connect()
     heartbeat: _FenceHeartbeat | None = None
     try:

@@ -20,6 +20,43 @@ class ServiceCapability:
     reason: str
 
 
+# Optional service/infra variables that are absent on a machine which has not
+# configured that backend. A test that reads one directly must skip cleanly with
+# the exact missing name rather than raise KeyError mid-run. `test_optional_service_env_access`
+# is the source invariant that forbids bare `os.environ[...]` reads of these in tests.
+OPTIONAL_SERVICE_ENV_VARS: frozenset[str] = frozenset(
+    {
+        "POSTGRES_DSN",
+        "POSTGRES_HOST",
+        "POSTGRES_PORT",
+        "POSTGRES_DB",
+        "POSTGRES_USER",
+        "POSTGRES_PASSWORD",
+        "NEO4J_URI",
+        "NEO4J_USER",
+        "NEO4J_PASSWORD",
+        "QDRANT_URL",
+        "FLYTE_ADMIN_URL",
+        "LOKI_BASE_URL",
+    }
+)
+
+
+def require_env(name: str) -> str:
+    """Return env var `name`, or `pytest.skip` with the exact missing variable.
+
+    The integration lane connects to real Postgres/Neo4j/Qdrant. On a box that
+    has not configured one of those, the variable is simply unset; reading it as
+    `os.environ[name]` raises `KeyError` and reports as an error, not a skip.
+    This turns the same condition into an honest skip naming the one variable to
+    set, and never runs beside heavy live work because the skip fires first.
+    """
+    value = os.environ.get(name)
+    if not value:
+        pytest.skip(f"{name} is not set; integration service not configured for this run")
+    return value
+
+
 def _strict_mode() -> bool:
     value = os.environ.get("RAGWELD_STRICT_INTEGRATION", "").strip().lower()
     return value in {"1", "true", "yes", "on"}

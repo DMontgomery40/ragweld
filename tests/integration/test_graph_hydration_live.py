@@ -38,6 +38,7 @@ from server.gateway_catalog import warm_gateway_catalog
 from server.indexing.embedder import Embedder
 from server.main import app
 from server.services import config_store
+from tests.service_requirements import require_env
 
 pytestmark = [
     pytest.mark.requires_postgres,
@@ -130,7 +131,7 @@ async def _set_graph_mode(
 @pytest_asyncio.fixture(scope="module")
 async def seeded() -> AsyncIterator[SeededGraph]:
     corpus_id = f"graph-hydrate-{uuid.uuid4().hex[:8]}"
-    pg = PostgresClient(os.environ["POSTGRES_DSN"])
+    pg = PostgresClient(require_env("POSTGRES_DSN"))
     cfg = load_config()
     kg_skip = await _gateway_serves(str(cfg.chat.litellm.base_url), _KG_MODEL)
     # ASGITransport does not run the lifespan: warm the gateway catalog the way
@@ -239,7 +240,7 @@ def _assert_hydrated_from_postgres(matches: list[dict], seeded: SeededGraph) -> 
 async def test_chunk_mode_hydrates_exactly_the_vector_seeds(
     client: AsyncClient, seeded: SeededGraph
 ) -> None:
-    pg = PostgresClient(os.environ["POSTGRES_DSN"])
+    pg = PostgresClient(require_env("POSTGRES_DSN"))
     await pg.connect()
     try:
         # Multiplier 1: the global top-k filtered to this corpus can only be a subset
@@ -299,7 +300,7 @@ async def test_chunk_mode_entity_expansion_adds_chunks_beyond_the_seeds(
 ) -> None:
     if seeded.kg_skip:
         pytest.skip(f"entity expansion needs the semantic KG through the gateway: {seeded.kg_skip}")
-    pg = PostgresClient(os.environ["POSTGRES_DSN"])
+    pg = PostgresClient(require_env("POSTGRES_DSN"))
     await pg.connect()
     try:
         await _set_graph_mode(pg, seeded.corpus_id, mode="chunk", entity_expansion=True)
@@ -352,7 +353,7 @@ async def test_entity_mode_hydrates_the_matched_entities_chunks(
 ) -> None:
     if seeded.kg_skip:
         pytest.skip(f"entity mode needs the semantic KG through the gateway: {seeded.kg_skip}")
-    pg = PostgresClient(os.environ["POSTGRES_DSN"])
+    pg = PostgresClient(require_env("POSTGRES_DSN"))
     await pg.connect()
     try:
         await _set_graph_mode(pg, seeded.corpus_id, mode="entity", entity_expansion=False)

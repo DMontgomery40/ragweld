@@ -31,6 +31,7 @@ from server.main import app
 from server.retrieval.contracts import sparse_contract_from_config
 from server.retrieval.qdrant_store import QdrantChunkStore
 from server.services import config_store
+from tests.service_requirements import require_env
 
 pytestmark = [
     pytest.mark.requires_postgres,
@@ -79,7 +80,7 @@ async def _wait_fence_released(
 
 async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> None:
     corpus_id = f"promoted-lane-{uuid.uuid4().hex[:8]}"
-    pg = PostgresClient(os.environ["POSTGRES_DSN"])
+    pg = PostgresClient(require_env("POSTGRES_DSN"))
     qdrant = QdrantChunkStore(load_config())
     try:
         await pg.connect()
@@ -777,7 +778,7 @@ async def test_only_the_manifest_run_id_proves_a_commit_and_reclaim_never_drops_
     the manifest names (live or retained), and clears the backlog entry.
     """
     corpus_id = f"retained-id-{uuid.uuid4().hex[:8]}"
-    pg = PostgresClient(os.environ["POSTGRES_DSN"])
+    pg = PostgresClient(require_env("POSTGRES_DSN"))
     cfg = load_config()
     qdrant = QdrantChunkStore(cfg)
     neo4j: Neo4jClient | None = None

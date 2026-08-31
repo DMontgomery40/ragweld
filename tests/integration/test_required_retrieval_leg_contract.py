@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import uuid
 
 import pytest
@@ -13,6 +12,7 @@ from server.models.tribrid_config_model import RetrievalContractMismatchDetail
 from server.retrieval.contracts import sparse_contract_from_config
 from server.services import config_store
 from server.services.conversation_store import get_conversation_store
+from tests.service_requirements import require_env
 
 
 @pytest.mark.requires_postgres
@@ -31,7 +31,7 @@ async def test_requested_contract_mismatch_never_returns_partial_success(
     expected_code: str,
 ) -> None:
     corpus_id = f"{leg}-mismatch-{uuid.uuid4().hex[:10]}"
-    pg = PostgresClient(os.environ["POSTGRES_DSN"])
+    pg = PostgresClient(require_env("POSTGRES_DSN"))
 
     try:
         await pg.connect()
@@ -126,7 +126,7 @@ async def test_requested_leg_execution_failure_never_returns_partial_success(
     leg: str,
 ) -> None:
     corpus_id = f"{leg}-execution-failure-{uuid.uuid4().hex[:10]}"
-    pg = PostgresClient(os.environ["POSTGRES_DSN"])
+    pg = PostgresClient(require_env("POSTGRES_DSN"))
     missing_model = "/definitely/missing/ragweld-embedding-model"
 
     try:
@@ -238,7 +238,7 @@ async def test_unreachable_qdrant_is_a_typed_503_never_a_500_or_partial_success(
 ) -> None:
     """The vector store is a required dependency: an unreachable Qdrant fails closed with dependency=qdrant."""
     corpus_id = f"{leg}-qdrant-down-{uuid.uuid4().hex[:10]}"
-    pg = PostgresClient(os.environ["POSTGRES_DSN"])
+    pg = PostgresClient(require_env("POSTGRES_DSN"))
 
     try:
         await pg.connect()

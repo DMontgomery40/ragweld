@@ -12,7 +12,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import io
-import os
 import shutil
 import uuid
 from pathlib import Path
@@ -31,6 +30,7 @@ from tests.fixtures.pdf_builder import (
     PAGE_TWO_SENTENCE,
     build_aurora_report_pdf,
 )
+from tests.service_requirements import require_env
 
 pytestmark = [
     pytest.mark.requires_postgres,
@@ -125,7 +125,7 @@ async def test_source_document_viewer_end_to_end(client: AsyncClient, tmp_path: 
     legacy_id = f"{corpus_id}-legacy"
     root = tmp_path / "corpus"
     _materialize_corpus(root)
-    pg = PostgresClient(os.environ["POSTGRES_DSN"])
+    pg = PostgresClient(require_env("POSTGRES_DSN"))
     try:
         await pg.connect()
         created = await client.post(

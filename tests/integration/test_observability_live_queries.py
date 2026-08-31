@@ -11,7 +11,6 @@ corpus is a 404 on status, catalog and incidents (never the global config).
 from __future__ import annotations
 
 import asyncio
-import os
 import uuid
 from pathlib import Path
 
@@ -22,6 +21,7 @@ from server.config import load_config
 from server.db.postgres import PostgresClient
 from server.retrieval.qdrant_store import QdrantChunkStore
 from server.services import config_store
+from tests.service_requirements import require_env
 
 pytestmark = [
     pytest.mark.requires_postgres,
@@ -74,7 +74,7 @@ async def test_unknown_corpus_is_a_404_on_every_observability_route(client: Asyn
 
 async def test_status_and_incidents_reflect_real_queries_on_the_corpus(client: AsyncClient) -> None:
     corpus_id = f"obs-live-{uuid.uuid4().hex[:8]}"
-    pg = PostgresClient(os.environ["POSTGRES_DSN"])
+    pg = PostgresClient(require_env("POSTGRES_DSN"))
     cfg = load_config()
     qdrant = QdrantChunkStore(cfg)
     try:

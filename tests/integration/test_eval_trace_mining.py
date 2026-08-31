@@ -8,7 +8,6 @@ contain the answer. Real Postgres/Neo4j/Qdrant, deterministic embeddings, no moc
 from __future__ import annotations
 
 import json
-import os
 import uuid
 from pathlib import Path
 
@@ -21,6 +20,7 @@ from server.api.eval import _run_path as _eval_run_path
 from server.config import load_config
 from server.db.postgres import PostgresClient
 from server.services import config_store
+from tests.service_requirements import require_env
 
 pytestmark = [
     pytest.mark.requires_postgres,
@@ -54,7 +54,7 @@ async def test_sse_eval_persists_answer_provenance_and_mining_rejects_answer_lea
     client: AsyncClient, tmp_path: Path
 ) -> None:
     corpus_id = f"eval-trace-{uuid.uuid4().hex[:8]}"
-    pg = PostgresClient(os.environ["POSTGRES_DSN"])
+    pg = PostgresClient(require_env("POSTGRES_DSN"))
     persisted: list[Path] = []
     triplets_path = tmp_path / "triplets.jsonl"
     status_before = dict(_EVAL_STATUS)

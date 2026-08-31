@@ -22,6 +22,7 @@ from server.config import load_config
 from server.db.postgres import PostgresClient
 from server.models.tribrid_config_model import TriBridConfig
 from server.services import config_store
+from tests.service_requirements import require_env
 
 pytestmark = [
     pytest.mark.requires_postgres,
@@ -84,7 +85,7 @@ async def test_benchmark_grounds_every_model_on_the_corpus(client: AsyncClient, 
         pytest.skip(skip_reason)
 
     corpus_id = f"bench-ground-{uuid.uuid4().hex[:8]}"
-    pg = PostgresClient(os.environ["POSTGRES_DSN"])
+    pg = PostgresClient(require_env("POSTGRES_DSN"))
     try:
         await pg.connect()
         created = await client.post(

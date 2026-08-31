@@ -9,6 +9,7 @@ import pytest
 from httpx import AsyncClient
 
 from server.config import DEFAULT_CONFIG_PATH, load_config
+from tests.service_requirements import require_env
 
 
 @pytest.mark.requires_postgres
@@ -19,8 +20,8 @@ def test_strict_integration_app_uses_disposable_service_bindings() -> None:
     assert DEFAULT_CONFIG_PATH.is_absolute()
     assert DEFAULT_CONFIG_PATH.resolve() != Path(os.environ["RAGWELD_SOURCE_CONFIG_PATH"]).resolve()
     assert DEFAULT_CONFIG_PATH.parent.resolve() == Path(os.environ["RAGWELD_INTEGRATION_RUNTIME_DIR"]).resolve()
-    assert config.indexing.postgres_url == os.environ["POSTGRES_DSN"]
-    assert config.graph_storage.neo4j_uri == os.environ["NEO4J_URI"]
+    assert config.indexing.postgres_url == require_env("POSTGRES_DSN")
+    assert config.graph_storage.neo4j_uri == require_env("NEO4J_URI")
 
 
 @pytest.mark.requires_postgres
