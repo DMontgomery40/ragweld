@@ -19,6 +19,7 @@ import pytest
 from server.api.index import _resolve_figure_route
 from server.gateway_catalog import warm_gateway_catalog
 from server.indexing.chunker import Chunker
+from server.indexing.figure_chunking import chunk_document_with_figures, figure_ranges_from_spans
 from server.indexing.provenance import stamp_provenance
 from server.indexing.text_extractors import extract_text_for_path
 from server.models.index import FigureKind
@@ -76,3 +77,64 @@ def test_real_figure_is_described_and_becomes_a_figure_chunk() -> None:
     assert any(word in summary_lower for word in domain_words), (
         f"figure summary did not mention any of {domain_words}: {fig['summary']!r}"
     )
+
+
+def test_real_figure_is_one_atomic_chunk_through_the_indexer_chunking() -> None:
+    """M-92 end to end on REAL vision-described spans: the indexer's own chunking entry
+    (``chunk_document_with_figures``, the function ``server/api/index.py`` dispatches to) keeps
+    the described figure block as one atomic chunk whose offsets align to the figure span
+    exactly — the discriminator between the atomic path and the old size-windowing, which would
+    instead carry the figure inside a chunk that begins mid-page-prose. Also proves M-43(a)'s
+    per-figure outcomes on real data. One live vision run.
+    """
+    warm_gateway_catalog()
+    cfg = TriBridConfig(indexing={"figures": {"enabled": True}})
+    gateway = _resolve_figure_route(cfg)
+    assert gateway is not None
+
+    extracted = extract_text_for_path(
+        apollo_figure_pages(), figures=cfg.indexing.figures, gateway=gateway
+    )
+    assert extracted is not None and extracted.figures_described >= 1
+
+    ranges = figure_ranges_from_spans(extracted.spans)
+    assert ranges, "a described figure must produce at least one atomic range"
+
+    chunker = Chunker(cfg.chunking, cfg.tokenization)
+    chunks = chunk_document_with_figures(
+        chunker, "apollo11_figure_pages.pdf", extracted.text, extracted.spans
+    )
+    stamp_provenance(chunks, extraction=extracted.extraction, spans=extracted.spans)
+
+    figure_chunks = [c for c in chunks if c.metadata.get("chunk_kind") == "figure"]
+    assert figure_chunks, "the figure block must be a figure chunk"
+
+    for fig_start, fig_end in ranges:
+        block = extracted.text[fig_start:fig_end]
+        # Offsets aligned to the span exactly: the atomic path begins the chunk at the item
+        # boundary, where the old windowing would begin it mid-prose at a size-window boundary.
+        exact = [
+            c
+            for c in chunks
+            if c.metadata.get("char_start") == fig_start and c.metadata.get("char_end") == fig_end
+        ]
+        assert len(exact) == 1, "the described figure must be exactly one atomic chunk"
+        chunk = exact[0]
+        assert chunk.content == block
+        assert chunk.content.lstrip().startswith("Figure")
+        assert chunk.metadata.get("chunk_kind") == "figure"
+
+    # The figure's own summary appears only inside its figure chunk — never bled into a
+    # neighbouring text chunk (the M-92 fragment cannot recur).
+    summary = next(
+        s.figure.summary
+        for s in extracted.spans
+        if s.figure is not None and s.figure.summary.strip()
+    )
+    holders = [c for c in chunks if summary in c.content]
+    assert holders and all(c.metadata.get("chunk_kind") == "figure" for c in holders)
+
+    # M-43(a) on real data: every described figure has a per-figure outcome with a self_ref.
+    described = [o for o in extracted.figures if o.status == "described"]
+    assert described and all(o.self_ref for o in described)
+    assert extracted.figures_described == len(described)
