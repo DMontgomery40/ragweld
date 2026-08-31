@@ -79,24 +79,17 @@ class Chunker:
             start_line, end_line = self._line_span(nl_positions, start_char, end_char, base_line=int(base_line))
             token_count = self._tokenizer.count_tokens(text)
 
-            meta: dict[str, Any] = {}
-            meta["char_start"] = abs_start
-            meta["char_end"] = int(base_char_offset) + int(end_char)
-            if bool(self.config.emit_chunk_ordinal):
-                meta["chunk_ordinal"] = ordinal
-            if parent_doc_id is not None:
-                meta["parent_doc_id"] = parent_doc_id
-
             chunks.append(
-                Chunk(
-                    chunk_id=f"{file_path}:{start_line}-{end_line}:{abs_start}",
-                    content=text,
-                    file_path=file_path,
-                    start_line=int(start_line),
-                    end_line=int(end_line),
+                self._build_chunk(
+                    file_path,
+                    text=text,
+                    abs_start=abs_start,
+                    start_line=start_line,
+                    end_line=end_line,
+                    token_count=token_count,
+                    ordinal=ordinal,
+                    parent_doc_id=parent_doc_id,
                     language=language,
-                    token_count=int(token_count),
-                    metadata=meta,
                 )
             )
             ordinal += 1
@@ -120,6 +113,203 @@ class Chunker:
             return out
 
         return chunks
+
+    def _build_chunk(
+        self,
+        file_path: str,
+        *,
+        text: str,
+        abs_start: int,
+        start_line: int,
+        end_line: int,
+        token_count: int,
+        ordinal: int,
+        parent_doc_id: str | None,
+        language: str | None,
+    ) -> Chunk:
+        """Construct one Chunk from a located span with the metadata every strategy shares.
+
+        The single place a Chunk is built from a span, so the windowed-text path and the
+        atomic figure-block path can never drift on ``chunk_id`` shape, the
+        ``char_start``/``char_end`` metadata, ``chunk_ordinal`` or ``parent_doc_id``. Note
+        ``char_end`` is ``char_start + len(text)`` — identical to ``base_char_offset + end_char``
+        for a slice, since ``text = content[start:end]``.
+        """
+        abs_start = int(abs_start)
+        meta: dict[str, Any] = {"char_start": abs_start, "char_end": abs_start + len(text)}
+        if bool(self.config.emit_chunk_ordinal):
+            meta["chunk_ordinal"] = int(ordinal)
+        if parent_doc_id is not None:
+            meta["parent_doc_id"] = parent_doc_id
+        return Chunk(
+            chunk_id=f"{file_path}:{start_line}-{end_line}:{abs_start}",
+            content=text,
+            file_path=file_path,
+            start_line=int(start_line),
+            end_line=int(end_line),
+            language=language,
+            token_count=int(token_count),
+            metadata=meta,
+        )
+
+    def chunk_document(
+        self, file_path: str, content: str, *, figure_ranges: list[tuple[int, int]]
+    ) -> list[Chunk]:
+        """Chunk a whole document while keeping each described figure block atomic.
+
+        ``figure_ranges`` are ``[char_start, char_end)`` ranges over ``content`` that a described
+        figure occupies in the serialized markdown (caption + prose summary + Labels/Components/…
+        + the trailing image placeholder). A described figure is ONE retrieval unit: a citation
+        that lands on half of it shows a mid-word fragment (" the following week.\\nLabels: …").
+        So those ranges are cut out and emitted whole; only the text BETWEEN figures is windowed
+        by the configured strategy. With no ranges this is exactly ``chunk_file`` — one path that
+        degrades to the ordinary chunker rather than a separate figure-only branch.
+
+        ``stamp_provenance`` remains the sole authority for ``chunk_kind``/``metadata.figure``;
+        this method only guarantees a figure block is never split mid-block, so that stamping
+        maps the figure span onto a whole chunk (or whole section pieces) at full coverage.
+        """
+        ranges = self._normalize_figure_ranges(figure_ranges, len(content))
+        if not ranges:
+            return self.chunk_file(file_path, content)
+
+        nl_positions = [i for i, ch in enumerate(content) if ch == "\n"]
+        parent_doc_id = file_path if bool(self.config.emit_parent_doc_id) else None
+        language = self._detect_language(file_path)
+
+        out: list[Chunk] = []
+        ordinal = 0
+        cursor = 0
+
+        def _chunk_gap(gap_start: int, gap_end: int, current_ordinal: int) -> int:
+            if gap_end <= gap_start:
+                return current_ordinal
+            gap = content[gap_start:gap_end]
+            gap_chunks = self.chunk_text(
+                file_path,
+                gap,
+                base_char_offset=gap_start,
+                base_line=1 + bisect.bisect_left(nl_positions, gap_start),
+                starting_ordinal=current_ordinal,
+            )
+            out.extend(gap_chunks)
+            return current_ordinal + len(gap_chunks)
+
+        for fig_start, fig_end in ranges:
+            ordinal = _chunk_gap(cursor, fig_start, ordinal)
+            fig_chunks = self._chunk_figure_block(
+                file_path,
+                content,
+                fig_start,
+                fig_end,
+                nl_positions=nl_positions,
+                starting_ordinal=ordinal,
+                parent_doc_id=parent_doc_id,
+                language=language,
+            )
+            out.extend(fig_chunks)
+            ordinal += len(fig_chunks)
+            cursor = fig_end
+        ordinal = _chunk_gap(cursor, len(content), ordinal)
+        return out
+
+    @staticmethod
+    def _normalize_figure_ranges(
+        figure_ranges: list[tuple[int, int]] | None, content_len: int
+    ) -> list[tuple[int, int]]:
+        """Sorted, de-duplicated, non-overlapping figure ranges clamped to the content.
+
+        ``_build_source_map`` emits one span per ``prov`` entry, so a two-page figure yields two
+        IDENTICAL ``(char_start, char_end)`` ranges; without the dedupe the same figure block
+        would be emitted twice. Overlap between DIFFERENT figures does not occur (distinct items
+        get distinct ranges from a monotonic cursor) but is merged defensively so a stray overlap
+        can never produce two chunks that each hold part of the other's text.
+        """
+        cleaned: list[tuple[int, int]] = []
+        for raw in figure_ranges or []:
+            start = max(0, min(int(raw[0]), content_len))
+            end = max(0, min(int(raw[1]), content_len))
+            if end > start:
+                cleaned.append((start, end))
+        cleaned.sort()
+        merged: list[tuple[int, int]] = []
+        for start, end in cleaned:
+            if merged and start < merged[-1][1]:
+                merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+            else:
+                merged.append((start, end))
+        return merged
+
+    def _chunk_figure_block(
+        self,
+        file_path: str,
+        content: str,
+        start: int,
+        end: int,
+        *,
+        nl_positions: list[int],
+        starting_ordinal: int,
+        parent_doc_id: str | None,
+        language: str | None,
+    ) -> list[Chunk]:
+        """Emit a described figure as one atomic chunk, or — only when it exceeds
+        ``max_chunk_tokens`` — split it at its ``Labels:``/``Components:``/… section headings.
+
+        The whole ``[start, end)`` range is kept, including the trailing image placeholder the
+        serializer appends, so ``char_start``/``char_end`` stay the true document offsets and the
+        figure span still maps onto every piece at full coverage. A figure chunk is never dropped
+        for being under ``min_chunk_chars``: a one-line described figure is still a real figure.
+        """
+        max_tokens = int(self.config.max_chunk_tokens)
+        sub_ranges: list[tuple[int, int]] = [(start, end)]
+        if max_tokens > 0 and self._tokenizer.count_tokens(content[start:end]) > max_tokens:
+            sub_ranges = self._figure_section_ranges(content, start, end, max_tokens=max_tokens)
+
+        out: list[Chunk] = []
+        ordinal = int(starting_ordinal)
+        for s, e in sub_ranges:
+            if e <= s:
+                continue
+            text = content[s:e]
+            start_line, end_line = self._line_span(nl_positions, s, e, base_line=1)
+            token_count = self._tokenizer.count_tokens(text)
+            out.append(
+                self._build_chunk(
+                    file_path,
+                    text=text,
+                    abs_start=s,
+                    start_line=start_line,
+                    end_line=end_line,
+                    token_count=token_count,
+                    ordinal=ordinal,
+                    parent_doc_id=parent_doc_id,
+                    language=language,
+                )
+            )
+            ordinal += 1
+        return out
+
+    def _figure_section_ranges(
+        self, content: str, start: int, end: int, *, max_tokens: int
+    ) -> list[tuple[int, int]]:
+        """Cut a too-large figure block ONLY at its section headings, packed to ``max_tokens``.
+
+        ``figure_block_markdown`` lays a figure out as a caption/summary head followed by
+        ``Labels:``/``Components:``/``Connections:``/``Values:``/``References:`` lines. Those line
+        starts are the only cut points — never mid-sentence — so a split figure still reads as
+        whole sections. Sections are packed greedily up to ``max_tokens``; a single section larger
+        than that is kept whole rather than cut inside a word.
+        """
+        headings = ("Labels:", "Components:", "Connections:", "Values:", "References:")
+        boundaries = [start]
+        pos = start
+        for line in content[start:end].splitlines(keepends=True):
+            if pos > start and line.lstrip().startswith(headings):
+                boundaries.append(pos)
+            pos += len(line)
+        boundaries.append(end)
+        units = [(a, b) for a, b in zip(boundaries, boundaries[1:], strict=False) if b > a]
+        return self._pack_units_by_tokens(content, units, target_tokens=max_tokens)
 
     @staticmethod
     def _detect_language(file_path: str) -> str | None:

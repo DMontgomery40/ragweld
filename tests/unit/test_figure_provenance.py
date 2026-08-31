@@ -18,6 +18,7 @@ from docling_core.types.doc.document import (
 )
 
 from server.indexing.chunker import Chunker
+from server.indexing.figure_chunking import chunk_document_with_figures
 from server.indexing.figure_serializer import make_markdown_serializer
 from server.indexing.provenance import stamp_provenance
 from server.indexing.text_extractors import (
@@ -27,7 +28,7 @@ from server.indexing.text_extractors import (
     _read_with_docling,
 )
 from server.models.index import Chunk, FigureAnnotation, PageRegion
-from server.models.tribrid_config_model import TriBridConfig
+from server.models.tribrid_config_model import ChunkingConfig, TokenizationConfig, TriBridConfig
 from tests.fixtures.pdf_builder import apollo_figure_pages
 
 REPLY = json.dumps({"kind": "drawing", "summary": "Landing gear strut and footpad with the lunar surface sensing probe.", "labels": ["PROBE", "FOOTPAD"], "components": ["strut", "footpad"], "connections": ["strut -> footpad"], "values": [], "references": []})
@@ -88,6 +89,32 @@ def test_stamp_provenance_marks_the_figure_chunk(described_doc) -> None:
     assert chunk.provenance is not None and figure_span.region in chunk.provenance.regions
     text_chunks = [c for c in chunks if c.metadata.get("chunk_kind") != "figure"]
     assert all("figure" not in c.metadata for c in text_chunks)
+
+
+def test_atomic_figure_chunk_from_the_real_apollo_fixture(described_doc) -> None:
+    """End-to-end on the two-page Apollo fixture (M-92): the figure-aware path keeps the whole
+    described block in ONE chunk_kind=figure chunk even under a tight window that would otherwise
+    straddle it, and no other chunk holds a fragment of the description."""
+    _doc, _pic, full, spans, _unlocated, _baseline = described_doc
+    figure_span = next(s for s in spans if s.figure is not None)
+    fig_text = full[figure_span.char_start : figure_span.char_end]
+
+    cfg = ChunkingConfig(
+        chunking_strategy="fixed_chars", chunk_size=200, chunk_overlap=40, min_chunk_chars=50
+    )
+    chunker = Chunker(cfg, TokenizationConfig(strategy="whitespace"))
+    chunks = chunk_document_with_figures(chunker, "apollo11_figure_pages.pdf", full, spans)
+    stamp_provenance(chunks, extraction="docling", spans=spans)
+
+    whole = [c for c in chunks if c.content == fig_text]
+    assert len(whole) == 1, "the described figure block must be one atomic chunk"
+    figure_chunks = [c for c in chunks if c.metadata.get("chunk_kind") == "figure"]
+    assert figure_chunks == whole, "the atomic block is exactly the figure chunk"
+    assert figure_chunks[0].metadata["figure"]["labels"] == ["PROBE", "FOOTPAD"]
+    # No other chunk holds the block's structured heading -- the M-92 fragment cannot recur.
+    assert sum("Labels: PROBE, FOOTPAD" in c.content for c in chunks) == 1
+    text_chunks = [c for c in chunks if c.metadata.get("chunk_kind") != "figure"]
+    assert all("Labels: PROBE, FOOTPAD" not in c.content for c in text_chunks)
 
 
 def test_figure_chunk_with_no_resolved_class_gets_no_figure_class_key() -> None:

@@ -69,6 +69,7 @@ from server.indexing.official_graphrag import (
     extract_semantic_kg_with_graphrag,
     write_lexical_graph_with_graphrag,
 )
+from server.indexing.figure_chunking import chunk_document_with_figures
 from server.indexing.provenance import stamp_provenance
 from server.indexing.text_extractors import (
     ExtractedDocument,
@@ -2797,7 +2798,10 @@ async def _run_index_body(
                 continue
 
             with INDEX_STAGE_LATENCY_SECONDS.labels(stage="chunk").time():
-                chunks = chunker.chunk_file(rel_path, content)
+                # Figure-aware: a described figure block is kept as one atomic chunk so a
+                # citation can never land on a mid-word fragment of its description. Degrades
+                # to ordinary windowing when the document has no described figures.
+                chunks = chunk_document_with_figures(chunker, rel_path, content, extracted.spans)
             INDEX_FILES_PROCESSED_TOTAL.inc()
             if not chunks:
                 continue
