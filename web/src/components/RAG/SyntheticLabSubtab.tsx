@@ -105,6 +105,16 @@ async function copyText(value: string, onOk: () => void, onErr: () => void): Pro
   }
 }
 
+function recipeLabel(recipe: SyntheticRecipeKind): string {
+  if (recipe === 'eval_dataset') return 'Eval Dataset';
+  if (recipe === 'semantic_cards') return 'Semantic Summaries';
+  if (recipe === 'triplets') return 'Triplets';
+  if (recipe === 'keywords') return 'Keywords';
+  if (recipe === 'autotune_retrieval') return 'Autotune Retrieval';
+  if (recipe === 'full_stack') return 'Full Stack';
+  return recipe;
+}
+
 function labelForKind(kind: SyntheticArtifactKind): string {
   if (kind === 'eval_dataset_json') return 'Eval Dataset';
   if (kind === 'semantic_cards_jsonl') return 'Semantic Summaries';
@@ -192,7 +202,7 @@ export function SyntheticLabSubtab() {
       setRecipe(recipeParam);
       const from = String(qs.get('synthetic_context') || '').trim();
       setPresetNotice(
-        `Recipe preset to "${recipeParam}"${from ? ` from ${from}` : ''}. Nothing has run — review it and start when you are ready.`
+        `Recipe preset to "${recipeLabel(recipeParam)}"${from ? ` from ${from}` : ''}. Nothing has run — review it and start when you are ready.`
       );
     } else {
       setPresetNotice('');
@@ -567,7 +577,7 @@ export function SyntheticLabSubtab() {
             <select value={recipe} onChange={(e) => setRecipe(e.target.value as SyntheticRecipeKind)}>
               {RECIPES.map((r) => (
                 <option key={r} value={r}>
-                  {r}
+                  {recipeLabel(r)}
                 </option>
               ))}
             </select>

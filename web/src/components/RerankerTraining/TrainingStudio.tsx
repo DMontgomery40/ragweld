@@ -777,7 +777,7 @@ export function TrainingStudio() {
   const openSyntheticLab = useCallback(() => {
     const qs = new URLSearchParams();
     qs.set('subtab', 'synthetic');
-    qs.set('synthetic_context', 'learning-ranker');
+    qs.set('synthetic_context', 'learning-reranker');
     qs.set('synthetic_recipe', syntheticRecipe);
     qs.set('synthetic_autorun', '0');
     navigate({ pathname: '/rag', search: `?${qs.toString()}` });

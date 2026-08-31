@@ -664,99 +664,6 @@
       ]
     },
     {
-      "term": "Card Search Enabled",
-      "key": "CARD_SEARCH_ENABLED",
-      "definition": "CARD_SEARCH_ENABLED determines whether card-based semantic matching participates in retrieval and score fusion. When enabled, high-level module summaries can bridge user intent phrasing that does not share exact tokens with underlying code chunks. This usually improves exploratory and architecture queries, but it also adds ranking work and can raise false positives if cards are stale or low quality. Keep it enabled when card enrichment is regularly refreshed, and disable it for strict lexical debugging where deterministic exact-match behavior is preferred.",
-      "category": "retrieval",
-      "related": [],
-      "links": [
-        {
-          "text": "HM-RAG: Hierarchical Multi-Agent RAG (arXiv)",
-          "href": "https://arxiv.org/abs/2504.12330"
-        },
-        {
-          "text": "Weaviate Hybrid Search",
-          "href": "https://docs.weaviate.io/weaviate/search/hybrid"
-        },
-        {
-          "text": "Pinecone Hybrid Search",
-          "href": "https://docs.pinecone.io/guides/search/hybrid-search"
-        },
-        {
-          "text": "Qdrant Hybrid Queries",
-          "href": "https://qdrant.tech/documentation/concepts/hybrid-queries/"
-        }
-      ],
-      "badges": [
-        {
-          "text": "Hybrid Search",
-          "class": "info"
-        }
-      ]
-    },
-    {
-      "term": "Card Semantic Bonus",
-      "key": "CARD_BONUS",
-      "definition": "CARD_BONUS controls how much score uplift is applied when a result aligns with card-level semantic summaries. This acts as a prior that high-level module intent should influence final ranking alongside lexical and dense evidence. A moderate bonus can lift architecturally relevant chunks that otherwise rank too low; an excessive bonus can overpower direct evidence and drift results toward generic summaries. Calibrate the bonus using grounded answer metrics and citation quality, not only top-k retrieval gain.",
-      "category": "general",
-      "related": [],
-      "links": [
-        {
-          "text": "RAG with Hierarchical Knowledge (arXiv)",
-          "href": "https://arxiv.org/abs/2503.10150"
-        },
-        {
-          "text": "Elasticsearch Function Score Query",
-          "href": "https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-function-score-query.html"
-        },
-        {
-          "text": "Weaviate Hybrid Search",
-          "href": "https://docs.weaviate.io/weaviate/search/hybrid"
-        },
-        {
-          "text": "Qdrant Hybrid Queries",
-          "href": "https://qdrant.tech/documentation/concepts/hybrid-queries/"
-        }
-      ],
-      "badges": [
-        {
-          "text": "Ranking",
-          "class": "info"
-        }
-      ]
-    },
-    {
-      "term": "Cards Max",
-      "key": "CARDS_MAX",
-      "definition": "CARDS_MAX sets how many semantic summary cards are loaded as auxiliary evidence during ranking. Increasing this value can improve coverage for architecture and feature-discovery questions, but it also introduces candidate noise and additional latency if too many weakly related cards are considered. Lower values keep ranking focused and faster, but can miss long-tail modules that only surface in summaries. Tune this limit by query segment and measure both grounded-answer quality and p95 latency so card coverage does not overwhelm precision.",
-      "category": "general",
-      "related": [],
-      "links": [
-        {
-          "text": "TagRAG: Tag-guided Hierarchical Retrieval (arXiv)",
-          "href": "https://arxiv.org/abs/2601.05254"
-        },
-        {
-          "text": "LlamaIndex Retriever Guide",
-          "href": "https://docs.llamaindex.ai/en/stable/module_guides/querying/retriever/"
-        },
-        {
-          "text": "Weaviate Hybrid Search",
-          "href": "https://docs.weaviate.io/weaviate/search/hybrid"
-        },
-        {
-          "text": "Elasticsearch Reciprocal Rank Fusion (RRF)",
-          "href": "https://www.elastic.co/guide/en/elasticsearch/reference/current/rrf.html"
-        }
-      ],
-      "badges": [
-        {
-          "text": "Ranking",
-          "class": "info"
-        }
-      ]
-    },
-    {
       "term": "Chat Configuration",
       "key": "CHAT_SETTINGS",
       "definition": "Represents the combined control surface for chat behavior: model choice, retrieval parameters, generation limits, and reasoning options. These settings should be treated as a coupled system rather than independent toggles, because changes in one area often shift quality or latency elsewhere. For example, increasing retrieved context may require lower output limits or different prompts to keep responses focused. The most reliable way to tune this bundle is benchmark-driven iteration against your real tasks, with clear measurements for answer quality, citation quality, latency, and cost.",
@@ -1353,37 +1260,6 @@
       "badges": [
         {
           "text": "Readability",
-          "class": "info"
-        }
-      ]
-    },
-    {
-      "term": "Code Cards",
-      "key": "CODE_CARDS",
-      "definition": "Code cards are enriched semantic representations of chunks that capture purpose, main symbols, side effects, and likely usage context in a compact form. They act as a retrieval-friendly abstraction layer: dense and hybrid retrievers can match the card text when raw source is too low-level or verbose for the user query. High-quality cards improve intent routing, candidate filtering, and explanation quality during answer generation. Because cards are derived artifacts, they should be regenerated when major code changes occur so retrieval stays aligned with current behavior.",
-      "category": "general",
-      "related": [],
-      "links": [
-        {
-          "text": "cAST: Structural chunking for code RAG (arXiv 2025)",
-          "href": "https://arxiv.org/abs/2506.15655"
-        },
-        {
-          "text": "Tree-sitter parser framework",
-          "href": "https://tree-sitter.github.io/tree-sitter/"
-        },
-        {
-          "text": "LangChain text splitter concepts",
-          "href": "https://python.langchain.com/docs/concepts/text_splitters/"
-        },
-        {
-          "text": "LangChain retriever concepts",
-          "href": "https://python.langchain.com/docs/concepts/retrievers/"
-        }
-      ],
-      "badges": [
-        {
-          "text": "Semantic layer",
           "class": "info"
         }
       ]
@@ -2290,7 +2166,7 @@
     {
       "term": "Disable Enrichment",
       "key": "ENRICH_DISABLED",
-      "definition": "This switch disables enrichment generation entirely during indexing. It is useful for fast iteration, low-cost development cycles, and emergency backfills where raw embedding retrieval is acceptable. The cost of disabling is reduced semantic metadata for reranking, cards, and explanatory UX features, which can lower answer quality on abstract or architecture-level questions. Use it intentionally and record when it is active so benchmark comparisons remain meaningful. A common pattern is enrichment disabled for local loops and enabled for production-grade index builds.",
+      "definition": "This switch disables enrichment generation entirely during indexing. It is useful for fast iteration, low-cost development cycles, and emergency backfills where raw embedding retrieval is acceptable. The cost of disabling is reduced semantic metadata for reranking, chunk summaries, and explanatory UX features, which can lower answer quality on abstract or architecture-level questions. Use it intentionally and record when it is active so benchmark comparisons remain meaningful. A common pattern is enrichment disabled for local loops and enabled for production-grade index builds.",
       "category": "general",
       "related": [],
       "links": [
@@ -3430,7 +3306,7 @@
     {
       "term": "Exclude Directories",
       "key": "EXCLUDE_PATHS",
-      "definition": "Defines directories omitted from semantic indexing and code-card generation so low-value or generated artifacts do not pollute retrieval. Excluding paths such as dependency caches, build outputs, and vendored code usually improves precision while reducing index size and reindex time. Keep exclusions explicit and versioned because they materially change what the retriever can ever return. When troubleshooting missing answers, this list is one of the first places to inspect.",
+      "definition": "Defines directories omitted from semantic indexing and chunk-summary generation so low-value or generated artifacts do not pollute retrieval. Excluding paths such as dependency caches, build outputs, and vendored code usually improves precision while reducing index size and reindex time. Keep exclusions explicit and versioned because they materially change what the retriever can ever return. When troubleshooting missing answers, this list is one of the first places to inspect.",
       "category": "general",
       "related": [],
       "links": [
@@ -3861,37 +3737,6 @@
       "badges": [
         {
           "text": "SLO guardrail",
-          "class": "info"
-        }
-      ]
-    },
-    {
-      "term": "Golden Questions Path",
-      "key": "GOLDEN_PATH",
-      "definition": "Golden path points to the curated evaluation file used for repeatable quality checks. This dataset should represent real user intents and include expected retrieval or answer signals so regressions are detectable after any model or retrieval change. Treat it as versioned test data and expand it when new failure modes appear in production. Run it automatically during configuration and model rollout workflows to prevent silent quality drift. A disciplined golden set is the fastest way to compare fusion, chunking, and model changes on equal ground.",
-      "category": "general",
-      "related": [],
-      "links": [
-        {
-          "text": "RAGVUE: Explainable and Automated RAG Evaluation (arXiv 2026)",
-          "href": "https://arxiv.org/abs/2601.04196"
-        },
-        {
-          "text": "BEIR Benchmark",
-          "href": "https://github.com/beir-cellar/beir"
-        },
-        {
-          "text": "RAGAS Framework",
-          "href": "https://github.com/explodinggradients/ragas"
-        },
-        {
-          "text": "trec_eval",
-          "href": "https://trec.nist.gov/trec_eval/"
-        }
-      ],
-      "badges": [
-        {
-          "text": "Evaluation",
           "class": "info"
         }
       ]

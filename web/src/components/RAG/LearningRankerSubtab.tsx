@@ -26,7 +26,7 @@ export function LearningRankerSubtab() {
         </div>
       ) : null}
 
-      <SyntheticCallout context="learning-ranker" />
+      <SyntheticCallout context="learning-reranker" />
 
       <TrainingStudio />
     </section>

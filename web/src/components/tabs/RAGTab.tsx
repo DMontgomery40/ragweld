@@ -55,9 +55,9 @@ export default function RAGTab() {
         </ErrorBoundary>
       </div>
 
-      <div id="tab-rag-learning-ranker" className={`rag-subtab-content ${activeSubtab === 'learning-ranker' ? 'active' : ''}`}>
+      <div id="tab-rag-learning-reranker" className={`rag-subtab-content ${activeSubtab === 'learning-reranker' ? 'active' : ''}`}>
         <ErrorBoundary context="LearningRankerSubtab">
-          {activeSubtab === 'learning-ranker' ? <LearningRankerSubtab /> : null}
+          {activeSubtab === 'learning-reranker' ? <LearningRankerSubtab /> : null}
         </ErrorBoundary>
       </div>
 

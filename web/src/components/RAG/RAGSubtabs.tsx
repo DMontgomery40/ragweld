@@ -15,7 +15,7 @@ export function RAGSubtabs({ activeSubtab, onSubtabChange }: RAGSubtabsProps) {
     { id: 'retrieval', title: 'Retrieval' },
     { id: 'graph', title: 'Graph' },
     { id: 'reranker-config', title: 'Reranker' },
-    { id: 'learning-ranker', title: 'Learning Reranker' },
+    { id: 'learning-reranker', title: 'Learning Reranker' },
     { id: 'learning-agent', title: 'Learning Agent Studio' },
     { id: 'indexing', title: 'Indexing' },
     { id: 'synthetic', title: 'Synthetic Lab' }

@@ -2,7 +2,7 @@
  * EvalDatasetManager (formerly QuestionManager)
  * Manages evaluation dataset entries for RAG testing
  *
- * Terminology: "golden questions" is banned - use "eval dataset" / "eval entries"
+ * Terminology: the legacy curated-eval term is banned - use "eval dataset" / "eval entries"
  */
 
 import { useState, useEffect } from 'react';

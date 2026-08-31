@@ -10,7 +10,7 @@ type SyntheticContext =
   | 'retrieval'
   | 'graph'
   | 'reranker-config'
-  | 'learning-ranker'
+  | 'learning-reranker'
   | 'learning-agent';
 
 // These buttons were labelled like viewers ("Corpus Keywords", "Starter Pack") but every one
@@ -34,7 +34,7 @@ const ACTIONS: Record<SyntheticContext, ActionPreset[]> = {
   'data-quality': [
     {
       label: 'Generate semantic summaries in Synthetic Lab \u2192',
-      title: 'Opens RAG \u203a Synthetic Lab with the semantic_cards recipe preselected. Nothing runs until you start it there.',
+      title: 'Opens RAG \u203a Synthetic Lab with the semantic summaries recipe preselected. Nothing runs until you start it there.',
       recipe: 'semantic_cards',
     },
     {
@@ -69,7 +69,7 @@ const ACTIONS: Record<SyntheticContext, ActionPreset[]> = {
       recipe: 'triplets',
     },
   ],
-  'learning-ranker': [
+  'learning-reranker': [
     {
       label: 'Generate synthetic triplets in Synthetic Lab \u2192',
       title: 'Opens RAG \u203a Synthetic Lab with the triplets recipe preselected. Nothing runs until you start it there.',

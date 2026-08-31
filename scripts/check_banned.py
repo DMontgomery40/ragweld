@@ -73,6 +73,42 @@ BANNED_TERMS: List[Tuple[str, str]] = [
 ]
 
 # =============================================================================
+# Operator-facing terminology invariant (web/src + data/glossary.json)
+# =============================================================================
+#
+# `.claude/rules/terminology.md` bans, in operator-facing copy: card/cards (for chunk
+# summaries), golden questions, ranker (use reranker), profile(s). This scanner enforces the
+# subset that can be checked without false positives:
+#
+# - `ranker`  : `\branker\b` matches the standalone word but NOT `reranker` (no word boundary
+#               after the `e`) and NOT camelCase identifiers like `LearningRankerSubtab`.
+# - `golden questions` : `golden.?questions?` — the legacy eval-set term.
+#   Both are scanned in web/src (.ts/.tsx/.css) AND data/glossary.json.
+#
+# - `cards` (chunk-summary sense) : scanned in data/glossary.json ONLY. In web/src every
+#   `card(s)` is a generic UI element (incident/provider/choice/citation cards), so a blanket
+#   ban there would be all false positives. In the glossary the only legitimate `card(s)` are
+#   the HuggingFace proper noun "Model Card(s)" and the chat UI "citation cards", which the
+#   lookbehinds allow.
+# - `profile(s)` is intentionally NOT enforced: it has many legitimate uses (Colima profile,
+#   latency profile, corpus eval profile, prompt profile). The removed "Profiles" feature is
+#   already gone; its residue is only "... removed" comments.
+WEB_GLOSSARY_BANNED_TERMS: List[Tuple[str, str]] = [
+    (r'\branker\b', 'Use "reranker" not "ranker" (terminology.md).'),
+    (r'golden.?questions?', 'Use "eval_dataset"/"eval entries" not "golden questions" (terminology.md).'),
+]
+# `card(s)` meaning chunk summaries; allows "Model Card(s)" and "citation cards".
+GLOSSARY_CARDS_BANNED = (
+    re.compile(r'(?<!model[ -])(?<!citation )\bcards?\b', re.IGNORECASE),
+    'Use "chunk_summaries" not "cards" (terminology.md).',
+)
+# The one web/src module allowed to contain a pre-rename banned slug: the subtab alias map,
+# which exists precisely to keep old (now-renamed) bookmark slugs resolving.
+WEB_BANNED_TERM_EXEMPT_PATHS = {
+    "web/src/config/subtabAliases.ts",
+}
+
+# =============================================================================
 # Environment usage policy
 # =============================================================================
 #
@@ -604,6 +640,69 @@ def check_retrieval_config_surface() -> List[str]:
     return errors
 
 
+def check_web_and_glossary_terminology() -> List[str]:
+    """Forbid banned operator-facing terminology in web/src and data/glossary.json.
+
+    See WEB_GLOSSARY_BANNED_TERMS / GLOSSARY_CARDS_BANNED for the exact rules and rationale.
+    """
+    errors: list[str] = []
+    compiled = [(re.compile(p, re.IGNORECASE), m) for p, m in WEB_GLOSSARY_BANNED_TERMS]
+
+    # --- web/src (.ts/.tsx/.css), excluding generated + exempt alias module ---
+    web_src = Path("web/src")
+    if web_src.exists():
+        for f in web_src.rglob("*"):
+            if should_skip(f) or not f.is_file():
+                continue
+            if f.suffix not in {".ts", ".tsx", ".css"}:
+                continue
+            rel = _normalize_relpath(f)
+            if rel.endswith("web/src/types/generated.ts") or "generated.ts" in rel:
+                continue
+            if rel in WEB_BANNED_TERM_EXEMPT_PATHS:
+                continue
+            try:
+                content = f.read_text(errors="ignore")
+            except Exception:
+                continue
+            for i, line in enumerate(content.split("\n"), 1):
+                for rx, message in compiled:
+                    if rx.search(line):
+                        errors.append(f"{rel}:{i}: {message}")
+
+    # --- data/glossary.json (all string values) ---
+    gpath = Path("data/glossary.json")
+    if gpath.exists():
+        try:
+            glossary = json.loads(gpath.read_text(errors="ignore"))
+        except Exception as e:
+            errors.append(f"data/glossary.json: failed to parse JSON ({e})")
+            glossary = None
+
+        if glossary is not None:
+            def _walk(obj, term: str):
+                # Track the enclosing term name for a useful pointer.
+                if isinstance(obj, dict):
+                    here = str(obj.get("term") or term)
+                    for v in obj.values():
+                        yield from _walk(v, here)
+                elif isinstance(obj, list):
+                    for v in obj:
+                        yield from _walk(v, term)
+                elif isinstance(obj, str):
+                    yield term, obj
+
+            cards_rx, cards_msg = GLOSSARY_CARDS_BANNED
+            for term, value in _walk(glossary, "?"):
+                for rx, message in compiled:
+                    if rx.search(value):
+                        errors.append(f"data/glossary.json (term '{term}'): {message}")
+                if cards_rx.search(value):
+                    errors.append(f"data/glossary.json (term '{term}'): {cards_msg}")
+
+    return errors
+
+
 def main() -> int:
     print("Checking for banned patterns...")
     print("")
@@ -611,6 +710,7 @@ def main() -> int:
     errors = []
     errors.extend(check_python_files())
     errors.extend(check_typescript_files())
+    errors.extend(check_web_and_glossary_terminology())
     errors.extend(check_zero_mock_tests())
     errors.extend(check_no_legacy_web_modules())
     errors.extend(check_legacy_project_name())
