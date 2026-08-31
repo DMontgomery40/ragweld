@@ -9,7 +9,7 @@ so a crashed run's residue is cleaned up by the next run.
 Two safety rails, because this runs against the operator's live Postgres:
 
 - **Prefix.** Only rows whose `repo_id` starts with a recognized test-corpus
-  prefix are ever touched. The operator's real corpora (``epstein-files-1``,
+  prefix are ever touched. The operator's real corpora (``epstein-files-public``,
   ``nasa-apollo-11``, ``ragweld_code``, ``recall_default``) match none of them.
 - **Age.** Only rows older than ``REAP_MAX_AGE_SECONDS`` are reaped, so a corpus
   a *concurrent* session created seconds ago on the shared box is never deleted

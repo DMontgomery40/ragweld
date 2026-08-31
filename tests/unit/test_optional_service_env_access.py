@@ -23,7 +23,7 @@ from tests.service_requirements import OPTIONAL_SERVICE_ENV_VARS
 TESTS_ROOT = Path(__file__).resolve().parents[1]
 
 # `os.environ[ "VAR" ]` capturing the key literal; whitespace-tolerant.
-_SUBSCRIPT = re.compile(r"os\.environ\[\s*(['\"])(?P<var>[A-Z0-9_]+)\1\s*\](?P<after>\s*=?)")
+_SUBSCRIPT = re.compile(r"os\.environ\[\s*(['\"])(?P<var>[A-Z0-9_]+)\1\s*\](?P<after>\s*={0,2})")
 
 # Files allowed to name these variables outside the helper: the helper itself and
 # this invariant.
