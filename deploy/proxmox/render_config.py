@@ -8,6 +8,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+from server.config import _strip_removed_keys
 from server.models.tribrid_config_model import TriBridConfig
 
 PRODUCTION_MODEL_ALIAS = "openai.gpt-5.6-terra"
@@ -56,7 +57,11 @@ def _paths_identify_same_target(source: Path, output: Path) -> bool:
 
 def _load_source(path: Path) -> TriBridConfig:
     payload = json.loads(path.read_text(encoding="utf-8"))
-    return TriBridConfig.model_validate(payload)
+    # Strip schema-removed keys the same way server.config.load_config does, so an operator's
+    # un-migrated tribrid_config.json (which still carries the deleted chat prompt fields) renders
+    # instead of failing ChatConfig(extra="forbid") — and the rendered production config comes out
+    # clean of the dead keys rather than passing them through to be stripped again at startup.
+    return TriBridConfig.model_validate(_strip_removed_keys(payload))
 
 
 def _with_entry(values: list[str], entry: str) -> list[str]:
