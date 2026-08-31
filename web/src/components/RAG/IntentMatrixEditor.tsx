@@ -189,7 +189,7 @@ export function IntentMatrixEditor() {
       )}
 
       <p className="editor-help">
-        Maps query intents to layer bonus multipliers. Values {'>'} 1.0 boost that layer for the intent;
+        Maps query intents to layer bonus multipliers. Values {'>'} 1.0 boost that layer for the intent;{' '}
         {'<'} 1.0 penalizes. Intents: gui, retrieval, indexer, eval, infra, server.
       </p>
     </div>

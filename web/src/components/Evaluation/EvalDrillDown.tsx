@@ -922,7 +922,7 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
             {' → '}
             <span style={{ fontFamily: 'monospace', color: 'var(--accent-green)' }}>{evalRun.run_id}</span>
             {' • '}
-            Performance change:
+            Performance change:{' '}
             <span data-testid="eval-performance-change" style={{
               color: (evalRun.topk_accuracy ?? 0) > (compareRun?.topk_accuracy ?? 0)
                 ? 'var(--accent-green)'

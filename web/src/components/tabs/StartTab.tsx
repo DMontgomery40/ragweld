@@ -403,7 +403,7 @@ export default function StartTab() {
                   </p>
                   {indexed && !indexing ? (
                     <div className="ob-info-box" data-testid="onboarding-index-summary">
-                      This corpus already has {indexStats?.total_chunks} chunks from {indexStats?.total_files} files
+                      This corpus already has {indexStats?.total_chunks} {indexStats?.total_chunks === 1 ? 'chunk' : 'chunks'} from {indexStats?.total_files} {indexStats?.total_files === 1 ? 'file' : 'files'}
                       {indexStats?.last_indexed ? ` (last indexed ${new Date(indexStats.last_indexed).toLocaleString()})` : ''}.
                       You can continue, or rebuild it.
                     </div>

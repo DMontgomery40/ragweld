@@ -1245,6 +1245,9 @@ export function TrainingStudio() {
                     Base model <TooltipIcon name="RAGWELD_AGENT_BASE_MODEL" />
                   </label>
                   <input type="text" value={ragweldBaseModel} onChange={(e) => setRagweldBaseModel(e.target.value)} />
+                  <p className="studio-note-tight studio-help-anchor">
+                    Fine-tuning base the Learning Agent attaches LoRA adapters to — the training base, not the chat or local-serving model. Defaults to the on-box 4-bit Qwen3-4B; change it only to retrain from a different base.
+                  </p>
                 </div>
               </div>
 
