@@ -1473,6 +1473,7 @@ export function IndexingSubtab() {
       <EmbeddingMismatchWarning variant="inline" showActions />
       {contractLocked && (
         <div
+          data-testid="index-contract-locked-banner"
           style={{
             marginBottom: '16px',
             padding: '10px 12px',
@@ -1865,6 +1866,7 @@ export function IndexingSubtab() {
                   <TooltipIcon name="EMBEDDING_BATCH_SIZE" />
                 </label>
                 <NumberField
+                  data-testid="embedding-batch-size"
                   value={embeddingBatchSize}
                   onCommit={setEmbeddingBatchSize}
                   min={1}
@@ -2138,6 +2140,7 @@ export function IndexingSubtab() {
               aria-label="Chunking strategy"
               data-testid="chunking-strategy-group"
               onKeyDown={(e) => {
+                if (contractLocked) return;
                 const keys = ['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp', 'Home', 'End'];
                 if (!keys.includes(e.key)) return;
                 e.preventDefault();
@@ -2169,14 +2172,16 @@ export function IndexingSubtab() {
                     data-testid={`chunking-strategy-${strat.id}`}
                     tabIndex={selected ? 0 : -1}
                     onClick={() => setChunkingStrategy(strat.id)}
+                    disabled={contractLocked}
                     style={{
                       padding: '16px',
                       background: selected ? 'rgba(var(--accent-rgb), 0.1)' : 'var(--bg-elev2)',
                       border: selected ? '2px solid var(--accent)' : '1px solid var(--line)',
                       borderRadius: '8px',
-                      cursor: 'pointer',
+                      cursor: contractLocked ? 'not-allowed' : 'pointer',
                       textAlign: 'left',
                       transition: 'all 0.2s ease',
+                      opacity: contractLocked ? 0.6 : 1,
                     }}
                   >
                     <div
@@ -2216,6 +2221,7 @@ export function IndexingSubtab() {
                       min={64}
                       max={8192}
                       step={1}
+                      disabled={contractLocked}
                       style={{
                         width: '100%',
                         padding: '10px 12px',
@@ -2224,6 +2230,7 @@ export function IndexingSubtab() {
                         borderRadius: '6px',
                         color: 'var(--fg)',
                         fontSize: '13px',
+                        opacity: contractLocked ? 0.6 : 1,
                       }}
                     />
                   </div>
@@ -2239,6 +2246,7 @@ export function IndexingSubtab() {
                       min={0}
                       max={2048}
                       step={1}
+                      disabled={contractLocked}
                       style={{
                         width: '100%',
                         padding: '10px 12px',
@@ -2247,6 +2255,7 @@ export function IndexingSubtab() {
                         borderRadius: '6px',
                         color: 'var(--fg)',
                         fontSize: '13px',
+                        opacity: contractLocked ? 0.6 : 1,
                       }}
                     />
                   </div>
@@ -2289,6 +2298,7 @@ export function IndexingSubtab() {
                       min={200}
                       max={5000}
                       step={1}
+                      disabled={contractLocked}
                       style={{
                         width: '100%',
                         padding: '10px 12px',
@@ -2297,6 +2307,7 @@ export function IndexingSubtab() {
                         borderRadius: '6px',
                         color: 'var(--fg)',
                         fontSize: '13px',
+                        opacity: contractLocked ? 0.6 : 1,
                       }}
                     />
                   </div>
@@ -2306,11 +2317,13 @@ export function IndexingSubtab() {
                       <TooltipIcon name="CHUNK_OVERLAP" />
                     </label>
                     <NumberField
+                      data-testid="chunking-chunk-overlap"
                       value={chunkOverlap}
                       onCommit={setChunkOverlap}
                       min={0}
                       max={1000}
                       step={1}
+                      disabled={contractLocked}
                       style={{
                         width: '100%',
                         padding: '10px 12px',
@@ -2319,6 +2332,7 @@ export function IndexingSubtab() {
                         borderRadius: '6px',
                         color: 'var(--fg)',
                         fontSize: '13px',
+                        opacity: contractLocked ? 0.6 : 1,
                       }}
                     />
                   </div>
@@ -2364,7 +2378,9 @@ export function IndexingSubtab() {
                       value={separatorsText}
                       onChange={(e) => updateSeparatorsFromText(e.target.value)}
                       rows={5}
+                      disabled={contractLocked}
                       style={{
+                        opacity: contractLocked ? 0.6 : 1,
                         width: '100%',
                         padding: '10px 12px',
                         background: 'var(--input-bg)',
@@ -2382,8 +2398,10 @@ export function IndexingSubtab() {
                       <TooltipIcon name="SEPARATOR_KEEP" />
                     </label>
                     <select
+                      data-testid="chunking-separator-keep"
                       value={separatorKeep}
                       onChange={(e) => setSeparatorKeep(e.target.value as any)}
+                      disabled={contractLocked}
                       style={{
                         width: '100%',
                         padding: '10px 12px',
@@ -2392,6 +2410,7 @@ export function IndexingSubtab() {
                         borderRadius: '6px',
                         color: 'var(--fg)',
                         fontSize: '13px',
+                        opacity: contractLocked ? 0.6 : 1,
                       }}
                     >
                       <option value="suffix">Suffix</option>
@@ -2404,11 +2423,13 @@ export function IndexingSubtab() {
                         <TooltipIcon name="RECURSIVE_MAX_DEPTH" />
                       </label>
                       <NumberField
+                        data-testid="chunking-recursive-max-depth"
                         value={recursiveMaxDepth}
                         onCommit={setRecursiveMaxDepth}
                         min={1}
                         max={50}
                         step={1}
+                        disabled={contractLocked}
                         style={{
                           width: '100%',
                           padding: '10px 12px',
@@ -2417,6 +2438,7 @@ export function IndexingSubtab() {
                           borderRadius: '6px',
                           color: 'var(--fg)',
                           fontSize: '13px',
+                          opacity: contractLocked ? 0.6 : 1,
                         }}
                       />
                     </div>
@@ -2433,11 +2455,13 @@ export function IndexingSubtab() {
                     <TooltipIcon name="MARKDOWN_MAX_HEADING_LEVEL" />
                   </label>
                   <NumberField
+                    data-testid="chunking-markdown-max-heading-level"
                     value={markdownMaxHeadingLevel}
                     onCommit={setMarkdownMaxHeadingLevel}
                     min={1}
                     max={6}
                     step={1}
+                    disabled={contractLocked}
                     style={{
                       width: '100%',
                       padding: '10px 12px',
@@ -2446,15 +2470,18 @@ export function IndexingSubtab() {
                       borderRadius: '6px',
                       color: 'var(--fg)',
                       fontSize: '13px',
+                      opacity: contractLocked ? 0.6 : 1,
                     }}
                   />
                 </div>
                 <div className="input-group">
                   <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', marginTop: '28px' }}>
                     <input
+                      data-testid="chunking-markdown-include-code-fences"
                       type="checkbox"
                       checked={markdownIncludeCodeFences}
                       onChange={(e) => setMarkdownIncludeCodeFences(e.target.checked)}
+                      disabled={contractLocked}
                     />
                     Include code fences
                     <TooltipIcon name="MARKDOWN_INCLUDE_CODE_FENCES" />
@@ -2471,11 +2498,13 @@ export function IndexingSubtab() {
                   <TooltipIcon name="MAX_CHUNK_TOKENS" />
                 </label>
                 <NumberField
+                  data-testid="chunking-max-chunk-tokens"
                   value={maxChunkTokens}
                   onCommit={setMaxChunkTokens}
                   min={100}
                   max={32000}
                   step={1}
+                  disabled={contractLocked}
                   style={{
                     width: '100%',
                     padding: '10px 12px',
@@ -2484,6 +2513,7 @@ export function IndexingSubtab() {
                     borderRadius: '6px',
                     color: 'var(--fg)',
                     fontSize: '13px',
+                    opacity: contractLocked ? 0.6 : 1,
                   }}
                 />
               </div>
@@ -2493,11 +2523,13 @@ export function IndexingSubtab() {
                   <TooltipIcon name="MIN_CHUNK_CHARS" />
                 </label>
                 <NumberField
+                  data-testid="chunking-min-chunk-chars"
                   value={minChunkChars}
                   onCommit={setMinChunkChars}
                   min={10}
                   max={500}
                   step={1}
+                  disabled={contractLocked}
                   style={{
                     width: '100%',
                     padding: '10px 12px',
@@ -2506,6 +2538,7 @@ export function IndexingSubtab() {
                     borderRadius: '6px',
                     color: 'var(--fg)',
                     fontSize: '13px',
+                    opacity: contractLocked ? 0.6 : 1,
                   }}
                 />
               </div>
@@ -2515,11 +2548,13 @@ export function IndexingSubtab() {
                   <TooltipIcon name="MAX_INDEXABLE_FILE_SIZE" />
                 </label>
                 <NumberField
+                  data-testid="chunking-max-indexable-file-size"
                   value={maxIndexableFileSize}
                   onCommit={setMaxIndexableFileSize}
                   min={10000}
                   max={2000000000}
                   step={1}
+                  disabled={contractLocked}
                   style={{
                     width: '100%',
                     padding: '10px 12px',
@@ -2528,6 +2563,7 @@ export function IndexingSubtab() {
                     borderRadius: '6px',
                     color: 'var(--fg)',
                     fontSize: '13px',
+                    opacity: contractLocked ? 0.6 : 1,
                   }}
                 />
                 <div
@@ -2543,25 +2579,29 @@ export function IndexingSubtab() {
               <div style={{ display: 'flex', gap: '18px', flexWrap: 'wrap' }}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
                   <input
+                    data-testid="chunking-emit-chunk-ordinal"
                     type="checkbox"
                     checked={emitChunkOrdinal}
                     onChange={(e) => setEmitChunkOrdinal(e.target.checked)}
+                    disabled={contractLocked}
                   />
                   <span style={{ fontSize: '13px', color: 'var(--fg)' }}>Emit chunk ordinal</span>
                   <TooltipIcon name="EMIT_CHUNK_ORDINAL" />
                 </label>
                 <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
                   <input
+                    data-testid="chunking-emit-parent-doc-id"
                     type="checkbox"
                     checked={emitParentDocId}
                     onChange={(e) => setEmitParentDocId(e.target.checked)}
+                    disabled={contractLocked}
                   />
                   <span style={{ fontSize: '13px', color: 'var(--fg)' }}>Emit parent doc id</span>
                   <TooltipIcon name="EMIT_PARENT_DOC_ID" />
                 </label>
               </div>
               <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-                <input type="checkbox" checked={preserveImports} onChange={(e) => setPreserveImports(e.target.checked)} />
+                <input data-testid="chunking-preserve-imports" type="checkbox" checked={preserveImports} onChange={(e) => setPreserveImports(e.target.checked)} disabled={contractLocked} />
                 <span style={{ fontSize: '13px', color: 'var(--fg)' }}>Preserve imports in chunks</span>
                 <TooltipIcon name="PRESERVE_IMPORTS" />
               </label>
@@ -2588,6 +2628,7 @@ export function IndexingSubtab() {
                       min={200}
                       max={2000}
                       step={1}
+                      disabled={contractLocked}
                       style={{
                         width: '100%',
                         padding: '10px 12px',
@@ -2596,6 +2637,7 @@ export function IndexingSubtab() {
                         borderRadius: '6px',
                         color: 'var(--fg)',
                         fontSize: '13px',
+                        opacity: contractLocked ? 0.6 : 1,
                       }}
                     />
                   </div>
@@ -2804,11 +2846,13 @@ export function IndexingSubtab() {
                     <TooltipIcon name="INDEX_MAX_FILE_SIZE_MB" />
                   </label>
                   <NumberField
+                    data-testid="tokenization-index-max-file-size-mb"
                     value={indexMaxFileSizeMb}
                     onCommit={setIndexMaxFileSizeMb}
                     min={1}
                     max={1024}
                     step={1}
+                    disabled={contractLocked}
                     style={{
                       width: '100%',
                       padding: '10px 12px',
@@ -2817,6 +2861,7 @@ export function IndexingSubtab() {
                       borderRadius: '6px',
                       color: 'var(--fg)',
                       fontSize: '13px',
+                      opacity: contractLocked ? 0.6 : 1,
                     }}
                   />
                   <div
@@ -2835,6 +2880,7 @@ export function IndexingSubtab() {
                     data-testid="large-file-mode"
                     value={largeFileMode}
                     onChange={(e) => setLargeFileMode(e.target.value as any)}
+                    disabled={contractLocked}
                     style={{
                       width: '100%',
                       padding: '10px 12px',
@@ -2843,6 +2889,7 @@ export function IndexingSubtab() {
                       borderRadius: '6px',
                       color: 'var(--fg)',
                       fontSize: '13px',
+                      opacity: contractLocked ? 0.6 : 1,
                     }}
                   >
                     <option value="stream">stream</option>
@@ -2855,12 +2902,13 @@ export function IndexingSubtab() {
                     <TooltipIcon name="LARGE_FILE_STREAM_CHUNK_CHARS" />
                   </label>
                   <NumberField
+                    data-testid="tokenization-large-file-stream-chunk-chars"
                     value={largeFileStreamChunkChars}
                     onCommit={setLargeFileStreamChunkChars}
                     min={100000}
                     max={50000000}
                     step={1}
-                    disabled={largeFileMode !== 'stream'}
+                    disabled={contractLocked || largeFileMode !== 'stream'}
                     style={{
                       width: '100%',
                       padding: '10px 12px',
@@ -2869,7 +2917,7 @@ export function IndexingSubtab() {
                       borderRadius: '6px',
                       color: 'var(--fg)',
                       fontSize: '13px',
-                      opacity: largeFileMode === 'stream' ? 1 : 0.6,
+                      opacity: !contractLocked && largeFileMode === 'stream' ? 1 : 0.6,
                     }}
                   />
                 </div>
@@ -2886,6 +2934,7 @@ export function IndexingSubtab() {
                   <TooltipIcon name="BM25_TOKENIZER" />
                 </label>
                 <select
+                  data-testid="sparse-bm25-tokenizer"
                   value={bm25Tokenizer}
                   onChange={(e) => setBm25Tokenizer(e.target.value)}
                   disabled={contractLocked}
@@ -2911,6 +2960,7 @@ export function IndexingSubtab() {
                   <TooltipIcon name="BM25_STEMMER_LANG" />
                 </label>
                 <input
+                  data-testid="sparse-bm25-stemmer-lang"
                   type="text"
                   value={bm25StemmerLang}
                   onChange={(e) => setBm25StemmerLang(e.target.value)}
@@ -2963,12 +3013,14 @@ export function IndexingSubtab() {
                       Max rows
                     </label>
                     <NumberField
+                      data-testid="parquet-extract-max-rows"
                       min={1}
                       max={200000}
                       step={1}
                       value={parquetExtractMaxRows}
                       onCommit={setParquetExtractMaxRows}
-                      style={{ width: '100%' }}
+                      disabled={contractLocked}
+                      style={{ width: '100%', opacity: contractLocked ? 0.6 : 1 }}
                     />
                   </div>
                   <div className="input-group">
@@ -2976,12 +3028,14 @@ export function IndexingSubtab() {
                       Max chars
                     </label>
                     <NumberField
+                      data-testid="parquet-extract-max-chars"
                       min={10_000}
                       max={50_000_000}
                       step={1}
                       value={parquetExtractMaxChars}
                       onCommit={setParquetExtractMaxChars}
-                      style={{ width: '100%' }}
+                      disabled={contractLocked}
+                      style={{ width: '100%', opacity: contractLocked ? 0.6 : 1 }}
                     />
                   </div>
                   <div className="input-group">
@@ -2989,12 +3043,14 @@ export function IndexingSubtab() {
                       Max cell chars
                     </label>
                     <NumberField
+                      data-testid="parquet-extract-max-cell-chars"
                       min={100}
                       max={200_000}
                       step={1}
                       value={parquetExtractMaxCellChars}
                       onCommit={setParquetExtractMaxCellChars}
-                      style={{ width: '100%' }}
+                      disabled={contractLocked}
+                      style={{ width: '100%', opacity: contractLocked ? 0.6 : 1 }}
                     />
                   </div>
                 </div>
@@ -3002,18 +3058,22 @@ export function IndexingSubtab() {
                 <div style={{ marginTop: '12px', display: 'flex', gap: '18px', flexWrap: 'wrap' }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
                     <input
+                      data-testid="parquet-extract-text-columns-only"
                       type="checkbox"
                       checked={parquetExtractTextColumnsOnly}
                       onChange={(e) => setParquetExtractTextColumnsOnly(e.target.checked)}
+                      disabled={contractLocked}
                     />
                     <span style={{ fontSize: '12px', color: 'var(--fg)' }}>Text columns only</span>
                     <TooltipIcon name="PARQUET_EXTRACT_TEXT_COLUMNS_ONLY" />
                   </label>
                   <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
                     <input
+                      data-testid="parquet-extract-include-column-names"
                       type="checkbox"
                       checked={parquetExtractIncludeColumnNames}
                       onChange={(e) => setParquetExtractIncludeColumnNames(e.target.checked)}
+                      disabled={contractLocked}
                     />
                     <span style={{ fontSize: '12px', color: 'var(--fg)' }}>Include column names</span>
                     <TooltipIcon name="PARQUET_EXTRACT_INCLUDE_COLUMN_NAMES" />
@@ -3222,7 +3282,7 @@ export function IndexingSubtab() {
                 }}
               >
                 <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
-                  <input type="checkbox" checked={skipDense} onChange={(e) => setSkipDense(e.target.checked)} style={{ width: '18px', height: '18px' }} />
+                  <input data-testid="graph-skip-dense" type="checkbox" checked={skipDense} onChange={(e) => setSkipDense(e.target.checked)} disabled={contractLocked} style={{ width: '18px', height: '18px' }} />
                   <div>
                     <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--fg)' }}>Skip dense vectors</div>
                     <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginTop: '2px' }}>
