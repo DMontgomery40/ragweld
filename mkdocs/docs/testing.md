@@ -177,6 +177,10 @@ Merely *visiting* a config surface must stage nothing. Under the staged model, a
 
 Proves the shared confirm-dialog primitive's safety contracts: the delete-index dialog focuses the typed-confirmation input (never the destructive button), the confirm stays disabled until the corpus id is typed verbatim, and cancelling issues no `DELETE` — nothing is destroyed. A second scenario pins the other focus branch: a danger dialog with no typed gate (the Infrastructure → Paths save) focuses **Cancel**, so a stray Enter declines rather than destroys.
 
+### The dock legibility spec (`legibility_dock.spec.ts`)
+
+Proves legibility invariants for tabs rendered in the narrow dock pane, with real sidebar/dock clicks and no interception: the docked glossary wraps or scrolls rather than clipping mid-word, and Get Started swapped into the dock lays out by its container's width — the onboarding container keys off the `#tab-start` size container, not the viewport, so a step-4 heading and its warning stay readable at dock width instead of collapsing into a vertical strip with horizontal overflow. It also asserts the main-pane rendering keeps the full container width when Get Started is the main page.
+
 ??? info "Artifacts"
     Temporary feature tests and results go in `.tests/`; permanent tests go under `tests/`.
 ```
