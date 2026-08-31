@@ -54,7 +54,7 @@ flowchart LR
     root --> n_training
     n_ui["ui\n45 fields"]
     root --> n_ui
-    n_chat["chat\n21 fields"]
+    n_chat["chat\n18 fields"]
     root --> n_chat
     n_hydration["hydration\n2 fields"]
     root --> n_hydration
@@ -97,7 +97,7 @@ flowchart LR
 | `tracing` | 29 | Observability and tracing configuration. | [tracing](../config/tracing.md) |
 | `training` | 46 | Reranker training configuration. | [training](../config/training.md) |
 | `ui` | 45 | User interface configuration. | [ui](../config/ui.md) |
-| `chat` | 21 | Top-level chat configuration. Lives at TriBridConfig.chat. | [chat](../config/chat.md) |
+| `chat` | 18 | Top-level chat configuration. Lives at TriBridConfig.chat. | [chat](../config/chat.md) |
 | `hydration` | 2 | Context hydration configuration. | [hydration](../config/hydration.md) |
 | `evaluation` | 14 | Evaluation dataset configuration. | [evaluation](../config/evaluation.md) |
 | `system_prompts` | 11 | System prompts for LLM interactions - affects RAG pipeline behavior. | [system_prompts](../config/system_prompts.md) |

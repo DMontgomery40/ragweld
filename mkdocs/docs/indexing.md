@@ -218,6 +218,8 @@ flowchart LR
   CHUNK --> PG["Postgres chunk row\nwith provenance"]
 ```
 
+Chunking is figure-aware too: `server/api/index.py` cuts each document through `chunk_document_with_figures` (`server/indexing/figure_chunking.py`), so a described figure block is emitted as **one atomic chunk** — caption, prose summary, structured lists, and trailing image placeholder together — instead of being windowed by size and risking a citation that lands on a mid-word fragment of the description. Only the text between figures is windowed by the configured chunking strategy, a document with no described figures chunks exactly as before, and an oversized figure splits only at its `Labels:`/`Components:`/`Connections:`/`Values:`/`References:` headings.
+
 !!! note "Figures are part of the run record"
     A completed run persists `figures_described`, `figures_failed`, `figures_undescribed`, and a `figure_description_cost_usd` ceiling on its `IndexRunSummary` (`GET /api/index/{corpus_id}/runs/latest`), so the counts stay auditable after the terminal stream is gone. The pre-run estimate answers in kind: `IndexEstimate.estimated_seconds_figures` prices the figure phase’s wall clock (~20 s per vision call, divided by `indexing.figures.concurrency`) alongside its cost, and the `GET /api/index/status` cost card adds a Figure Descriptions line when the latest committed run described any.
 

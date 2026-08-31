@@ -1,4 +1,5 @@
 
+
 # Indexing a corpus
 
 <div class="grid chunk_summaries" markdown>
@@ -139,6 +140,8 @@ A chunk whose text is majority covered by a described figure's source span is st
 - **`figure_class` is only written when classification resolved.** A described-but-unclassified figure gets `chunk_kind` and `figure` but no `figure_class` key — no metadata backed by nothing.
 - **Only the marked chunk carries the annotation.** Text chunks next to a figure get no `figure` key, so retrieval-side filtering on `chunk_kind` can't accidentally pick up prose.
 
+**A described figure is one atomic chunk.** The indexer cuts documents through `chunk_document_with_figures` (`server/indexing/figure_chunking.py`), which hands the chunker the described figures' `[char_start, char_end)` ranges (`Chunker.chunk_document`) so each figure block — caption, prose summary, structured lists, and the trailing image placeholder — is emitted **whole**, not windowed by size. This is what keeps a citation from landing on a mid-word fragment of a figure description (" … the following week.\nLabels: …"): only the text *between* figures is windowed by the configured strategy, and a document with no described figures chunks exactly as `chunk_file` would. When a figure block exceeds `chunking.max_chunk_tokens`, it is split only at its `Labels:` / `Components:` / `Connections:` / `Values:` / `References:` section headings (packed to the token budget), never mid-word — every piece still reconstructs the block and stamps as a figure chunk.
+
 !!! note "The figure marking rides the vector payload"
     The Qdrant writer carries `chunk_kind` and `figure` in the point payload (`server/retrieval/qdrant_store.py`), so **dense and sparse** hits read back as figures without a Postgres hydration step — previously only graph-hydrated chunks carried the marking, and a figure hit on the dense or sparse leg looked like ordinary page text to the citation UI. `figure_class` is deliberately not carried in the payload: nothing downstream reads the local classifier's class at retrieval time. Corpora indexed before this change still hold the metadata in Postgres; re-index to mark dense/sparse figure hits.
 
@@ -274,7 +277,7 @@ The replayed log comes from `GET /api/index/{corpus_id}/runs/{run_id}/events`, w
 Two things the tab does so the signal survives the replay:
 
 - **Conversion heartbeats collapse.** A long Docling conversion emits a `Converting <file>: still running (Ns elapsed)` beat every few minutes, which used to bury everything around it — the figure summary included — under dozens of identical lines. Only the last beat per file is kept, labelled `[N progress notices]`, so the figure summary and per-file events stay readable.
-- **Figure outcomes are listed per document.** When a figure-enabled run finishes, the tab shows a **Figures this run failed to describe** panel (or "Figures this run filtered out, as configured" when nothing failed), one row per document with failed / filtered-out / described counts, from the run's own per-document `figure_outcome` events. "Failed" means the vision call was made and the gateway returned nothing — check the alias and `indexing.figures.max_completion_tokens`, then re-run with Force reindex. "Filtered out" means the picture never reached the vision call (`indexing.figures.skip_classes`, `min_area_fraction`, or `classify`) — the configured rules working, not a fault.
+- **Figure outcomes are listed per document.** When a figure-enabled run finishes, the tab shows a **Figures this run failed to describe** panel (or "Figures this run filtered out, as configured" when nothing failed), one row per document with failed / filtered-out / described counts, from the run's own per-document `figure_outcome` events. "Failed" means the vision call was made and the gateway returned nothing — check the alias and `indexing.figures.max_completion_tokens`, then re-run with Force reindex. "Filtered out" means the picture never reached the vision call (`indexing.figures.skip_classes`, `min_area_fraction`, or `classify`) — the configured rules working, not a fault. The event also carries per-figure detail for the non-described pictures (`FigureOutcome` in `server/models/index.py` — the Docling `self_ref`, the 1-based page, the classifier class when one resolved, and a reason), so the panel can name *which* figures failed or were filtered out rather than only counting them.
 
 ### Runs started outside the tab are mirrored, not lost
 
@@ -426,4 +429,5 @@ Here’s the short list of “most likely to matter” knobs:
 
 ??? question "Starting the run returns 409 with `code: figure_vision_alias`"
     `indexing.figures.vision_model` is either not a vision-capable gateway alias in the model catalog, or it cannot be routed right now (for example, the LiteLLM gateway is disabled). ragweld refuses the run **before** it takes the per-corpus run fence, so nothing is claimed, leased, or staged. Fix the alias — pick a vision-capable alias from the model catalog — or turn `indexing.figures.describe` off, then start the run again.
+
 

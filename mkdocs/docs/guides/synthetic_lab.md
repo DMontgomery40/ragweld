@@ -1,3 +1,5 @@
+
+
 # Synthetic Data Lab
 
 <div class="grid chunk_summaries" markdown>
@@ -50,10 +52,12 @@ A run walks the corpus's indexed chunks in bounded batches:
 |---|---|---|---|
 | Grounded QA | `eval_dataset_json` | Publish eval dataset | yes |
 | Triplets | `triplets_jsonl` | Publish triplets (reranker training) | yes |
-| Semantic cards | `semantic_cards_jsonl` | Publish semantic cards | no |
+| Semantic summaries | `semantic_cards_jsonl` | Publish semantic summaries | no |
 | Keywords | keywords file | Publish keywords | no |
 
 Every run also writes a human-readable `report_md` summary. That report is not published to a corpus store, so it has no Publish action; each artifact row carries **Copy path**, **Preview** (a bounded, read-only preview of the artifact rows), and **Publish** where applicable.
+
+The recipe picker labels every lane in plain language — **Eval Dataset**, **Semantic Summaries**, **Triplets**, **Keywords**, **Autotune Retrieval**, and **Full Stack** — and the deep-link preset notice uses those labels too (`Recipe preset to "Eval Dataset" … Nothing has run`). Autotune Retrieval and Full Stack sit in the same picker under the same rules as the recipes above: nothing runs until you start it there, and each run writes its artifacts and report to the run record.
 
 ## Publish vs promote
 
@@ -146,3 +150,4 @@ All knobs are generated in the [synthetic config reference](../reference/config/
 
 !!! tip "If you're not sure"
     Start with the `eval_dataset` recipe and small limits, read the run report, and only promote (point an alias at) runs whose gate passed on a healthy sample. Wire the published dataset into an eval run before trusting it in any regression workflow.
+

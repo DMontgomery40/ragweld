@@ -228,6 +228,8 @@ Full alerting controls (Alertmanager endpoints, receivers, delivery policy) live
 
 Below the alerts panel, **Recent Query Traces** lists the last 10 search and chat queries — a date-and-time timestamp, the query text, and the corpus each ran against. The table deliberately has no Duration column: the query log records no per-request timing, so the table never shows a column it cannot populate (a column of `—` for every row would look like missing data). For latency work use `/api/metrics`, the trace viewer, or the Grafana dashboards rather than this table; the timestamps include the date, so a list spanning days cannot read as if it ran backwards.
 
+The panel's description links straight into the **Eval Analysis** tab — per-run drilldown, per-question detail, and AI comparison analysis live there — and the table's third column header reads **Corpus**, matching the workbench's corpus-first naming.
+
 ### Dashboard → Storage: byte tiles, count tiles, and the capacity planner
 
 The Storage subtab shows one tile per storage component, in two deliberately different formats:

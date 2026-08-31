@@ -80,6 +80,9 @@ flowchart TB
 !!! note "Removed: the dead `retrieval.topk_*` and weight duplicates"
     `retrieval.rrf_k_div`, `retrieval.langgraph_final_k`, `retrieval.bm25_weight`, `retrieval.vector_weight`, `retrieval.topk_dense`, and `retrieval.topk_sparse` are gone from the config model. They duplicated the knobs the pipeline actually reads (`server/retrieval/fusion.py`): fusion weights live under `fusion.*`, the dense candidate size is `vector_search.top_k`, and the sparse candidate size is `sparse_search.top_k`. A saved config that still carries the old keys simply ignores them — retune at the canonical homes. `retrieval.eval_final_k` stays: it is the evaluation-only final-k (`server/api/eval.py`) and is deliberately distinct from `retrieval.final_k`, not a duplicate.
 
+!!! note "Removed: the legacy base+suffix chat prompt composition"
+    `chat.system_prompt_base`, `chat.system_prompt_rag_suffix`, and `chat.system_prompt_recall_suffix` are gone from `ChatConfig`. Exactly one of the four state prompts (`system_prompt_direct`, `system_prompt_rag`, `system_prompt_recall`, `system_prompt_rag_and_recall`) is selected per message by whether RAG and/or Recall context is present, so the legacy base+suffix path was a second, conflicting instruction surface behind the live one. `GET /api/prompts` lists only the four state prompts, and a persisted config that still carries the removed keys loads cleanly — the config-store upgrade path strips them (`server/services/config_store.py`), as does the flat loader (`server/config.py`). If you customized a suffix, move that text into the state prompt whose behavior you want it to affect.
+
 ### Fusion Configuration
 
 | Field | Type | Constraints | Description |
