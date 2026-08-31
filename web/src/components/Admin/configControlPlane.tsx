@@ -294,7 +294,7 @@ export function ConfigFieldEditor({
       const parsed = parseDraft(field, draft);
       await onSave(field.path, parsed);
       setFieldError(null);
-      setStatus('Saved');
+      setStatus('Staged — Apply to save');
       window.setTimeout(() => setStatus(null), 1200);
     } catch (err) {
       setFieldError(err instanceof Error ? err.message : 'Unable to save this field.');
@@ -329,7 +329,7 @@ export function ConfigFieldEditor({
       disabled={saving}
       style={ACTION_BUTTON_STYLE}
     >
-      {saving ? 'Saving…' : 'Save'}
+      {saving ? 'Staging…' : 'Stage'}
     </button>
   );
 
