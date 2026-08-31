@@ -2542,7 +2542,10 @@ class PostgresClient:
             # which renames `root_path` to `path`; a caller that had to read both shapes
             # would be a dual-read contract over the same table -- and did in fact raise
             # KeyError on whichever branch it had not been written against.
-            out["path"] = out.pop("root_path", None)
+            # `RETURNING *` always includes root_path (NOT NULL), so pop it without a
+            # default: a missing column must fail here, at the source, not surface later
+            # as a silent path=None that only trips a Pydantic error far downstream.
+            out["path"] = out.pop("root_path")
             out["meta"] = _coerce_jsonb_dict(out.get("meta"))
             return out
 
