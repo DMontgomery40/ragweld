@@ -29,8 +29,9 @@ from tests.service_requirements import require_env
 
 
 def test_real_corpus_names_are_not_reap_eligible() -> None:
-    # The operator's real corpora must never match a test-corpus prefix.
-    for real in ("epstein-files-1", "nasa-apollo-11", "ragweld_code", "recall_default"):
+    # The operator's real corpora (as seen in the live registry) must never match a
+    # test-corpus prefix -- this fixture deletes from live Postgres on every run.
+    for real in ("ragweld_code", "recall_default", "nasa-apollo-11", "epstein-files-public"):
         assert not is_test_corpus_id(real), real
     assert is_test_corpus_id(f"{TEST_CORPUS_PREFIX}anything")
 
