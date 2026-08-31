@@ -208,7 +208,7 @@ export interface ChatConfig {
   /** State 1: No context. Nothing checked or retrieval returned empty. */
   system_prompt_direct?: string; // default: "You are a helpful agentic RAG database assistan..."
   /** State 2: RAG only. Code corpora returned results; Recall did not. */
-  system_prompt_rag?: string; // default: "You are a database assistant powered by TriBrid..."
+  system_prompt_rag?: string; // default: "You are a database assistant powered by ragweld..."
   /** State 3: Recall only. Recall returned results; no RAG corpora active. */
   system_prompt_recall?: string; // default: "You are an agentic RAG database assistant power..."
   /** State 4: Both. RAG and Recall both returned results. */

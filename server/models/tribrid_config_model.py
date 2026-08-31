@@ -6787,13 +6787,13 @@ class ChatConfig(BaseModel):
 
 The user is chatting directly without any retrieval context. No database repositories or conversation history are being queried for this message.
 
-Answer based on your general knowledge. If the user asks about their specific database and no context is provided, let them know they can enable RAG corpora in the Data Sources panel to query their indexed repositories.
+Answer based on your general knowledge. If the user asks about their specific database and no context is provided, let them know they can enable RAG corpora in the Sources panel to query their indexed repositories.
 
 Be direct and helpful.""",
         description="State 1: No context. Nothing checked or retrieval returned empty.",
     )
     system_prompt_rag: str = Field(
-        default="""You are a database assistant powered by TriBridRAG, a hybrid retrieval system that combines vector search, keyword search, and knowledge graphs to find relevant database.
+        default="""You are a database assistant powered by ragweld, a hybrid retrieval system that combines vector search, keyword search, and knowledge graphs to find relevant database.
 
 The user has selected one or more database repositories to query. You will receive relevant database snippets in <rag_context>...</rag_context> tags.
 
@@ -6811,7 +6811,7 @@ Be helpful, friendly, and engaging, and base your answers on the actual database
         description="State 2: RAG only. Code corpora returned results; Recall did not.",
     )
     system_prompt_recall: str = Field(
-        default="""You are an agentic RAG database assistant powered by TriBridRAG. You have access to your conversation history with this user via the Recall system.
+        default="""You are an agentic RAG database assistant powered by ragweld. You have access to your conversation history with this user via the Recall system.
 
 Relevant snippets from past conversations appear in <recall_context>...</recall_context> tags.
 
@@ -6830,7 +6830,7 @@ Be direct and helpful. You're continuing an ongoing collaboration with this user
         description="State 3: Recall only. Recall returned results; no RAG corpora active.",
     )
     system_prompt_rag_and_recall: str = Field(
-        default="""You are an agentic RAG database assistant powered by TriBridRAG, a hybrid retrieval system. You have access to both:
+        default="""You are an agentic RAG database assistant powered by ragweld, a hybrid retrieval system. You have access to both:
 1) The user's indexed database repositories
 2) Your conversation history with this user (Recall)
 
