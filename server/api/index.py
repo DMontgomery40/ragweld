@@ -43,6 +43,7 @@ from server.indexing.estimate import (
     warm_sampler,
     warmup_seconds_remaining,
 )
+from server.indexing.figure_chunking import chunk_document_with_figures
 from server.indexing.generations import (
     DeletionIncompleteError,
     FenceClaim,
@@ -69,7 +70,6 @@ from server.indexing.official_graphrag import (
     extract_semantic_kg_with_graphrag,
     write_lexical_graph_with_graphrag,
 )
-from server.indexing.figure_chunking import chunk_document_with_figures
 from server.indexing.provenance import stamp_provenance
 from server.indexing.text_extractors import (
     ExtractedDocument,
@@ -2745,6 +2745,16 @@ async def _run_index_body(
                             "described": int(extracted.figures_described),
                             "failed": int(extracted.figures_failed),
                             "undescribed": int(extracted.figures_skipped),
+                            # Per-figure detail for exactly the figures that did NOT get a
+                            # description, so the run report can name which ones (page, ref,
+                            # class, reason) and not just count them (M-43). The described
+                            # figures are omitted here to keep this one-event-per-document
+                            # payload bounded — they are the success path and already counted.
+                            "figures": [
+                                outcome.model_dump(mode="json")
+                                for outcome in extracted.figures
+                                if outcome.status != "described"
+                            ],
                         },
                     },
                     drop_oldest=True,
@@ -3985,7 +3995,8 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
         assumptions.append(f"skips files > {max_indexable_bytes} bytes")
     if estimated_figures is not None:
         assumptions.append(
-            f"figures≈{_FIGURES_PER_PAGE_HEURISTIC} per PDF page "
+            f"figures≈{_FIGURES_PER_PAGE_HEURISTIC} per PDF page — a flat per-page heuristic, "
+            "not a count of the actual pictures in these PDFs "
             f"(ceiling: {_FIGURE_INPUT_TOKENS} input tokens + the full max_completion_tokens "
             "budget per figure)"
         )

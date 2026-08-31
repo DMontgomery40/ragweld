@@ -194,6 +194,45 @@ def test_a_multi_prov_figure_does_not_double_count_its_own_coverage() -> None:
 def test_extracted_document_counts_default_to_zero() -> None:
     doc = ExtractedDocument(text="x", extraction="direct", kind="text")
     assert (doc.figures_described, doc.figures_failed, doc.figures_skipped) == (0, 0, 0)
+    assert doc.figures == ()
+
+
+def test_per_figure_outcomes_name_which_pictures_were_described_and_skipped() -> None:
+    """M-43: the extractor records a FigureOutcome per picture (page, self_ref, class, status,
+    reason) so a run report can name WHICH figures failed, not just how many. The outcomes and
+    the described/failed/skipped counts are the same triage, so they cannot disagree."""
+    doc = DocumentConverter().convert(str(apollo_figure_pages())).document
+    pictures = [p for p, _ in doc.iterate_items() if isinstance(p, PictureItem) and p.prov]
+    described_pic = pictures[0]
+    described_pic.meta = PictureMeta(
+        description=DescriptionMetaField(text=REPLY, created_by="test"),
+        classification=PictureClassificationMetaField(
+            predictions=[PictureClassificationPrediction(class_name="drawing", confidence=0.9)]
+        ),
+    )
+
+    class _FixedDocConverter:
+        def convert(self, _path: str) -> Any:
+            return SimpleNamespace(document=doc)
+
+    extracted = _read_with_docling(apollo_figure_pages(), converter=_FixedDocConverter())
+    assert extracted is not None
+
+    all_pictures = [p for p, _ in doc.iterate_items() if isinstance(p, PictureItem)]
+    assert len(extracted.figures) == len(all_pictures), "one outcome per picture"
+    described = [o for o in extracted.figures if o.status == "described"]
+    skipped = [o for o in extracted.figures if o.status == "skipped"]
+    assert len(described) == extracted.figures_described == 1
+    assert len(skipped) == extracted.figures_skipped
+    assert not [o for o in extracted.figures if o.status == "failed"]
+
+    only = described[0]
+    assert only.self_ref == described_pic.self_ref
+    assert only.page == described_pic.prov[0].page_no
+    assert only.figure_class == "drawing"
+    assert only.reason is None
+    # A skipped figure carries an actionable reason so the report can explain the skip.
+    assert all(o.reason for o in skipped)
 
 
 def test_blank_meta_description_falls_back_to_a_non_blank_annotation() -> None:

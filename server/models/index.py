@@ -71,6 +71,33 @@ class FigureAnnotation(BaseModel):
     references: list[str] = Field(default_factory=list, description="Sheet/figure/table/section cross-references printed on the figure")
 
 
+FigureOutcomeStatus = Literal["described", "failed", "skipped"]
+
+
+class FigureOutcome(BaseModel):
+    """What happened to one picture during an indexing run, recorded per figure so a run report
+    can name WHICH figures failed, not just how many (M-43).
+
+    Carried inside the per-document figure event's ``meta.figures`` — a run-event payload read
+    back through ``/index/{corpus}/runs/{run}/events``, not a distinct generated frontend
+    contract. ``self_ref`` is the Docling item ref, ``page`` its first page, ``figure_class`` the
+    local classifier's label when classification ran, and ``reason`` explains a non-described
+    outcome.
+    """
+
+    self_ref: str = Field(description="Docling item reference for the picture (e.g. #/pictures/3)")
+    page: int | None = Field(default=None, ge=1, description="1-based page the picture sits on")
+    figure_class: str | None = Field(
+        default=None, description="Local classifier label, when classification ran"
+    )
+    status: FigureOutcomeStatus = Field(
+        description="described (vision reply kept), failed (empty/errored reply), or skipped (never sent)"
+    )
+    reason: str | None = Field(
+        default=None, description="Why a figure failed or was skipped; None when described"
+    )
+
+
 class Chunk(BaseModel):
     """A code chunk from the indexed repository."""
 

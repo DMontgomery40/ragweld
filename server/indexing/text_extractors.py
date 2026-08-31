@@ -8,7 +8,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from server.models.index import DocumentKind, ExtractionMethod, FigureAnnotation, PageRegion
+from server.models.index import (
+    DocumentKind,
+    ExtractionMethod,
+    FigureAnnotation,
+    FigureOutcome,
+    PageRegion,
+)
 
 # Rich-document formats are converted through Docling; code and plain-text
 # formats keep the direct read path by design.
@@ -41,6 +47,10 @@ class ExtractedDocument:
     figures_described: int = 0
     figures_failed: int = 0
     figures_skipped: int = 0
+    # Per-figure outcome (page, self_ref, class, status, reason) for every picture, so a run
+    # report can list WHICH figures failed, not just how many (M-43). Empty for non-Docling
+    # extraction and for Docling documents that have no pictures.
+    figures: tuple[FigureOutcome, ...] = ()
 
 
 def extraction_method_for_path(path: Path) -> ExtractionMethod:
@@ -411,16 +421,52 @@ def _read_with_docling(
             return ""  # attempted (a description object exists), but nothing non-blank
         return None  # never attempted
 
+    classes_by_ref = getattr(
+        getattr(serializer, "picture_serializer", None), "classes_by_ref", {}
+    )
+
+    def _figure_page(p: Any) -> int | None:
+        prov = getattr(p, "prov", None)
+        return int(prov[0].page_no) if prov else None
+
     described = 0
     failed = 0
+    outcomes: list[FigureOutcome] = []
     for p in pictures:
         text = _description_text(p)
+        self_ref = str(getattr(p, "self_ref", "") or "")
+        page = _figure_page(p)
+        figure_class = classes_by_ref.get(self_ref)
         if text is None:
-            continue  # never attempted -> counted in figures_skipped below
+            # Never attempted: the picture never reached the vision call.
+            outcomes.append(
+                FigureOutcome(
+                    self_ref=self_ref,
+                    page=page,
+                    figure_class=figure_class,
+                    status="skipped",
+                    reason="not sent for description (area threshold, class deny-list, or describe disabled)",
+                )
+            )
+            continue
         if text.strip():
             described += 1
+            outcomes.append(
+                FigureOutcome(
+                    self_ref=self_ref, page=page, figure_class=figure_class, status="described"
+                )
+            )
         else:
             failed += 1  # attempted, gateway returned nothing
+            outcomes.append(
+                FigureOutcome(
+                    self_ref=self_ref,
+                    page=page,
+                    figure_class=figure_class,
+                    status="failed",
+                    reason="vision call returned no text",
+                )
+            )
     skipped = len(pictures) - described - failed  # every picture lands in exactly one count
     return ExtractedDocument(
         text=full,
@@ -431,6 +477,7 @@ def _read_with_docling(
         figures_described=described,
         figures_failed=failed,
         figures_skipped=skipped,
+        figures=tuple(outcomes),
     )
 
 
