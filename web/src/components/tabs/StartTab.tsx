@@ -294,7 +294,7 @@ export default function StartTab() {
                   Qdrant dense + sparse vectors, Neo4j graph), and ask it a first grounded question with citations.
                 </p>
                 <p>
-                  Everything runs against your local services; generation goes through the configured LiteLLM gateway
+                  Everything runs on the machine running ragweld; generation goes through the configured LiteLLM gateway
                   alias.
                 </p>
               </div>
@@ -337,7 +337,7 @@ export default function StartTab() {
                 </select>
               </div>
 
-              <p className="ob-hint">Or register a new folder on this machine:</p>
+              <p className="ob-hint">Or register a new folder on the machine running ragweld:</p>
               <div className="ob-input-group">
                 <label htmlFor="onboarding-corpus-name">Corpus name</label>
                 <input

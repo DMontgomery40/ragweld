@@ -192,6 +192,10 @@ export function IntentMatrixEditor() {
         Maps query intents to layer bonus multipliers. Values {'>'} 1.0 boost that layer for the intent;{' '}
         {'<'} 1.0 penalizes. Intents: gui, retrieval, indexer, eval, infra, server.
       </p>
+      <p className="editor-help">
+        These layers and intents describe source-tree (code) corpora; on document or email
+        corpora they have little effect.
+      </p>
     </div>
   );
 }
