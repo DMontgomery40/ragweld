@@ -37,7 +37,7 @@
 
     ---
 
-    Secrets + integrations that power provider-backed features.
+    Basic, advanced, and raw configuration plus dependency and secret readiness.
 
 </div>
 
@@ -173,12 +173,15 @@ The UI is organized into top-level tabs. Here’s the practical meaning of each:
 | Get Started | Bring-up flow + sanity checks | `/web/start` |
 | Dashboard | System status, monitoring, storage, help | `/web/dashboard?subtab=system` |
 | Chat | Chat UI + chat settings | `/web/chat?subtab=ui` |
-| Grafana | Embed Grafana dashboards/config (when enabled) | `/web/grafana?subtab=dashboard` |
+| Grafana | Embedded dashboards, observability catalog, and incident signals (when enabled) | `/web/grafana?subtab=overview` |
 | Benchmark | Run/inspect benchmarks | `/web/benchmark` |
 | RAG | Core tri-brid features (retrieval/indexing/graph/reranker) | `/web/rag?subtab=retrieval` |
 | Eval Analysis | Analyze eval runs and datasets | `/web/eval?subtab=analysis` |
 | Infrastructure | Docker status, MCP servers, paths/stores | `/web/infrastructure?subtab=services` |
-| Admin | Secrets and integrations | `/web/admin?subtab=secrets` |
+| Admin | Basic/advanced/raw configuration + dependency and secret readiness | `/web/admin?subtab=basic` |
+
+!!! note "Subtab routes changed recently"
+    Grafana's subtabs are now **Overview**, **Dashboards**, **Incidents**, and **Config**; Admin's are **Basic**, **Advanced**, **Raw**, and **Dependencies** (secret readiness lives under Dependencies). A bookmark pointing at an old `?subtab=` value is corrected with a toast naming what changed.
 
 !!! note "Startup load: Dashboard → Storage is lazy-loaded"
     To keep first paint cheap and avoid unnecessary database IO, ragweld does not fetch storage/indexing metrics until you open the Storage subtab.
@@ -264,7 +267,7 @@ If you see “wrong results”, the most common cause is simply that you’re lo
     - Your terminal where `./start.sh` is running
 
 ??? tip "Where to verify secrets"
-    - **Admin → Secrets**
+    - **Admin → Dependencies** (dependency and secret readiness)
     - `/api/secrets/check?...`
 
 ## Shell polish worth knowing (recent changes)

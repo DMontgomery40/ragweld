@@ -55,6 +55,9 @@
 
     The same builder serves the corpus-delete refusal (`DELETE /api/repos/{corpus_id}` and `DELETE /api/corpora/{corpus_id}`, both of which document the `409` in their OpenAPI responses), so the delete refusal and the index-start refusal cannot drift apart.
 
+!!! note "A poll for a deleted corpus is a typed 404, not a 500"
+    `GET /api/index/status` and `GET /api/index/stats` resolve the corpus's scoped config as part of answering; when the named corpus is not registered — for example, a Dashboard tab left open across a corpus deletion — both answer `404` with the corpus-not-found message instead of an unhandled `500`, and both document the `404` in their OpenAPI responses (`server/api/index.py`).
+
 !!! note "Run event logs are pages, not bare lists"
     `GET /api/index/{corpus_id}/runs/{run_id}/events` now answers `IndexRunEventPage`: `events` (the most recent `limit`, oldest first), `total` (everything the run recorded) and `first_index` (where this slice starts). A client that asked for `?limit=500` of a 1,284-event run can now say so, instead of printing its own cap as a fact about the run.
 

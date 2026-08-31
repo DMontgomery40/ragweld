@@ -69,6 +69,27 @@ curl -sS http://localhost:8000/mcp/status | jq .
 const status = await (await fetch('/mcp/status')).json();
 ```
 
+## Structured, fail-closed search errors
+
+The MCP `search` tool never returns a partial result. When retrieval cannot complete, it answers with `isError=true` and a structured payload (`MCPSearchToolResult` in `server/models/tribrid_config_model.py`) that carries exactly one of:
+
+result
+:   The successful `ChunkMatch[]` rows. An empty list is a valid successful result — a corpus with no hits is not an error.
+
+error
+:   One of the typed failure details the HTTP API already returns, so agent clients branch on stable codes instead of parsing prose:
+
+| Error detail | `code` | Meaning |
+|---|---|---|
+| `DependencyUnavailableDetail` | `dependency_unavailable` | A required runtime dependency (Postgres, Qdrant, Neo4j, embedding provider) is unavailable. |
+| `RequiredRetrievalLegFailureDetail` | `required_retrieval_leg_failed` | A requested retrieval leg failed at execution time (for example, the configured embedding model is missing). |
+| `RetrievalContractMismatchDetail` | `embedding_contract_mismatch` / `sparse_contract_mismatch` | The corpus's stored index contract conflicts with the current configuration; re-index. |
+
+The same errors surface as typed HTTP failures on the probe route: `POST /api/mcp/probe` answers `503` for the first two and `409` for a contract mismatch, with the detail under `detail` — so HTTP clients and MCP clients share one error vocabulary. The integration tests prove the fail-closed contract end to end over the real mounted transport (`tests/integration/test_dependency_outage_asymmetric.py`, `tests/integration/test_required_retrieval_leg_contract.py`): a Neo4j outage or a contract mismatch returns the same typed detail as `/api/search`, never partial rows.
+
+!!! tip "If you're not sure"
+    Treat `isError=true` as "retry after remediation or re-index", never as "the search came back empty". A genuine empty result arrives with `isError=false` and `result: []`.
+
 ```mermaid
 flowchart LR
     Client["MCP Client"] --> HTTP["MCP HTTP\n(mount /mcp)"]

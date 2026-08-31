@@ -1,3 +1,4 @@
+
 # Troubleshooting (user-focused)
 
 <div class="grid chunk_summaries" markdown>
@@ -53,7 +54,7 @@
 | Indexing errors on a file | Unsupported encoding or giant binary | Exclude the file type; reindex |
 | Search is slow | Large candidate sizes, slow provider calls, graph enabled | Start with `/api/search`, disable graph, reduce top-k; then tune |
 | Deleting a corpus returns 409 | A live index run holds the corpus fence | The error names the run and its latest step; stop it (**RAG → Indexing → Stop**) or wait for its lease to lapse, then retry |
-| Chat logs header says “Loki unreachable” during a heavy re-index | The Loki readiness probe timed out on a busy box (Loki itself is usually up) | The URL is cached and the log tail retries for up to two minutes, so the header recovers without a reload; if it stays red after the box quiets down, check `/api/loki/status` and your `LOKI_BASE_URL` |
+| Chat logs header says “Loki unreachable” during a heavy re-index | The Loki readiness probe timed out on a busy box (Loki itself is usually up) | The URL is cached and the log tail retries for up to two minutes, so the header recovers without a reload; if it stays red after the box quiets down, check `/api/loki/status` and your `LOKI_BASE_URL`. Each timed-out probe is also counted in the `tribrid_loki_probe_timeouts_total` Prometheus metric, so a busy-box pattern is visible in metrics without new log noise |
 
 ## “My corpus indexed, but results look wrong”
 

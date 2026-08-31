@@ -35,6 +35,9 @@
 !!! note "Container Logs"
     Use `/api/docker/services/{service}/logs` for ad-hoc log pulls (ragweld services only), or rely on Loki for aggregation.
 
+!!! note "A Loki probe timeout is counted, not logged"
+    The Loki readiness probe behind `/api/loki/status` and the chat log tail deliberately stays quiet when it times out — one log line per timeout would restore exactly the journal noise the resolved-URL cache exists to remove. Instead, every timed-out `/ready` probe increments `tribrid_loki_probe_timeouts_total` (Prometheus, unlabelled by design), so a box too busy to probe Loki is visible in metrics without new log lines. Every other failure shape — a refused connection, a bad status — reads the same "not ready" as before.
+
 !!! warning "Restarts"
     Prefer coordinated restarts via the API (or compose) to avoid dropping in-flight requests.
 
