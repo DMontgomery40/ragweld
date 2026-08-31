@@ -28,18 +28,10 @@ from server.models.tribrid_config_model import (
     TriBridConfig,
 )
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-
-
-def repo_root() -> Path:
-    return _REPO_ROOT
-
-
-def resolve_project_path(path_str: str) -> Path:
-    p = Path(str(path_str or "")).expanduser()
-    if not p.is_absolute():
-        p = repo_root() / p
-    return p
+# The repo root and relative-path resolution live in one module; `repo_root` is
+# used throughout this file and `resolve_project_path` is re-exported by
+# `server.lineage.__init__`, so both are imported (not recomputed) here.
+from server.project_paths import repo_root, resolve_project_path
 
 
 def _raise_lineage_store_error(operation: str, exc: BaseException) -> None:

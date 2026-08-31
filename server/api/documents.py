@@ -39,6 +39,7 @@ from server.models.index import (
     IndexedDocumentRecord,
 )
 from server.models.tribrid_config_model import TriBridConfig, validate_corpus_id_component
+from server.project_paths import resolve_project_path
 from server.services.config_store import CorpusNotFoundError
 from server.services.config_store import get_config as load_scoped_config
 from server.services.corpus_files import file_etag, resolve_corpus_file, sha256_file
@@ -50,8 +51,6 @@ from server.services.pdf_render import (
 )
 
 logger = logging.getLogger(__name__)
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 router = APIRouter(tags=["documents"], responses=DEPENDENCY_UNAVAILABLE_RESPONSES)
 
@@ -130,9 +129,7 @@ async def _resolve(corpus_id: str, path: str, *, boundary: str) -> _Resolved:
         raise_postgres_unavailable_if_applicable(exc, boundary=boundary)
         raise
 
-    corpus_root = Path(str(corpus.get("path") or "")).expanduser()
-    if not corpus_root.is_absolute():
-        corpus_root = PROJECT_ROOT / corpus_root
+    corpus_root = resolve_project_path(str(corpus.get("path") or ""))
     abs_path = resolve_corpus_file(corpus_root, rel_path)
 
     try:
