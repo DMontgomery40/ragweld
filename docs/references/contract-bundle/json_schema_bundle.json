@@ -2,7 +2,7 @@
   "domain_modules": [
     "server.models.index"
   ],
-  "model_count": 287,
+  "model_count": 289,
   "module": "server.models.tribrid_config_model",
   "root_models": {
     "ActiveSources": {
@@ -4832,43 +4832,28 @@
           "title": "Show Source Dropdown",
           "type": "boolean"
         },
-        "system_prompt_base": {
-          "default": "You are a helpful assistant.",
-          "title": "System Prompt Base",
-          "type": "string"
-        },
         "system_prompt_direct": {
-          "default": "You are a helpful agentic RAG database assistant.\n\nThe user is chatting directly without any retrieval context. No database repositories or conversation history are being queried for this message.\n\nAnswer based on your general knowledge. If the user asks about their specific database and no context is provided, let them know they can enable RAG corpora in the Data Sources panel to query their indexed repositories.\n\nBe direct and helpful.",
+          "default": "You are a helpful agentic RAG database assistant.\n\nThe user is chatting directly without any retrieval context. No database repositories or conversation history are being queried for this message.\n\nAnswer based on your general knowledge. If the user asks about their specific database and no context is provided, let them know they can enable RAG corpora in the Sources panel to query their indexed repositories.\n\nBe direct and helpful.",
           "description": "State 1: No context. Nothing checked or retrieval returned empty.",
           "title": "System Prompt Direct",
           "type": "string"
         },
         "system_prompt_rag": {
-          "default": "You are a database assistant powered by TriBridRAG, a hybrid retrieval system that combines vector search, keyword search, and knowledge graphs to find relevant database.\n\nThe user has selected one or more database repositories to query. You will receive relevant database snippets in <rag_context>...</rag_context> tags.\n\nEach snippet includes:\n- File path and line numbers\n\nHow to use this context:\n- Base your answers on the actual database shown, not assumptions\n- Always cite file paths and line numbers when referencing database\n- If the retrieved information doesn't fully answer the question, say what's missing\n- Don't invent information that isn't in the context\n- **Connect related pieces when they appear across multiple snippets** (e.g. if the user asks about a specific database table, and you have information about the table in the context, connect the information to the question)\n\nBe helpful, friendly, and engaging, and base your answers on the actual database information you have.",
+          "default": "You are a database assistant powered by ragweld, a hybrid retrieval system that combines vector search, keyword search, and knowledge graphs to find relevant database.\n\nThe user has selected one or more database repositories to query. You will receive relevant database snippets in <rag_context>...</rag_context> tags.\n\nEach snippet includes:\n- File path and line numbers\n\nHow to use this context:\n- Base your answers on the actual database shown, not assumptions\n- Always cite file paths and line numbers when referencing database\n- If the retrieved information doesn't fully answer the question, say what's missing\n- Don't invent information that isn't in the context\n- **Connect related pieces when they appear across multiple snippets** (e.g. if the user asks about a specific database table, and you have information about the table in the context, connect the information to the question)\n\nBe helpful, friendly, and engaging, and base your answers on the actual database information you have.",
           "description": "State 2: RAG only. Code corpora returned results; Recall did not.",
           "title": "System Prompt Rag",
           "type": "string"
         },
         "system_prompt_rag_and_recall": {
-          "default": "You are an agentic RAG database assistant powered by TriBridRAG, a hybrid retrieval system. You have access to both:\n1) The user's indexed database repositories\n2) Your conversation history with this user (Recall)\n\ndatabase context appears in <rag_context>...</rag_context> tags.\nConversation history appears in <recall_context>...</recall_context> tags.\n\nHow to use both:\n- Reference past discussions naturally\n- Connect them when relevant (e.g., a past decision and the database information that implements it)\n- If past context contradicts current database information, acknowledge the change\n- Don't say \"according to recall\" \u2014 just incorporate shared knowledge naturally\n\nBe helpful, friendly, and engaging, and base your answers on the actual database information you have.",
+          "default": "You are an agentic RAG database assistant powered by ragweld, a hybrid retrieval system. You have access to both:\n1) The user's indexed database repositories\n2) Your conversation history with this user (Recall)\n\ndatabase context appears in <rag_context>...</rag_context> tags.\nConversation history appears in <recall_context>...</recall_context> tags.\n\nHow to use both:\n- Reference past discussions naturally\n- Connect them when relevant (e.g., a past decision and the database information that implements it)\n- If past context contradicts current database information, acknowledge the change\n- Don't say \"according to recall\" \u2014 just incorporate shared knowledge naturally\n\nBe helpful, friendly, and engaging, and base your answers on the actual database information you have.",
           "description": "State 4: Both. RAG and Recall both returned results.",
           "title": "System Prompt Rag And Recall",
           "type": "string"
         },
-        "system_prompt_rag_suffix": {
-          "default": " Answer questions using the provided database information.",
-          "title": "System Prompt Rag Suffix",
-          "type": "string"
-        },
         "system_prompt_recall": {
-          "default": "You are an agentic RAG database assistant powered by TriBridRAG. You have access to your conversation history with this user via the Recall system.\n\nRelevant snippets from past conversations appear in <recall_context>...</recall_context> tags.\n\nEach snippet includes:\n- Who said it (user or assistant)\n- Timestamp\n- The message content\n\nHow to use this context:\n- Reference past discussions naturally\n- Don't explicitly say \"according to my recall\" \u2014 incorporate it as shared context\n- Past conversations may contain decisions, preferences, or context that inform the current question\n- Prioritize recent conversations over older ones when relevant\n\nBe direct and helpful. You're continuing an ongoing collaboration with this user.",
+          "default": "You are an agentic RAG database assistant powered by ragweld. You have access to your conversation history with this user via the Recall system.\n\nRelevant snippets from past conversations appear in <recall_context>...</recall_context> tags.\n\nEach snippet includes:\n- Who said it (user or assistant)\n- Timestamp\n- The message content\n\nHow to use this context:\n- Reference past discussions naturally\n- Don't explicitly say \"according to my recall\" \u2014 incorporate it as shared context\n- Past conversations may contain decisions, preferences, or context that inform the current question\n- Prioritize recent conversations over older ones when relevant\n\nBe direct and helpful. You're continuing an ongoing collaboration with this user.",
           "description": "State 3: Recall only. Recall returned results; no RAG corpora active.",
           "title": "System Prompt Recall",
-          "type": "string"
-        },
-        "system_prompt_recall_suffix": {
-          "default": " You have access to conversation history. Reference past discussions when relevant.",
-          "title": "System Prompt Recall Suffix",
           "type": "string"
         },
         "temperature": {
@@ -12575,6 +12560,46 @@
       "title": "Entity",
       "type": "object"
     },
+    "EvalAnalysisArtifact": {
+      "description": "A persisted AI comparison analysis, keyed by the current run id so re-opening\na run serves the costed result from disk instead of re-charging the gateway.",
+      "properties": {
+        "analysis": {
+          "description": "Markdown analysis text",
+          "title": "Analysis",
+          "type": "string"
+        },
+        "compare_run_id": {
+          "description": "Baseline (before) run id the analysis compared against",
+          "title": "Compare Run Id",
+          "type": "string"
+        },
+        "created_at": {
+          "description": "When the analysis was generated",
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "model_used": {
+          "description": "Model identifier that produced the analysis",
+          "title": "Model Used",
+          "type": "string"
+        },
+        "run_id": {
+          "description": "Current (after) eval run id this analysis is keyed by",
+          "title": "Run Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "compare_run_id",
+        "analysis",
+        "model_used",
+        "created_at"
+      ],
+      "title": "EvalAnalysisArtifact",
+      "type": "object"
+    },
     "EvalAnalyzeComparisonRequest": {
       "$defs": {
         "EvalAnalyzeComparisonRun": {
@@ -14841,6 +14866,72 @@
         }
       },
       "title": "FigureAnnotation",
+      "type": "object"
+    },
+    "FigureOutcome": {
+      "description": "What happened to one picture during an indexing run, recorded per figure so a run report\ncan name WHICH figures failed, not just how many (M-43).\n\nCarried inside the per-document figure event's ``meta.figures`` \u2014 a run-event payload read\nback through ``/index/{corpus}/runs/{run}/events``, not a distinct generated frontend\ncontract. ``self_ref`` is the Docling item ref, ``page`` its first page, ``figure_class`` the\nlocal classifier's label when classification ran, and ``reason`` explains a non-described\noutcome.",
+      "properties": {
+        "figure_class": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Local classifier label, when classification ran",
+          "title": "Figure Class"
+        },
+        "page": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "1-based page the picture sits on",
+          "title": "Page"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Why a figure failed or was skipped; None when described",
+          "title": "Reason"
+        },
+        "self_ref": {
+          "description": "Docling item reference for the picture (e.g. #/pictures/3)",
+          "title": "Self Ref",
+          "type": "string"
+        },
+        "status": {
+          "description": "described (vision reply kept), failed (empty/errored reply), or skipped (never sent)",
+          "enum": [
+            "described",
+            "failed",
+            "skipped"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "self_ref",
+        "status"
+      ],
+      "title": "FigureOutcome",
       "type": "object"
     },
     "FigureRouteConflictDetail": {
@@ -26592,6 +26683,18 @@
     "RerankerInfoResponse": {
       "description": "Response payload for GET /api/reranker/info (no secrets).",
       "properties": {
+        "active": {
+          "default": false,
+          "description": "Whether reranking will actually run for this corpus scope: configured AND ready (cloud provider+model set, or a learning adapter promoted). The configured-vs-active distinction, computed server-side so the UI cannot contradict the runtime.",
+          "title": "Active",
+          "type": "boolean"
+        },
+        "active_reason": {
+          "default": "",
+          "description": "Human-readable explanation of the active/inactive state (the 'because' behind Active).",
+          "title": "Active Reason",
+          "type": "string"
+        },
         "alpha": {
           "anyOf": [
             {
@@ -29717,14 +29820,6 @@
     "RetrievalConfig": {
       "description": "Configuration for retrieval and search parameters.",
       "properties": {
-        "bm25_weight": {
-          "default": 0.3,
-          "description": "Weight for BM25 in hybrid search",
-          "maximum": 1.0,
-          "minimum": 0.0,
-          "title": "Bm25 Weight",
-          "type": "number"
-        },
         "chunk_summary_search_enabled": {
           "default": true,
           "description": "Enable chunk_summary-based retrieval",
@@ -29773,7 +29868,7 @@
         },
         "eval_final_k": {
           "default": 5,
-          "description": "Top-k for evaluation runs",
+          "description": "Final-k used only by the evaluation flow (server/api/eval.py); the live retrieval pipeline uses retrieval.final_k. Distinct knob, not a duplicate.",
           "maximum": 50,
           "minimum": 1,
           "title": "Eval Final K",
@@ -29815,14 +29910,6 @@
           "pattern": "^(lazy|eager|none|off)$",
           "title": "Hydration Mode",
           "type": "string"
-        },
-        "langgraph_final_k": {
-          "default": 20,
-          "description": "Number of final results to return in LangGraph pipeline",
-          "maximum": 100,
-          "minimum": 1,
-          "title": "Langgraph Final K",
-          "type": "integer"
         },
         "langgraph_max_query_rewrites": {
           "default": 2,
@@ -29902,30 +29989,6 @@
           "title": "Query Expansion Enabled",
           "type": "boolean"
         },
-        "rrf_k_div": {
-          "default": 60,
-          "description": "RRF rank smoothing constant (higher = more weight to top ranks)",
-          "maximum": 200,
-          "minimum": 1,
-          "title": "Rrf K Div",
-          "type": "integer"
-        },
-        "topk_dense": {
-          "default": 75,
-          "description": "Top-K for dense vector search",
-          "maximum": 200,
-          "minimum": 10,
-          "title": "Topk Dense",
-          "type": "integer"
-        },
-        "topk_sparse": {
-          "default": 75,
-          "description": "Top-K for sparse BM25 search",
-          "maximum": 200,
-          "minimum": 10,
-          "title": "Topk Sparse",
-          "type": "integer"
-        },
         "tribrid_synonyms_path": {
           "default": "",
           "description": "Custom path to semantic_synonyms.json (default: data/semantic_synonyms.json)",
@@ -29937,14 +30000,6 @@
           "description": "Enable semantic synonym expansion",
           "title": "Use Semantic Synonyms",
           "type": "boolean"
-        },
-        "vector_weight": {
-          "default": 0.7,
-          "description": "Weight for vector search",
-          "maximum": 1.0,
-          "minimum": 0.0,
-          "title": "Vector Weight",
-          "type": "number"
         }
       },
       "title": "RetrievalConfig",
@@ -35026,8 +35081,8 @@
         "learning_reranker_lora_alpha": {
           "default": 32.0,
           "description": "LoRA alpha for MLX Qwen3 learning reranker",
-          "exclusiveMinimum": 0.0,
           "maximum": 512.0,
+          "minimum": 1.0,
           "title": "Learning Reranker Lora Alpha",
           "type": "number"
         },
@@ -35153,8 +35208,8 @@
         "ragweld_agent_lora_alpha": {
           "default": 32.0,
           "description": "LoRA alpha for ragweld agent MLX fine-tuning.",
-          "exclusiveMinimum": 0.0,
           "maximum": 512.0,
+          "minimum": 1.0,
           "title": "Ragweld Agent Lora Alpha",
           "type": "number"
         },
@@ -35546,43 +35601,28 @@
               "title": "Show Source Dropdown",
               "type": "boolean"
             },
-            "system_prompt_base": {
-              "default": "You are a helpful assistant.",
-              "title": "System Prompt Base",
-              "type": "string"
-            },
             "system_prompt_direct": {
-              "default": "You are a helpful agentic RAG database assistant.\n\nThe user is chatting directly without any retrieval context. No database repositories or conversation history are being queried for this message.\n\nAnswer based on your general knowledge. If the user asks about their specific database and no context is provided, let them know they can enable RAG corpora in the Data Sources panel to query their indexed repositories.\n\nBe direct and helpful.",
+              "default": "You are a helpful agentic RAG database assistant.\n\nThe user is chatting directly without any retrieval context. No database repositories or conversation history are being queried for this message.\n\nAnswer based on your general knowledge. If the user asks about their specific database and no context is provided, let them know they can enable RAG corpora in the Sources panel to query their indexed repositories.\n\nBe direct and helpful.",
               "description": "State 1: No context. Nothing checked or retrieval returned empty.",
               "title": "System Prompt Direct",
               "type": "string"
             },
             "system_prompt_rag": {
-              "default": "You are a database assistant powered by TriBridRAG, a hybrid retrieval system that combines vector search, keyword search, and knowledge graphs to find relevant database.\n\nThe user has selected one or more database repositories to query. You will receive relevant database snippets in <rag_context>...</rag_context> tags.\n\nEach snippet includes:\n- File path and line numbers\n\nHow to use this context:\n- Base your answers on the actual database shown, not assumptions\n- Always cite file paths and line numbers when referencing database\n- If the retrieved information doesn't fully answer the question, say what's missing\n- Don't invent information that isn't in the context\n- **Connect related pieces when they appear across multiple snippets** (e.g. if the user asks about a specific database table, and you have information about the table in the context, connect the information to the question)\n\nBe helpful, friendly, and engaging, and base your answers on the actual database information you have.",
+              "default": "You are a database assistant powered by ragweld, a hybrid retrieval system that combines vector search, keyword search, and knowledge graphs to find relevant database.\n\nThe user has selected one or more database repositories to query. You will receive relevant database snippets in <rag_context>...</rag_context> tags.\n\nEach snippet includes:\n- File path and line numbers\n\nHow to use this context:\n- Base your answers on the actual database shown, not assumptions\n- Always cite file paths and line numbers when referencing database\n- If the retrieved information doesn't fully answer the question, say what's missing\n- Don't invent information that isn't in the context\n- **Connect related pieces when they appear across multiple snippets** (e.g. if the user asks about a specific database table, and you have information about the table in the context, connect the information to the question)\n\nBe helpful, friendly, and engaging, and base your answers on the actual database information you have.",
               "description": "State 2: RAG only. Code corpora returned results; Recall did not.",
               "title": "System Prompt Rag",
               "type": "string"
             },
             "system_prompt_rag_and_recall": {
-              "default": "You are an agentic RAG database assistant powered by TriBridRAG, a hybrid retrieval system. You have access to both:\n1) The user's indexed database repositories\n2) Your conversation history with this user (Recall)\n\ndatabase context appears in <rag_context>...</rag_context> tags.\nConversation history appears in <recall_context>...</recall_context> tags.\n\nHow to use both:\n- Reference past discussions naturally\n- Connect them when relevant (e.g., a past decision and the database information that implements it)\n- If past context contradicts current database information, acknowledge the change\n- Don't say \"according to recall\" \u2014 just incorporate shared knowledge naturally\n\nBe helpful, friendly, and engaging, and base your answers on the actual database information you have.",
+              "default": "You are an agentic RAG database assistant powered by ragweld, a hybrid retrieval system. You have access to both:\n1) The user's indexed database repositories\n2) Your conversation history with this user (Recall)\n\ndatabase context appears in <rag_context>...</rag_context> tags.\nConversation history appears in <recall_context>...</recall_context> tags.\n\nHow to use both:\n- Reference past discussions naturally\n- Connect them when relevant (e.g., a past decision and the database information that implements it)\n- If past context contradicts current database information, acknowledge the change\n- Don't say \"according to recall\" \u2014 just incorporate shared knowledge naturally\n\nBe helpful, friendly, and engaging, and base your answers on the actual database information you have.",
               "description": "State 4: Both. RAG and Recall both returned results.",
               "title": "System Prompt Rag And Recall",
               "type": "string"
             },
-            "system_prompt_rag_suffix": {
-              "default": " Answer questions using the provided database information.",
-              "title": "System Prompt Rag Suffix",
-              "type": "string"
-            },
             "system_prompt_recall": {
-              "default": "You are an agentic RAG database assistant powered by TriBridRAG. You have access to your conversation history with this user via the Recall system.\n\nRelevant snippets from past conversations appear in <recall_context>...</recall_context> tags.\n\nEach snippet includes:\n- Who said it (user or assistant)\n- Timestamp\n- The message content\n\nHow to use this context:\n- Reference past discussions naturally\n- Don't explicitly say \"according to my recall\" \u2014 incorporate it as shared context\n- Past conversations may contain decisions, preferences, or context that inform the current question\n- Prioritize recent conversations over older ones when relevant\n\nBe direct and helpful. You're continuing an ongoing collaboration with this user.",
+              "default": "You are an agentic RAG database assistant powered by ragweld. You have access to your conversation history with this user via the Recall system.\n\nRelevant snippets from past conversations appear in <recall_context>...</recall_context> tags.\n\nEach snippet includes:\n- Who said it (user or assistant)\n- Timestamp\n- The message content\n\nHow to use this context:\n- Reference past discussions naturally\n- Don't explicitly say \"according to my recall\" \u2014 incorporate it as shared context\n- Past conversations may contain decisions, preferences, or context that inform the current question\n- Prioritize recent conversations over older ones when relevant\n\nBe direct and helpful. You're continuing an ongoing collaboration with this user.",
               "description": "State 3: Recall only. Recall returned results; no RAG corpora active.",
               "title": "System Prompt Recall",
-              "type": "string"
-            },
-            "system_prompt_recall_suffix": {
-              "default": " You have access to conversation history. Reference past discussions when relevant.",
-              "title": "System Prompt Recall Suffix",
               "type": "string"
             },
             "temperature": {
@@ -37751,14 +37791,6 @@
         "RetrievalConfig": {
           "description": "Configuration for retrieval and search parameters.",
           "properties": {
-            "bm25_weight": {
-              "default": 0.3,
-              "description": "Weight for BM25 in hybrid search",
-              "maximum": 1.0,
-              "minimum": 0.0,
-              "title": "Bm25 Weight",
-              "type": "number"
-            },
             "chunk_summary_search_enabled": {
               "default": true,
               "description": "Enable chunk_summary-based retrieval",
@@ -37807,7 +37839,7 @@
             },
             "eval_final_k": {
               "default": 5,
-              "description": "Top-k for evaluation runs",
+              "description": "Final-k used only by the evaluation flow (server/api/eval.py); the live retrieval pipeline uses retrieval.final_k. Distinct knob, not a duplicate.",
               "maximum": 50,
               "minimum": 1,
               "title": "Eval Final K",
@@ -37849,14 +37881,6 @@
               "pattern": "^(lazy|eager|none|off)$",
               "title": "Hydration Mode",
               "type": "string"
-            },
-            "langgraph_final_k": {
-              "default": 20,
-              "description": "Number of final results to return in LangGraph pipeline",
-              "maximum": 100,
-              "minimum": 1,
-              "title": "Langgraph Final K",
-              "type": "integer"
             },
             "langgraph_max_query_rewrites": {
               "default": 2,
@@ -37936,30 +37960,6 @@
               "title": "Query Expansion Enabled",
               "type": "boolean"
             },
-            "rrf_k_div": {
-              "default": 60,
-              "description": "RRF rank smoothing constant (higher = more weight to top ranks)",
-              "maximum": 200,
-              "minimum": 1,
-              "title": "Rrf K Div",
-              "type": "integer"
-            },
-            "topk_dense": {
-              "default": 75,
-              "description": "Top-K for dense vector search",
-              "maximum": 200,
-              "minimum": 10,
-              "title": "Topk Dense",
-              "type": "integer"
-            },
-            "topk_sparse": {
-              "default": 75,
-              "description": "Top-K for sparse BM25 search",
-              "maximum": 200,
-              "minimum": 10,
-              "title": "Topk Sparse",
-              "type": "integer"
-            },
             "tribrid_synonyms_path": {
               "default": "",
               "description": "Custom path to semantic_synonyms.json (default: data/semantic_synonyms.json)",
@@ -37971,14 +37971,6 @@
               "description": "Enable semantic synonym expansion",
               "title": "Use Semantic Synonyms",
               "type": "boolean"
-            },
-            "vector_weight": {
-              "default": 0.7,
-              "description": "Weight for vector search",
-              "maximum": 1.0,
-              "minimum": 0.0,
-              "title": "Vector Weight",
-              "type": "number"
             }
           },
           "title": "RetrievalConfig",
@@ -38653,8 +38645,8 @@
             "learning_reranker_lora_alpha": {
               "default": 32.0,
               "description": "LoRA alpha for MLX Qwen3 learning reranker",
-              "exclusiveMinimum": 0.0,
               "maximum": 512.0,
+              "minimum": 1.0,
               "title": "Learning Reranker Lora Alpha",
               "type": "number"
             },
@@ -38780,8 +38772,8 @@
             "ragweld_agent_lora_alpha": {
               "default": 32.0,
               "description": "LoRA alpha for ragweld agent MLX fine-tuning.",
-              "exclusiveMinimum": 0.0,
               "maximum": 512.0,
+              "minimum": 1.0,
               "title": "Ragweld Agent Lora Alpha",
               "type": "number"
             },
@@ -39104,6 +39096,7 @@
             "grafana_org_id": {
               "default": 1,
               "description": "Grafana organization ID",
+              "minimum": 1,
               "title": "Grafana Org Id",
               "type": "integer"
             },
@@ -39590,6 +39583,7 @@
         "grafana_org_id": {
           "default": 1,
           "description": "Grafana organization ID",
+          "minimum": 1,
           "title": "Grafana Org Id",
           "type": "integer"
         },

@@ -2201,43 +2201,28 @@
             "title": "Show Source Dropdown",
             "type": "boolean"
           },
-          "system_prompt_base": {
-            "default": "You are a helpful assistant.",
-            "title": "System Prompt Base",
-            "type": "string"
-          },
           "system_prompt_direct": {
-            "default": "You are a helpful agentic RAG database assistant.\n\nThe user is chatting directly without any retrieval context. No database repositories or conversation history are being queried for this message.\n\nAnswer based on your general knowledge. If the user asks about their specific database and no context is provided, let them know they can enable RAG corpora in the Data Sources panel to query their indexed repositories.\n\nBe direct and helpful.",
+            "default": "You are a helpful agentic RAG database assistant.\n\nThe user is chatting directly without any retrieval context. No database repositories or conversation history are being queried for this message.\n\nAnswer based on your general knowledge. If the user asks about their specific database and no context is provided, let them know they can enable RAG corpora in the Sources panel to query their indexed repositories.\n\nBe direct and helpful.",
             "description": "State 1: No context. Nothing checked or retrieval returned empty.",
             "title": "System Prompt Direct",
             "type": "string"
           },
           "system_prompt_rag": {
-            "default": "You are a database assistant powered by TriBridRAG, a hybrid retrieval system that combines vector search, keyword search, and knowledge graphs to find relevant database.\n\nThe user has selected one or more database repositories to query. You will receive relevant database snippets in <rag_context>...</rag_context> tags.\n\nEach snippet includes:\n- File path and line numbers\n\nHow to use this context:\n- Base your answers on the actual database shown, not assumptions\n- Always cite file paths and line numbers when referencing database\n- If the retrieved information doesn't fully answer the question, say what's missing\n- Don't invent information that isn't in the context\n- **Connect related pieces when they appear across multiple snippets** (e.g. if the user asks about a specific database table, and you have information about the table in the context, connect the information to the question)\n\nBe helpful, friendly, and engaging, and base your answers on the actual database information you have.",
+            "default": "You are a database assistant powered by ragweld, a hybrid retrieval system that combines vector search, keyword search, and knowledge graphs to find relevant database.\n\nThe user has selected one or more database repositories to query. You will receive relevant database snippets in <rag_context>...</rag_context> tags.\n\nEach snippet includes:\n- File path and line numbers\n\nHow to use this context:\n- Base your answers on the actual database shown, not assumptions\n- Always cite file paths and line numbers when referencing database\n- If the retrieved information doesn't fully answer the question, say what's missing\n- Don't invent information that isn't in the context\n- **Connect related pieces when they appear across multiple snippets** (e.g. if the user asks about a specific database table, and you have information about the table in the context, connect the information to the question)\n\nBe helpful, friendly, and engaging, and base your answers on the actual database information you have.",
             "description": "State 2: RAG only. Code corpora returned results; Recall did not.",
             "title": "System Prompt Rag",
             "type": "string"
           },
           "system_prompt_rag_and_recall": {
-            "default": "You are an agentic RAG database assistant powered by TriBridRAG, a hybrid retrieval system. You have access to both:\n1) The user's indexed database repositories\n2) Your conversation history with this user (Recall)\n\ndatabase context appears in <rag_context>...</rag_context> tags.\nConversation history appears in <recall_context>...</recall_context> tags.\n\nHow to use both:\n- Reference past discussions naturally\n- Connect them when relevant (e.g., a past decision and the database information that implements it)\n- If past context contradicts current database information, acknowledge the change\n- Don't say \"according to recall\" \u2014 just incorporate shared knowledge naturally\n\nBe helpful, friendly, and engaging, and base your answers on the actual database information you have.",
+            "default": "You are an agentic RAG database assistant powered by ragweld, a hybrid retrieval system. You have access to both:\n1) The user's indexed database repositories\n2) Your conversation history with this user (Recall)\n\ndatabase context appears in <rag_context>...</rag_context> tags.\nConversation history appears in <recall_context>...</recall_context> tags.\n\nHow to use both:\n- Reference past discussions naturally\n- Connect them when relevant (e.g., a past decision and the database information that implements it)\n- If past context contradicts current database information, acknowledge the change\n- Don't say \"according to recall\" \u2014 just incorporate shared knowledge naturally\n\nBe helpful, friendly, and engaging, and base your answers on the actual database information you have.",
             "description": "State 4: Both. RAG and Recall both returned results.",
             "title": "System Prompt Rag And Recall",
             "type": "string"
           },
-          "system_prompt_rag_suffix": {
-            "default": " Answer questions using the provided database information.",
-            "title": "System Prompt Rag Suffix",
-            "type": "string"
-          },
           "system_prompt_recall": {
-            "default": "You are an agentic RAG database assistant powered by TriBridRAG. You have access to your conversation history with this user via the Recall system.\n\nRelevant snippets from past conversations appear in <recall_context>...</recall_context> tags.\n\nEach snippet includes:\n- Who said it (user or assistant)\n- Timestamp\n- The message content\n\nHow to use this context:\n- Reference past discussions naturally\n- Don't explicitly say \"according to my recall\" \u2014 incorporate it as shared context\n- Past conversations may contain decisions, preferences, or context that inform the current question\n- Prioritize recent conversations over older ones when relevant\n\nBe direct and helpful. You're continuing an ongoing collaboration with this user.",
+            "default": "You are an agentic RAG database assistant powered by ragweld. You have access to your conversation history with this user via the Recall system.\n\nRelevant snippets from past conversations appear in <recall_context>...</recall_context> tags.\n\nEach snippet includes:\n- Who said it (user or assistant)\n- Timestamp\n- The message content\n\nHow to use this context:\n- Reference past discussions naturally\n- Don't explicitly say \"according to my recall\" \u2014 incorporate it as shared context\n- Past conversations may contain decisions, preferences, or context that inform the current question\n- Prioritize recent conversations over older ones when relevant\n\nBe direct and helpful. You're continuing an ongoing collaboration with this user.",
             "description": "State 3: Recall only. Recall returned results; no RAG corpora active.",
             "title": "System Prompt Recall",
-            "type": "string"
-          },
-          "system_prompt_recall_suffix": {
-            "default": " You have access to conversation history. Reference past discussions when relevant.",
-            "title": "System Prompt Recall Suffix",
             "type": "string"
           },
           "temperature": {
@@ -2315,43 +2300,28 @@
             "title": "Show Source Dropdown",
             "type": "boolean"
           },
-          "system_prompt_base": {
-            "default": "You are a helpful assistant.",
-            "title": "System Prompt Base",
-            "type": "string"
-          },
           "system_prompt_direct": {
-            "default": "You are a helpful agentic RAG database assistant.\n\nThe user is chatting directly without any retrieval context. No database repositories or conversation history are being queried for this message.\n\nAnswer based on your general knowledge. If the user asks about their specific database and no context is provided, let them know they can enable RAG corpora in the Data Sources panel to query their indexed repositories.\n\nBe direct and helpful.",
+            "default": "You are a helpful agentic RAG database assistant.\n\nThe user is chatting directly without any retrieval context. No database repositories or conversation history are being queried for this message.\n\nAnswer based on your general knowledge. If the user asks about their specific database and no context is provided, let them know they can enable RAG corpora in the Sources panel to query their indexed repositories.\n\nBe direct and helpful.",
             "description": "State 1: No context. Nothing checked or retrieval returned empty.",
             "title": "System Prompt Direct",
             "type": "string"
           },
           "system_prompt_rag": {
-            "default": "You are a database assistant powered by TriBridRAG, a hybrid retrieval system that combines vector search, keyword search, and knowledge graphs to find relevant database.\n\nThe user has selected one or more database repositories to query. You will receive relevant database snippets in <rag_context>...</rag_context> tags.\n\nEach snippet includes:\n- File path and line numbers\n\nHow to use this context:\n- Base your answers on the actual database shown, not assumptions\n- Always cite file paths and line numbers when referencing database\n- If the retrieved information doesn't fully answer the question, say what's missing\n- Don't invent information that isn't in the context\n- **Connect related pieces when they appear across multiple snippets** (e.g. if the user asks about a specific database table, and you have information about the table in the context, connect the information to the question)\n\nBe helpful, friendly, and engaging, and base your answers on the actual database information you have.",
+            "default": "You are a database assistant powered by ragweld, a hybrid retrieval system that combines vector search, keyword search, and knowledge graphs to find relevant database.\n\nThe user has selected one or more database repositories to query. You will receive relevant database snippets in <rag_context>...</rag_context> tags.\n\nEach snippet includes:\n- File path and line numbers\n\nHow to use this context:\n- Base your answers on the actual database shown, not assumptions\n- Always cite file paths and line numbers when referencing database\n- If the retrieved information doesn't fully answer the question, say what's missing\n- Don't invent information that isn't in the context\n- **Connect related pieces when they appear across multiple snippets** (e.g. if the user asks about a specific database table, and you have information about the table in the context, connect the information to the question)\n\nBe helpful, friendly, and engaging, and base your answers on the actual database information you have.",
             "description": "State 2: RAG only. Code corpora returned results; Recall did not.",
             "title": "System Prompt Rag",
             "type": "string"
           },
           "system_prompt_rag_and_recall": {
-            "default": "You are an agentic RAG database assistant powered by TriBridRAG, a hybrid retrieval system. You have access to both:\n1) The user's indexed database repositories\n2) Your conversation history with this user (Recall)\n\ndatabase context appears in <rag_context>...</rag_context> tags.\nConversation history appears in <recall_context>...</recall_context> tags.\n\nHow to use both:\n- Reference past discussions naturally\n- Connect them when relevant (e.g., a past decision and the database information that implements it)\n- If past context contradicts current database information, acknowledge the change\n- Don't say \"according to recall\" \u2014 just incorporate shared knowledge naturally\n\nBe helpful, friendly, and engaging, and base your answers on the actual database information you have.",
+            "default": "You are an agentic RAG database assistant powered by ragweld, a hybrid retrieval system. You have access to both:\n1) The user's indexed database repositories\n2) Your conversation history with this user (Recall)\n\ndatabase context appears in <rag_context>...</rag_context> tags.\nConversation history appears in <recall_context>...</recall_context> tags.\n\nHow to use both:\n- Reference past discussions naturally\n- Connect them when relevant (e.g., a past decision and the database information that implements it)\n- If past context contradicts current database information, acknowledge the change\n- Don't say \"according to recall\" \u2014 just incorporate shared knowledge naturally\n\nBe helpful, friendly, and engaging, and base your answers on the actual database information you have.",
             "description": "State 4: Both. RAG and Recall both returned results.",
             "title": "System Prompt Rag And Recall",
             "type": "string"
           },
-          "system_prompt_rag_suffix": {
-            "default": " Answer questions using the provided database information.",
-            "title": "System Prompt Rag Suffix",
-            "type": "string"
-          },
           "system_prompt_recall": {
-            "default": "You are an agentic RAG database assistant powered by TriBridRAG. You have access to your conversation history with this user via the Recall system.\n\nRelevant snippets from past conversations appear in <recall_context>...</recall_context> tags.\n\nEach snippet includes:\n- Who said it (user or assistant)\n- Timestamp\n- The message content\n\nHow to use this context:\n- Reference past discussions naturally\n- Don't explicitly say \"according to my recall\" \u2014 incorporate it as shared context\n- Past conversations may contain decisions, preferences, or context that inform the current question\n- Prioritize recent conversations over older ones when relevant\n\nBe direct and helpful. You're continuing an ongoing collaboration with this user.",
+            "default": "You are an agentic RAG database assistant powered by ragweld. You have access to your conversation history with this user via the Recall system.\n\nRelevant snippets from past conversations appear in <recall_context>...</recall_context> tags.\n\nEach snippet includes:\n- Who said it (user or assistant)\n- Timestamp\n- The message content\n\nHow to use this context:\n- Reference past discussions naturally\n- Don't explicitly say \"according to my recall\" \u2014 incorporate it as shared context\n- Past conversations may contain decisions, preferences, or context that inform the current question\n- Prioritize recent conversations over older ones when relevant\n\nBe direct and helpful. You're continuing an ongoing collaboration with this user.",
             "description": "State 3: Recall only. Recall returned results; no RAG corpora active.",
             "title": "System Prompt Recall",
-            "type": "string"
-          },
-          "system_prompt_recall_suffix": {
-            "default": " You have access to conversation history. Reference past discussions when relevant.",
-            "title": "System Prompt Recall Suffix",
             "type": "string"
           },
           "temperature": {
@@ -6336,6 +6306,46 @@
           "entity_type"
         ],
         "title": "Entity",
+        "type": "object"
+      },
+      "EvalAnalysisArtifact": {
+        "description": "A persisted AI comparison analysis, keyed by the current run id so re-opening\na run serves the costed result from disk instead of re-charging the gateway.",
+        "properties": {
+          "analysis": {
+            "description": "Markdown analysis text",
+            "title": "Analysis",
+            "type": "string"
+          },
+          "compare_run_id": {
+            "description": "Baseline (before) run id the analysis compared against",
+            "title": "Compare Run Id",
+            "type": "string"
+          },
+          "created_at": {
+            "description": "When the analysis was generated",
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "model_used": {
+            "description": "Model identifier that produced the analysis",
+            "title": "Model Used",
+            "type": "string"
+          },
+          "run_id": {
+            "description": "Current (after) eval run id this analysis is keyed by",
+            "title": "Run Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "compare_run_id",
+          "analysis",
+          "model_used",
+          "created_at"
+        ],
+        "title": "EvalAnalysisArtifact",
         "type": "object"
       },
       "EvalAnalyzeComparisonRequest": {
@@ -14228,6 +14238,18 @@
       "RerankerInfoResponse": {
         "description": "Response payload for GET /api/reranker/info (no secrets).",
         "properties": {
+          "active": {
+            "default": false,
+            "description": "Whether reranking will actually run for this corpus scope: configured AND ready (cloud provider+model set, or a learning adapter promoted). The configured-vs-active distinction, computed server-side so the UI cannot contradict the runtime.",
+            "title": "Active",
+            "type": "boolean"
+          },
+          "active_reason": {
+            "default": "",
+            "description": "Human-readable explanation of the active/inactive state (the 'because' behind Active).",
+            "title": "Active Reason",
+            "type": "string"
+          },
           "alpha": {
             "anyOf": [
               {
@@ -16069,14 +16091,6 @@
       "RetrievalConfig": {
         "description": "Configuration for retrieval and search parameters.",
         "properties": {
-          "bm25_weight": {
-            "default": 0.3,
-            "description": "Weight for BM25 in hybrid search",
-            "maximum": 1.0,
-            "minimum": 0.0,
-            "title": "Bm25 Weight",
-            "type": "number"
-          },
           "chunk_summary_search_enabled": {
             "default": true,
             "description": "Enable chunk_summary-based retrieval",
@@ -16125,7 +16139,7 @@
           },
           "eval_final_k": {
             "default": 5,
-            "description": "Top-k for evaluation runs",
+            "description": "Final-k used only by the evaluation flow (server/api/eval.py); the live retrieval pipeline uses retrieval.final_k. Distinct knob, not a duplicate.",
             "maximum": 50.0,
             "minimum": 1.0,
             "title": "Eval Final K",
@@ -16167,14 +16181,6 @@
             "pattern": "^(lazy|eager|none|off)$",
             "title": "Hydration Mode",
             "type": "string"
-          },
-          "langgraph_final_k": {
-            "default": 20,
-            "description": "Number of final results to return in LangGraph pipeline",
-            "maximum": 100.0,
-            "minimum": 1.0,
-            "title": "Langgraph Final K",
-            "type": "integer"
           },
           "langgraph_max_query_rewrites": {
             "default": 2,
@@ -16254,30 +16260,6 @@
             "title": "Query Expansion Enabled",
             "type": "boolean"
           },
-          "rrf_k_div": {
-            "default": 60,
-            "description": "RRF rank smoothing constant (higher = more weight to top ranks)",
-            "maximum": 200.0,
-            "minimum": 1.0,
-            "title": "Rrf K Div",
-            "type": "integer"
-          },
-          "topk_dense": {
-            "default": 75,
-            "description": "Top-K for dense vector search",
-            "maximum": 200.0,
-            "minimum": 10.0,
-            "title": "Topk Dense",
-            "type": "integer"
-          },
-          "topk_sparse": {
-            "default": 75,
-            "description": "Top-K for sparse BM25 search",
-            "maximum": 200.0,
-            "minimum": 10.0,
-            "title": "Topk Sparse",
-            "type": "integer"
-          },
           "tribrid_synonyms_path": {
             "default": "",
             "description": "Custom path to semantic_synonyms.json (default: data/semantic_synonyms.json)",
@@ -16289,14 +16271,6 @@
             "description": "Enable semantic synonym expansion",
             "title": "Use Semantic Synonyms",
             "type": "boolean"
-          },
-          "vector_weight": {
-            "default": 0.7,
-            "description": "Weight for vector search",
-            "maximum": 1.0,
-            "minimum": 0.0,
-            "title": "Vector Weight",
-            "type": "number"
           }
         },
         "title": "RetrievalConfig",
@@ -18787,8 +18761,8 @@
           "learning_reranker_lora_alpha": {
             "default": 32.0,
             "description": "LoRA alpha for MLX Qwen3 learning reranker",
-            "exclusiveMinimum": 0.0,
             "maximum": 512.0,
+            "minimum": 1.0,
             "title": "Learning Reranker Lora Alpha",
             "type": "number"
           },
@@ -18914,8 +18888,8 @@
           "ragweld_agent_lora_alpha": {
             "default": 32.0,
             "description": "LoRA alpha for ragweld agent MLX fine-tuning.",
-            "exclusiveMinimum": 0.0,
             "maximum": 512.0,
+            "minimum": 1.0,
             "title": "Ragweld Agent Lora Alpha",
             "type": "number"
           },
@@ -19509,6 +19483,7 @@
           "grafana_org_id": {
             "default": 1,
             "description": "Grafana organization ID",
+            "minimum": 1.0,
             "title": "Grafana Org Id",
             "type": "integer"
           },
@@ -23557,6 +23532,65 @@
         ]
       }
     },
+    "/api/eval/analysis/{run_id}": {
+      "get": {
+        "description": "Return the persisted AI analysis for a run so re-opening it never re-charges.\n\n404 when nothing is cached, or when a cached analysis exists but was generated\nagainst a different baseline than the one currently selected \u2014 serving that would\nbe a stale, wrong-pair result. This read path never touches the gateway.",
+        "operationId": "get_eval_analysis_api_eval_analysis__run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "compare_run_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Compare Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalAnalysisArtifact"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Eval Analysis",
+        "tags": [
+          "eval"
+        ]
+      }
+    },
     "/api/eval/analyze_comparison": {
       "post": {
         "description": "LLM-backed comparison analysis for the Eval drill-down UI.",
@@ -25505,6 +25539,9 @@
             },
             "description": "Successful Response"
           },
+          "404": {
+            "description": "The named corpus does not exist (e.g. a stats poll on a since-deleted corpus)."
+          },
           "409": {
             "content": {
               "application/json": {
@@ -25622,6 +25659,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "404": {
+            "description": "The named corpus does not exist (e.g. a status poll from a tab open on a since-deleted corpus)."
           },
           "409": {
             "content": {
@@ -28639,8 +28679,28 @@
     },
     "/api/reranker/info": {
       "get": {
-        "description": "Return current reranker runtime/config info (no secrets).",
+        "description": "Return current reranker runtime/config info (no secrets), scoped to a corpus.\n\nThe reranker config section is corpus-scoped, so this endpoint MUST resolve the\nscoped config when a corpus is given. Reading the global config here (the old\nbehavior) is exactly what made the mode selector say CLOUD while runtime info said\ndisabled: two different scopes on one screen.",
         "operationId": "get_reranker_info_api_reranker_info_get",
+        "parameters": [
+          {
+            "description": "Corpus scope. Reranker config is corpus-scoped, so runtime info must reflect the same corpus the mode selector configures; without it, info reports the global config.",
+            "in": "query",
+            "name": "corpus_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Corpus scope. Reranker config is corpus-scoped, so runtime info must reflect the same corpus the mode selector configures; without it, info reports the global config.",
+              "title": "Corpus Id"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -28651,6 +28711,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "Get Reranker Info",
@@ -30454,6 +30524,64 @@
           }
         },
         "summary": "Synthetic Run Cancel",
+        "tags": [
+          "synthetic"
+        ]
+      }
+    },
+    "/api/synthetic/run/{run_id}/promote/{alias}": {
+      "post": {
+        "description": "Point a lineage alias (baseline/canary/current/promoted) at this run's bundle.\n\nRefused with 409 unless the run completed and passed its quality gate \u2014 a failed or\nun-evaluated run produced nothing worth promoting. 404 when the run or its bundle is gone,\n503 when the lineage store is unavailable. This is the gated path the Synthetic Lab uses;\nthe generic /lineage/aliases/{alias} endpoint stays available for other bundle sources.",
+        "operationId": "synthetic_run_promote_api_synthetic_run__run_id__promote__alias__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "alias",
+            "required": true,
+            "schema": {
+              "enum": [
+                "current",
+                "promoted",
+                "baseline",
+                "canary"
+              ],
+              "title": "Alias",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LineageAliasesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Synthetic Run Promote",
         "tags": [
           "synthetic"
         ]
