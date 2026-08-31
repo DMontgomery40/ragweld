@@ -222,7 +222,7 @@ export function PromptfooRegressionPanel({ corpusId }: Props) {
           <div style={{ marginTop: '12px' }}>
             <CollapsibleSection
               title={`Run results (${(latest.results as PromptfooRunResult[]).length})`}
-              description="Per-entry verdicts. Expand a card for the generated answer and the grader's reasoning."
+              description="Per-entry verdicts. Expand an entry for the generated answer and the grader's reasoning."
               defaultExpanded={false}
               storageKey="promptfoo_run_results"
             >

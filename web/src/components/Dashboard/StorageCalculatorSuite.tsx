@@ -350,7 +350,7 @@ export function StorageCalculatorSuite() {
   return (
     <div className="storage-calc-wrapper">
       <div className="storage-calc-header">
-        <h1><span className="brand">TriBrid RAG</span> Storage Calculator Suite</h1>
+        <h1><span className="brand">ragweld</span> Storage Calculator Suite</h1>
         <p className="subtitle">Hypothetical capacity planner — independent of the live storage shown above</p>
         <div
           className="info-box"
@@ -881,7 +881,7 @@ export function StorageCalculatorSuite() {
       </div>
 
       <div className="storage-calc-footer">
-        <p>TriBrid RAG • Enterprise Storage Calculator v2.0</p>
+        <p>ragweld • Storage Calculator v2.0</p>
         <p>Precision calculations for Qdrant + Neo4j + sparse BM25 infrastructure</p>
       </div>
     </div>

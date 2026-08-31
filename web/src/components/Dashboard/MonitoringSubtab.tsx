@@ -239,7 +239,15 @@ export function MonitoringSubtab() {
           Recent Query Traces
         </h3>
         <p className="small" style={{ color: 'var(--fg-muted)', marginBottom: '16px', lineHeight: '1.6' }}>
-          The last 10 search and chat queries. For detailed analysis, use the dedicated Analytics tab.
+          The last 10 search and chat queries. For detailed analysis, open the{' '}
+          <button
+            type="button"
+            className="linklike"
+            onClick={() => navigate('/eval')}
+            style={{ background: 'none', border: 'none', padding: 0, color: 'var(--link)', cursor: 'pointer', font: 'inherit', textDecoration: 'underline' }}
+          >
+            Eval Analysis
+          </button>{' '}tab.
         </p>
 
         {loading ? (
@@ -308,7 +316,7 @@ export function MonitoringSubtab() {
                       letterSpacing: '0.5px'
                     }}
                   >
-                    Repo
+                    Corpus
                   </th>
                 </tr>
               </thead>
