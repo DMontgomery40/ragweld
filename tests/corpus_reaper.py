@@ -25,7 +25,6 @@ inside the reaper's match set.
 from __future__ import annotations
 
 import asyncio
-import os
 from datetime import UTC, datetime, timedelta
 
 # The canonical prefix new corpus-creating fixtures should use.
@@ -115,17 +114,9 @@ def reaper_dsn() -> str | None:
     ``POSTGRES_HOST`` and friends the way the service probe does. Returns None
     when neither is present, so the reaper simply no-ops on an unconfigured box.
     """
-    dsn = (os.environ.get("POSTGRES_DSN") or "").strip()
-    if dsn:
-        return dsn
-    host = (os.environ.get("POSTGRES_HOST") or "").strip()
-    if not host:
-        return None
-    user = os.environ.get("POSTGRES_USER", "postgres")
-    password = os.environ.get("POSTGRES_PASSWORD", "postgres")
-    port = os.environ.get("POSTGRES_PORT", "5432")
-    database = os.environ.get("POSTGRES_DB", "tribrid_rag")
-    return f"postgresql://{user}:{password}@{host}:{port}/{database}"
+    from tests.service_requirements import postgres_dsn_from_env
+
+    return postgres_dsn_from_env()
 
 
 def reap_quietly(*, max_age_seconds: float = REAP_MAX_AGE_SECONDS) -> list[str]:

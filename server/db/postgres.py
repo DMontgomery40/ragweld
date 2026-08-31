@@ -1878,7 +1878,9 @@ class PostgresClient:
         await self._require_pool()
         assert self._pool is not None
         async with self._pool.acquire() as conn:
-            return await conn.fetchval("SELECT now();")
+            now = await conn.fetchval("SELECT now();")
+        assert isinstance(now, datetime)
+        return now
 
     async def get_index_fence(self, repo_id: str) -> IndexRunFence | None:
         """The durable fence on the corpus row, validated; a malformed fence raises."""

@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import re
 from copy import deepcopy
-from typing import Any
+from typing import Any, TypeVar
 
 from server.models.tribrid_config_model import ConfigRegistryResponse, TriBridConfig
 
@@ -241,7 +241,10 @@ def redact_config_record(
     return safe_nested, safe_flat
 
 
-def redact_run_record(run: Any) -> Any:
+_RunT = TypeVar("_RunT")
+
+
+def redact_run_record(run: _RunT) -> _RunT:
     """Withhold credentials from a run record in place, whatever its model.
 
     Every run model spells the pair `config_snapshot` / `config`; anything that carries
@@ -258,8 +261,10 @@ def redact_run_record(run: Any) -> Any:
         nested if isinstance(nested, dict) else None,
         flat if isinstance(flat, dict) else None,
     )
+    # Duck-typed on purpose (see docstring); the writes mirror the getattr reads above.
+    record: Any = run
     if isinstance(nested, dict):
-        run.config_snapshot = safe_nested
+        record.config_snapshot = safe_nested
     if isinstance(flat, dict):
-        run.config = safe_flat
+        record.config = safe_flat
     return run

@@ -10,7 +10,6 @@ from mcp.server.transport_security import TransportSecuritySettings
 from server.config import load_config
 from server.mcp.tools import register_mcp_tools
 
-
 _MOUNTED: dict[str, object] = {"enabled": False, "mount_path": ""}
 
 

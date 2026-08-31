@@ -10,7 +10,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from opentelemetry._logs import set_logger_provider
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
@@ -35,19 +35,27 @@ from server.models.tribrid_config_model import (
 try:
     from langfuse import Langfuse
 except Exception:  # pragma: no cover - optional dependency during rollout
-    Langfuse = None  # type: ignore[assignment]
+    Langfuse = None  # type: ignore[assignment,misc]
 
 
-def normalize_tracing_mode(value: str | None) -> str:
+TracingMode = Literal["local", "otel", "otel_langfuse", "off"]
+
+_LINK_KINDS: dict[str, Literal["grafana", "tempo", "langfuse", "custom"]] = {
+    "grafana": "grafana",
+    "tempo": "tempo",
+    "langfuse": "langfuse",
+    "custom": "custom",
+}
+
+
+def normalize_tracing_mode(value: str | None) -> TracingMode:
     mode = str(value or "off").strip().lower()
     if mode in {"none", "off"}:
         return "off"
-    if mode in {"langfuse", "otel+langfuse"}:
+    if mode in {"langfuse", "otel+langfuse", "otel_langfuse"}:
         return "otel_langfuse"
-    if mode == "otel_langfuse":
-        return mode
     if mode == "otel":
-        return mode
+        return "otel"
     return "local"
 
 
@@ -579,7 +587,7 @@ def add_external_link(*, label: str, kind: str, url: str, detail: str | None = N
     obs.links.append(
         TraceExternalLink(
             label=str(label or "").strip() or "Link",
-            kind=kind if kind in {"grafana", "tempo", "langfuse", "custom"} else "custom",
+            kind=_LINK_KINDS.get(kind, "custom"),
             url=normalized_url,
             detail=detail,
         )

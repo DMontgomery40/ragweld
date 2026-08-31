@@ -884,10 +884,11 @@ const ThreadWelcome = memo(function ThreadWelcome({ onPromptSelect }: { onPrompt
       </div>
 
       <div style={{ display: 'grid', gap: '10px', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
-        {WELCOME_PROMPTS.map((prompt) => (
+        {WELCOME_PROMPTS.map((prompt, index) => (
           <button
             key={prompt}
             type="button"
+            data-testid={`chat-welcome-prompt-${index}`}
             onClick={() => onPromptSelect(prompt)}
             style={{
               textAlign: 'left',
@@ -1925,7 +1926,11 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
       style={{
         display: 'flex',
         flexDirection: 'column',
-        height: '70vh',
+        // At short desktop window heights, 70vh left less than 100px between the
+        // toolbar and composer. Citation/feedback controls then occupied the same
+        // screen coordinates as the status bar and could not be clicked. Keep a
+        // usable message viewport; the surrounding tab remains the page scroller.
+        height: 'clamp(560px, 70vh, 760px)',
         border: '1px solid var(--line)',
         borderRadius: '18px',
         overflow: 'hidden',
@@ -2136,6 +2141,12 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
                   padding: '18px',
                   minHeight: 0,
                   minWidth: 0,
+                  // Message controls (citation buttons, thumbs) scrolled flush to this
+                  // viewport's edges land under the sticky "Jump to latest" footer or the
+                  // composer/status-bar seam; scroll padding keeps scroll-into-view targets
+                  // clear of both without force-clicks.
+                  scrollPaddingTop: '18px',
+                  scrollPaddingBottom: '64px',
                 }}
               >
                 <AuiIf condition={(state) => state.thread.isEmpty}>

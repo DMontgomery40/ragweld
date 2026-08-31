@@ -25,7 +25,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 import torch
-import yaml  # type: ignore[import-untyped]
+import yaml
 from prometheus_client import (
     CollectorRegistry,
     Gauge,
@@ -40,10 +40,10 @@ from prometheus_client import (
 from sentence_transformers import SentenceTransformer
 
 from server.db.postgres import PostgresClient
+from server.indexing.generations import qdrant_collection_of
 from server.indexing.tokenizer import TextTokenizer
 from server.models.index import Chunk
 from server.models.tribrid_config_model import TokenizationConfig, TriBridConfig
-from server.indexing.generations import qdrant_collection_of
 from server.retrieval.qdrant_store import QdrantChunkStore
 
 DEFAULT_POSTGRES_DSN = "postgresql://postgres:postgres@127.0.0.1:5432/tribrid_rag"

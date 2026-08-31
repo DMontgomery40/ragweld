@@ -10,7 +10,6 @@ from server.chat.gateway_runtime import resolve_litellm_api_key, resolve_litellm
 from server.gateway_catalog import gateway_rows_snapshot
 from server.models.tribrid_config_model import TriBridConfig
 
-
 _GATEWAY_ALIAS = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _REMOVED_PREFIXES = {"local", "openrouter", "ragweld", "openai", "anthropic", "ollama", "mlx"}
 

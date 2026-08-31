@@ -154,7 +154,7 @@ def test_start_check_defaults_backend_bind_to_loopback(tmp_path: Path) -> None:
         "--no-docker",
         "--no-frontend",
         "--no-local-model",
-        env={"BACKEND_PORT": "58112"},
+        env={"BACKEND_PORT": "58112", "SERVER_HOST": ""},
         cwd=repo,
     )
     output = f"{result.stdout}\n{result.stderr}"

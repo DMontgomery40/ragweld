@@ -8,9 +8,71 @@ from pathlib import Path
 import pytest
 from dotenv import dotenv_values
 
-from tests.service_requirements import probe_neo4j, probe_postgres
+from tests.service_requirements import (
+    postgres_dsn_from_env,
+    probe_neo4j,
+    probe_postgres,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_postgres_dsn_resolution_prefers_explicit_and_composes_escaped_components() -> None:
+    assert postgres_dsn_from_env({"POSTGRES_DSN": "postgresql://explicit/db"}) == (
+        "postgresql://explicit/db"
+    )
+    assert postgres_dsn_from_env(
+        {
+            "POSTGRES_HOST": "db.internal",
+            "POSTGRES_PORT": "5544",
+            "POSTGRES_DB": "rag weld",
+            "POSTGRES_USER": "test@user",
+            "POSTGRES_PASSWORD": "p:a/ss",
+        }
+    ) == "postgresql://test%40user:p%3Aa%2Fss@db.internal:5544/rag%20weld"
+    assert postgres_dsn_from_env({}) is None
+
+
+def test_require_env_resolves_postgres_components_and_preserves_named_skip() -> None:
+    postgres_names = (
+        "POSTGRES_DSN",
+        "POSTGRES_HOST",
+        "POSTGRES_PORT",
+        "POSTGRES_DB",
+        "POSTGRES_USER",
+        "POSTGRES_PASSWORD",
+    )
+    base_env = {name: value for name, value in os.environ.items() if name not in postgres_names}
+    probe = (
+        "import pytest\n"
+        "from tests.service_requirements import require_env\n"
+        "try:\n"
+        "    print(require_env('POSTGRES_DSN'))\n"
+        "except pytest.skip.Exception as exc:\n"
+        "    print(f'SKIP:{exc}')\n"
+    )
+
+    missing = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=ROOT,
+        env=base_env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert missing.stdout.strip().startswith("SKIP:POSTGRES_DSN is not set")
+
+    configured = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=ROOT,
+        env={**base_env, "POSTGRES_HOST": "db.internal", "POSTGRES_USER": "test-user"},
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert configured.stdout.strip() == (
+        "postgresql://test-user:postgres@db.internal:5432/tribrid_rag"
+    )
 
 
 def test_postgres_probe_requires_a_real_connection() -> None:

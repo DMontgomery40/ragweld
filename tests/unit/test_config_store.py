@@ -1,4 +1,5 @@
 import asyncio
+import os
 
 import pytest
 
@@ -25,11 +26,23 @@ async def test_get_global_config_returns_detached_copy() -> None:
 
 @pytest.mark.asyncio
 async def test_warm_corpus_cache_does_not_hide_postgres_outage() -> None:
-    store = ConfigStore("postgresql://postgres:postgres@127.0.0.1:1/ragweld_outage")
-    store._cache["warm-corpus"] = TriBridConfig()
+    postgres_keys = (
+        "POSTGRES_DSN",
+        "POSTGRES_HOST",
+        "POSTGRES_PORT",
+        "POSTGRES_DB",
+        "POSTGRES_USER",
+        "POSTGRES_PASSWORD",
+    )
+    previous = {key: os.environ.pop(key) for key in postgres_keys if key in os.environ}
+    try:
+        store = ConfigStore("postgresql://postgres:postgres@127.0.0.1:1/ragweld_outage")
+        store._cache["warm-corpus"] = TriBridConfig()
 
-    with pytest.raises((ConnectionError, OSError, TimeoutError)):
-        await store.get(repo_id="warm-corpus")
+        with pytest.raises((ConnectionError, OSError, TimeoutError)):
+            await store.get(repo_id="warm-corpus")
+    finally:
+        os.environ.update(previous)
 
 
 class _ControlledPostgres:

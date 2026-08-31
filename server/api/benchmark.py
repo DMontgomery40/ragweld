@@ -11,7 +11,6 @@ from server.api.retrieval_errors import (
     required_retrieval_leg_http_exception,
     retrieval_contract_mismatch_http_exception,
 )
-from server.retrieval.errors import RequiredRetrievalLegError, RetrievalContractMismatchError
 from server.chat.benchmark_runner import run_benchmark
 from server.config import load_config
 from server.lineage import (
@@ -20,20 +19,21 @@ from server.lineage import (
     ensure_current_bundle,
     make_ref,
 )
-from server.observability import metrics
-from server.observability.ml_quality import build_benchmark_observability_summary
 from server.models.retrieval import ChunkMatch
 from server.models.tribrid_config_model import (
-    BenchmarkRetrieval,
     BenchmarkObservabilitySummaryResponse,
+    BenchmarkRetrieval,
     BenchmarkRun,
     BenchmarkRunRequest,
     BenchmarkRunsResponse,
     CorpusScope,
 )
+from server.observability import metrics
+from server.observability.ml_quality import build_benchmark_observability_summary
+from server.retrieval.errors import RequiredRetrievalLegError, RetrievalContractMismatchError
+from server.retrieval.fusion import TriBridFusion
 from server.services.config_store import CorpusNotFoundError
 from server.services.config_store import get_config as load_scoped_config
-from server.retrieval.fusion import TriBridFusion
 
 router = APIRouter(tags=["benchmark"])
 

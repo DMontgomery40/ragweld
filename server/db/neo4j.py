@@ -830,7 +830,7 @@ class Neo4jClient:
                 community_id=community_id,
             )
             rec = await res.single()
-        return int((rec or {}).get("members") or 0)
+        return int((rec.get("members") if rec else 0) or 0)
 
     async def get_community_members(
         self, repo_id: str, community_id: str, *, limit: int = 500
@@ -1087,7 +1087,7 @@ class Neo4jClient:
         async with driver.session(database=self.database) as session:
             res = await session.run(cypher, **params)
             rec = await res.single()
-        return int((rec or {}).get("total") or 0)
+        return int((rec.get("total") if rec else 0) or 0)
 
     # Community operations
     async def detect_communities(self, repo_id: str) -> list[Community]:
@@ -1729,7 +1729,7 @@ def _modularity_groups(adjacency: dict[str, set[str]]) -> list[list[str]]:
     """
     import networkx as nx
 
-    graph = nx.Graph()
+    graph: nx.Graph[str] = nx.Graph()
     graph.add_nodes_from(sorted(adjacency))
     for node in sorted(adjacency):
         for other in sorted(adjacency[node]):
@@ -1775,9 +1775,10 @@ def _relationship_properties_from_mapping(mapping: dict[str, Any]) -> dict[str, 
         return cleaned
     if mapping.get("properties_json"):
         try:
-            return json.loads(mapping["properties_json"])
+            parsed = json.loads(mapping["properties_json"])
         except Exception:
             return {}
+        return parsed if isinstance(parsed, dict) else {}
     return {}
 
 
@@ -1798,9 +1799,10 @@ def _entity_properties_from_mapping(mapping: dict[str, Any]) -> dict[str, Any]:
         return cleaned
     if mapping.get("properties_json"):
         try:
-            return json.loads(mapping["properties_json"])
+            parsed = json.loads(mapping["properties_json"])
         except Exception:
             return {}
+        return parsed if isinstance(parsed, dict) else {}
     return {}
 
 

@@ -41,6 +41,8 @@ dependencies = [
     # Utilities
     "httpx>=0.26.0",
     "python-dotenv>=1.0.0",
+    # Repair-parse malformed JSON replies from the vision alias at index time
+    "json-repair>=0.44.1",
     # Document extraction (Parquet ingestion; rich documents go through Docling)
     "pandas>=2.2.0",
     "pyarrow>=15.0.0",
@@ -101,6 +103,7 @@ dev-dependencies = [
     "pytest-cov>=4.1.0",
     "ruff>=0.2.0",
     "mypy>=1.8.0",
+    "types-networkx>=3.0",
     "datamodel-code-generator>=0.25.0",
 ]
 
@@ -136,6 +139,10 @@ module = [
     "mlx_lm.*",
     "sentence_transformers",
     "sentence_transformers.*",
+    "pypdfium2",
+    "pyroscope",
+    "ragas",
+    "ragas.*",
 ]
 ignore_missing_imports = true
 

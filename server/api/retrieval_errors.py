@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from fastapi import HTTPException
 
@@ -18,7 +19,7 @@ from server.retrieval.errors import RequiredRetrievalLegError, RetrievalContract
 
 logger = logging.getLogger(__name__)
 
-RETRIEVAL_RUNTIME_UNAVAILABLE_RESPONSES = {
+RETRIEVAL_RUNTIME_UNAVAILABLE_RESPONSES: dict[int | str, dict[str, Any]] = {
     503: {
         "model": (
             DependencyUnavailableResponse

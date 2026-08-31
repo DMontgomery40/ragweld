@@ -214,7 +214,7 @@ def _usage(data: Any) -> dict[str, Any] | None:
 def _debug_trace_id(response: httpx.Response) -> str | None:
     for name in ("x-debug-trace-id", "x-request-id", "openai-request-id", "request-id"):
         value = response.headers.get(name)
-        if value and value.strip():
+        if isinstance(value, str) and value.strip():
             return value.strip()
     return None
 
@@ -226,12 +226,15 @@ def _error_detail(response: httpx.Response) -> str:
         return (response.text or "").strip()[:400]
     if isinstance(data, dict):
         error = data.get("error")
-        if isinstance(error, dict) and isinstance(error.get("message"), str):
-            return error["message"].strip()
+        if isinstance(error, dict):
+            message = error.get("message")
+            if isinstance(message, str):
+                return message.strip()
         if isinstance(error, str):
             return error.strip()
-        if isinstance(data.get("message"), str):
-            return data["message"].strip()
+        message = data.get("message")
+        if isinstance(message, str):
+            return message.strip()
     return ""
 
 

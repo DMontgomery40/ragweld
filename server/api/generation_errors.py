@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from fastapi import HTTPException
 
@@ -18,7 +19,7 @@ from server.models.tribrid_config_model import (
 
 logger = logging.getLogger(__name__)
 
-CHAT_RUNTIME_UNAVAILABLE_RESPONSES = {
+CHAT_RUNTIME_UNAVAILABLE_RESPONSES: dict[int | str, dict[str, Any]] = {
     413: {
         "model": PromptBudgetExceededResponse,
         "description": "The request cannot fit the selected model alias's context window.",

@@ -1037,7 +1037,8 @@ async def _read_index_state(repo_id: str, cfg: TriBridConfig) -> GenerationManif
     try:
         await pg.connect()
         row = await pg.get_corpus(repo_id)
-        meta = row.get("meta") if row and isinstance(row.get("meta"), dict) else {}
+        raw_meta = row.get("meta") if row else None
+        meta: dict[str, Any] = raw_meta if isinstance(raw_meta, dict) else {}
         reclaim_backlog_from_meta(meta, repo_id=repo_id)
         raw_fence = meta.get("index_run")
         if raw_fence is not None:
@@ -1530,7 +1531,7 @@ def _status_costs(
     total_cost: float | None = (
         None
         if any(component is None for component in components)
-        else sum(float(component) for component in components)  # type: ignore[arg-type]
+        else sum(component for component in components if component is not None)
     )
 
     return DashboardIndexCosts(
@@ -3982,7 +3983,7 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
     total_cost: float | None = (
         None
         if any(component is None for component in cost_components)
-        else sum(float(component) for component in cost_components)  # type: ignore[arg-type]
+        else sum(component for component in cost_components if component is not None)
     )
 
     # Time estimate (rough): embedding throughput + optional semantic KG extraction phase +

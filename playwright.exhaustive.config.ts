@@ -22,6 +22,7 @@ export default {
   },
   use: {
     baseURL: ensureTrailingSlash(webBaseURL),
+    actionTimeout: Number(process.env.EXHAUSTIVE_ACTION_TIMEOUT_MS ?? 30_000),
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',

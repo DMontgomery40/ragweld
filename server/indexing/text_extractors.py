@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from pydantic import AnyUrl
+
 from server.models.index import (
     DocumentKind,
     ExtractionMethod,
@@ -119,7 +121,7 @@ def build_figure_pipeline_options(figures: Any, gateway: FigureGateway | None) -
     if describe:
         assert gateway is not None
         opts.picture_description_options = PictureDescriptionApiOptions(
-            url=f"{gateway.base_url.rstrip('/')}/chat/completions",
+            url=AnyUrl(f"{gateway.base_url.rstrip('/')}/chat/completions"),
             headers={"Authorization": f"Bearer {gateway.api_key}"},
             params={
                 "model": gateway.model,
@@ -295,7 +297,7 @@ def _build_source_map(doc: Any, serializer: Any, full: str) -> tuple[tuple[Sourc
     becomes a normalized top-left ``PageRegion`` over that span. Items that cannot be located
     are counted, never raised: extraction must not fail because one layout item drifted.
     """
-    from docling_core.types.doc import DocItem
+    from docling_core.types.doc.document import DocItem
 
     spans: list[SourceSpan] = []
     unlocated = 0
@@ -372,8 +374,7 @@ def _read_with_docling(
     checking the text), and ``figures_skipped`` (no description object at all -- the picture
     never reached the vision call: area threshold, classification deny-list, or describe off).
     """
-    from docling_core.types.doc import PictureItem
-    from docling_core.types.doc.document import DescriptionAnnotation, PictureMeta
+    from docling_core.types.doc.document import DescriptionAnnotation, PictureItem, PictureMeta
 
     from server.indexing.figure_serializer import make_markdown_serializer, non_blank
 

@@ -57,6 +57,7 @@ from server.models.index import (
 from server.models.tribrid_config_model import (
     DependencyUnavailableDetail,
     DependencyUnavailableResponse,
+    TriBridConfig,
 )
 from server.observability.costing import warm_costing_catalog
 from server.observability.metrics import render_latest
@@ -425,7 +426,7 @@ def _request_observability_route_name(path: str) -> str:
     return clean.replace("/", ".").replace("-", "_")
 
 
-async def _load_request_observability_config(request: Request):
+async def _load_request_observability_config(request: Request) -> TriBridConfig:
     scope_id = _request_observability_scope_id(request)
     if not scope_id:
         return load_config()

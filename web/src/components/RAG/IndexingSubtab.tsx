@@ -1483,7 +1483,7 @@ export function IndexingSubtab() {
             color: 'var(--fg)',
           }}
         >
-          Index contract is locked for this corpus. Enable <strong>Force reindex</strong> to edit provider/model/dimension/tokenizer fields.
+          Index contract is locked for this corpus. Enable <strong>Force reindex</strong> to edit fields that change dense or sparse index contents.
         </div>
       )}
 
@@ -1883,7 +1883,12 @@ export function IndexingSubtab() {
               </div>
             </div>
 
-            <details style={{ marginTop: '18px' }}>
+            {/* Default-open: these are real corpus tunables. A collapsed-by-default
+                panel resets on every reload, so a saved value could never be verified
+                against the rendered control after refresh (the exhaustive run reported
+                ui_matches=false for suffix/truncation/contextual for exactly this
+                reason). Operators can still collapse it for the session. */}
+            <details open style={{ marginTop: '18px' }}>
               <summary style={{ cursor: 'pointer', fontSize: '13px', fontWeight: 600, color: 'var(--fg)' }}>
                 Advanced embedding settings
               </summary>
@@ -1898,6 +1903,7 @@ export function IndexingSubtab() {
                       data-testid="embedding-input-truncation"
                       value={embeddingInputTruncation}
                       onChange={(e) => setEmbeddingInputTruncation(e.target.value as any)}
+                      disabled={contractLocked}
                       style={{
                         width: '100%',
                         padding: '10px 12px',
@@ -1906,6 +1912,7 @@ export function IndexingSubtab() {
                         borderRadius: '6px',
                         color: 'var(--fg)',
                         fontSize: '13px',
+                        opacity: contractLocked ? 0.6 : 1,
                       }}
                     >
                       <option value="truncate_end">truncate_end</option>
@@ -1923,6 +1930,7 @@ export function IndexingSubtab() {
                       type="text"
                       value={embedTextPrefix}
                       onChange={(e) => setEmbedTextPrefix(e.target.value)}
+                      disabled={contractLocked}
                       placeholder=""
                       style={{
                         width: '100%',
@@ -1932,6 +1940,7 @@ export function IndexingSubtab() {
                         borderRadius: '6px',
                         color: 'var(--fg)',
                         fontSize: '13px',
+                        opacity: contractLocked ? 0.6 : 1,
                       }}
                     />
                   </div>
@@ -1945,6 +1954,7 @@ export function IndexingSubtab() {
                       type="text"
                       value={embedTextSuffix}
                       onChange={(e) => setEmbedTextSuffix(e.target.value)}
+                      disabled={contractLocked}
                       placeholder=""
                       style={{
                         width: '100%',
@@ -1954,6 +1964,7 @@ export function IndexingSubtab() {
                         borderRadius: '6px',
                         color: 'var(--fg)',
                         fontSize: '13px',
+                        opacity: contractLocked ? 0.6 : 1,
                       }}
                     />
                   </div>
@@ -1969,6 +1980,7 @@ export function IndexingSubtab() {
                       data-testid="embedding-contextual-chunk-embeddings"
                       value={contextualChunkEmbeddings}
                       onChange={(e) => setContextualChunkEmbeddings(e.target.value as any)}
+                      disabled={contractLocked}
                       style={{
                         width: '100%',
                         padding: '10px 12px',
@@ -1977,6 +1989,7 @@ export function IndexingSubtab() {
                         borderRadius: '6px',
                         color: 'var(--fg)',
                         fontSize: '13px',
+                        opacity: contractLocked ? 0.6 : 1,
                       }}
                     >
                       <option value="off">off</option>
@@ -1996,7 +2009,7 @@ export function IndexingSubtab() {
                       min={256}
                       max={65536}
                       step={1}
-                      disabled={String(contextualChunkEmbeddings).toLowerCase() !== 'late_chunking_local_only'}
+                      disabled={contractLocked || String(contextualChunkEmbeddings).toLowerCase() !== 'late_chunking_local_only'}
                       style={{
                         width: '100%',
                         padding: '10px 12px',
@@ -2005,7 +2018,7 @@ export function IndexingSubtab() {
                         borderRadius: '6px',
                         color: 'var(--fg)',
                         fontSize: '13px',
-                        opacity: String(contextualChunkEmbeddings).toLowerCase() === 'late_chunking_local_only' ? 1 : 0.6,
+                        opacity: !contractLocked && String(contextualChunkEmbeddings).toLowerCase() === 'late_chunking_local_only' ? 1 : 0.6,
                       }}
                     />
                   </div>
@@ -2019,11 +2032,13 @@ export function IndexingSubtab() {
                       <TooltipIcon name="EMBEDDING_MAX_TOKENS" />
                     </label>
                     <NumberField
+                      data-testid="embedding-max-tokens"
                       value={embeddingMaxTokens}
                       onCommit={setEmbeddingMaxTokens}
                       min={512}
                       max={8192}
                       step={1}
+                      disabled={contractLocked}
                       style={{
                         width: '100%',
                         padding: '10px 12px',
@@ -2032,6 +2047,7 @@ export function IndexingSubtab() {
                         borderRadius: '6px',
                         color: 'var(--fg)',
                         fontSize: '13px',
+                        opacity: contractLocked ? 0.6 : 1,
                       }}
                     />
                   </div>

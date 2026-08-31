@@ -49,19 +49,6 @@ async function getRerankerLogs(request: APIRequestContext, limit: number = 1000)
   return [];
 }
 
-function eventIncludesCorpus(row: Record<string, unknown>): boolean {
-  const corpusIds = Array.isArray(row?.corpus_ids) ? (row.corpus_ids as unknown[]) : [];
-  if (corpusIds.some((id) => String(id || '').trim() === CORPUS_ID)) return true;
-  const corpusId = String(row?.corpus_id || '').trim();
-  return corpusId === CORPUS_ID;
-}
-
-function isChatEvent(row: Record<string, unknown>): boolean {
-  const kind = String(row?.kind || row?.type || '').trim().toLowerCase();
-  const eventId = String(row?.event_id || '').trim();
-  return kind === 'chat' && Boolean(eventId);
-}
-
 function isThumbsupFeedbackForEvent(row: Record<string, unknown>, eventId: string): boolean {
   const kind = String(row?.kind || row?.type || '').trim().toLowerCase();
   const signal = String(row?.signal || '').trim().toLowerCase();
@@ -73,19 +60,6 @@ function hasLinkedChatEvent(row: Record<string, unknown>, eventId: string): bool
   const kind = String(row?.kind || row?.type || '').trim().toLowerCase();
   const id = String(row?.event_id || '').trim();
   return kind === 'chat' && id === eventId;
-}
-
-async function findRecentChatEventId(request: APIRequestContext): Promise<string | null> {
-  const logs = await getRerankerLogs(request, 1000);
-  for (let i = logs.length - 1; i >= 0; i -= 1) {
-    const row = logs[i];
-    if (!row || typeof row !== 'object') continue;
-    if (!isChatEvent(row)) continue;
-    if (!eventIncludesCorpus(row)) continue;
-    const eventId = String(row.event_id || '').trim();
-    if (eventId) return eventId;
-  }
-  return null;
 }
 
 async function countThumbsupForEvent(request: APIRequestContext, eventId: string): Promise<number> {
@@ -118,9 +92,9 @@ async function waitForNewFeedbackLink(
 }
 
 async function getOrCreateLinkedRunId(request: APIRequestContext): Promise<string> {
-  const existing = await findRecentChatEventId(request);
-  if (existing) return existing;
-
+  // Always create the event this test will own. Reusing the most recent event
+  // couples this assertion to earlier feedback clicks and can make a legitimate
+  // one-feedback-per-event policy look like persistence loss.
   const conversationId = `playwright-feedback-seed-${Date.now()}`;
   const chatResp = await request.post(`${API_BASE}/chat`, {
     timeout: 180_000,
@@ -279,6 +253,14 @@ test.describe.serial('chat reliability', () => {
 
     await expect(page.locator('#chat-input')).toBeEnabled({ timeout: 20_000 });
     await expect(page.getByText('Streaming')).toBeHidden();
+
+    // These controls sit at the bottom of a real assistant response. A short
+    // window used to collapse the message viewport until the status bar occupied
+    // their click coordinates. Exercise the actual buttons without force-clicks.
+    await clickHelpfulFeedback(page);
+    const citation = page.getByTestId('chat-citation-open').first();
+    await expect(citation).toBeVisible({ timeout: 30_000 });
+    await citation.click();
   });
 
   test('new chat resets in-flight state and clears active stream UI', async ({ page, request }) => {
@@ -297,6 +279,20 @@ test.describe.serial('chat reliability', () => {
     await expect(page.getByText('Streaming')).toBeHidden({ timeout: 20_000 });
     await expect(page.locator('#chat-input')).toBeEnabled({ timeout: 20_000 });
     await expect(page.getByText('Chat stays grounded in recall, sources, and session continuity.')).toBeVisible({ timeout: 20_000 });
+  });
+
+  test('welcome prompt sends through a pinned runnable model', async ({ page, request }) => {
+    const corpusLabels = await ensureCorpusExists(request);
+    await gotoChat(page);
+    await setSources(page, corpusLabels, false);
+    await page.getByTestId('model-picker').selectOption(`litellm:${EXHAUSTIVE_CHAT_MODEL}`);
+
+    await page.getByTestId('chat-welcome-prompt-0').click();
+    await waitForStreamingTerminal(page);
+
+    const latest = page.locator('[data-role="assistant"]').last();
+    await expect(latest).toBeVisible();
+    await expect(latest.getByTestId('chat-structured-error-card')).toHaveCount(0);
   });
 
   test('feedback is persisted and mineable via matching event_id', async ({ page, request }) => {

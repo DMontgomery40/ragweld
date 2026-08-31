@@ -75,7 +75,11 @@ export async function gotoSurface(page: Page, surface: UISurface): Promise<void>
     const detailsNodes = Array.from(document.querySelectorAll('details'));
     for (const node of detailsNodes) {
       const hidden = !node.offsetParent;
-      if (!hidden) node.open = true;
+      // Open persistent disclosure panels so their controls are discoverable,
+      // but leave transient popovers closed. The Chat source picker is a
+      // full-card overlay; auto-opening it covered every later Chat target.
+      const transient = node.matches('[data-testid="source-dropdown"]');
+      if (!hidden && !transient) node.open = true;
     }
   });
 }
@@ -273,6 +277,14 @@ async function maybeApply(page: Page): Promise<{ attempted: boolean; saved: bool
   if (!(await safeEnabled(saveBtn))) return { attempted: true, saved: false };
 
   await saveBtn.click();
+  const confirm = page.getByTestId('confirm-dialog');
+  if ((await safeCount(confirm)) > 0 && (await safeVisible(confirm))) {
+    await expect(confirm).toHaveAccessibleName('Apply changes that affect the index');
+    const accept = page.getByTestId('confirm-dialog-accept');
+    await expect(accept).toBeEnabled();
+    await accept.click();
+    await expect(confirm).toHaveCount(0);
+  }
   await page.waitForTimeout(EXTRA_WAIT_MS);
   await expect(saveBtn).not.toContainText('Saving...', { timeout: 180_000 });
   return { attempted: true, saved: true };
@@ -444,6 +456,11 @@ function isClickLike(c: ControlDescriptor): boolean {
 
 export function isActionBlacklisted(c: ControlDescriptor, surface?: UISurface): boolean {
   if (ALLOW_DESTRUCTIVE) return false;
+  // Welcome prompts are real paid/model actions. The dedicated Chat reliability
+  // lane pins a runnable cloud alias and clicks one; the generic crawler must
+  // not repeat that generation against whichever session model happens to be
+  // persisted (for example an unavailable optional local model).
+  if (c.selector.includes('chat-welcome-prompt-')) return true;
   const text = controlText(c);
   if (hasAny(text, ACTION_BLACKLIST_HINTS) || ACTION_BLACKLIST_PATTERNS.some((pattern) => pattern.test(text))) {
     return true;
@@ -688,9 +705,22 @@ export async function runMetricsBudgetCheck(
 export async function runEvalAndMcpSmoke(page: Page): Promise<void> {
   await page.goto('eval?subtab=analysis', { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(EXTRA_WAIT_MS);
-  const evalSettings = page.locator('#eval-run-settings-final-k');
-  if ((await safeCount(evalSettings)) > 0) {
-    await expect(evalSettings).toBeVisible();
+  // `#eval-run-settings-final-k` exists but lives in a legitimately collapsed
+  // settings panel. Open it through the same button an operator uses before
+  // checking the field, so the smoke covers both the analysis surface and its
+  // run-settings disclosure without treating collapsed content as broken.
+  await expect(page.getByRole('heading', { name: 'Eval Analysis' })).toBeVisible();
+  const runSettings = page.getByRole('button', { name: /Run Settings/ }).first();
+  if ((await safeCount(runSettings)) > 0) {
+    await expect(runSettings).toBeVisible();
+    if ((await runSettings.getAttribute('aria-expanded')) !== 'true') {
+      await runSettings.click();
+    }
+    await expect(page.locator('#eval-run-settings-final-k')).toBeVisible();
+  } else {
+    // A freshly provisioned exhaustive corpus has no eval run yet, so the app
+    // intentionally omits Run Settings and renders the typed empty state.
+    await expect(page.getByRole('heading', { name: 'No Evaluation Runs Yet' })).toBeVisible();
   }
 
   await page.goto('infrastructure?subtab=mcp', { waitUntil: 'domcontentloaded' });

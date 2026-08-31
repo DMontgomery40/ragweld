@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from dataclasses import dataclass
-import re
 
 from neo4j_graphrag.experimental.components.entity_relation_extractor import (
     LLMEntityRelationExtractor,

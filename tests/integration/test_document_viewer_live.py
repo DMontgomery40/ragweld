@@ -89,7 +89,7 @@ async def _configure(pg: PostgresClient, corpus_id: str) -> None:
     cfg.graph_indexing.store_chunk_embeddings = True
     cfg.graph_indexing.semantic_kg_enabled = False
     cfg.chat.litellm.enabled = False
-    cfg.semantic_cache.enabled = 0
+    cfg.semantic_cache.enabled = False
     cfg.chunking.chunking_strategy = "fixed_tokens"
     cfg.chunking.chunk_size = 200
     cfg.chunking.chunk_overlap = 0

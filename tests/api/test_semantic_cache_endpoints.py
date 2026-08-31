@@ -29,7 +29,7 @@ async def _seed_repo(pg: PostgresClient, repo_id: str) -> None:
     cfg = load_config()
     # Deterministic query embeddings keep the semantic-hit / miss expectations exact.
     cfg.embedding.embedding_backend = "deterministic"
-    cfg.semantic_cache.enabled = 1
+    cfg.semantic_cache.enabled = True
     cfg.semantic_cache.mode = "read_write"
     cfg.semantic_cache.min_query_chars = 3
     cfg.semantic_cache.similarity_threshold_search = 0.10

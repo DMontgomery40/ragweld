@@ -176,7 +176,7 @@ async def seeded() -> AsyncIterator[SeededGraph]:
                 cfg.graph_indexing.semantic_kg_require_llm_success = True
             cfg.chat.litellm.enabled = kg_skip is None
             cfg.reranking.reranker_mode = "none"
-            cfg.semantic_cache.enabled = 0
+            cfg.semantic_cache.enabled = False
             await pg.upsert_corpus_config_json(corpus_id, cfg.model_dump(mode="serialization"))
             config_store._store = None
 

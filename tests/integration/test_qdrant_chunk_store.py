@@ -290,7 +290,7 @@ async def test_fusion_keeps_same_chunk_id_distinct_across_corpora() -> None:
     cfg.sparse_search.enabled = False
     cfg.graph_search.enabled = False
     cfg.chat.litellm.enabled = False
-    cfg.semantic_cache.enabled = 0
+    cfg.semantic_cache.enabled = False
     cfg.retrieval.final_k = 10
     store = QdrantChunkStore(cfg)
     embedder = Embedder(cfg.embedding, cfg.tokenization)

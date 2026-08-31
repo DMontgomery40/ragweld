@@ -250,7 +250,10 @@ def build_observability_catalog(config: TriBridConfig) -> ObservabilityCatalogRe
         title = str((raw or {}).get("title") or item["title"])
         uid = str((raw or {}).get("uid") or item["uid"])
         slug = str(item["slug"])
-        tags = [str(tag) for tag in ((raw or {}).get("tags") or []) if str(tag).strip()]
+        raw_tags = (raw or {}).get("tags")
+        tags = [str(tag) for tag in (raw_tags if isinstance(raw_tags, list) else []) if str(tag).strip()]
+        raw_workbench_paths = item.get("workbench_paths")
+        workbench_paths = raw_workbench_paths if isinstance(raw_workbench_paths, list) else []
         dashboards.append(
             ObservabilityDashboardFamily(
                 id=str(item["id"]),
@@ -265,7 +268,7 @@ def build_observability_catalog(config: TriBridConfig) -> ObservabilityCatalogRe
                 links=_links_for_dashboard(config, uid=uid, slug=slug, title=title),
                 workbench_links=[
                     workbench_by_path[path]
-                    for path in item.get("workbench_paths", [])
+                    for path in workbench_paths
                     if isinstance(path, str) and path in workbench_by_path
                 ],
             )

@@ -12,7 +12,12 @@ from server.chat.handler import fit_context_to_route
 from server.chat.prompt_builder import get_system_prompt
 from server.chat.provider_router import select_provider_route
 from server.models.retrieval import ChunkMatch
-from server.models.tribrid_config_model import BenchmarkResult, BenchmarkRetrieval, BenchmarkRun, TriBridConfig
+from server.models.tribrid_config_model import (
+    BenchmarkResult,
+    BenchmarkRetrieval,
+    BenchmarkRun,
+    TriBridConfig,
+)
 
 _ROOT = Path(__file__).resolve().parents[2]
 

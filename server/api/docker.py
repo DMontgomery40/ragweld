@@ -9,7 +9,7 @@ import time
 from collections import deque
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -29,7 +29,7 @@ from server.observability.metrics import LOKI_PROBE_TIMEOUTS_TOTAL
 
 router = APIRouter(tags=["docker"])
 
-_DOCKER_PROJECT = "ragweld"
+_DOCKER_PROJECT: Final = "ragweld"
 _DOCKER_MANAGED_LABEL = "io.ragweld.managed"
 _DOCKER_MANAGED_VALUE = "true"
 _DOCKER_SERVICES = frozenset(
@@ -597,7 +597,7 @@ async def get_dev_stack_status() -> DevStackStatusResponse:
     bundle_built_at = (
         datetime.fromtimestamp(bundle_path.stat().st_mtime, tz=UTC) if bundle_exists else None
     )
-    if frontend_mode == "built_bundle":
+    if frontend_mode == "built_bundle" and bundle_built_at is not None:
         details.append(
             "No Vite dev server on this host, which is expected on a deployed one: the frontend is "
             f"served from the built bundle at web/dist (built {bundle_built_at.isoformat()})."

@@ -23,7 +23,7 @@ import json
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, overload
 
 from pydantic import ValidationError
 
@@ -205,6 +205,32 @@ def _canonical_positive(label: str, retrieved: list[str]) -> str:
     return label
 
 
+@overload
+def mine_triplets_from_eval_results(
+    results: Iterable[EvalResult],
+    *,
+    negative_ratio: int,
+    max_triplets: int | None = ...,
+    source: str = ...,
+    corpus_root: Path | None = ...,
+    negative_text: NegativeTextLoader | None = ...,
+    with_stats: Literal[True],
+) -> tuple[list[dict[str, str]], dict[str, int]]: ...
+
+
+@overload
+def mine_triplets_from_eval_results(
+    results: Iterable[EvalResult],
+    *,
+    negative_ratio: int,
+    max_triplets: int | None = ...,
+    source: str = ...,
+    corpus_root: Path | None = ...,
+    negative_text: NegativeTextLoader | None = ...,
+    with_stats: Literal[False] = ...,
+) -> list[dict[str, str]]: ...
+
+
 def mine_triplets_from_eval_results(
     results: Iterable[EvalResult],
     *,
@@ -325,7 +351,7 @@ def mine_triplets(
     eval_rows: list[TripletRow] = []
     eval_stats: dict[str, int] = {}
     if eval_results is not None:
-        mined, eval_stats = mine_triplets_from_eval_results(  # type: ignore[misc]
+        mined, eval_stats = mine_triplets_from_eval_results(
             list(eval_results),
             negative_ratio=negative_ratio,
             source=eval_source,

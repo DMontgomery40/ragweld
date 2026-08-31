@@ -8,6 +8,36 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 
+_DEPLOYMENT_WIRING_KEYS = {
+    "POSTGRES_DSN",
+    "POSTGRES_HOST",
+    "POSTGRES_PORT",
+    "POSTGRES_DB",
+    "POSTGRES_USER",
+    "POSTGRES_PASSWORD",
+    "NEO4J_URI",
+    "NEO4J_USER",
+    "NEO4J_PASSWORD",
+    "LITELLM_BASE_URL",
+    "LITELLM_API_KEY",
+    "VLLM_BASE_URL",
+}
+
+
+def _isolated_config_subprocess_env(config_path: Path) -> dict[str, str]:
+    """Make the supplied config authoritative instead of inheriting live wiring."""
+    env = dict(os.environ)
+    for key in _DEPLOYMENT_WIRING_KEYS:
+        env.pop(key, None)
+    env.update(
+        {
+            "PYTHONPATH": str(ROOT),
+            "RAGWELD_LOAD_DOTENV": "0",
+            "RAGWELD_CONFIG_PATH": str(config_path),
+        }
+    )
+    return env
+
 
 def test_stateful_api_openapi_documents_typed_dependency_503() -> None:
     from server.main import app
@@ -169,10 +199,7 @@ async def main():
 
 asyncio.run(main())
 """
-    env = dict(os.environ)
-    env["PYTHONPATH"] = str(ROOT)
-    env["RAGWELD_LOAD_DOTENV"] = "0"
-    env["RAGWELD_CONFIG_PATH"] = str(tmp_path / "tribrid_config.json")
+    env = _isolated_config_subprocess_env(tmp_path / "tribrid_config.json")
     result = subprocess.run(
         [sys.executable, "-c", script],
         cwd=tmp_path,
@@ -218,11 +245,7 @@ async def main():
 
 asyncio.run(main())
 """
-    env = dict(os.environ)
-    env.pop("LITELLM_API_KEY", None)
-    env["PYTHONPATH"] = str(ROOT)
-    env["RAGWELD_LOAD_DOTENV"] = "0"
-    env["RAGWELD_CONFIG_PATH"] = str(runtime_config)
+    env = _isolated_config_subprocess_env(runtime_config)
     result = subprocess.run(
         [sys.executable, "-c", script],
         cwd=tmp_path,
@@ -267,10 +290,7 @@ async def main():
 
 asyncio.run(main())
 """
-    env = dict(os.environ)
-    env["PYTHONPATH"] = str(ROOT)
-    env["RAGWELD_LOAD_DOTENV"] = "0"
-    env["RAGWELD_CONFIG_PATH"] = str(tmp_path / "tribrid_config.json")
+    env = _isolated_config_subprocess_env(tmp_path / "tribrid_config.json")
     result = subprocess.run(
         [sys.executable, "-c", script],
         cwd=tmp_path,

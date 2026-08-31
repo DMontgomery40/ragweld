@@ -18,12 +18,9 @@ import secrets
 from collections.abc import Awaitable, Callable
 
 from starlette.responses import JSONResponse
+from starlette.types import Receive, Scope, Send
 
 from server.models.tribrid_config_model import MCPUnauthorizedResponse
-
-Scope = dict[str, object]
-Receive = Callable[[], Awaitable[dict[str, object]]]
-Send = Callable[[dict[str, object]], Awaitable[None]]
 
 
 class MCPApiKeyMissingError(RuntimeError):

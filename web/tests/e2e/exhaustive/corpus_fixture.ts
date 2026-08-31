@@ -14,7 +14,7 @@
 // files live under data/logs/exhaustive/<id>/ because the reranker log API only
 // serves paths under data/logs/.
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { existsSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import type { APIRequestContext, Page } from '@playwright/test';
 
@@ -130,7 +130,9 @@ export async function provisionExhaustiveCorpus(
   const corpusPath = opts.corpusPath ?? acceptanceCorpusPath();
   // `/api/reranker/logs` only serves log paths under data/logs/ (or the OS temp dir).
   const runDir = path.posix.join('data', 'logs', 'exhaustive', corpusId);
-  mkdirSync(path.resolve(process.cwd(), runDir), { recursive: true });
+  // Do not pre-create this as the Playwright process: exhaustive runs are often
+  // launched by root through pct exec, while the API runs as `ragweld`. The API's
+  // first log write must create the directory under its own runtime identity.
 
   const created = await request.post(`${API_BASE}/corpora`, {
     data: { corpus_id: corpusId, name: corpusId, path: corpusPath },
@@ -142,7 +144,12 @@ export async function provisionExhaustiveCorpus(
     if (disposed) return;
     let lastError: Error | null = null;
     for (let attempt = 1; attempt <= DISPOSE_ATTEMPTS; attempt += 1) {
-      const response = await context.delete(`${API_BASE}/corpora/${encodeURIComponent(corpusId)}`);
+      // Corpus deletion clears Postgres, Qdrant, Neo4j, lineage, config and
+      // per-run artifacts. Under a long headed drive that honest cleanup can
+      // exceed Playwright's 30s request default even though the delete commits.
+      const response = await context.delete(`${API_BASE}/corpora/${encodeURIComponent(corpusId)}`, {
+        timeout: 120_000,
+      });
       if (response.ok() || response.status() === 404) {
         disposed = true;
         rmSync(path.resolve(process.cwd(), runDir), { recursive: true, force: true });

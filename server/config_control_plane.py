@@ -1146,7 +1146,7 @@ async def _build_runtime_integration_readiness(
         runtime_url = str(config.chat.vllm.base_url or "")
         reachable, detail = False, str(exc)
     state = "ready"
-    failing_checks: list[str] = []
+    failing_checks = []
     if missing:
         state = "unconfigured"
         failing_checks.extend(["base_url_present", "default_model_present"])
@@ -1541,7 +1541,7 @@ async def _build_observability_integration_readiness(
         for path in contract.required_config_paths[1:]
         if _is_missing(_config_value(config, path))
     ]
-    failing_checks: list[str] = []
+    failing_checks = []
     state = "ready"
     reachable: bool | None = True if relevant else None
     if not enabled:

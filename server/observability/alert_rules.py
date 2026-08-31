@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 
@@ -13,10 +13,14 @@ from server.models.tribrid_config_model import (
 )
 
 _STATE_ORDER = {"firing": 0, "pending": 1, "inactive": 2, "unknown": 3}
-_KNOWN_STATES = frozenset({"firing", "pending", "inactive"})
+_KNOWN_STATES: dict[str, Literal["firing", "pending", "inactive"]] = {
+    "firing": "firing",
+    "pending": "pending",
+    "inactive": "inactive",
+}
 
 
-class MalformedRulesPayload(ValueError):
+class MalformedRulesPayload(ValueError):  # noqa: N818 - public payload classification, not a generic error type
     """Prometheus answered, but not with a rules payload."""
 
 
@@ -44,15 +48,18 @@ def parse_rules_payload(payload: Any) -> list[ObservabilityAlertRule]:
 def _rule_from_payload(group_name: str, raw: dict[str, Any]) -> ObservabilityAlertRule | None:
     if str(raw.get("type") or "alerting") != "alerting":
         return None
-    labels = raw.get("labels") if isinstance(raw.get("labels"), dict) else {}
-    annotations = raw.get("annotations") if isinstance(raw.get("annotations"), dict) else {}
-    alerts = raw.get("alerts") if isinstance(raw.get("alerts"), list) else []
+    raw_labels = raw.get("labels")
+    labels: dict[str, Any] = raw_labels if isinstance(raw_labels, dict) else {}
+    raw_annotations = raw.get("annotations")
+    annotations: dict[str, Any] = raw_annotations if isinstance(raw_annotations, dict) else {}
+    raw_alerts = raw.get("alerts")
+    alerts: list[Any] = raw_alerts if isinstance(raw_alerts, list) else []
     severity = labels.get("severity")
     raw_state = str(raw.get("state") or "").strip().lower()
     return ObservabilityAlertRule(
         group=str(group_name),
         name=str(raw.get("name") or ""),
-        state=raw_state if raw_state in _KNOWN_STATES else "unknown",
+        state=_KNOWN_STATES.get(raw_state, "unknown"),
         severity=str(severity) if severity is not None else None,
         query=str(raw.get("query") or ""),
         duration_seconds=float(raw.get("duration") or 0.0),

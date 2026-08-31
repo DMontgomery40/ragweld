@@ -95,7 +95,7 @@ async def test_benchmark_grounds_every_model_on_the_corpus(client: AsyncClient, 
         cfg.embedding.embedding_backend = "deterministic"
         cfg.graph_indexing.semantic_kg_enabled = False
         cfg.reranking.reranker_mode = "none"
-        cfg.semantic_cache.enabled = 0
+        cfg.semantic_cache.enabled = False
         cfg.chat.litellm.enabled = True
         cfg.chat.benchmark.enabled = True
         cfg.chat.benchmark.save_results = True

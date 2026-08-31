@@ -344,7 +344,7 @@ class PersistedStateCorruptError(RuntimeError):
 class TombstoneCleanupError(RuntimeError):
     """An external store named by a deletion tombstone could not be cleaned (retry later)."""
 
-    def __init__(self, dependency: str, operation: str, cause: BaseException) -> None:
+    def __init__(self, dependency: Literal["qdrant", "neo4j"], operation: str, cause: BaseException) -> None:
         self.dependency = dependency
         self.operation = operation
         self.cause = cause
@@ -445,7 +445,8 @@ def generation_from_corpus_row(row: dict[str, Any] | None) -> GenerationManifest
     if not row:
         return None
     repo_id = str(row.get("repo_id") or "")
-    meta = row.get("meta") if isinstance(row.get("meta"), dict) else {}
+    raw_meta = row.get("meta")
+    meta: dict[str, Any] = raw_meta if isinstance(raw_meta, dict) else {}
     tombstone = tombstone_from_meta(meta, repo_id=repo_id)
     if tombstone is not None:
         raise DeletionIncompleteError(repo_id, tombstone)
@@ -696,7 +697,8 @@ async def ensure_generation_manifests(config: TriBridConfig) -> int:
             repo_id = str(row.get("repo_id") or "").strip()
             if not repo_id or repo_id.startswith("__staging__"):
                 continue
-            meta = row.get("meta") if isinstance(row.get("meta"), dict) else {}
+            raw_meta = row.get("meta")
+            meta = raw_meta if isinstance(raw_meta, dict) else {}
             # Every persisted key of the row is validated inside the SAME per-corpus
             # quarantine boundary: a malformed tombstone, fence or backlog never
             # gates the other corpora.

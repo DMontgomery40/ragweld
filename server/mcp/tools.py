@@ -2,20 +2,64 @@
 
 from __future__ import annotations
 
+import json
 import time
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import CallToolResult, TextContent
 
 from server.config import load_config
 from server.db.postgres import PostgresClient
-from server.models.tribrid_config_model import AnswerResponse, ChunkMatch, Corpus, MCPConfig
+from server.dependency_errors import DependencyUnavailableError
+from server.models.tribrid_config_model import (
+    AnswerResponse,
+    ChunkMatch,
+    Corpus,
+    DependencyUnavailableDetail,
+    MCPConfig,
+    MCPSearchToolResult,
+    RequiredRetrievalLegFailureDetail,
+    RetrievalContractMismatchDetail,
+)
+from server.retrieval.errors import RequiredRetrievalLegError, RetrievalContractMismatchError
 from server.retrieval.fusion import TriBridFusion
 from server.services.answer_service import answer_best_effort
 from server.services.config_store import get_config as load_scoped_config
 
 MCPMode = Literal["tribrid", "dense_only", "sparse_only", "graph_only"]
+
+
+def _search_tool_result(
+    *,
+    rows: list[ChunkMatch] | None = None,
+    error: (
+        DependencyUnavailableDetail
+        | RequiredRetrievalLegFailureDetail
+        | RetrievalContractMismatchDetail
+        | None
+    ) = None,
+) -> CallToolResult:
+    payload = MCPSearchToolResult(result=rows, error=error).model_dump(mode="json")
+    return CallToolResult(
+        content=[TextContent(type="text", text=json.dumps(payload, separators=(",", ":")))],
+        structuredContent=payload,
+        isError=error is not None,
+    )
+
+
+def _dependency_error_detail(exc: DependencyUnavailableError) -> DependencyUnavailableDetail:
+    dependency = str(exc.dependency)
+    return DependencyUnavailableDetail(
+        dependency=exc.dependency,
+        operation=exc.operation,
+        message=f"The required {dependency} dependency is unavailable.",
+        operator_hint=(
+            f"Restore the {dependency} runtime used by {exc.operation}, then retry. "
+            "Ragweld did not substitute a partial retrieval result."
+        ),
+    )
 
 
 def _mode_to_flags(mode: MCPMode) -> tuple[bool, bool, bool]:
@@ -46,7 +90,7 @@ def register_mcp_tools(mcp: FastMCP, cfg: MCPConfig) -> None:
         corpus_id: str,
         mode: MCPMode | None = None,
         top_k: int | None = None,
-    ) -> list[ChunkMatch]:
+    ) -> Annotated[CallToolResult, MCPSearchToolResult]:
         """Search a corpus with tri-brid retrieval (vector + sparse + graph)."""
         if not query.strip():
             raise ValueError("Query must not be empty")
@@ -59,15 +103,27 @@ def register_mcp_tools(mcp: FastMCP, cfg: MCPConfig) -> None:
         effective_top_k = int(top_k or cfg.default_top_k)
 
         fusion = TriBridFusion()
-        return await fusion.search(
-            [corpus_id],
-            query,
-            scoped_cfg.fusion,
-            include_vector=include_vector,
-            include_sparse=include_sparse,
-            include_graph=include_graph,
-            top_k=effective_top_k,
-        )
+        try:
+            rows = await fusion.search(
+                [corpus_id],
+                query,
+                scoped_cfg.fusion,
+                include_vector=include_vector,
+                include_sparse=include_sparse,
+                include_graph=include_graph,
+                top_k=effective_top_k,
+            )
+        except RetrievalContractMismatchError as exc:
+            return _search_tool_result(
+                error=RetrievalContractMismatchDetail.model_validate(exc.to_detail())
+            )
+        except RequiredRetrievalLegError as exc:
+            return _search_tool_result(
+                error=RequiredRetrievalLegFailureDetail.model_validate(exc.to_detail())
+            )
+        except DependencyUnavailableError as exc:
+            return _search_tool_result(error=_dependency_error_detail(exc))
+        return _search_tool_result(rows=rows)
 
     @mcp.tool()
     async def answer(

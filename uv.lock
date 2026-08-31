@@ -4830,6 +4830,7 @@ dependencies = [
     { name = "fastembed-haystack" },
     { name = "haystack-ai" },
     { name = "httpx" },
+    { name = "json-repair" },
     { name = "langchain" },
     { name = "langchain-community" },
     { name = "langchain-core" },
@@ -4894,6 +4895,7 @@ dev = [
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
     { name = "ruff" },
+    { name = "types-networkx" },
 ]
 
 [package.metadata]
@@ -4910,6 +4912,7 @@ requires-dist = [
     { name = "haystack-ai", specifier = ">=2.26.0" },
     { name = "httpx", specifier = ">=0.26.0" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.26.0" },
+    { name = "json-repair", specifier = ">=0.44.1" },
     { name = "langchain", specifier = "<1" },
     { name = "langchain-community", specifier = "<1" },
     { name = "langchain-core", specifier = "<1" },
@@ -4963,6 +4966,7 @@ dev = [
     { name = "pytest-asyncio", specifier = ">=0.23.0" },
     { name = "pytest-cov", specifier = ">=4.1.0" },
     { name = "ruff", specifier = ">=0.2.0" },
+    { name = "types-networkx", specifier = ">=3.0" },
 ]
 
 [[package]]
@@ -4999,6 +5003,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/36/bf/8825b5929afd84d0dabd606c67cd57b8388cb3ec385f7ef19c5cc2202069/typer-0.21.1.tar.gz", hash = "sha256:ea835607cd752343b6b2b7ce676893e5a0324082268b48f27aa058bdb7d2145d", size = 110371 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a0/1d/d9257dd49ff2ca23ea5f132edf1281a0c4f9de8a762b9ae399b670a59235/typer-0.21.1-py3-none-any.whl", hash = "sha256:7985e89081c636b88d172c2ee0cfe33c253160994d47bdfdc302defd7d1f1d01", size = 47381 },
+]
+
+[[package]]
+name = "types-networkx"
+version = "3.6.1.20260728"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ed/8e/9c80373fd5a33c82ac25cbe868afae25c2babf050b65468464933c5f2854/types_networkx-3.6.1.20260728.tar.gz", hash = "sha256:f193e4fc6a41c973c7d687fa3c12f8008d8e7dcd22b0ab62f0300cc47b65eb28", size = 75720 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c2/4a/619f72e3f149b9291c1537ff3aceaecef8ed36877db13ea3698b2841663d/types_networkx-3.6.1.20260728-py3-none-any.whl", hash = "sha256:0be72ff7625dbdfcd2d76ed7662de96987d0d5433b7055c320065d5b3621f9f6", size = 167078 },
 ]
 
 [[package]]

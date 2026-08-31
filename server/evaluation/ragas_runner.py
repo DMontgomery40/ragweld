@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
+from pydantic import SecretStr
 
 from server.chat.gateway_runtime import resolve_litellm_api_key, resolve_litellm_base_url
 from server.models.tribrid_config_model import TriBridConfig
@@ -106,16 +107,19 @@ def score_samples(cfg: TriBridConfig, samples: list[RagasSample]) -> list[dict[s
     from ragas.run_config import RunConfig
     from sentence_transformers import SentenceTransformer
 
-    class _LocalEmbeddings(BaseRagasEmbeddings):
+    class _LocalEmbeddings(BaseRagasEmbeddings):  # type: ignore[misc]  # ragas ships untyped; its base is Any to mypy
         def __init__(self, model_name: str) -> None:
             super().__init__()
             self._model = SentenceTransformer(model_name)
 
         def embed_query(self, text: str) -> list[float]:
-            return self._model.encode(text, normalize_embeddings=True).tolist()
+            return [float(x) for x in self._model.encode(text, normalize_embeddings=True).tolist()]
 
         def embed_documents(self, texts: list[str]) -> list[list[float]]:
-            return self._model.encode(list(texts), normalize_embeddings=True).tolist()
+            return [
+                [float(x) for x in row]
+                for row in self._model.encode(list(texts), normalize_embeddings=True).tolist()
+            ]
 
         async def aembed_query(self, text: str) -> list[float]:
             return self.embed_query(text)
@@ -136,7 +140,7 @@ def score_samples(cfg: TriBridConfig, samples: list[RagasSample]) -> list[dict[s
     judge = LangchainLLMWrapper(
         ChatOpenAI(
             base_url=base_url,
-            api_key=api_key,
+            api_key=SecretStr(api_key),
             model=_judge_alias(cfg),
             temperature=0,
             timeout=judge_timeout,
@@ -145,7 +149,7 @@ def score_samples(cfg: TriBridConfig, samples: list[RagasSample]) -> list[dict[s
             http_async_client=http_async_client,
             # Judges must return structured verdicts; cap output at the eval judge budget
             # (faithfulness statement lists outgrow a chat answer budget).
-            max_tokens=int(cfg.evaluation.judge_max_tokens),
+            max_completion_tokens=int(cfg.evaluation.judge_max_tokens),
         )
     )
     # Local serving is single-stream; serialize judge calls and honor the

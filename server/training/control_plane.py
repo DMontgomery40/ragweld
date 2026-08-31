@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Literal
 from urllib.parse import quote, urlsplit, urlunsplit
 
 import httpx
@@ -150,7 +151,7 @@ def build_agent_run_links(run: AgentTrainRun, cfg: TriBridConfig) -> list[TraceE
         if tracking_run_id and tracking_experiment_id:
             run_link_url = _mlflow_console_run_url(mlflow_console_url, tracking_experiment_id, tracking_run_id)
             detail = f"MLflow run {run.tracking_run_id}"
-            key = ("custom", run_link_url)
+            key: tuple[Literal["grafana", "tempo", "langfuse", "custom"], str] = ("custom", run_link_url)
             if key not in seen:
                 seen.add(key)
                 links.append(
@@ -379,7 +380,7 @@ async def build_agent_control_plane_status(cfg: TriBridConfig) -> AgentTrainCont
             )
         )
 
-    lane = (
+    lane: Literal["legacy_local", "flyte_mlflow_unsloth"] = (
         "flyte_mlflow_unsloth"
         if workflow_backend == "flyte" and tracking_backend == "mlflow" and execution_backend == "unsloth"
         else "legacy_local"

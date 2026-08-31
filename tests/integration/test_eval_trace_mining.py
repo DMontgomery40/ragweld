@@ -74,7 +74,7 @@ async def test_sse_eval_persists_answer_provenance_and_mining_rejects_answer_lea
         cfg.graph_indexing.store_chunk_embeddings = True
         cfg.graph_indexing.semantic_kg_enabled = False
         cfg.chat.litellm.enabled = False
-        cfg.semantic_cache.enabled = 0
+        cfg.semantic_cache.enabled = False
         cfg.reranking.reranker_mode = "none"
         cfg.tracing.tribrid_log_path = str(tmp_path / "queries.jsonl")
         cfg.training.tribrid_triplets_path = str(triplets_path)

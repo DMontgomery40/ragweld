@@ -2,7 +2,7 @@
   "domain_modules": [
     "server.models.index"
   ],
-  "model_count": 289,
+  "model_count": 290,
   "module": "server.models.tribrid_config_model",
   "root_models": {
     "ActiveSources": {
@@ -20591,6 +20591,397 @@
         "top_k"
       ],
       "title": "MCPProbeResponse",
+      "type": "object"
+    },
+    "MCPSearchToolResult": {
+      "$defs": {
+        "ChunkMatch": {
+          "description": "Unified result shape for vector/sparse/graph retrieval.",
+          "properties": {
+            "chunk_id": {
+              "description": "Unique identifier for matched chunk",
+              "title": "Chunk Id",
+              "type": "string"
+            },
+            "content": {
+              "description": "The matched code/text content",
+              "title": "Content",
+              "type": "string"
+            },
+            "end_line": {
+              "description": "Ending line number",
+              "title": "End Line",
+              "type": "integer"
+            },
+            "file_path": {
+              "description": "Path to the source file",
+              "title": "File Path",
+              "type": "string"
+            },
+            "language": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Programming language",
+              "title": "Language"
+            },
+            "metadata": {
+              "additionalProperties": true,
+              "description": "Additional match metadata",
+              "title": "Metadata",
+              "type": "object"
+            },
+            "provenance": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ChunkProvenance"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Extraction and page provenance; None for chunks indexed before provenance capture"
+            },
+            "score": {
+              "description": "Relevance score from retrieval",
+              "title": "Score",
+              "type": "number"
+            },
+            "source": {
+              "description": "Which retrieval leg found this",
+              "enum": [
+                "vector",
+                "sparse",
+                "graph"
+              ],
+              "title": "Source",
+              "type": "string"
+            },
+            "start_line": {
+              "description": "Starting line number",
+              "title": "Start Line",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "chunk_id",
+            "content",
+            "file_path",
+            "start_line",
+            "end_line",
+            "score",
+            "source"
+          ],
+          "title": "ChunkMatch",
+          "type": "object"
+        },
+        "ChunkProvenance": {
+          "description": "Where a chunk came from in its source document: extraction method plus page regions.\n\nDirect text/code extraction has line spans only (``regions`` empty, pages ``None``).\nDocling extraction carries one region per contributing layout item.",
+          "properties": {
+            "extraction": {
+              "description": "How the source text was extracted",
+              "enum": [
+                "docling",
+                "direct"
+              ],
+              "title": "Extraction",
+              "type": "string"
+            },
+            "page_end": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Last cited page (1-based)",
+              "title": "Page End"
+            },
+            "page_start": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "First cited page (1-based)",
+              "title": "Page Start"
+            },
+            "regions": {
+              "description": "Layout regions the chunk text was taken from",
+              "items": {
+                "$ref": "#/$defs/PageRegion"
+              },
+              "title": "Regions",
+              "type": "array"
+            }
+          },
+          "required": [
+            "extraction"
+          ],
+          "title": "ChunkProvenance",
+          "type": "object"
+        },
+        "DependencyUnavailableDetail": {
+          "description": "Public error detail returned when a required runtime dependency is unavailable.",
+          "properties": {
+            "code": {
+              "const": "dependency_unavailable",
+              "default": "dependency_unavailable",
+              "title": "Code",
+              "type": "string"
+            },
+            "dependency": {
+              "description": "Unavailable required dependency",
+              "enum": [
+                "postgres",
+                "neo4j",
+                "qdrant",
+                "embedding_provider",
+                "ragas",
+                "promptfoo",
+                "feedback_log",
+                "lineage_store"
+              ],
+              "title": "Dependency",
+              "type": "string"
+            },
+            "message": {
+              "description": "Stable, non-sensitive failure summary",
+              "title": "Message",
+              "type": "string"
+            },
+            "operation": {
+              "description": "API operation that could not complete",
+              "title": "Operation",
+              "type": "string"
+            },
+            "operator_hint": {
+              "description": "High-signal next step for the operator",
+              "title": "Operator Hint",
+              "type": "string"
+            },
+            "retryable": {
+              "default": true,
+              "description": "Whether the caller may retry after operator remediation",
+              "title": "Retryable",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "dependency",
+            "operation",
+            "message",
+            "operator_hint"
+          ],
+          "title": "DependencyUnavailableDetail",
+          "type": "object"
+        },
+        "PageRegion": {
+          "description": "One cited region on a page: top-left origin, normalized to the page size (0..1).",
+          "properties": {
+            "bottom": {
+              "description": "Bottom edge as a fraction of page height",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Bottom",
+              "type": "number"
+            },
+            "left": {
+              "description": "Left edge as a fraction of page width",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Left",
+              "type": "number"
+            },
+            "page": {
+              "description": "1-based page number",
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            },
+            "right": {
+              "description": "Right edge as a fraction of page width",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Right",
+              "type": "number"
+            },
+            "top": {
+              "description": "Top edge as a fraction of page height",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Top",
+              "type": "number"
+            }
+          },
+          "required": [
+            "page",
+            "left",
+            "top",
+            "right",
+            "bottom"
+          ],
+          "title": "PageRegion",
+          "type": "object"
+        },
+        "RequiredRetrievalLegFailureDetail": {
+          "description": "Public error detail returned when a requested retrieval leg fails.",
+          "properties": {
+            "code": {
+              "const": "required_retrieval_leg_failed",
+              "default": "required_retrieval_leg_failed",
+              "title": "Code",
+              "type": "string"
+            },
+            "leg": {
+              "description": "Requested retrieval leg",
+              "enum": [
+                "vector",
+                "sparse",
+                "graph"
+              ],
+              "title": "Leg",
+              "type": "string"
+            },
+            "message": {
+              "description": "Stable, non-sensitive failure summary",
+              "title": "Message",
+              "type": "string"
+            },
+            "operation": {
+              "description": "Retrieval operation that could not complete",
+              "title": "Operation",
+              "type": "string"
+            },
+            "operator_hint": {
+              "description": "High-signal next step for the operator",
+              "title": "Operator Hint",
+              "type": "string"
+            },
+            "retryable": {
+              "default": true,
+              "description": "Whether the caller may retry after remediation",
+              "title": "Retryable",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "leg",
+            "operation",
+            "message",
+            "operator_hint"
+          ],
+          "title": "RequiredRetrievalLegFailureDetail",
+          "type": "object"
+        },
+        "RetrievalContractMismatchDetail": {
+          "description": "Public error detail returned when a stored index contract blocks a retrieval request.",
+          "properties": {
+            "code": {
+              "description": "Stable mismatch code, e.g. embedding_contract_mismatch",
+              "title": "Code",
+              "type": "string"
+            },
+            "corpus_id": {
+              "description": "Corpus whose stored index contract conflicts with the current configuration",
+              "title": "Corpus Id",
+              "type": "string"
+            },
+            "current_contract": {
+              "additionalProperties": true,
+              "description": "Contract implied by the current runtime configuration",
+              "title": "Current Contract",
+              "type": "object"
+            },
+            "expected_contract": {
+              "additionalProperties": true,
+              "description": "Contract recorded when the corpus was indexed",
+              "title": "Expected Contract",
+              "type": "object"
+            },
+            "leg": {
+              "description": "Retrieval leg governed by the mismatched contract",
+              "enum": [
+                "vector",
+                "sparse",
+                "graph"
+              ],
+              "title": "Leg",
+              "type": "string"
+            },
+            "required_action": {
+              "description": "Exact operator action required to resolve the mismatch",
+              "title": "Required Action",
+              "type": "string"
+            }
+          },
+          "required": [
+            "code",
+            "corpus_id",
+            "leg",
+            "expected_contract",
+            "current_contract",
+            "required_action"
+          ],
+          "title": "RetrievalContractMismatchDetail",
+          "type": "object"
+        }
+      },
+      "description": "Structured MCP search result, including typed fail-closed tool errors.",
+      "properties": {
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DependencyUnavailableDetail"
+            },
+            {
+              "$ref": "#/$defs/RequiredRetrievalLegFailureDetail"
+            },
+            {
+              "$ref": "#/$defs/RetrievalContractMismatchDetail"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Typed retrieval failure returned with isError=true.",
+          "title": "Error"
+        },
+        "result": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ChunkMatch"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Successful search rows. An empty list is a valid successful result.",
+          "title": "Result"
+        }
+      },
+      "title": "MCPSearchToolResult",
       "type": "object"
     },
     "MCPStatusResponse": {

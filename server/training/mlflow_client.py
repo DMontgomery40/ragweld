@@ -86,7 +86,12 @@ class MlflowClient:
             raise MlflowUnavailableError(
                 f"MLflow API {path} failed ({response.status_code}): {response.text[:300]}"
             )
-        return response.json()
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise MlflowUnavailableError(
+                f"MLflow API {path} returned a non-object payload: {type(payload).__name__}"
+            )
+        return payload
 
     def ensure_experiment(self, name: str) -> str:
         existing = self._get("/experiments/get-by-name", {"experiment_name": name})

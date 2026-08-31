@@ -465,6 +465,12 @@
             padding: 0;
             min-height: 0;
             height: 0; /* Force flex to constrain height - critical for sticky */
+            /* The single-row sticky subtab bar is roughly 48px tall; 64px deliberately
+               leaves another 16px of click clearance. Without it, scroll-into-view
+               (keyboard nav, anchor jumps, Playwright) parks the target under the bar.
+               The bottom guard similarly clears bottom-seam chrome such as chat status. */
+            scroll-padding-top: 64px;
+            scroll-padding-bottom: 48px;
         }
 
         .tab-content.active {

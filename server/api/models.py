@@ -14,14 +14,10 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
 
-from server.models.tribrid_config_model import (
-    ModelCatalogEntry,
-    ModelCatalogResponse,
-    ModelCatalogUpsertRequest,
-    ModelCatalogUpsertResponse,
-)
 from server.gateway_catalog import (
     LITELLM_CONFIG_PATH as _DEFAULT_LITELLM_CONFIG_PATH,
+)
+from server.gateway_catalog import (
     OPENROUTER_BASE_URL,
     GatewayCatalogError,
     gateway_alias_for_openrouter_id,
@@ -29,6 +25,12 @@ from server.gateway_catalog import (
     openrouter_upstream_for_id,
     warm_gateway_catalog,
     write_catalog_trio,
+)
+from server.models.tribrid_config_model import (
+    ModelCatalogEntry,
+    ModelCatalogResponse,
+    ModelCatalogUpsertRequest,
+    ModelCatalogUpsertResponse,
 )
 from server.observability.costing import reset_costing_catalog, warm_costing_catalog
 from server.runtime_capabilities import (

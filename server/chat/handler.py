@@ -1055,7 +1055,7 @@ async def chat_stream(
 
     ended_at_ms = int(time.time() * 1000)
     sources_json = [s.model_dump(mode="serialization", by_alias=True) for s in sources]
-    done_event_payload: dict[str, Any] = {
+    done_event_payload = {
         "type": "done",
         "run_id": run_id,
         "started_at_ms": int(started_at_ms),

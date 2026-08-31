@@ -32,7 +32,10 @@ _MULTI_NL_RE = re.compile(r"\n{3,}")
 
 def _json_get(url: str) -> dict[str, Any]:
     with urlopen(url) as resp:  # noqa: S310 - controlled HF datasets server endpoint
-        return json.loads(resp.read().decode("utf-8"))
+        payload = json.loads(resp.read().decode("utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"unexpected non-object response from {url}")
+    return payload
 
 
 def fetch_dataset_info(
@@ -100,14 +103,13 @@ def iter_dataset_rows(
 
     for offset in range(0, total, batch_size):
         length = min(batch_size, total - offset)
-        for row in fetch_dataset_rows(
+        yield from fetch_dataset_rows(
             dataset=dataset,
             config=config,
             split=split,
             offset=offset,
             length=length,
-        ):
-            yield row
+        )
 
 
 def strip_html_message(value: str | None) -> str:

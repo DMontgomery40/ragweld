@@ -2,15 +2,19 @@ from __future__ import annotations
 
 import base64
 import copy
+import errno
 import hashlib
 import hmac
 import json
 import os
+import pwd
 import re
 import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -696,47 +700,168 @@ def test_proxmox_render_makes_the_mcp_endpoint_reachable_on_the_public_origin(
     assert "handle /mcp* {" in caddyfile
 
 
-def test_proxmox_renderer_preserves_existing_output_ownership(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def _ownership_a_fresh_temp_file_would_not_get() -> tuple[int, int]:
+    """Owner for the pre-existing output that a freshly staged temp file would NOT have.
+
+    The staged file is created by this process, so it starts life as (euid, egid);
+    ownership preservation is only observable if the existing output is owned by
+    something else. Root can hand the file to arbitrary ids (kept under 65536 so the
+    chown survives an unprivileged-LXC id mapping); an unprivileged user can at least
+    move it to a supplementary group (the LXC100 ragweld user carries several). With
+    neither, preservation cannot be distinguished from re-creation, so the test fails
+    loudly instead of passing vacuously.
+    """
+    if os.geteuid() == 0:
+        return 12345, 54321
+    supplementary = [gid for gid in os.getgroups() if gid != os.getegid()]
+    if supplementary:
+        return os.geteuid(), supplementary[0]
+    pytest.fail(
+        "cannot prove ownership preservation here: run as root or as a user with at "
+        "least one supplementary group, or the preserved owner is indistinguishable "
+        "from the owner a freshly staged file would get"
+    )
+
+
+def test_proxmox_renderer_preserves_existing_output_ownership(tmp_path: Path) -> None:
     output = tmp_path / "tribrid_config.production.json"
     output.write_text("{}\n", encoding="utf-8")
-    original = output.stat()
-    chown_calls: list[tuple[int, int]] = []
-    real_fchown = os.fchown
+    expected_uid, expected_gid = _ownership_a_fresh_temp_file_would_not_get()
+    os.chown(output, expected_uid, expected_gid)
+    config = TriBridConfig()
 
-    def record_fchown(fd: int, uid: int, gid: int) -> None:
-        chown_calls.append((uid, gid))
-        real_fchown(fd, uid, gid)
+    render_config._write_output(output, config)
 
-    monkeypatch.setattr(render_config.os, "fchown", record_fchown)
-    render_config._write_output(output, TriBridConfig())
+    after = output.stat()
+    assert (after.st_uid, after.st_gid) == (expected_uid, expected_gid)
+    assert after.st_mode & 0o777 == 0o600
+    assert output.read_text(encoding="utf-8") == json.dumps(
+        config.model_dump(mode="json"),
+        indent=2,
+        sort_keys=True,
+    ) + "\n"
+    assert sorted(path.name for path in tmp_path.iterdir()) == [output.name]
 
-    assert chown_calls == [(original.st_uid, original.st_gid)]
-    assert output.stat().st_uid == original.st_uid
-    assert output.stat().st_gid == original.st_gid
-    assert output.stat().st_mode & 0o777 == 0o600
+
+def test_proxmox_renderer_keeps_existing_output_when_staging_the_temp_file_fails(
+    tmp_path: Path,
+) -> None:
+    # The staged name is ".{output.name}.<random>.tmp" -- always more than five bytes
+    # longer than the output name. A 251-byte output name is therefore creatable while
+    # every temp candidate exceeds NAME_MAX (255 on ext4/tmpfs/APFS): a real OSError
+    # raised inside the write path, after the regular-file guard has passed, with
+    # nothing intercepted. Whatever fails mid-write, the previous rendered config must
+    # survive byte-for-byte and no staging litter may remain.
+    output = tmp_path / ("f" * 246 + ".json")
+    original = b'{"sentinel": true}\n'
+    output.write_bytes(original)
+    source = tmp_path / "source.json"
+    source.write_bytes(SOURCE_CONFIG.read_bytes())
+
+    result = _run_renderer(source=source, output=output)
+
+    assert result.returncode != 0
+    assert "too long" in result.stderr.lower(), result.stdout + result.stderr
+    assert output.read_bytes() == original
+    assert sorted(path.name for path in tmp_path.iterdir()) == [output.name, source.name]
+
+
+def _unprivileged_child_account() -> tuple[int, int]:
+    """A real non-root account a root run can drop the renderer into.
+
+    Prefer the ragweld service account -- it can read the checkout and the venv the
+    renderer imports from -- and fall back to nobody.
+    """
+    for name in ("ragweld", "nobody"):
+        try:
+            record = pwd.getpwnam(name)
+        except KeyError:
+            continue
+        if record.pw_uid != 0:
+            return record.pw_uid, record.pw_gid
+    pytest.fail("no unprivileged account available to drop the renderer into")
 
 
 def test_proxmox_renderer_keeps_existing_output_when_ownership_restore_fails(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    output = tmp_path / "tribrid_config.production.json"
-    original = b'{"sentinel": true}\n'
-    output.write_bytes(original)
+    """The production ownership restore really failing, with nothing intercepted.
 
-    def fail_fchown(fd: int, uid: int, gid: int) -> None:
-        raise PermissionError("simulated ownership restore failure")
+    Root run: the renderer runs as an unprivileged child against an output owned by
+    root, in a directory the child can write. The child stages its temp file, and then
+    `os.fchown(fd, 0, 0)` -- restoring the existing owner -- raises a genuine EPERM.
+    Contract: the previous rendered config survives byte-for-byte with its owner and
+    mode intact, and the staged temp file is cleaned up.
 
-    monkeypatch.setattr(render_config.os, "fchown", fail_fchown)
+    A non-root run cannot set up an owner it could not restore, so it exercises the
+    same failure-preserves-the-output contract through the only failure an
+    unprivileged user can genuinely cause inside `_write_output`: a staged name past
+    NAME_MAX (in-process here; the CLI-level variant is the test above).
+    """
+    if os.geteuid() != 0:
+        output = tmp_path / ("f" * 246 + ".json")
+        original = b'{"sentinel": true}\n'
+        output.write_bytes(original)
+        with pytest.raises(OSError) as excinfo:
+            render_config._write_output(output, TriBridConfig())
+        assert excinfo.value.errno == errno.ENAMETOOLONG
+        assert output.read_bytes() == original
+        assert sorted(path.name for path in tmp_path.iterdir()) == [output.name]
+        return
 
-    with pytest.raises(PermissionError, match="ownership restore failure"):
-        render_config._write_output(output, TriBridConfig())
+    child_uid, child_gid = _unprivileged_child_account()
+    # Not pytest's tmp_path: under a root run those directories are 0o700, which the
+    # child cannot even traverse. The dedicated world-writable directory is part of
+    # the scenario -- the child must be able to stage its temp file so the failure
+    # happens at the ownership restore, not before.
+    work_root = Path(tempfile.mkdtemp(prefix="ragweld-ownership-contract."))
+    try:
+        os.chmod(work_root, 0o777)
+        source = work_root / "source.json"
+        source.write_bytes(SOURCE_CONFIG.read_bytes())
+        os.chmod(source, 0o644)
+        output = work_root / "tribrid_config.production.json"
+        original = b'{"sentinel": true}\n'
+        output.write_bytes(original)
+        os.chmod(output, 0o600)
+        before = output.lstat()
+        assert (before.st_uid, before.st_gid) == (0, 0)
 
-    assert output.read_bytes() == original
-    assert sorted(path.name for path in tmp_path.iterdir()) == [output.name]
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT),
+                "--source",
+                str(source),
+                "--output",
+                str(output),
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+            user=child_uid,
+            group=child_gid,
+            extra_groups=[],
+        )
+
+        assert result.returncode != 0
+        # EPERM from fchown reads "Operation not permitted". A wrong-reason failure
+        # earlier in the run (the child failing to read the source, for instance) is
+        # EACCES -- "Permission denied" -- and must not satisfy this.
+        assert "operation not permitted" in result.stderr.lower(), (
+            result.stdout + result.stderr
+        )
+        after = output.lstat()
+        assert output.read_bytes() == original
+        assert (after.st_uid, after.st_gid) == (before.st_uid, before.st_gid)
+        assert after.st_mode & 0o777 == 0o600
+        assert sorted(path.name for path in work_root.iterdir()) == [
+            source.name,
+            output.name,
+        ]
+    finally:
+        shutil.rmtree(work_root)
 
 
 def test_proxmox_production_policy_never_routes_defaults_or_smoke_to_gpt_5_4() -> None:
@@ -2423,6 +2548,91 @@ def _run_bootstrap(tmp_path: Path) -> tuple[Path, Path, Path]:
     return repo, secret_root, python_log
 
 
+@pytest.fixture()
+def service_lifecycle_root() -> Iterator[Path]:
+    """A private work root directly under /tmp for the service-lifecycle tests.
+
+    pytest's tmp_path lives beneath 0700 per-user roots that a
+    privilege-dropped service child cannot traverse, and granting traversal
+    there would chmod shared directories without restoration. Use a dedicated
+    mkdtemp root instead: mode 0711 (traversal-only, never readable) is the
+    only permission the child needs, and teardown removes the entire tree --
+    including any service-owned files -- from the invoking (root) test process.
+    """
+    work_root = Path(tempfile.mkdtemp(prefix="ragweld-lifecycle-contract.", dir="/tmp"))
+    try:
+        work_root.chmod(0o711)
+        yield work_root
+    finally:
+        shutil.rmtree(work_root)
+
+
+def _prepare_service_account_lifecycle(
+    work_root: Path, repo: Path, secret_root: Path, *service_logs: Path
+) -> tuple[dict[str, Any], dict[str, str]]:
+    """Arrange to run the lifecycle scripts as the secret root's owner.
+
+    A root-run bootstrap-secrets.sh chowns the generated secret tree to the
+    ragweld service account, and the production unit runs start-runtime.sh and
+    stop-runtime.sh as that same account (User=ragweld/Group=ragweld), which is
+    why the scripts pin their ownership checks to their own uid:gid. Mirror
+    that contract here instead of invoking the scripts as root against a
+    service-owned tree. Everything the service child must traverse, read, or
+    write stays inside work_root (a service_lifecycle_root fixture directory);
+    nothing outside it is touched.
+    """
+    owner = secret_root.stat()
+    uid, gid = owner.st_uid, owner.st_gid
+    # The test stages tribrid_config.json after bootstrap; in production the
+    # rendered config inside the secret root is owned by the service account.
+    os.chown(secret_root / "tribrid_config.json", uid, gid)
+    for log_path in service_logs:
+        log_path.touch()
+        log_path.chmod(0o600)
+        os.chown(log_path, uid, gid)
+    if (uid, gid) == (os.geteuid(), os.getegid()):
+        return {}, {}
+    # The production repo checkout is service-owned; the scripts create the
+    # runtime symlinks inside it themselves.
+    for dirpath, _dirnames, filenames in os.walk(repo):
+        os.lchown(dirpath, uid, gid)
+        for name in filenames:
+            os.lchown(Path(dirpath) / name, uid, gid)
+    # The docker CLI reads and writes $HOME/.docker; give the service account
+    # a home it owns instead of the invoking root's.
+    home = work_root / "service-home"
+    home.mkdir()
+    os.chown(home, uid, gid)
+    home.chmod(0o700)
+    try:
+        record = pwd.getpwuid(uid)
+        extra_groups = os.getgrouplist(record.pw_name, gid)
+    except KeyError:
+        extra_groups = [gid]
+    run_as: dict[str, Any] = {"user": uid, "group": gid, "extra_groups": extra_groups}
+    return run_as, {"HOME": str(home)}
+
+
+def _run_service_lifecycle_script(
+    script: Path,
+    *,
+    cwd: Path,
+    env: dict[str, str],
+    run_as: dict[str, Any],
+) -> subprocess.CompletedProcess[str]:
+    merged_env = dict(os.environ)
+    merged_env.update(env)
+    return subprocess.run(
+        ["bash", str(script)],
+        cwd=cwd,
+        env=merged_env,
+        text=True,
+        capture_output=True,
+        check=False,
+        **run_as,
+    )
+
+
 def _real_compose_config(repo: Path, env: dict[str, str]) -> dict[str, Any]:
     docker_path = _require_compose_cli()
     result = subprocess.run(
@@ -2537,16 +2747,20 @@ def test_proxmox_bootstrap_outputs_drive_real_production_compose_credentials(tmp
 
 
 def test_proxmox_start_runtime_sources_generated_runtime_and_langfuse_env_before_compose_parse(
-    tmp_path: Path,
+    service_lifecycle_root: Path,
 ) -> None:
-    repo, secret_root, _ = _run_bootstrap(tmp_path)
-    capture_path = tmp_path / "start-compose.json"
-    host_capture = tmp_path / "host.log"
-    bin_dir = tmp_path / "bin"
+    work_root = service_lifecycle_root
+    repo, secret_root, python_log = _run_bootstrap(work_root)
+    capture_path = work_root / "start-compose.json"
+    host_capture = work_root / "host.log"
+    bin_dir = work_root / "bin"
     bin_dir.mkdir()
     _write_real_compose_proxy(bin_dir, capture_path)
+    run_as, service_env = _prepare_service_account_lifecycle(
+        work_root, repo, secret_root, capture_path, host_capture, python_log
+    )
 
-    result = _run_shell_script(
+    result = _run_service_lifecycle_script(
         repo / "deploy" / "proxmox" / "start-runtime.sh",
         cwd=repo,
         env={
@@ -2554,7 +2768,9 @@ def test_proxmox_start_runtime_sources_generated_runtime_and_langfuse_env_before
             "RAGWELD_SKIP_TUNNEL": "1",
             "PROXMOX_HOST_CAPTURE": str(host_capture),
             "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            **service_env,
         },
+        run_as=run_as,
     )
 
     assert result.returncode == 0, result.stderr
@@ -2568,28 +2784,35 @@ def test_proxmox_start_runtime_sources_generated_runtime_and_langfuse_env_before
     # The session store must run as the uid/gid that owns the secret root, or the
     # redis entrypoint rewrites the bind mount owner and the owner-only preflight
     # fails on every later start.
-    assert services["authelia-redis"]["user"] == f"{os.getuid()}:{os.getgid()}"
+    secret_owner = secret_root.stat()
+    assert services["authelia-redis"]["user"] == f"{secret_owner.st_uid}:{secret_owner.st_gid}"
     assert "start --no-docker --no-local-model --no-frontend" in host_capture.read_text(encoding="utf-8")
 
 
 def test_proxmox_stop_runtime_sources_generated_runtime_and_langfuse_env_before_compose_parse(
-    tmp_path: Path,
+    service_lifecycle_root: Path,
 ) -> None:
-    repo, secret_root, _ = _run_bootstrap(tmp_path)
-    capture_path = tmp_path / "stop-compose.json"
-    host_capture = tmp_path / "host.log"
-    bin_dir = tmp_path / "bin"
+    work_root = service_lifecycle_root
+    repo, secret_root, _ = _run_bootstrap(work_root)
+    capture_path = work_root / "stop-compose.json"
+    host_capture = work_root / "host.log"
+    bin_dir = work_root / "bin"
     bin_dir.mkdir()
     _write_real_compose_proxy(bin_dir, capture_path)
+    run_as, service_env = _prepare_service_account_lifecycle(
+        work_root, repo, secret_root, capture_path, host_capture
+    )
 
-    result = _run_shell_script(
+    result = _run_service_lifecycle_script(
         repo / "deploy" / "proxmox" / "stop-runtime.sh",
         cwd=repo,
         env={
             PROXMOX_SECRET_ROOT_ENV: str(secret_root),
             "PROXMOX_HOST_CAPTURE": str(host_capture),
             "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            **service_env,
         },
+        run_as=run_as,
     )
 
     assert result.returncode == 0, result.stderr

@@ -7,6 +7,8 @@ import os
 import platform
 import time
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
 from server.chat.provider_router import ProviderRoute
 from server.models.retrieval import ChunkMatch
@@ -449,7 +451,7 @@ class Reranker:
         # The config path names the versioned artifact store; pin the active immutable
         # version once for this whole rerank so a concurrent promotion cannot swap the
         # files underneath the load. All metadata reads run off the event loop.
-        def _pin_and_read_metadata() -> tuple[Path, dict, dict]:
+        def _pin_and_read_metadata() -> tuple[Path, dict[str, Any], dict[str, Any]]:
             pinned = resolve_active_artifact_dir(resolve_project_path(str(adapter_dir)))
             if pinned is None:
                 raise RuntimeError(

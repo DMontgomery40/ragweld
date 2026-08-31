@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import hmac
 import json
 import os
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 from httpx import AsyncClient
 
 from server.config import DEFAULT_CONFIG_PATH, load_config
+from server.db.neo4j import Neo4jClient
+from server.db.postgres import PostgresClient
 from tests.service_requirements import require_env
 
 
@@ -20,8 +25,26 @@ def test_strict_integration_app_uses_disposable_service_bindings() -> None:
     assert DEFAULT_CONFIG_PATH.is_absolute()
     assert DEFAULT_CONFIG_PATH.resolve() != Path(os.environ["RAGWELD_SOURCE_CONFIG_PATH"]).resolve()
     assert DEFAULT_CONFIG_PATH.parent.resolve() == Path(os.environ["RAGWELD_INTEGRATION_RUNTIME_DIR"]).resolve()
-    assert config.indexing.postgres_url == require_env("POSTGRES_DSN")
-    assert config.graph_storage.neo4j_uri == require_env("NEO4J_URI")
+    resolved_postgres = urlsplit(PostgresClient._resolve_dsn(config.indexing.postgres_url))
+    assert resolved_postgres.hostname == require_env("POSTGRES_HOST")
+    assert resolved_postgres.port == int(require_env("POSTGRES_PORT"))
+    assert resolved_postgres.path.lstrip("/") == require_env("POSTGRES_DB")
+    assert resolved_postgres.username == require_env("POSTGRES_USER")
+    assert hmac.compare_digest(
+        resolved_postgres.password or "",
+        require_env("POSTGRES_PASSWORD"),
+    )
+    require_env("NEO4J_URI")
+
+    async def probe_environment_owned_neo4j() -> dict[str, object]:
+        client = Neo4jClient("bolt://127.0.0.1:1", "invalid", "invalid")
+        try:
+            await client.connect()
+            return await client.ping()
+        finally:
+            await client.disconnect()
+
+    assert asyncio.run(probe_environment_owned_neo4j())["ok"] is True
 
 
 @pytest.mark.requires_postgres

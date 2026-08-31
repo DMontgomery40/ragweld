@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -15,6 +16,10 @@ from server.gateway_catalog import warm_gateway_catalog
 from server.main import app
 from server.models.retrieval import ChunkMatch
 from server.models.tribrid_config_model import TriBridConfig
+from server.observability.metrics import (
+    SEMANTIC_CACHE_LOOKUPS_TOTAL,
+    SEMANTIC_CACHE_WRITES_TOTAL,
+)
 from server.services.conversation_store import get_conversation_store
 
 
@@ -144,10 +149,17 @@ def _usage_gateway() -> Iterator[str]:
     server = ThreadingHTTPServer(("127.0.0.1", 0), _UsageGatewayHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
+    previous_base_url = os.environ.get("LITELLM_BASE_URL")
     try:
         host, port = server.server_address
-        yield f"http://{host}:{port}/v1"
+        base_url = f"http://{host}:{port}/v1"
+        os.environ["LITELLM_BASE_URL"] = base_url
+        yield base_url
     finally:
+        if previous_base_url is None:
+            os.environ.pop("LITELLM_BASE_URL", None)
+        else:
+            os.environ["LITELLM_BASE_URL"] = previous_base_url
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
@@ -203,6 +215,15 @@ def _usage_config(base_url: str) -> TriBridConfig:
             "semantic_cache": semantic_cache,
             "tracing": tracing,
         }
+    )
+
+
+def _semantic_cache_counter_total(counter: Any, *, endpoint: str) -> float:
+    return sum(
+        float(sample.value)
+        for metric in counter.collect()
+        for sample in metric.samples
+        if sample.name.endswith("_total") and sample.labels.get("endpoint") == endpoint
     )
 
 
@@ -280,19 +301,16 @@ async def test_chat_transports_report_real_gateway_usage() -> None:
 
 
 @pytest.mark.asyncio
-async def test_web_search_is_server_owned_validated_and_terminal_only(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_web_search_is_server_owned_validated_and_terminal_only() -> None:
     """Web composes with zero corpora; annotations never leak as stream text."""
     warm_gateway_catalog()
     get_conversation_store()._conversations.clear()
 
     with _usage_gateway() as base_url:
-        from server.retrieval.cache import SemanticCacheService
-
-        async def forbidden_cache(*_args: object, **_kwargs: object) -> None:
-            raise AssertionError("web-enabled chat must bypass cache reads and writes")
-
-        monkeypatch.setattr(SemanticCacheService, "lookup", forbidden_cache)
-        monkeypatch.setattr(SemanticCacheService, "write", forbidden_cache)
+        cache_counts_before = (
+            _semantic_cache_counter_total(SEMANTIC_CACHE_LOOKUPS_TOTAL, endpoint="chat"),
+            _semantic_cache_counter_total(SEMANTIC_CACHE_WRITES_TOTAL, endpoint="chat"),
+        )
         set_config(_usage_config(base_url))
         set_fusion(_UnusedFusion())
         try:
@@ -389,6 +407,10 @@ async def test_web_search_is_server_owned_validated_and_terminal_only(monkeypatc
                         },
                     }
                 ]
+            assert (
+                _semantic_cache_counter_total(SEMANTIC_CACHE_LOOKUPS_TOTAL, endpoint="chat"),
+                _semantic_cache_counter_total(SEMANTIC_CACHE_WRITES_TOTAL, endpoint="chat"),
+            ) == cache_counts_before
         finally:
             set_config(None)
             set_fusion(None)

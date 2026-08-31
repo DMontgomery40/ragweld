@@ -14,7 +14,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from httpx import ASGITransport, AsyncClient
+from httpx import AsyncClient
 
 import server.api.index as index_api
 from server.config import load_config
@@ -27,10 +27,10 @@ from server.indexing.generations import (
     reclaim_stale_run,
     staging_repo_id,
 )
-from server.main import app
 from server.retrieval.contracts import sparse_contract_from_config
 from server.retrieval.qdrant_store import QdrantChunkStore
 from server.services import config_store
+from tests.mcp_probe_subprocess import call_mcp_probe
 from tests.service_requirements import require_env
 
 pytestmark = [
@@ -104,7 +104,7 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         cfg.graph_indexing.store_chunk_embeddings = True
         cfg.graph_indexing.semantic_kg_enabled = False
         cfg.chat.litellm.enabled = False
-        cfg.semantic_cache.enabled = 0
+        cfg.semantic_cache.enabled = False
         await pg.upsert_corpus_config_json(corpus_id, cfg.model_dump(mode="serialization"))
         config_store._store = None
 
@@ -604,41 +604,31 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         assert still.status_code == 200 and still.json()["matches"], still.text
 
         # The MCP probe goes through the mounted Streamable HTTP transport and the
-        # registered `search` tool (mcp.default_mode), not an HTTP shortcut. The
-        # MCP session manager lives in the app lifespan, so run this leg under it.
-        async with app.router.lifespan_context(app):
-            async with AsyncClient(
-                transport=ASGITransport(app=app), base_url="http://localhost:8000"
-            ) as mcp_client:
-                probe = await mcp_client.post(
-                    "/api/mcp/probe",
-                    params={"corpus_id": corpus_id},
-                    json={"question": "How often is the salinity sensor calibrated?", "top_k": 5},
-                )
-                assert probe.status_code == 200, probe.text
-                probe_payload = probe.json()
-                assert probe_payload["tool"] == "search" and probe_payload[
-                    "transport_url"
-                ].endswith("/mcp/")
-                assert probe_payload["mode"] == cfg.mcp.default_mode and probe_payload["top_k"] == 5
-                assert probe_payload["results"] and any(
-                    "calibrat" in r["content"].lower() for r in probe_payload["results"]
-                )
-                sparse_only = await mcp_client.post(
-                    "/api/mcp/probe",
-                    params={"corpus_id": corpus_id},
-                    json={
-                        "question": "How often is the salinity sensor calibrated?",
-                        "mode": "sparse_only",
-                        "top_k": 3,
-                    },
-                )
-                assert sparse_only.status_code == 200, sparse_only.text
-                assert (
-                    sparse_only.json()["mode"] == "sparse_only"
-                    and len(sparse_only.json()["results"]) <= 3
-                )
-                assert all(r["source"] == "sparse" for r in sparse_only.json()["results"])
+        # registered `search` tool, not an HTTP shortcut. Each helper call owns one
+        # child-process lifespan because the SDK session manager is one-shot.
+        probe_status, probe_payload = await call_mcp_probe(
+            corpus_id,
+            None,
+            question="How often is the salinity sensor calibrated?",
+            top_k=5,
+        )
+        assert probe_status == 200, probe_payload
+        assert probe_payload["tool"] == "search" and probe_payload["transport_url"].endswith(
+            "/mcp/"
+        )
+        assert probe_payload["mode"] == cfg.mcp.default_mode and probe_payload["top_k"] == 5
+        assert probe_payload["results"] and any(
+            "calibrat" in row["content"].lower() for row in probe_payload["results"]
+        )
+        sparse_status, sparse_payload = await call_mcp_probe(
+            corpus_id,
+            "sparse_only",
+            question="How often is the salinity sensor calibrated?",
+            top_k=3,
+        )
+        assert sparse_status == 200, sparse_payload
+        assert sparse_payload["mode"] == "sparse_only" and len(sparse_payload["results"]) <= 3
+        assert all(row["source"] == "sparse" for row in sparse_payload["results"])
 
         # Retrieval request/latency metrics are measured on the shared fusion lane,
         # so chat retrieval counts exactly like /api/search (finding M9: chat never

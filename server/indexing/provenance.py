@@ -77,6 +77,7 @@ def stamp_provenance(
         chunk_len = max(1, raw_end - raw_start)
         if covered * 2 >= chunk_len:
             first = figure_spans[0]
+            assert first.figure is not None  # figure_spans filters on span.figure above
             chunk.metadata["figure"] = first.figure.model_dump(mode="json")
             if first.figure_class:
                 chunk.metadata["figure_class"] = first.figure_class

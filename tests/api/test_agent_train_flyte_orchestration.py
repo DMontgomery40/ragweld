@@ -29,7 +29,7 @@ from datetime import UTC, datetime
 import pytest
 from httpx import AsyncClient
 
-from server.api.agent import _RUNS_DIR
+from server.api.agent import _RUNS_DIR, _finish_cancelled_flyte_start
 from server.models.tribrid_config_model import AgentTrainRun, TriBridConfig
 from server.training.flyte_client import FLYTE_ABORT_PHASES, FlyteAdminClient
 
@@ -62,6 +62,49 @@ async def _wait_for(predicate, *, timeout_s: float, interval_s: float = 1.0):
             return last
         await asyncio.sleep(interval_s)
     return last
+
+
+@pytest.mark.requires_flyte
+@pytest.mark.asyncio
+async def test_cancelled_create_cleanup_returns_typed_response_and_aborts_real_execution() -> None:
+    """The cancellation-wins branch returns its response model and aborts the real Flyte execution."""
+    admin = FlyteAdminClient(FLYTE_ADMIN_URL)
+    launch_plan = admin.resolve_launch_plan(FLYTE_PROJECT, FLYTE_DOMAIN, LAUNCH_PLAN)
+    execution_name = admin.create_execution(
+        launch_plan,
+        inputs={
+            "run_id": f"pytest_flyte_race_{uuid.uuid4().hex[:8]}",
+            "corpus_id": "pytest-flyte-race",
+            "callback_base_url": UNROUTABLE_CALLBACK,
+            "execution_backend": "mlx_qwen3",
+        },
+    )
+    run_id = f"pytest_flyte_race_{uuid.uuid4().hex[:8]}__20260831_000000"
+    cfg = TriBridConfig()
+    cfg.training.ragweld_agent_flyte_admin_base_url = FLYTE_ADMIN_URL
+    cfg.training.ragweld_agent_flyte_project = FLYTE_PROJECT
+    cfg.training.ragweld_agent_flyte_domain = FLYTE_DOMAIN
+    try:
+        response = await _finish_cancelled_flyte_start(
+            cfg=cfg,
+            execution_name=execution_name,
+            run_id=run_id,
+        )
+        assert response.ok is False
+        assert response.run_id == run_id
+
+        async def _aborted():
+            state = admin.get_execution(FLYTE_PROJECT, FLYTE_DOMAIN, execution_name)
+            return state if state.phase in FLYTE_ABORT_PHASES else None
+
+        final = await _wait_for(_aborted, timeout_s=60)
+        assert final is not None, "cancellation-wins cleanup did not abort the real Flyte execution"
+        assert "cancelled while the execution was being created" in str(final.abort_cause).lower()
+    finally:
+        try:
+            admin.terminate_execution(FLYTE_PROJECT, FLYTE_DOMAIN, execution_name, cause="pytest cleanup")
+        except Exception:
+            pass
 
 
 @pytest.mark.requires_postgres

@@ -42,6 +42,7 @@ from server.models.tribrid_config_model import (
     ConfigReadinessResponse,
     ConfigRegistryResponse,
     CorpusScope,
+    DependencyUnavailableDetail,
     MCPConfig,
     MCPHTTPTransportStatus,
     MCPProbeRequest,
@@ -50,6 +51,8 @@ from server.models.tribrid_config_model import (
     MCPToolInfo,
     ModelValidationResult,
     ModelValidationWarning,
+    RequiredRetrievalLegFailureDetail,
+    RetrievalContractMismatchDetail,
     TriBridConfig,
 )
 from server.retrieval.contracts import (
@@ -959,6 +962,19 @@ async def mcp_probe(
             ) from exc
 
     if result.isError:
+        structured = result.structuredContent
+        raw_error = structured.get("error") if isinstance(structured, dict) else None
+        if isinstance(raw_error, dict):
+            code = str(raw_error.get("code") or "")
+            if code == "dependency_unavailable":
+                detail = DependencyUnavailableDetail.model_validate(raw_error)
+                raise HTTPException(status_code=503, detail=detail.model_dump(mode="json"))
+            if code == "required_retrieval_leg_failed":
+                leg_failure = RequiredRetrievalLegFailureDetail.model_validate(raw_error)
+                raise HTTPException(status_code=503, detail=leg_failure.model_dump(mode="json"))
+            if code in {"embedding_contract_mismatch", "sparse_contract_mismatch"}:
+                mismatch = RetrievalContractMismatchDetail.model_validate(raw_error)
+                raise HTTPException(status_code=409, detail=mismatch.model_dump(mode="json"))
         text = " ".join(c.text for c in result.content if isinstance(c, TextContent)).strip()
         lowered = text.lower()
         if "corpus not found" in lowered or "not found" in lowered:

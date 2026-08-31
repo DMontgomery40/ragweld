@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import time
 import uuid
+from collections.abc import AsyncIterator
+from types import TracebackType
 from typing import cast
 
 from fastapi import APIRouter, HTTPException, Response
@@ -422,9 +424,9 @@ async def answer_stream(request: AnswerRequest) -> StreamingResponse:
         raise_required_dependency_unavailable_if_applicable(e, boundary="Streaming answer retrieval")
         raise HTTPException(status_code=500, detail="Streaming answer generation failed") from e
 
-    async def wrapped_stream() -> object:
+    async def wrapped_stream() -> AsyncIterator[str]:
         ended_at_ms: int | None = None
-        caught_exc: tuple[type[BaseException] | None, BaseException | None, object | None] = (None, None, None)
+        caught_exc: tuple[type[BaseException] | None, BaseException | None, TracebackType | None] = (None, None, None)
         # This is the task that owns the rest of the request, so it attaches and detaches
         # the span itself rather than inheriting a token from the endpoint coroutine.
         stream_scope = observation.scope()

@@ -9,7 +9,9 @@ export const UI_SURFACES: UISurface[] = [
   { route: '/dashboard', subtab: 'glossary', label: 'Dashboard / Glossary' },
   { route: '/chat', subtab: 'ui', label: 'Chat / UI' },
   { route: '/chat', subtab: 'settings', label: 'Chat / Settings' },
-  { route: '/grafana', subtab: 'dashboard', label: 'Grafana / Dashboard' },
+  { route: '/grafana', subtab: 'overview', label: 'Grafana / Overview' },
+  { route: '/grafana', subtab: 'dashboards', label: 'Grafana / Dashboards' },
+  { route: '/grafana', subtab: 'incidents', label: 'Grafana / Incidents' },
   { route: '/grafana', subtab: 'config', label: 'Grafana / Config' },
   { route: '/benchmark', label: 'Benchmark' },
   { route: '/rag', subtab: 'data-quality', label: 'RAG / Data Quality' },
@@ -28,9 +30,13 @@ export const UI_SURFACES: UISurface[] = [
   { route: '/infrastructure', subtab: 'mcp', label: 'Infrastructure / MCP' },
   { route: '/infrastructure', subtab: 'paths', label: 'Infrastructure / Paths' },
   { route: '/infrastructure', subtab: 'monitoring', label: 'Infrastructure / Monitoring' },
-  { route: '/admin', subtab: 'general', label: 'Admin / General' },
-  { route: '/admin', subtab: 'secrets', label: 'Admin / Secrets' },
-  { route: '/admin', subtab: 'integrations', label: 'Admin / Integrations' },
+  // Admin's real routes (AdminTab.tsx): basic | advanced | raw | dependencies.
+  // `raw` is deliberately not cataloged: its single control is the whole-config
+  // JSON textarea, and filling it with a generated string is not a field-level
+  // mutation — it just manufactures a validation-error toast.
+  { route: '/admin', subtab: 'basic', label: 'Admin / Basics' },
+  { route: '/admin', subtab: 'advanced', label: 'Admin / Explorer' },
+  { route: '/admin', subtab: 'dependencies', label: 'Admin / Dependencies' },
 ];
 
 /**

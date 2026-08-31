@@ -56,6 +56,67 @@ def test_parse_reply_fenced_with_literal_closing_brace_and_surrounding_prose() -
     assert fig.labels == ["X}"]
 
 
+def _assert_no_json_syntax_leaks(fig: FigureAnnotation) -> None:
+    """No field of a degraded/repaired annotation may carry JSON keys or syntax."""
+    for text in (fig.summary, *fig.labels, *fig.components, *fig.connections, *fig.values, *fig.references):
+        assert "{" not in text and "}" not in text
+        for key in ("kind", "summary", "labels", "components", "connections", "values", "references"):
+            assert f'"{key}"' not in text
+
+
+def test_malformed_reply_with_trailing_comma_is_repaired() -> None:
+    """Live-defect regression: a JSON-looking reply json.loads rejects must not leak keys."""
+    reply = (
+        '{"kind": "chart", "summary": "Cabin pressure falls from 5.0 to 4.6 psia during entry.", '
+        '"labels": ["CABIN PRESSURE, PSIA"], "values": ["5.0 psia", "4.6 psia"],}'
+    )
+    fig = parse_figure_reply(reply)
+    assert fig.kind == "chart"
+    assert fig.summary == "Cabin pressure falls from 5.0 to 4.6 psia during entry."
+    assert fig.labels == ["CABIN PRESSURE, PSIA"]
+    assert fig.values == ["5.0 psia", "4.6 psia"]
+    _assert_no_json_syntax_leaks(fig)
+    block = figure_block_markdown("Figure 5-12. Cabin pressure", "chart", fig)
+    assert '"summary"' not in block and "{" not in block
+
+
+def test_malformed_fenced_reply_with_unescaped_newline_in_string_is_repaired() -> None:
+    reply = (
+        '```json\n{"kind": "diagram", "summary": "Fuel cell reactant flow\nfrom cryogenic tanks to the bus.", '
+        '"labels": ["H2", "O2"]}\n```'
+    )
+    fig = parse_figure_reply(reply)
+    assert fig.kind == "diagram"
+    assert "Fuel cell reactant flow" in fig.summary and "cryogenic tanks" in fig.summary
+    assert fig.labels == ["H2", "O2"]
+    _assert_no_json_syntax_leaks(fig)
+
+
+def test_truncated_reply_is_repaired_without_leaking_syntax() -> None:
+    """A response cut off mid-object (no closing brace) is a realistic provider failure."""
+    reply = '{"kind": "schematic", "summary": "Umbilical wiring between the CSM and LM ascent stage.", "labels": ["J1", "P2"'
+    fig = parse_figure_reply(reply)
+    assert fig.kind == "schematic"
+    assert fig.summary == "Umbilical wiring between the CSM and LM ascent stage."
+    assert fig.labels == ["J1", "P2"]
+    _assert_no_json_syntax_leaks(fig)
+
+
+def test_json_looking_but_unrecoverable_reply_degrades_to_empty_annotation() -> None:
+    reply = '{"completely": {"different": ["shape"]}, "no_reply_keys": true'
+    fig = parse_figure_reply(reply)
+    assert fig == FigureAnnotation()
+    _assert_no_json_syntax_leaks(fig)
+    assert figure_block_markdown("Figure 3-3. Umbilical", None, fig) == "Figure: Figure 3-3. Umbilical"
+
+
+def test_prose_with_incidental_braces_still_becomes_the_summary() -> None:
+    reply = "A photograph of the ascent stage; the {bracketed} caption text is part of the print."
+    fig = parse_figure_reply(reply)
+    assert fig.summary == reply
+    assert fig.kind == "other" and fig.labels == []
+
+
 def test_non_json_reply_becomes_summary() -> None:
     fig = parse_figure_reply("A photograph of the lunar module ascent stage on the pad.")
     assert fig.summary == "A photograph of the lunar module ascent stage on the pad."

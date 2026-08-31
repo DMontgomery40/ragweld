@@ -43,6 +43,8 @@ else:
     shutil.copy2(PROJECT_ROOT / "tribrid_config.json", test_config_path)
     test_config_path.chmod(0o600)
     os.environ["RAGWELD_CONFIG_PATH"] = str(test_config_path)
+    os.environ["RAGWELD_SOURCE_CONFIG_PATH"] = str(PROJECT_ROOT / "tribrid_config.json")
+    os.environ["RAGWELD_INTEGRATION_RUNTIME_DIR"] = _TEST_CONFIG_RUNTIME_DIR
 
 # Tests receive integration configuration explicitly. Never leak a developer
 # .env into collection or use its mere presence as a readiness signal.

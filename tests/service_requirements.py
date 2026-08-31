@@ -6,6 +6,7 @@ import asyncio
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
+from urllib.parse import quote
 
 import asyncpg
 import httpx
@@ -42,6 +43,29 @@ OPTIONAL_SERVICE_ENV_VARS: frozenset[str] = frozenset(
 )
 
 
+def postgres_dsn_from_env(env: Mapping[str, str] | None = None) -> str | None:
+    """Return an explicit DSN or safely compose one from configured components.
+
+    The capability probe already treats ``POSTGRES_HOST`` plus the standard
+    component variables as a configured integration service.  Tests that ask
+    for ``POSTGRES_DSN`` must resolve the same configuration instead of probing
+    successfully and then skipping.  User, password, and database components
+    are URL-escaped so credentials containing DSN punctuation remain valid.
+    """
+    values = os.environ if env is None else env
+    explicit = str(values.get("POSTGRES_DSN") or "").strip()
+    if explicit:
+        return explicit
+    host = str(values.get("POSTGRES_HOST") or "").strip()
+    if not host:
+        return None
+    port = str(values.get("POSTGRES_PORT") or "5432").strip()
+    user = quote(str(values.get("POSTGRES_USER") or "postgres"), safe="")
+    password = quote(str(values.get("POSTGRES_PASSWORD") or "postgres"), safe="")
+    database = quote(str(values.get("POSTGRES_DB") or "tribrid_rag"), safe="")
+    return f"postgresql://{user}:{password}@{host}:{port}/{database}"
+
+
 def require_env(name: str) -> str:
     """Return env var `name`, or `pytest.skip` with the exact missing variable.
 
@@ -51,7 +75,7 @@ def require_env(name: str) -> str:
     This turns the same condition into an honest skip naming the one variable to
     set, and never runs beside heavy live work because the skip fires first.
     """
-    value = os.environ.get(name)
+    value = postgres_dsn_from_env() if name == "POSTGRES_DSN" else os.environ.get(name)
     if not value:
         pytest.skip(f"{name} is not set; integration service not configured for this run")
     return value

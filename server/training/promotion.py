@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Literal
 
 from server.lineage.registry import repo_lineage_lock, restore_aliases, snapshot_aliases
+from server.models.tribrid_config_model import LineageAliasName
 from server.training.artifact_store import VersionedArtifactSwap
 
 BaselineState = Literal["absent", "incompatible", "measured", "failed"]
@@ -74,9 +75,15 @@ def decide_auto_promotion(
         baseline_state = "failed"
         baseline_primary = None
     final_is_finite = primary_value is not None and math.isfinite(float(primary_value))
-    primary_text = f"{float(primary_value):.6f}" if final_is_finite else ("n/a" if primary_value is None else str(primary_value))
+    primary_text = (
+        f"{float(primary_value):.6f}"
+        if final_is_finite and primary_value is not None
+        else ("n/a" if primary_value is None else str(primary_value))
+    )
     baseline_text = (
-        f"{float(baseline_primary):.6f}" if baseline_state == "measured" else _BASELINE_NA_TEXT[baseline_state]
+        f"{float(baseline_primary):.6f}"
+        if baseline_state == "measured" and baseline_primary is not None
+        else _BASELINE_NA_TEXT[baseline_state]
     )
     tail = f"eps={float(epsilon):.6f} (backend={backend}). Run artifact preserved at {artifact_dir}."
     if dev_examples <= 0:
@@ -150,7 +157,7 @@ def run_promotion_transaction(
     lineage_lock = repo_lineage_lock(repo_id)  # resolved (and its root created) before anything changes
     swap.begin()
     acquired = False
-    snapshot: dict | None = None
+    snapshot: dict[LineageAliasName, str | None] | None = None
     written_bundle: str | None = None
     try:
         lineage_lock.acquire()

@@ -88,7 +88,7 @@ async def test_status_and_incidents_reflect_real_queries_on_the_corpus(client: A
         cfg.graph_indexing.semantic_kg_enabled = False
         cfg.reranking.reranker_mode = "none"
         cfg.chat.litellm.enabled = False
-        cfg.semantic_cache.enabled = 0
+        cfg.semantic_cache.enabled = False
         await pg.upsert_corpus_config_json(corpus_id, cfg.model_dump(mode="serialization"))
         config_store._store = None
         started = await client.post(

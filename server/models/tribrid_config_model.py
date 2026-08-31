@@ -734,6 +734,27 @@ class RetrievalContractMismatchResponse(BaseModel):
     detail: RetrievalContractMismatchDetail
 
 
+class MCPSearchToolResult(BaseModel):
+    """Structured MCP search result, including typed fail-closed tool errors."""
+
+    result: list[ChunkMatch] | None = Field(
+        default=None,
+        description="Successful search rows. An empty list is a valid successful result.",
+    )
+    error: (
+        DependencyUnavailableDetail
+        | RequiredRetrievalLegFailureDetail
+        | RetrievalContractMismatchDetail
+        | None
+    ) = Field(default=None, description="Typed retrieval failure returned with isError=true.")
+
+    @model_validator(mode="after")
+    def _exactly_one_outcome(self) -> Self:
+        if (self.result is None) == (self.error is None):
+            raise ValueError("MCP search result must contain exactly one of result or error")
+        return self
+
+
 class GenerationUnavailableDetail(BaseModel):
     """Public error detail returned when the generation gateway cannot complete."""
 

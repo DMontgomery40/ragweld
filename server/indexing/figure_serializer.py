@@ -35,6 +35,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from docling_core.transforms.serializer.base import SerializationResult
 from docling_core.transforms.serializer.common import create_ser_result
 from docling_core.transforms.serializer.markdown import (
     MarkdownDocSerializer,
@@ -77,7 +78,7 @@ class RagweldPictureSerializer(MarkdownPictureSerializer):
         self.figures_by_ref: dict[str, FigureAnnotation] = {}
         self.classes_by_ref: dict[str, str] = {}
 
-    def serialize(self, *, item: PictureItem, doc_serializer: Any, doc: DoclingDocument, **kwargs: Any):  # type: ignore[override]
+    def serialize(self, *, item: PictureItem, doc_serializer: Any, doc: DoclingDocument, **kwargs: Any) -> SerializationResult:
         meta = item.meta if isinstance(item.meta, PictureMeta) else None
         description_text: str | None = (
             non_blank(meta.description.text) if meta and meta.description else None

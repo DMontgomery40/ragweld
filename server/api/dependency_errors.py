@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import HTTPException
 
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 DependencyName = Literal["postgres", "neo4j", "qdrant", "embedding_provider", "ragas", "promptfoo", "feedback_log", "lineage_store"]
 
-DEPENDENCY_UNAVAILABLE_RESPONSES = {
+DEPENDENCY_UNAVAILABLE_RESPONSES: dict[int | str, dict[str, Any]] = {
     503: {
         "model": DependencyUnavailableResponse,
         "description": "A required runtime dependency is unavailable.",
@@ -33,7 +33,7 @@ DEPENDENCY_UNAVAILABLE_RESPONSES = {
 
 # Routes that resolve a corpus's generation manifest can also meet a de-index
 # tombstone: the corpus fails closed until its external cleanup completed.
-MANIFEST_READER_UNAVAILABLE_RESPONSES = {
+MANIFEST_READER_UNAVAILABLE_RESPONSES: dict[int | str, dict[str, Any]] = {
     503: {
         "model": DependencyUnavailableResponse | IndexDeletionIncompleteResponse,
         "description": (

@@ -7,11 +7,13 @@ from httpx import AsyncClient
 
 from server.config import load_config
 from server.db.postgres import PostgresClient
+from server.indexing.generations import build_generation
 from server.models.index import Chunk
 from server.models.tribrid_config_model import RetrievalContractMismatchDetail
 from server.retrieval.contracts import sparse_contract_from_config
 from server.services import config_store
 from server.services.conversation_store import get_conversation_store
+from tests.mcp_probe_subprocess import call_mcp_probe
 from tests.service_requirements import require_env
 
 
@@ -92,7 +94,6 @@ async def test_requested_contract_mismatch_never_returns_partial_success(
                     "conversation_id": stream_conversation_id,
                 },
             )),
-            ("MCP search", await client.get(f"/api/mcp/rag_search?q=status&corpus_id={corpus_id}")),
         )
 
         for label, response in responses:
@@ -107,6 +108,15 @@ async def test_requested_contract_mismatch_never_returns_partial_success(
             assert parsed.required_action.strip(), f"{label}: missing required_action"
             assert parsed.expected_contract, f"{label}: missing expected_contract"
             assert parsed.current_contract, f"{label}: missing current_contract"
+        mcp_status, mcp_body = await call_mcp_probe(
+            corpus_id, "dense_only" if leg == "vector" else "sparse_only"
+        )
+        assert mcp_status == 409, mcp_body
+        mcp_detail = mcp_body["detail"]
+        assert mcp_detail["code"] == expected_code
+        assert mcp_detail["leg"] == leg
+        assert mcp_detail["corpus_id"] == corpus_id
+        RetrievalContractMismatchDetail.model_validate(mcp_detail)
         assert get_conversation_store().get_messages(stream_conversation_id) == []
     finally:
         config_store._store = None
@@ -154,6 +164,15 @@ async def test_requested_leg_execution_failure_never_returns_partial_success(
             dimensions=cfg.embedding.embedding_dim,
             sparse_contract=sparse_contract_from_config(cfg),
         )
+        if leg == "graph":
+            await pg.set_generation(
+                corpus_id,
+                build_generation(
+                    run_id=f"{corpus_id}-promoted",
+                    qdrant_collection=None,
+                    graph_repo_id=corpus_id,
+                ),
+            )
         if leg == "sparse":
             # The corpus has indexed chunk rows (last_indexed is set) but its Qdrant
             # generation is gone: the sparse leg must fail closed, never return [].
@@ -209,7 +228,6 @@ async def test_requested_leg_execution_failure_never_returns_partial_success(
                     "conversation_id": stream_conversation_id,
                 },
             )),
-            ("MCP search", await client.get(f"/api/mcp/rag_search?q=status&corpus_id={corpus_id}")),
         )
 
         for label, response in responses:
@@ -220,6 +238,19 @@ async def test_requested_leg_execution_failure_never_returns_partial_success(
             assert detail["retryable"] is True
             assert detail["operator_hint"]
             assert missing_model not in response.text
+        mcp_mode = {
+            "vector": "dense_only",
+            "sparse": "sparse_only",
+            "graph": "graph_only",
+        }[leg]
+        mcp_status, mcp_body = await call_mcp_probe(corpus_id, mcp_mode)
+        assert mcp_status == 503, mcp_body
+        mcp_detail = mcp_body["detail"]
+        assert mcp_detail["code"] == "required_retrieval_leg_failed"
+        assert mcp_detail["leg"] == leg
+        assert mcp_detail["retryable"] is True
+        assert mcp_detail["operator_hint"]
+        assert missing_model not in str(mcp_body)
         assert get_conversation_store().get_messages(stream_conversation_id) == []
     finally:
         config_store._store = None
@@ -264,6 +295,14 @@ async def test_unreachable_qdrant_is_a_typed_503_never_a_500_or_partial_success(
             corpus_id,
             [Chunk(chunk_id="c1", content="status report", file_path="status.md", start_line=1, end_line=1, language=None, token_count=2)],
         )
+        await pg.set_generation(
+            corpus_id,
+            build_generation(
+                run_id=f"{corpus_id}-promoted",
+                qdrant_collection=f"missing_{corpus_id}".replace("-", "_"),
+                graph_repo_id=None,
+            ),
+        )
         config_store._store = None
 
         body = {
@@ -302,7 +341,6 @@ async def test_unreachable_qdrant_is_a_typed_503_never_a_500_or_partial_success(
                     "conversation_id": stream_conversation_id,
                 },
             )),
-            ("MCP search", await client.get(f"/api/mcp/rag_search?q=status&corpus_id={corpus_id}")),
         )
 
         for label, response in responses:
@@ -310,6 +348,14 @@ async def test_unreachable_qdrant_is_a_typed_503_never_a_500_or_partial_success(
             detail = response.json()["detail"]
             assert detail["dependency"] == "qdrant", f"{label}: {response.text}"
             assert detail["operator_hint"]
+        mcp_status, mcp_body = await call_mcp_probe(
+            corpus_id, "dense_only" if leg == "vector" else "sparse_only"
+        )
+        assert mcp_status == 503, mcp_body
+        mcp_detail = mcp_body["detail"]
+        assert mcp_detail["code"] == "dependency_unavailable"
+        assert mcp_detail["dependency"] == "qdrant"
+        assert mcp_detail["operator_hint"]
         assert get_conversation_store().get_messages(stream_conversation_id) == []
     finally:
         config_store._store = None

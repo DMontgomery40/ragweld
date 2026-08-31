@@ -46,10 +46,17 @@ def _models_server() -> Iterator[str]:
     server = ThreadingHTTPServer(("127.0.0.1", 0), _ModelsHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
+    previous_base_url = os.environ.get("LITELLM_BASE_URL")
     try:
         host, port = server.server_address
-        yield f"http://{host}:{port}/v1"
+        base_url = f"http://{host}:{port}/v1"
+        os.environ["LITELLM_BASE_URL"] = base_url
+        yield base_url
     finally:
+        if previous_base_url is None:
+            os.environ.pop("LITELLM_BASE_URL", None)
+        else:
+            os.environ["LITELLM_BASE_URL"] = previous_base_url
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)

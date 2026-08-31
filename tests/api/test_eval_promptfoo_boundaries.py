@@ -7,6 +7,7 @@ the typed 503 for the promptfoo dependency instead of fabricating results.
 
 from __future__ import annotations
 
+import os
 import uuid
 
 import pytest
@@ -34,7 +35,18 @@ async def test_promptfoo_run_fails_closed_without_gateway(client: AsyncClient) -
         )
         assert entry.status_code == 200, entry.text
 
-        response = await client.post("/api/eval/promptfoo/run", json={"repo_id": corpus_id, "sample_size": 1})
+        previous_base_url = os.environ.get("LITELLM_BASE_URL")
+        os.environ["LITELLM_BASE_URL"] = "http://127.0.0.1:1/v1"
+        try:
+            response = await client.post(
+                "/api/eval/promptfoo/run",
+                json={"repo_id": corpus_id, "sample_size": 1},
+            )
+        finally:
+            if previous_base_url is None:
+                os.environ.pop("LITELLM_BASE_URL", None)
+            else:
+                os.environ["LITELLM_BASE_URL"] = previous_base_url
         assert response.status_code == 503, response.text
         detail = response.json()["detail"]
         assert detail["code"] == "dependency_unavailable"

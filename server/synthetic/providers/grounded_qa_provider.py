@@ -871,7 +871,7 @@ def is_self_contained_question(question: str, *, source_excerpt: str | None = No
         return False  # "What did he say about Barry Cohen?": no anchor can say who "he" is
     if _has_anchor(text, excerpt):
         return True
-    return bool(excerpt) and _shares_content_span(text, excerpt)
+    return excerpt is not None and _shares_content_span(text, excerpt)
 
 
 def judge_accepts(*, score: float, keep: bool, threshold: float) -> bool:
@@ -1095,7 +1095,12 @@ async def _generate_rows_for_chunk(
         if item is None or not is_self_contained_question(item.question, source_excerpt=excerpt):
             stats.rejected_malformed += 1
             continue
-        if not is_grounded(item.evidence_quote, excerpt) or not answer_is_anchored(item.expected_answer, excerpt):
+        if (
+            item.evidence_quote is None
+            or item.expected_answer is None
+            or not is_grounded(item.evidence_quote, excerpt)
+            or not answer_is_anchored(item.expected_answer, excerpt)
+        ):
             stats.rejected_ungrounded += 1
             continue
         candidates.append(_Candidate(item=item, source_path=file_path, source_excerpt=excerpt))

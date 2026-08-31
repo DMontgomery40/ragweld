@@ -9,7 +9,7 @@ import subprocess
 import threading
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import IO, Any, NoReturn, cast
 from urllib.parse import quote
 
 from pydantic import ValidationError
@@ -31,10 +31,11 @@ from server.models.tribrid_config_model import (
 # The repo root and relative-path resolution live in one module; `repo_root` is
 # used throughout this file and `resolve_project_path` is re-exported by
 # `server.lineage.__init__`, so both are imported (not recomputed) here.
-from server.project_paths import repo_root, resolve_project_path
+from server.project_paths import repo_root
+from server.project_paths import resolve_project_path as resolve_project_path
 
 
-def _raise_lineage_store_error(operation: str, exc: BaseException) -> None:
+def _raise_lineage_store_error(operation: str, exc: BaseException) -> NoReturn:
     raise DependencyUnavailableError("lineage_store", operation) from exc
 
 
@@ -595,7 +596,7 @@ class _RepoLineageLock:
         self._guard = threading.Lock()
         self._owner: int | None = None
         self._depth = 0
-        self._handle = None
+        self._handle: IO[str] | None = None
 
     def acquire(self) -> None:
         me = threading.get_ident()

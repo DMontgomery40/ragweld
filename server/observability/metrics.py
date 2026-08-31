@@ -417,7 +417,7 @@ class LatestMLQualityCollector:
         self._promptfoo_dir = promptfoo_dir
         self._benchmark_dir = benchmark_dir
 
-    def collect(self):  # noqa: ANN201 - prometheus_client's collector protocol
+    def collect(self) -> Iterator[GaugeMetricFamily]:
         try:
             # Imported lazily: `ml_quality` reaches into the API and lineage
             # layers, which import this module.

@@ -3,6 +3,11 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from server.db.postgres import PostgresClient
+from server.indexing.generations import (
+    DeletionIncompleteError,
+    PersistedStateCorruptError,
+    qdrant_collection_of,
+)
 from server.models.tribrid_config_model import (
     ObservabilityIncident,
     ObservabilityIncidentChange,
@@ -19,11 +24,6 @@ from server.observability.ml_quality import (
     build_prompt_observability_summary,
 )
 from server.observability.status import build_observability_status
-from server.indexing.generations import (
-    DeletionIncompleteError,
-    PersistedStateCorruptError,
-    qdrant_collection_of,
-)
 from server.retrieval.qdrant_store import QdrantChunkStore
 
 _GROUP_DASHBOARDS: dict[str, list[str]] = {

@@ -9,6 +9,7 @@ as "no alerts".
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
 import httpx
 
@@ -38,13 +39,16 @@ class AlertmanagerUnavailableError(Exception):
 def _alert_from_payload(row: dict[str, object]) -> AlertmanagerAlert | None:
     """One Alertmanager alert as a wire model, or None when the row is unusable."""
 
-    labels = {str(key): str(value) for key, value in dict(row.get("labels") or {}).items()}
+    def _as_dict(value: object) -> dict[Any, Any]:
+        return value if isinstance(value, dict) else {}
+
+    labels = {str(key): str(value) for key, value in _as_dict(row.get("labels")).items()}
     name = labels.get("alertname", "").strip()
     starts_at = str(row.get("startsAt") or "").strip()
     if not name or not starts_at:
         return None
-    annotations = {str(key): str(value) for key, value in dict(row.get("annotations") or {}).items()}
-    status = dict(row.get("status") or {})
+    annotations = {str(key): str(value) for key, value in _as_dict(row.get("annotations")).items()}
+    status = _as_dict(row.get("status"))
     state = str(status.get("state") or "active").strip()
     ends_at = str(row.get("endsAt") or "").strip()
     try:

@@ -40,6 +40,7 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import IO
 
 POINTER_NAME = "ACTIVE.json"
 VERSIONS_DIR_NAME = "versions"
@@ -249,7 +250,6 @@ def _recover_locked(root: Path, *, promotion_recorded: Callable[[str], bool] | N
     # the post-switch work the crash fell on: recorded work finishes the commit, unrecorded
     # work rolls the pointer back — an unrecorded candidate never stays active.
     pointer = _read_pointer(root)
-    candidate = versions_dir(root) / version
     if pointer is not None and pointer.version == version:
         recorded = False
         if promotion_recorded is not None and run_id:
@@ -349,7 +349,7 @@ class VersionedArtifactSwap:
         self.promotion_recorded = promotion_recorded
         self.version: str | None = None
         self.previous: ActivePointerState | None = None
-        self._lock_handle = None
+        self._lock_handle: IO[str] | None = None
         self._open = False
 
     # -- locking -------------------------------------------------------------------------

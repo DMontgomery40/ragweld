@@ -8,6 +8,7 @@ import tempfile
 import time
 import weakref
 from collections.abc import AsyncIterator, Callable, Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, NamedTuple
@@ -70,6 +71,7 @@ from server.training.flyte_client import (
     FLYTE_FAILURE_PHASES,
     FLYTE_TERMINAL_PHASES,
     FlyteAdminClient,
+    FlyteExecutionState,
     FlyteLaunchPlanRef,
     FlyteUnavailableError,
     new_execution_name,
@@ -301,7 +303,7 @@ def _flyte_run_needs_reconcile(run: AgentTrainRun) -> bool:
     return str(run.workflow_phase or "") not in FLYTE_TERMINAL_PHASES
 
 
-def _fetch_flyte_state(run: AgentTrainRun):
+def _fetch_flyte_state(run: AgentTrainRun) -> FlyteExecutionState | None:
     """Blocking flyteadmin probe for a Flyte-owned run. Call via asyncio.to_thread.
 
     Returns the FlyteExecutionState, or None if config is missing or the admin
@@ -349,7 +351,7 @@ async def _refresh_flyte_run(run: AgentTrainRun) -> AgentTrainRun:
     return await _apply_flyte_state(run, state)
 
 
-async def _apply_flyte_state(run: AgentTrainRun, state) -> AgentTrainRun:
+async def _apply_flyte_state(run: AgentTrainRun, state: FlyteExecutionState) -> AgentTrainRun:
     """Apply a fetched Flyte execution phase to a run.
 
     Persistence (run record, events, lineage) runs in worker threads; the cancel-event
@@ -362,7 +364,7 @@ async def _apply_flyte_state(run: AgentTrainRun, state) -> AgentTrainRun:
         return await _apply_flyte_state_locked(run, state)
 
 
-async def _apply_flyte_state_locked(run: AgentTrainRun, state) -> AgentTrainRun:
+async def _apply_flyte_state_locked(run: AgentTrainRun, state: FlyteExecutionState) -> AgentTrainRun:
     execution_name = str(run.workflow_run_id or "").strip()
     try:
         run = await asyncio.to_thread(_load_run, run.run_id)  # the stored record is the truth
@@ -699,7 +701,8 @@ def _append_event(run_id: str, event: AgentTrainMetricEvent) -> None:
         f.write(json.dumps(payload) + "\n")
 
 
-class UnreadableEvents(NamedTuple):
+@dataclass(frozen=True)
+class UnreadableEvents:
     count: int
     first_reason: str | None
 
@@ -1413,7 +1416,7 @@ async def _run_train_job(*, run_id: str, corpus_id: str, cancel_event: asyncio.E
                     repo_id=str(run.repo_id),
                     work=_promotion_work,
                 )
-                promotion_message = (
+                promotion_message: str | None = (
                     f"Promoted trained artifact to {active_dir_cfg} (backend=mlx_qwen3). "
                     f"Run artifact preserved at {model_artifact_dir}."
                     + (f" A retired version could not be pruned and was left at {leftover}." if leftover is not None else "")
@@ -1602,6 +1605,38 @@ async def list_train_runs(
     return AgentTrainRunsResponse(ok=True, runs=metas[: int(limit)])
 
 
+async def _finish_cancelled_flyte_start(
+    *,
+    cfg: TriBridConfig,
+    execution_name: str,
+    run_id: str,
+) -> AgentTrainStartResponse:
+    """Terminate an execution created after its run was cancelled and return the typed start result."""
+    admin_url, project, domain = _flyte_scope(cfg)
+
+    def _terminate_created() -> None:
+        FlyteAdminClient(admin_url).terminate_execution(
+            project,
+            domain,
+            execution_name,
+            cause="Run was cancelled while the execution was being created.",
+        )
+
+    try:
+        await asyncio.to_thread(_terminate_created)
+    except Exception as exc:  # noqa: BLE001 - reported, the run record is already terminal
+        _append_event(
+            run_id,
+            AgentTrainMetricEvent(
+                type="log",
+                ts=datetime.now(UTC),
+                run_id=run_id,
+                message=f"Flyte execution {execution_name} was created for a cancelled run and could not be terminated: {exc}",
+            ),
+        )
+    return AgentTrainStartResponse(ok=False, run_id=run_id)
+
+
 @router.post("/agent/train/start", response_model=AgentTrainStartResponse)
 async def start_train_run(request: AgentTrainStartRequest) -> AgentTrainStartResponse:
     corpus_id = request.repo_id
@@ -1761,8 +1796,8 @@ async def start_train_run(request: AgentTrainStartRequest) -> AgentTrainStartRes
         lr=float(request.lr) if request.lr is not None else float(cfg.training.reranker_train_lr),
         warmup_ratio=float(request.warmup_ratio) if request.warmup_ratio is not None else float(cfg.training.reranker_warmup_ratio),
         max_length=int(request.max_length) if request.max_length is not None else int(getattr(cfg.reranking, "tribrid_reranker_maxlen", 512) or 512),
-        workflow_backend=workflow_backend,  # type: ignore[arg-type]
-        tracking_backend=tracking_backend,  # type: ignore[arg-type]
+        workflow_backend=workflow_backend,
+        tracking_backend=tracking_backend,
         execution_backend=execution_backend,
         input_bundle_id=current_bundle.bundle_id,
     )
@@ -1870,26 +1905,11 @@ async def start_train_run(request: AgentTrainStartRequest) -> AgentTrainStartRes
         if recorded is None:
             # The run was cancelled while flyteadmin was creating the execution: the operator's
             # cancellation wins, so the execution that was just created is terminated.
-            admin_url, project, domain = _flyte_scope(cfg)
-
-            def _terminate_created() -> None:
-                FlyteAdminClient(admin_url).terminate_execution(
-                    project, domain, execution_name, cause="Run was cancelled while the execution was being created."
-                )
-
-            try:
-                await asyncio.to_thread(_terminate_created)
-            except Exception as exc:  # noqa: BLE001 - reported, the run record is already terminal
-                _append_event(
-                    run_id,
-                    AgentTrainMetricEvent(
-                        type="log",
-                        ts=datetime.now(UTC),
-                        run_id=run_id,
-                        message=f"Flyte execution {execution_name} was created for a cancelled run and could not be terminated: {exc}",
-                    ),
-                )
-            return
+            return await _finish_cancelled_flyte_start(
+                cfg=cfg,
+                execution_name=execution_name,
+                run_id=run_id,
+            )
         run = recorded
         _append_event(
             run_id,

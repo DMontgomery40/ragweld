@@ -8,7 +8,9 @@ from httpx import AsyncClient
 
 from server.config import load_config
 from server.db.postgres import PostgresClient
+from server.indexing.generations import build_generation
 from server.services import config_store
+from tests.mcp_probe_subprocess import call_mcp_probe
 from tests.service_requirements import require_env
 
 
@@ -38,6 +40,14 @@ async def test_neo4j_outage_is_attributed_and_does_not_delete_corpus(client: Asy
         cfg.vector_search.enabled = False
         cfg.sparse_search.enabled = False
         await pg.upsert_corpus_config_json(corpus_id, cfg.model_dump(mode="serialization"))
+        await pg.set_generation(
+            corpus_id,
+            build_generation(
+                run_id=f"{corpus_id}-promoted",
+                qdrant_collection=None,
+                graph_repo_id=corpus_id,
+            ),
+        )
 
         config_store._store = None
         os.environ["NEO4J_URI"] = "bolt://127.0.0.1:1"
@@ -91,10 +101,16 @@ async def test_neo4j_outage_is_attributed_and_does_not_delete_corpus(client: Asy
                     "cache_mode": "bypass",
                 },
             )),
-            ("MCP search", await client.get(f"/api/mcp/rag_search?q=status&corpus_id={corpus_id}")),
         )
         for label, response in requests:
             _assert_dependency_503(response, "neo4j", label=label)
+
+        mcp_status, mcp_body = await call_mcp_probe(corpus_id, "graph_only")
+        assert mcp_status == 503, mcp_body
+        mcp_detail = mcp_body["detail"]
+        assert mcp_detail["code"] == "dependency_unavailable"
+        assert mcp_detail["dependency"] == "neo4j"
+        assert mcp_detail["operator_hint"]
 
         ready = await client.get(f"/api/ready?corpus_id={corpus_id}")
         assert ready.status_code == 503

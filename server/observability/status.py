@@ -3,16 +3,21 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
-
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 
-from server.gateway_catalog import LOCAL_GATEWAY_ALIAS, gateway_rows_snapshot
 from server.chat.gateway_runtime import (
     resolve_litellm_api_key,
     resolve_litellm_base_url,
     resolve_vllm_base_url,
+)
+from server.db.postgres import PostgresClient
+from server.gateway_catalog import LOCAL_GATEWAY_ALIAS, gateway_rows_snapshot
+from server.indexing.generations import (
+    DeletionIncompleteError,
+    PersistedStateCorruptError,
+    qdrant_collection_of,
 )
 from server.models.tribrid_config_model import (
     ObservabilityComponentStatus,
@@ -28,6 +33,8 @@ from server.observability.runtime import (
     langfuse_sign_in_hint,
     normalize_tracing_mode,
 )
+from server.retrieval.qdrant_store import QdrantChunkStore
+from server.training.control_plane import build_agent_control_plane_status
 
 
 def _langfuse_ingestion_detail(config: TriBridConfig) -> str:
@@ -35,14 +42,7 @@ def _langfuse_ingestion_detail(config: TriBridConfig) -> str:
     if blockers:
         return f"blocked ({'; '.join(blockers)})"
     return langfuse_ingestion_state()
-from server.db.postgres import PostgresClient
-from server.indexing.generations import (
-    DeletionIncompleteError,
-    PersistedStateCorruptError,
-    qdrant_collection_of,
-)
-from server.retrieval.qdrant_store import QdrantChunkStore
-from server.training.control_plane import build_agent_control_plane_status
+
 
 _CRITICAL_GROUPS = {"metrics", "traces", "gateway", "serving", "workflow", "retrieval", "cost", "frontend"}
 
@@ -198,7 +198,13 @@ def _append_link(links: list[TraceExternalLink], link: TraceExternalLink) -> Non
     links.append(link)
 
 
-def _make_links(label: str, url: str | None, detail: str | None = None, *, kind: str = "custom") -> list[TraceExternalLink]:
+def _make_links(
+    label: str,
+    url: str | None,
+    detail: str | None = None,
+    *,
+    kind: Literal["grafana", "tempo", "langfuse", "custom"] = "custom",
+) -> list[TraceExternalLink]:
     target = str(url or "").strip()
     if not target:
         return []
@@ -727,7 +733,7 @@ async def build_observability_status(config: TriBridConfig, *, repo_id: str | No
     return ObservabilityStatusResponse(
         ok=len(blockers) == 0,
         generated_at=datetime.now(UTC),
-        mode=mode if mode in {"local", "otel", "otel_langfuse", "off"} else "local",
+        mode=mode,
         severity=overall_severity,  # type: ignore[arg-type]
         slo_state=_component_slo_state(overall_severity),  # type: ignore[arg-type]
         components=components,

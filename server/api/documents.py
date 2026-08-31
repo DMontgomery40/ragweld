@@ -217,7 +217,7 @@ async def view_document(
         content = DocumentPdfView(page_count=len(sizes), page_sizes=sizes)
     else:
         if record is None or record.markdown is None:
-            detail = DocumentNotCapturedDetail(
+            missing = DocumentNotCapturedDetail(
                 corpus_id=resolved.corpus_id,
                 file_path=resolved.rel_path,
                 message="No captured markdown exists for this document.",
@@ -226,7 +226,7 @@ async def view_document(
                     "from the markdown captured at index time."
                 ),
             )
-            raise HTTPException(status_code=409, detail=detail.model_dump(mode="json"))
+            raise HTTPException(status_code=409, detail=missing.model_dump(mode="json"))
         content = DocumentRichView(markdown=record.markdown)
 
     return DocumentView(

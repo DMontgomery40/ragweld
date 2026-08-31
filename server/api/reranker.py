@@ -621,13 +621,13 @@ def _finalize_stored_run(
                 type="error" if status == "failed" else "state",
                 ts=now,
                 run_id=run.run_id,
-                status=run.status,  # type: ignore[arg-type]
+                status=run.status,
                 message=message,
             ),
         )
         _append_event(
             run.run_id,
-            RerankerTrainMetricEvent(type="complete", ts=now, run_id=run.run_id, status=run.status),  # type: ignore[arg-type]
+            RerankerTrainMetricEvent(type="complete", ts=now, run_id=run.run_id, status=run.status),
         )
     _train_start_guard.pop(str(run.repo_id or "").strip(), None)
     return run
@@ -808,7 +808,8 @@ def _append_event(run_id: str, event: RerankerTrainMetricEvent) -> None:
         pass
 
 
-class UnreadableEvents(NamedTuple):
+@dataclass(frozen=True)
+class UnreadableEvents:
     count: int
     first_reason: str | None
 
