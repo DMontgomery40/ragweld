@@ -116,6 +116,22 @@ function durationMs(seconds: number): number {
 }
 
 /**
+ * Currency for a figure-description cost, which is genuinely sub-cent: one figure at the
+ * vision alias runs about $0.0007, and `Intl` currency (two decimals) prints that as
+ * "$0.00" — the exact misleading zero the Python `_estimate_figures` guard exists to avoid,
+ * reintroduced at the display layer. At or above one cent this is ordinary `formatCurrency`;
+ * below it, show at least three significant figures (trailing zeros trimmed) so the number
+ * the estimate produced is not rounded away. Shared `formatCurrency` is left untouched.
+ */
+function formatFigureCostUsd(amount: number): string {
+  const value = Number(amount) || 0;
+  if (value >= 0.01 || value <= 0) return formatCurrency(value);
+  const digits = Math.min(10, -Math.floor(Math.log10(value)) + 2);
+  const fixed = value.toFixed(digits).replace(/0+$/, '').replace(/\.$/, '');
+  return `$${fixed}`;
+}
+
+/**
  * The operator-readable reason inside an API error.
  *
  * An axios rejection's own `message` is "Request failed with status code 422", which names
@@ -1087,7 +1103,7 @@ export function IndexingSubtab() {
                 semanticKgCostUsd == null ? null : `Semantic KG ${formatCurrency(Number(semanticKgCostUsd || 0))}`,
                 figureCostUsd == null
                   ? null
-                  : `Figures ≤ ${formatCurrency(Number(figureCostUsd || 0))}${
+                  : `Figures ≤ ${formatFigureCostUsd(Number(figureCostUsd || 0))}${
                       estimate.estimated_figures != null
                         ? ` (~${formatNumber(Number(estimate.estimated_figures))} figures)`
                         : ''
@@ -3719,7 +3735,7 @@ export function IndexingSubtab() {
                 )})`
               : ''}
             {indexEstimate.figure_description_cost_usd != null
-              ? ` + Figures ≤ ${formatCurrency(Number(indexEstimate.figure_description_cost_usd || 0))}${
+              ? ` + Figures ≤ ${formatFigureCostUsd(Number(indexEstimate.figure_description_cost_usd || 0))}${
                   indexEstimate.estimated_figures != null
                     ? ` (~${formatNumber(Number(indexEstimate.estimated_figures))} figures)`
                     : ''

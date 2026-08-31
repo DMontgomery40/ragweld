@@ -237,7 +237,10 @@ test('the index estimate prices the figure descriptions before any run starts', 
   await expect(message).toContainText('Index estimate');
   await expect(message).toContainText('Cost breakdown:');
   const breakdown = await message.innerText();
-  const figures = /Figures ≤ \$[\d,]+\.\d\d \(~(\d+)\)/.exec(breakdown);
+  // The product emits `Figures ≤ <cost> (~N figures)`, where a sub-cent cost is printed to
+  // its real precision (e.g. `$0.000715`, not `$0.00`). The old assertion required exactly
+  // two decimals and closed the paren right after the number — it matched neither.
+  const figures = /Figures ≤ \$[\d,]+(?:\.\d+)? \(~(\d+) figures\)/.exec(breakdown);
   expect(figures, `no figure line in the cost breakdown:\n${breakdown}`).not.toBeNull();
   expect(Number(figures![1]), 'estimated_figures must be at least 1 for a 2-page PDF').toBeGreaterThanOrEqual(1);
 
