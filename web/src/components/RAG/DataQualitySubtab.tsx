@@ -380,7 +380,7 @@ export function DataQualitySubtab() {
           </button>
         </div>
         <div style={{ marginTop: 10, fontSize: 12, color: 'var(--fg-muted)' }}>
-          Cost estimate placeholder: current chunk summary build is deterministic (no LLM billing). When LLM-based enrichment is added, an estimate will be shown before build.
+          This chunk summary build is deterministic and does not call an LLM, so it incurs no gateway billing.
         </div>
       </div>
 

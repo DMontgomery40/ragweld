@@ -5,7 +5,7 @@ import { NumberField } from '@/components/ui/NumberField';
 import { ProviderSetup } from '@/components/Chat/ProviderSetup';
 import type { ChatMultimodalConfig, RecallConfig, RecallGateConfig, RecallIntensity } from '@/types/generated';
 
-const TABS = ['Model', 'Sources', 'Recall', 'Multimodal', 'Providers', 'Benchmark', 'UI'];
+const TABS = ['Model', 'Recall', 'Multimodal', 'Providers', 'UI'];
 
 export function ChatSettings() {
   const { config, loading, error, saving } = useConfig();
@@ -207,17 +207,6 @@ export function ChatSettings() {
 
             <div style={{ marginTop: 18 }}>
               <ProviderSetup />
-            </div>
-          </div>
-        );
-
-      case 'Sources':
-        return (
-          <div className="subtab-panel" style={{ padding: 24 }}>
-            <h3 style={{ marginTop: 0 }}>Sources</h3>
-            <div style={{ color: 'var(--fg-muted)', fontSize: 13 }}>
-              This tab is a placeholder for source selection defaults. Sources are primarily chosen per-conversation in
-              the chat UI (e.g., Corpora + Recall).
             </div>
           </div>
         );
@@ -551,16 +540,6 @@ export function ChatSettings() {
               not route chat directly to any other provider.
             </div>
             <ProviderSetup />
-          </div>
-        );
-
-      case 'Benchmark':
-        return (
-          <div className="subtab-panel" style={{ padding: 24 }}>
-            <h3 style={{ marginTop: 0 }}>Benchmark</h3>
-            <div style={{ color: 'var(--fg-muted)', fontSize: 13 }}>
-              Split-screen model comparison + pipeline profiling controls live here (coming soon).
-            </div>
           </div>
         );
 
