@@ -34,29 +34,10 @@ async def test_get_config(client: AsyncClient) -> None:
         "semantic_kg_max_concepts_per_chunk",
         "semantic_kg_min_concept_len",
         "semantic_kg_max_relations_per_chunk",
+        "semantic_kg_allowed_entity_types",
+        "semantic_kg_allowed_relation_types",
     }:
         assert removed_key not in data["graph_indexing"]
-    assert data["graph_indexing"]["semantic_kg_allowed_entity_types"] == [
-        "person",
-        "org",
-        "location",
-        "event",
-        "concept",
-    ]
-    assert data["graph_indexing"]["semantic_kg_allowed_relation_types"] == [
-        "associated_with",
-        "met_with",
-        "communicated_with",
-        "works_for",
-        "member_of",
-        "founded",
-        "owns",
-        "funded",
-        "participated_in",
-        "located_in",
-        "references",
-        "related_to",
-    ]
     assert data["graph_indexing"]["semantic_kg_max_chunks"] == 40000
 
 
@@ -74,27 +55,8 @@ async def test_patch_graph_indexing_ignores_removed_semantic_toggle_and_preserve
     assert "semantic_kg_enabled" not in graph_indexing
     assert "semantic_kg_mode" not in graph_indexing
     assert "semantic_kg_typed_entities_enabled" not in graph_indexing
-    assert graph_indexing["semantic_kg_allowed_entity_types"] == [
-        "person",
-        "org",
-        "location",
-        "event",
-        "concept",
-    ]
-    assert graph_indexing["semantic_kg_allowed_relation_types"] == [
-        "associated_with",
-        "met_with",
-        "communicated_with",
-        "works_for",
-        "member_of",
-        "founded",
-        "owns",
-        "funded",
-        "participated_in",
-        "located_in",
-        "references",
-        "related_to",
-    ]
+    assert "semantic_kg_allowed_entity_types" not in graph_indexing
+    assert "semantic_kg_allowed_relation_types" not in graph_indexing
     assert graph_indexing["semantic_kg_max_chunks"] == 40000
 
 

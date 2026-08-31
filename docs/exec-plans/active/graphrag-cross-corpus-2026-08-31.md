@@ -16,7 +16,7 @@ Plan: `docs/superpowers/plans/2026-08-31-neo4j-graphrag-cross-corpus.md`
 
 ## Task 1 - Neo4j GraphRAG 1.19 contract
 
-Status: in progress
+Status: complete
 
 ### Pre-edit impact analysis
 
@@ -51,7 +51,7 @@ GitNexus refresh note: the incremental refresh first failed because the derived 
 
 ## Task 2 - Corpus graph policy
 
-Status: in progress
+Status: complete
 
 ### Pre-edit impact analysis
 
@@ -88,7 +88,39 @@ The CRITICAL config blast radius was reported before mutation. The change is gua
 
 ## Task 3 - Reviewed per-corpus schema
 
-Status: pending
+Status: complete
+
+### Pre-edit impact analysis
+
+- Backend `IndexRequest` and `IndexEstimate`: HIGH, 28 direct / 124 total dependants.
+- Generated `IndexRequest` and `IndexEstimate` interfaces: CRITICAL, 94 direct / 141 total dependants.
+- `GenerationManifest`: MEDIUM, 12 direct / 49 total dependants.
+- `PostgresClient.promote_staging_index`, `start_index`, and `IndexingSubtab`: LOW.
+- `_background_index_job`, checked separately before manifest metadata wiring: LOW, one direct caller and one affected process.
+- The new `build_proposal_from_corpus` symbol does not exist in the pre-task graph and therefore reports UNKNOWN until the post-task GitNexus refresh.
+
+The HIGH/CRITICAL public boundary blast radius was reported before mutation. Containment is generated-contract validation, API/model tests, live Postgres locking proof, TypeScript compilation/build, and the headed operator flow.
+
+### TDD and verification evidence
+
+- RED: missing schema module/models, then a semantic start without an approval hash entered the run path instead of returning typed 409.
+- Live RED: the first real proposal exposed an incomplete low-level chunker call. Production now uses public `Chunker.chunk_file`, and an API regression exercises the real chunker over two sampled documents.
+- DeepSeek first review found one P1: blocking inventory iteration and chunking in the async proposal path. A new boundary test reproduced both on the API loop thread; both now run through `asyncio.to_thread`.
+- GREEN after the review fix: 103/103 focused schema, manifest, proposal API, event-loop, config, official GraphRAG, and batching tests passed on LXC100 in 2.92s.
+- Real Apollo subset after the review fix through the production `deepseek.deepseek-v4-flash` alias: 1/1 passed in 54.65s. It proves real inference, persisted readback, stable reuse, concurrent locked meta merge, missing/stale approval refusal, and Recall exclusion.
+- Generated TypeScript and validation passed for 238 registered public models. TypeScript lint and Vite production build passed.
+- Headed Playwright after the review fix against the isolated overlay API/UI, no request interception: 2/2 passed in 1.9m. The operator visibly reviewed all schema sections and exact hash, approved, observed a real index start response, stopped the disposable run, and cleanup left no test corpus.
+
+### DeepSeek V4 Flash review
+
+- First review response id: `gen-1788211612-951KoeTi1yBvk5K4akSg`.
+- First review verdict: FAIL, one P1 for blocking inventory/chunking inside the async proposal API.
+- Fix: both operations moved through `asyncio.to_thread` with a direct loop-thread regression; all focused/live/browser evidence above was rerun.
+- Re-review response id: `gen-1788212397-HELcFZ95gFV34778jSOB`.
+- Resolved model: `deepseek.deepseek-v4-flash`.
+- Re-review usage: 25,860 prompt + 6,361 completion = 32,221 tokens.
+- Re-review cost: `$0.00540148`.
+- Final verdict: **PASS**.
 
 ## Task 4 - Official pipeline and lexical graph
 

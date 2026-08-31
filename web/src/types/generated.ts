@@ -1121,6 +1121,26 @@ export interface GitTrackedFile {
   bytes?: number | null; // default: None
 }
 
+export interface GraphCommunityTelemetry {
+  algorithm?: "gds-leiden-2.13"; // default: "gds-leiden-2.13"
+  community_count: number;
+  levels: number;
+  modularity: number;
+  did_converge: boolean;
+  nodes_written: number;
+}
+
+export interface GraphExtractionTelemetry {
+  selected_chunks: number;
+  attempted_chunks: number;
+  succeeded_chunks: number;
+  failed_chunks: number;
+  truncated_chunks: number;
+  extracted_entities: number;
+  semantic_relationships: number;
+  from_chunk_relationships: number;
+}
+
 /** Configuration for building/persisting graph data during indexing. */
 export interface GraphIndexingConfig {
   /** Enable graph building during indexing (Neo4j) */
@@ -1139,10 +1159,6 @@ export interface GraphIndexingConfig {
   ast_imports_weight?: number; // default: 1.0
   /** Edge weight for AST call relationships (function->callee). */
   ast_calls_weight?: number; // default: 1.0
-  /** Allowed semantic KG entity types produced by extraction. */
-  semantic_kg_allowed_entity_types?: ("person" | "org" | "location" | "event" | "concept")[]; // default: ["person", "org", "location", "event", "concept"]
-  /** Allowed semantic KG relationship types produced by extraction. */
-  semantic_kg_allowed_relation_types?: ("associated_with" | "met_with" | "communicated_with" | "works_for" | "member_of" | "founded" | "owns" | "funded" | "participated_in" | "located_in" | "references" | "related_to")[]; // default: ["associated_with", "met_with", "communicated_w...
   /** Reasoning effort for semantic KG extraction when using OpenAI Responses-compatible models. */
   semantic_kg_reasoning_effort?: "minimal" | "low" | "medium" | "high" | "xhigh"; // default: "medium"
   /** Maximum eligible chunks for a semantic GraphRAG run. Runs above this ceiling fail before promotion; the corpus is never sliced into a partial graph. */
@@ -1161,6 +1177,35 @@ export interface GraphIndexingConfig {
   wait_vector_index_online?: boolean; // default: True
   /** Timeout waiting for Neo4j vector index ONLINE (seconds) */
   vector_index_online_timeout_s?: number; // default: 60.0
+}
+
+export interface GraphPromotionOverride {
+  actor: string;
+  reason: string;
+  created_at: string;
+  failure_codes: ("zero_entities" | "zero_semantic_relationships")[];
+}
+
+export interface GraphResolutionTelemetry {
+  candidate_nodes: number;
+  resolved_nodes: number;
+  merged_nodes: number;
+  unresolved_duplicate_groups: number;
+}
+
+/** Public 409 detail when schema proposal is not valid for the corpus graph policy. */
+export interface GraphSchemaPolicyConflictDetail {
+  code?: "graph_schema_policy_not_semantic"; // default: "graph_schema_policy_not_semantic"
+  policy: "semantic" | "code" | "off" | "excluded";
+  message: string;
+  operator_hint: string;
+}
+
+export interface GraphSchemaSample {
+  recipe?: "documents-and-positions-v1"; // default: "documents-and-positions-v1"
+  seed?: number; // default: 0
+  chunk_ids: string[];
+  chunk_hashes: string[];
 }
 
 /** Configuration for graph-based search using Neo4j. */
@@ -3941,6 +3986,17 @@ export interface GenerationUnavailableResponse {
   detail: GenerationUnavailableDetail;
 }
 
+export interface GraphGenerationMetadata {
+  policy: "semantic" | "code";
+  schema_hash?: string | null;
+  schema?: Record<string, unknown> | null;
+  extraction: GraphExtractionTelemetry;
+  resolution: GraphResolutionTelemetry;
+  communities?: GraphCommunityTelemetry | null;
+  override?: GraphPromotionOverride | null;
+  partial?: boolean;
+}
+
 /** A graph slice: entities plus the relationships induced among exactly those entities.  Used for an entity neighborhood, a community, and the whole-corpus/search view. ``total_matched`` is what the query found before ``limit`` was applied, so the UI can say "showing 200 of 5,179" instead of an undenominated "200 shown". */
 export interface GraphNeighborsResponse {
   /** Entities in the neighborhood (includes the center entity) */
@@ -3951,6 +4007,26 @@ export interface GraphNeighborsResponse {
   total_matched?: number;
   /** Cap applied to `entities`; `len(entities) <= limit` on every producer */
   limit?: number;
+}
+
+export interface GraphSchemaPolicyConflictResponse {
+  detail: GraphSchemaPolicyConflictDetail;
+}
+
+export interface GraphSchemaProposal {
+  corpus_id: string;
+  policy: "semantic";
+  input_fingerprint: string;
+  schema_hash: string;
+  schema: Record<string, unknown>;
+  sample: GraphSchemaSample;
+  model_alias: string;
+  graphrag_version?: "1.19.0";
+  created_at: string;
+}
+
+export interface GraphSchemaProposalRequest {
+  force_refresh?: boolean;
 }
 
 /** System health status payload for /api/health. */
@@ -4050,6 +4126,10 @@ export interface IndexRequest {
   repo_path: string;
   /** Force full reindex even if up-to-date */
   force_reindex?: boolean;
+  /** Exact reviewed graph schema hash required for semantic indexing */
+  approved_graph_schema_hash?: string | null;
+  /** Audited sparse-graph override reason; accepted only for eligible invariant failures */
+  graph_empty_override_reason?: string | null;
 }
 
 /** FastAPI response envelope for every index-run fence conflict (HTTP 409). */

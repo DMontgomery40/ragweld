@@ -9,13 +9,7 @@ from neo4j_graphrag.components.entity_relation_extractor import (
     OnError,
 )
 from neo4j_graphrag.components.lexical_graph import LexicalGraphBuilder
-from neo4j_graphrag.components.schema import (
-    GraphSchema,
-    NodeType,
-    Pattern,
-    PropertyType,
-    RelationshipType,
-)
+from neo4j_graphrag.components.schema import GraphSchema
 from neo4j_graphrag.components.types import (
     DocumentInfo,
     LexicalGraphConfig,
@@ -26,20 +20,12 @@ from neo4j_graphrag.components.types import (
 from neo4j_graphrag.llm import OpenAILLM
 
 from server.models.index import Chunk
-from server.models.tribrid_config_model import GraphIndexingConfig, TriBridConfig
+from server.models.tribrid_config_model import TriBridConfig
 
 GRAPH_RAG_CHUNK_LABEL = "Chunk"
 GRAPH_RAG_DOCUMENT_LABEL = "Document"
 GRAPH_RAG_CHUNK_TO_DOCUMENT = "FROM_DOCUMENT"
 GRAPH_RAG_FROM_CHUNK = "IN_CHUNK"
-
-DEFAULT_GRAPH_ENTITY_TYPES: tuple[str, ...] = tuple(
-    GraphIndexingConfig().semantic_kg_allowed_entity_types
-)
-DEFAULT_GRAPH_RELATION_TYPES: tuple[str, ...] = tuple(
-    GraphIndexingConfig().semantic_kg_allowed_relation_types
-)
-
 
 @dataclass
 class GraphRAGExtractionResult:
@@ -60,86 +46,6 @@ def _normalize_entity_type(value: str) -> str:
     normalized = re.sub(r"[^a-z0-9_]+", "_", str(value or "").strip().lower()).strip("_")
     aliases = {"organization": "org", "organisation": "org"}
     return aliases.get(normalized, normalized)
-
-
-def _configured_entity_types(cfg: TriBridConfig | None = None) -> tuple[str, ...]:
-    raw = (
-        tuple(cfg.graph_indexing.semantic_kg_allowed_entity_types)
-        if cfg is not None
-        else DEFAULT_GRAPH_ENTITY_TYPES
-    )
-    normalized = tuple(
-        dict.fromkeys(
-            normalized
-            for normalized in (_normalize_entity_type(value) for value in raw)
-            if normalized
-        )
-    )
-    return normalized or DEFAULT_GRAPH_ENTITY_TYPES
-
-
-def _configured_relation_types(cfg: TriBridConfig | None = None) -> tuple[str, ...]:
-    raw = (
-        tuple(cfg.graph_indexing.semantic_kg_allowed_relation_types)
-        if cfg is not None
-        else DEFAULT_GRAPH_RELATION_TYPES
-    )
-    normalized = tuple(
-        dict.fromkeys(
-            normalized
-            for normalized in (_normalize_relation_type(value) for value in raw)
-            if normalized
-        )
-    )
-    return normalized or DEFAULT_GRAPH_RELATION_TYPES
-
-
-def _schema(
-    *,
-    allowed_entity_types: tuple[str, ...] | None = None,
-    allowed_relation_types: tuple[str, ...] | None = None,
-) -> GraphSchema:
-    entity_types = allowed_entity_types or DEFAULT_GRAPH_ENTITY_TYPES
-    relation_types = allowed_relation_types or DEFAULT_GRAPH_RELATION_TYPES
-    node_types = tuple(
-        NodeType(
-            label=entity_type,
-            description=f"{entity_type} entity extracted by Neo4j GraphRAG.",
-            properties=[
-                PropertyType(name="name", type="STRING", description="Canonical entity name", required=True),
-                PropertyType(
-                    name="description",
-                    type="STRING",
-                    description="Optional entity description",
-                    required=False,
-                ),
-            ],
-            additional_properties=True,
-        )
-        for entity_type in entity_types
-    )
-    relationship_types = tuple(
-        RelationshipType(
-            label=relation_type,
-            description=f"{relation_type} relationship extracted by Neo4j GraphRAG.",
-            additional_properties=True,
-        )
-        for relation_type in relation_types
-    )
-    patterns = tuple(
-        Pattern(source=src, relationship=rel, target=tgt)
-        for src in entity_types
-        for rel in relation_types
-        for tgt in entity_types
-    )
-    return GraphSchema(
-        node_types=node_types,
-        relationship_types=relationship_types,
-        patterns=patterns,
-        additional_node_types=False,
-        additional_relationship_types=False,
-        additional_patterns=False,
-    )
 
 
 def _lexical_graph_config() -> LexicalGraphConfig:
@@ -265,6 +171,7 @@ async def extract_semantic_kg_with_graphrag(
     repo_id: str,
     run_id: str,
     cfg: TriBridConfig,
+    schema: GraphSchema,
     chunks: list[Chunk],
     route_model: str,
     route_base_url: str,
@@ -292,9 +199,6 @@ async def extract_semantic_kg_with_graphrag(
         max_concurrency=max(1, int(getattr(cfg.indexing, "indexing_workers", 1) or 1)),
         use_structured_output=True,
     )
-    allowed_entity_types = _configured_entity_types(cfg)
-    allowed_relation_types = _configured_relation_types(cfg)
-
     grouped_chunks: dict[str, list[Chunk]] = defaultdict(list)
     for chunk in chunks:
         grouped_chunks[str(chunk.file_path or "")].append(chunk)
@@ -316,10 +220,7 @@ async def extract_semantic_kg_with_graphrag(
             chunks=text_chunks,
             document_info=document_info,
             lexical_graph_config=lexical_graph_config,
-            schema=_schema(
-                allowed_entity_types=allowed_entity_types,
-                allowed_relation_types=allowed_relation_types,
-            ),
+            schema=schema,
         )
         annotated = _annotate_graph(
             graph,

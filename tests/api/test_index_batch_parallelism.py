@@ -341,6 +341,7 @@ async def test_run_index_body_batches_small_files_across_files_when_graph_work_i
         run_id="run-small-files",
         cfg=cfg,
         graph_policy="off",
+        graph_schema=None,
         chunker=chunker,
         max_indexable_bytes=10_000_000,
         skip_dense=False,

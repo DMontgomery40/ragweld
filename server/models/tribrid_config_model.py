@@ -5073,44 +5073,6 @@ class GraphIndexingConfig(BaseModel):
         description="Edge weight for AST call relationships (function->callee).",
     )
 
-    semantic_kg_allowed_entity_types: list[Literal["person", "org", "location", "event", "concept"]] = Field(
-        default=["person", "org", "location", "event", "concept"],
-        description="Allowed semantic KG entity types produced by extraction.",
-    )
-
-    semantic_kg_allowed_relation_types: list[
-        Literal[
-            "associated_with",
-            "met_with",
-            "communicated_with",
-            "works_for",
-            "member_of",
-            "founded",
-            "owns",
-            "funded",
-            "participated_in",
-            "located_in",
-            "references",
-            "related_to",
-        ]
-    ] = Field(
-        default=[
-            "associated_with",
-            "met_with",
-            "communicated_with",
-            "works_for",
-            "member_of",
-            "founded",
-            "owns",
-            "funded",
-            "participated_in",
-            "located_in",
-            "references",
-            "related_to",
-        ],
-        description="Allowed semantic KG relationship types produced by extraction.",
-    )
-
     semantic_kg_reasoning_effort: Literal["minimal", "low", "medium", "high", "xhigh"] = Field(
         default="medium",
         description="Reasoning effort for semantic KG extraction when using OpenAI Responses-compatible models.",

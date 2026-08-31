@@ -14,7 +14,14 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 import asyncpg
 from pgvector.asyncpg import register_vector
 
-from server.models.index import Chunk, ChunkProvenance, IndexedDocumentRecord, IndexStats
+from server.models.index import (
+    Chunk,
+    ChunkProvenance,
+    GraphGenerationMetadata,
+    GraphSchemaProposal,
+    IndexedDocumentRecord,
+    IndexStats,
+)
 from server.models.tribrid_config_model import (
     ChunkSummariesLastBuild,
     ChunkSummary,
@@ -705,6 +712,7 @@ class PostgresClient:
                         run_id=f"incremental-{uuid.uuid4().hex[:10]}",
                         qdrant_collection=physical,
                         graph_repo_id=generation.graph_repo_id if generation else None,
+                        graph_metadata=generation.graph_metadata if generation else None,
                         previous=generation,
                         now=await conn.fetchval("SELECT now();"),
                     )
@@ -2493,6 +2501,42 @@ class PostgresClient:
                 meta_json,
             )
 
+    async def patch_corpus_meta_locked(self, repo_id: str, updates: dict[str, Any]) -> None:
+        """Merge top-level corpus metadata while holding the corpus row lock."""
+        if not isinstance(updates, dict):
+            raise TypeError("corpus metadata updates must be a dict")
+        await self._require_pool()
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                row = await conn.fetchrow(
+                    "SELECT meta FROM corpora WHERE repo_id = $1 FOR UPDATE;", repo_id
+                )
+                if row is None:
+                    from server.services.config_store import CorpusNotFoundError
+
+                    raise CorpusNotFoundError(repo_id)
+                merged = _coerce_jsonb_dict(row["meta"])
+                merged.update(updates)
+                await conn.execute(
+                    "UPDATE corpora SET meta = $2::jsonb WHERE repo_id = $1;",
+                    repo_id,
+                    _json_dumps_sanitized(merged),
+                )
+
+    async def get_graph_schema_proposal(self, repo_id: str) -> GraphSchemaProposal | None:
+        row = await self.get_corpus(repo_id)
+        raw = ((row or {}).get("meta") or {}).get("graph_schema_proposal")
+        return GraphSchemaProposal.model_validate(raw) if raw is not None else None
+
+    async def set_graph_schema_proposal(
+        self, repo_id: str, proposal: GraphSchemaProposal
+    ) -> None:
+        await self.patch_corpus_meta_locked(
+            repo_id,
+            {"graph_schema_proposal": proposal.model_dump(mode="json")},
+        )
+
     async def update_corpus(
         self,
         repo_id: str,
@@ -2587,6 +2631,7 @@ class PostgresClient:
         run_id: str,
         qdrant_collection: str | None,
         graph_repo_id: str | None,
+        graph_metadata: GraphGenerationMetadata | None = None,
     ) -> GenerationManifest:
         """Atomically promote staged chunks/stats into the active corpus id.
 
@@ -2688,6 +2733,7 @@ class PostgresClient:
                     run_id=run_id,
                     qdrant_collection=qdrant_collection,
                     graph_repo_id=graph_repo_id,
+                    graph_metadata=graph_metadata,
                     previous=previous_generation,
                     now=db_now,
                 )

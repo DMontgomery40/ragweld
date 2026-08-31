@@ -110,21 +110,6 @@ def test_graph_indexing_config_weight_defaults() -> None:
     assert cfg.ast_inherits_weight == 1.0
     assert cfg.ast_imports_weight == 1.0
     assert cfg.ast_calls_weight == 1.0
-    assert cfg.semantic_kg_allowed_entity_types == ["person", "org", "location", "event", "concept"]
-    assert cfg.semantic_kg_allowed_relation_types == [
-        "associated_with",
-        "met_with",
-        "communicated_with",
-        "works_for",
-        "member_of",
-        "founded",
-        "owns",
-        "funded",
-        "participated_in",
-        "located_in",
-        "references",
-        "related_to",
-    ]
     assert cfg.semantic_kg_reasoning_effort == "medium"
     assert cfg.semantic_kg_max_chunks == 40000
     assert cfg.semantic_kg_llm_timeout_s == 90
@@ -143,6 +128,8 @@ def test_graph_config_has_one_policy_surface_without_a_second_semantic_toggle() 
         "semantic_kg_max_concepts_per_chunk",
         "semantic_kg_min_concept_len",
         "semantic_kg_max_relations_per_chunk",
+        "semantic_kg_allowed_entity_types",
+        "semantic_kg_allowed_relation_types",
     }:
         assert key not in payload["graph_indexing"]
 
@@ -151,21 +138,6 @@ def test_checked_in_global_config_matches_graph_branch_defaults() -> None:
     cfg = load_config(DEFAULT_CONFIG_PATH).graph_indexing
     assert cfg.enabled is True
     assert cfg.build_code_graph is False
-    assert cfg.semantic_kg_allowed_entity_types == ["person", "org", "location", "event", "concept"]
-    assert cfg.semantic_kg_allowed_relation_types == [
-        "associated_with",
-        "met_with",
-        "communicated_with",
-        "works_for",
-        "member_of",
-        "founded",
-        "owns",
-        "funded",
-        "participated_in",
-        "located_in",
-        "references",
-        "related_to",
-    ]
     assert cfg.semantic_kg_max_chunks == 40000
     assert cfg.semantic_kg_llm_timeout_s == 90
 

@@ -46,6 +46,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from server.db.postgres import PostgresClient
+from server.models.index import GraphGenerationMetadata
 from server.models.tribrid_config_model import TriBridConfig
 
 logger = logging.getLogger(__name__)
@@ -104,6 +105,10 @@ class GenerationManifest(BaseModel):
     )
     graph_repo_id: str | None = Field(
         default=None, description="repo_id under which the live Neo4j graph is stored."
+    )
+    graph_metadata: GraphGenerationMetadata | None = Field(
+        default=None,
+        description="Reviewed schema and graph build telemetry for this generation",
     )
     promoted_at: datetime = Field(description="When the manifest was committed.")
     retired: list[RetiredGeneration] = Field(
@@ -383,6 +388,7 @@ def build_generation(
     run_id: str,
     qdrant_collection: str | None,
     graph_repo_id: str | None,
+    graph_metadata: GraphGenerationMetadata | None = None,
     previous: GenerationManifest | None = None,
     now: datetime | None = None,
 ) -> GenerationManifest:
@@ -415,6 +421,7 @@ def build_generation(
         run_id=str(run_id),
         qdrant_collection=live_collection,
         graph_repo_id=live_graph,
+        graph_metadata=graph_metadata,
         promoted_at=stamp,
         retired=_dedupe_retired(masked),
     )

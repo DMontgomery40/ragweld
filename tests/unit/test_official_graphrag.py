@@ -9,11 +9,9 @@ from server.indexing.official_graphrag import (
     GRAPH_RAG_FROM_CHUNK,
     _count_semantic_edges,
     _lexical_graph_config,
-    _schema,
     write_lexical_graph_with_graphrag,
 )
 from server.models.index import Chunk
-from server.models.tribrid_config_model import TriBridConfig
 
 
 @pytest.mark.asyncio
@@ -86,23 +84,3 @@ def test_count_semantic_edges_counts_entities_relations_and_empty_chunks() -> No
     assert entity_count == 2
     assert relationship_count == 1
     assert empty_chunks == 1
-
-
-def test_schema_uses_configured_entity_and_relation_types() -> None:
-    cfg = TriBridConfig.model_validate(
-        {
-            "graph_indexing": {
-                "semantic_kg_allowed_entity_types": ["person", "event"],
-                "semantic_kg_allowed_relation_types": ["met_with", "participated_in"],
-            }
-        }
-    )
-
-    schema = _schema(
-        allowed_entity_types=tuple(cfg.graph_indexing.semantic_kg_allowed_entity_types),
-        allowed_relation_types=tuple(cfg.graph_indexing.semantic_kg_allowed_relation_types),
-    )
-
-    assert [node.label for node in schema.node_types] == ["person", "event"]
-    assert [rel.label for rel in schema.relationship_types] == ["met_with", "participated_in"]
-    assert all(pattern.relationship in {"met_with", "participated_in"} for pattern in schema.patterns)

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import AliasChoices, BaseModel, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 ExtractionMethod = Literal["docling", "direct"]
 DocumentKind = Literal["text", "pdf", "rich"]
@@ -117,6 +119,100 @@ class Chunk(BaseModel):
     )
 
 
+class GraphSchemaSample(BaseModel):
+    recipe: Literal["documents-and-positions-v1"] = "documents-and-positions-v1"
+    seed: int = 0
+    chunk_ids: list[str]
+    chunk_hashes: list[str]
+
+    @model_validator(mode="after")
+    def _matching_rows(self) -> GraphSchemaSample:
+        if len(self.chunk_ids) != len(self.chunk_hashes):
+            raise ValueError("chunk_ids and chunk_hashes must have equal length")
+        if any(len(value) != 64 or any(ch not in "0123456789abcdef" for ch in value) for value in self.chunk_hashes):
+            raise ValueError("chunk_hashes must be lowercase SHA-256 hex")
+        return self
+
+
+class GraphSchemaProposal(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+    corpus_id: str
+    policy: Literal["semantic"]
+    input_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    schema_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    schema_payload: dict[str, Any] = Field(
+        validation_alias="schema", serialization_alias="schema"
+    )
+    sample: GraphSchemaSample
+    model_alias: str
+    graphrag_version: Literal["1.19.0"] = "1.19.0"
+    created_at: datetime
+
+    @model_validator(mode="after")
+    def _schema_hash_matches(self) -> GraphSchemaProposal:
+        encoded = json.dumps(
+            self.schema_payload, sort_keys=True, separators=(",", ":")
+        ).encode()
+        expected = hashlib.sha256(encoded).hexdigest()
+        if self.schema_hash != expected:
+            raise ValueError("schema_hash does not match canonical schema JSON")
+        return self
+
+
+class GraphSchemaProposalRequest(BaseModel):
+    force_refresh: bool = False
+
+
+class GraphExtractionTelemetry(BaseModel):
+    selected_chunks: int = Field(ge=0)
+    attempted_chunks: int = Field(ge=0)
+    succeeded_chunks: int = Field(ge=0)
+    failed_chunks: int = Field(ge=0)
+    truncated_chunks: int = Field(ge=0)
+    extracted_entities: int = Field(ge=0)
+    semantic_relationships: int = Field(ge=0)
+    from_chunk_relationships: int = Field(ge=0)
+
+
+class GraphResolutionTelemetry(BaseModel):
+    candidate_nodes: int = Field(ge=0)
+    resolved_nodes: int = Field(ge=0)
+    merged_nodes: int = Field(ge=0)
+    unresolved_duplicate_groups: int = Field(ge=0)
+
+
+class GraphCommunityTelemetry(BaseModel):
+    algorithm: Literal["gds-leiden-2.13"] = "gds-leiden-2.13"
+    community_count: int = Field(ge=0)
+    levels: int = Field(ge=0)
+    modularity: float
+    did_converge: bool
+    nodes_written: int = Field(ge=0)
+
+
+class GraphPromotionOverride(BaseModel):
+    actor: str = Field(min_length=1)
+    reason: str = Field(min_length=20)
+    created_at: datetime
+    failure_codes: list[Literal["zero_entities", "zero_semantic_relationships"]]
+
+
+class GraphGenerationMetadata(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+    policy: Literal["semantic", "code"]
+    schema_hash: str | None = None
+    schema_payload: dict[str, Any] | None = Field(
+        default=None, validation_alias="schema", serialization_alias="schema"
+    )
+    extraction: GraphExtractionTelemetry
+    resolution: GraphResolutionTelemetry
+    communities: GraphCommunityTelemetry | None = None
+    override: GraphPromotionOverride | None = None
+    partial: bool = False
+
+
 class IndexRequest(BaseModel):
     """Request to index a repository."""
 
@@ -127,6 +223,16 @@ class IndexRequest(BaseModel):
     )
     repo_path: str = Field(description="Path to repository on disk")
     force_reindex: bool = Field(default=False, description="Force full reindex even if up-to-date")
+    approved_graph_schema_hash: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+        description="Exact reviewed graph schema hash required for semantic indexing",
+    )
+    graph_empty_override_reason: str | None = Field(
+        default=None,
+        min_length=20,
+        description="Audited sparse-graph override reason; accepted only for eligible invariant failures",
+    )
 
 
 class IndexStatus(BaseModel):
@@ -494,6 +600,15 @@ class FigureRouteConflictDetail(BaseModel):
     operator_hint: str = Field(description="What the operator can do next")
 
 
+class GraphSchemaPolicyConflictDetail(BaseModel):
+    """Public 409 detail when schema proposal is not valid for the corpus graph policy."""
+
+    code: Literal["graph_schema_policy_not_semantic"] = "graph_schema_policy_not_semantic"
+    policy: Literal["semantic", "code", "off", "excluded"]
+    message: str
+    operator_hint: str
+
+
 class PersistedStateCorruptDetail(BaseModel):
     """Public error detail (HTTP 409) when a corpus's persisted index state does not validate."""
 
@@ -512,6 +627,10 @@ class FigureRouteConflictResponse(BaseModel):
     """FastAPI response envelope for an unusable figure vision alias (HTTP 409)."""
 
     detail: FigureRouteConflictDetail
+
+
+class GraphSchemaPolicyConflictResponse(BaseModel):
+    detail: GraphSchemaPolicyConflictDetail
 
 
 class PersistedStateCorruptResponse(BaseModel):
@@ -663,6 +782,16 @@ __all__ = [
     "IndexEstimate",
     "FigureRouteConflictDetail",
     "FigureRouteConflictResponse",
+    "GraphCommunityTelemetry",
+    "GraphExtractionTelemetry",
+    "GraphGenerationMetadata",
+    "GraphPromotionOverride",
+    "GraphResolutionTelemetry",
+    "GraphSchemaPolicyConflictDetail",
+    "GraphSchemaPolicyConflictResponse",
+    "GraphSchemaProposal",
+    "GraphSchemaProposalRequest",
+    "GraphSchemaSample",
     "IndexFenceCorruptDetail",
     "IndexRequest",
     "IndexRunConflictDetail",

@@ -36,6 +36,7 @@ import { NumberField } from '@/components/ui/NumberField';
 import type {
   ChatModelInfo,
   ChatModelsResponse,
+  GraphSchemaProposal,
   IndexRequest,
   IndexRunEvent,
   IndexRunEventPage,
@@ -260,6 +261,9 @@ export function IndexingSubtab() {
   // Only a measured estimate is ever stored: indexingApi.estimate cannot return anything
   // else, and the narrow type stops a future edit putting a warming payload in here.
   const [indexEstimate, setIndexEstimate] = useState<ReadyIndexEstimate | null>(null);
+  const [graphSchemaProposal, setGraphSchemaProposal] = useState<GraphSchemaProposal | null>(null);
+  const [graphSchemaLoading, setGraphSchemaLoading] = useState(false);
+  const [graphSchemaError, setGraphSchemaError] = useState<string | null>(null);
   const [estimateLoading, setEstimateLoading] = useState(false);
   const [estimateWarmup, setEstimateWarmup] = useState('');
 
@@ -548,7 +552,18 @@ export function IndexingSubtab() {
 
   useEffect(() => {
     setIndexEstimate(null);
-  }, [activeRepo, effectivePath]);
+    setGraphSchemaProposal(null);
+    setGraphSchemaError(null);
+  }, [
+    activeRepo,
+    buildCodeGraph,
+    effectivePath,
+    graphIndexingEnabled,
+    semanticKgLlmModel,
+    semanticKgMaxChunks,
+    semanticKgReasoningEffort,
+    semanticKgTimeoutS,
+  ]);
 
   useEffect(() => {
     activeRepoRef.current = String(activeRepo || '').trim();
@@ -783,8 +798,9 @@ export function IndexingSubtab() {
   const canIndex = useMemo(() => {
     const rid = String(activeRepo || '').trim();
     const pathOk = Boolean(effectivePath && effectivePath.trim());
-    return Boolean(rid && pathOk && !isIndexing && !indexBlockingReason);
-  }, [activeRepo, effectivePath, indexBlockingReason, isIndexing]);
+    const schemaReady = !semanticGraphActive || Boolean(graphSchemaProposal);
+    return Boolean(rid && pathOk && schemaReady && !isIndexing && !indexBlockingReason);
+  }, [activeRepo, effectivePath, graphSchemaProposal, indexBlockingReason, isIndexing, semanticGraphActive]);
 
   const refreshStatus = useCallback(async () => {
     const rid = String(activeRepo || '').trim();
@@ -1037,6 +1053,31 @@ export function IndexingSubtab() {
     }
   }, [activeRepo, loadLatestRunReplay, loadStats, refreshStatus, stopIndex]);
 
+  const handleGenerateGraphSchema = useCallback(async () => {
+    const rid = String(activeRepo || '').trim();
+    if (!rid || !semanticGraphActive) return;
+    setGraphSchemaLoading(true);
+    setGraphSchemaError(null);
+    try {
+      await flushPendingPatches();
+      const response = await fetch(api(`index/${encodeURIComponent(rid)}/graph-schema/proposal`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ force_refresh: false }),
+      });
+      if (!response.ok) {
+        const text = await response.text().catch(() => '');
+        throw new Error(text || `Schema proposal failed (${response.status})`);
+      }
+      setGraphSchemaProposal((await response.json()) as GraphSchemaProposal);
+    } catch (error) {
+      setGraphSchemaProposal(null);
+      setGraphSchemaError(errorDetail(error));
+    } finally {
+      setGraphSchemaLoading(false);
+    }
+  }, [activeRepo, api, flushPendingPatches, semanticGraphActive]);
+
   const handleStartIndex = useCallback(async () => {
     const rid = String(activeRepo || '').trim();
     if (!rid) {
@@ -1059,10 +1100,16 @@ export function IndexingSubtab() {
       // up-to-date settings when it loads scoped config for this index run.
       await flushPendingPatches();
 
+      if (semanticGraphActive && !graphSchemaProposal) {
+        setErrorBanner('Generate and review the current graph schema before semantic indexing.');
+        return;
+      }
+
       const body: IndexRequest = {
         corpus_id: rid,
         repo_path: effectivePath,
         force_reindex: Boolean(forceReindex),
+        approved_graph_schema_hash: graphSchemaProposal?.schema_hash ?? null,
       };
 
       setErrorBanner(null);
@@ -1261,6 +1308,7 @@ export function IndexingSubtab() {
     flushPendingPatches,
     forceReindex,
     graphIndexingEnabled,
+    graphSchemaProposal,
     hasIndexedCorpus,
     loadLatestRunReplay,
     loadStats,
@@ -1268,6 +1316,7 @@ export function IndexingSubtab() {
     refreshStatus,
     skipDense,
     startAndStream,
+    semanticGraphActive,
   ]);
 
   const handleDeleteIndex = useCallback(async () => {
@@ -3345,6 +3394,131 @@ export function IndexingSubtab() {
                       />
                     </div>
                   </div>
+                  <div
+                    style={{
+                      marginTop: 14,
+                      paddingTop: 14,
+                      borderTop: '1px solid var(--line)',
+                      display: 'grid',
+                      gap: 10,
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        data-testid="generate-graph-schema"
+                        onClick={() => void handleGenerateGraphSchema()}
+                        disabled={graphSchemaLoading}
+                        aria-busy={graphSchemaLoading}
+                        style={{
+                          padding: '8px 14px',
+                          border: '1px solid var(--accent)',
+                          borderRadius: 7,
+                          background: graphSchemaLoading ? 'var(--bg-elev2)' : 'rgba(var(--accent-rgb), 0.12)',
+                          color: graphSchemaLoading ? 'var(--fg-muted)' : 'var(--accent-text)',
+                          cursor: graphSchemaLoading ? 'wait' : 'pointer',
+                          fontWeight: 750,
+                        }}
+                      >
+                        {graphSchemaLoading
+                          ? 'Generating proposed schema…'
+                          : graphSchemaProposal
+                            ? 'Regenerate proposed schema'
+                            : 'Generate proposed schema'}
+                      </button>
+                      <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
+                        Samples documents deterministically; bulk extraction starts only after approval.
+                      </span>
+                    </div>
+
+                    {graphSchemaError ? (
+                      <div data-testid="graph-schema-error" role="alert" style={{ color: 'var(--err)', fontSize: 12 }}>
+                        {graphSchemaError}
+                      </div>
+                    ) : null}
+
+                    {graphSchemaProposal ? (
+                      <div
+                        data-testid="graph-schema-proposal"
+                        style={{
+                          padding: 12,
+                          border: '1px solid rgba(var(--accent-rgb), 0.45)',
+                          borderRadius: 7,
+                          background: 'var(--bg)',
+                          display: 'grid',
+                          gap: 9,
+                          fontSize: 11,
+                        }}
+                      >
+                        <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--fg)' }}>
+                          Proposed closed-world graph contract
+                        </div>
+                        <div style={{ display: 'grid', gap: 3, color: 'var(--fg-muted)' }}>
+                          <span>Model: <strong style={{ color: 'var(--fg)' }}>{graphSchemaProposal.model_alias}</strong></span>
+                          <span>Neo4j GraphRAG: {graphSchemaProposal.graphrag_version}</span>
+                          <span>
+                            Schema hash:{' '}
+                            <code data-testid="graph-schema-hash" style={{ overflowWrap: 'anywhere', color: 'var(--fg)' }}>
+                              {graphSchemaProposal.schema_hash}
+                            </code>
+                          </span>
+                          <span>Sample recipe: {graphSchemaProposal.sample.recipe}</span>
+                          <span>
+                            Estimated bulk cost:{' '}
+                            {indexEstimate?.semantic_kg_cost_usd == null
+                              ? 'measured before the final approval; indexing cannot start without that estimate'
+                              : formatCurrency(Number(indexEstimate.semantic_kg_cost_usd))}
+                          </span>
+                        </div>
+                        {[
+                          ['Node types & properties', 'node_types'],
+                          ['Relationships', 'relationship_types'],
+                          ['Directed patterns', 'patterns'],
+                          ['Constraints', 'constraints'],
+                        ].map(([label, key]) => (
+                          <details key={key} data-testid={`graph-schema-${key.replace(/_/g, '-')}`}>
+                            <summary style={{ cursor: 'pointer', fontWeight: 750, color: 'var(--fg)' }}>{label}</summary>
+                            <pre
+                              style={{
+                                margin: '7px 0 0',
+                                padding: 8,
+                                maxHeight: 220,
+                                overflow: 'auto',
+                                borderRadius: 5,
+                                background: 'var(--bg-elev2)',
+                                color: 'var(--fg-muted)',
+                                whiteSpace: 'pre-wrap',
+                                overflowWrap: 'anywhere',
+                              }}
+                            >
+                              {JSON.stringify(
+                                (graphSchemaProposal.schema as Record<string, unknown>)[key] ?? [],
+                                null,
+                                2
+                              )}
+                            </pre>
+                          </details>
+                        ))}
+                        <details data-testid="graph-schema-sample">
+                          <summary style={{ cursor: 'pointer', fontWeight: 750, color: 'var(--fg)' }}>
+                            Sample documents & positions ({graphSchemaProposal.sample.chunk_ids.length} chunks)
+                          </summary>
+                          <ol style={{ margin: '7px 0 0', paddingLeft: 24, color: 'var(--fg-muted)' }}>
+                            {graphSchemaProposal.sample.chunk_ids.map((chunkId, index) => (
+                              <li key={`${chunkId}:${index}`} style={{ marginBottom: 4, overflowWrap: 'anywhere' }}>
+                                <code>{chunkId}</code>
+                                <span> · SHA-256 {graphSchemaProposal.sample.chunk_hashes[index]}</span>
+                              </li>
+                            ))}
+                          </ol>
+                        </details>
+                        <div style={{ color: 'var(--warn)', lineHeight: 1.45 }}>
+                          Approval is bound to this exact schema hash, model, GraphRAG version, and source fingerprint.
+                          Changing any of them invalidates this review.
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
               ) : null}
 
@@ -3782,24 +3956,32 @@ export function IndexingSubtab() {
               <button
                 onClick={handleStartIndex}
                 data-testid="index-now-button"
-                disabled={!canIndex || estimateLoading}
-                aria-busy={estimateLoading}
+                disabled={!canIndex || estimateLoading || graphSchemaLoading}
+                aria-busy={estimateLoading || graphSchemaLoading}
                 style={{
                   padding: '12px 32px',
                   fontSize: '14px',
                   fontWeight: 800,
-                  background: canIndex && !estimateLoading ? 'var(--accent)' : 'var(--bg-elev2)',
-                  color: canIndex && !estimateLoading ? 'var(--accent-contrast)' : 'var(--fg-muted)',
+                  background: canIndex && !estimateLoading && !graphSchemaLoading ? 'var(--accent)' : 'var(--bg-elev2)',
+                  color: canIndex && !estimateLoading && !graphSchemaLoading ? 'var(--accent-contrast)' : 'var(--fg-muted)',
                   border: 'none',
                   borderRadius: '8px',
-                  cursor: canIndex && !estimateLoading ? 'pointer' : 'not-allowed',
+                  cursor: canIndex && !estimateLoading && !graphSchemaLoading ? 'pointer' : 'not-allowed',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '8px',
                 }}
               >
                 <span>🚀</span>
-                {estimateWarmup ? 'Preparing…' : estimateLoading ? 'Estimating…' : 'Index Now'}
+                {estimateWarmup
+                  ? 'Preparing…'
+                  : estimateLoading
+                    ? 'Estimating…'
+                    : semanticGraphActive
+                      ? graphSchemaProposal
+                        ? 'Approve schema & index'
+                        : 'Generate schema first'
+                      : 'Index Now'}
               </button>
               <label
                 data-testid="force-reindex-toggle"

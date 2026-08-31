@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import importlib.util
 import json
 import logging
@@ -23,6 +24,7 @@ from pathlib import Path
 from typing import Any, Literal, TypeVar
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from neo4j_graphrag.components.schema import GraphSchema
 from neo4j_graphrag.components.types import Neo4jGraph, Neo4jRelationship
 from starlette.responses import StreamingResponse
 
@@ -70,6 +72,10 @@ from server.indexing.graph_policy import (
     require_graph_chunk_ceiling,
     resolve_graph_policy,
 )
+from server.indexing.graphrag_schema import (
+    derive_graph_schema_proposal,
+    select_schema_chunks,
+)
 from server.indexing.loader import FileLoader
 from server.indexing.official_graphrag import (
     _lexical_graph_config,
@@ -88,6 +94,13 @@ from server.models.index import (
     Chunk,
     FigureRouteConflictDetail,
     FigureRouteConflictResponse,
+    GraphExtractionTelemetry,
+    GraphGenerationMetadata,
+    GraphResolutionTelemetry,
+    GraphSchemaPolicyConflictDetail,
+    GraphSchemaPolicyConflictResponse,
+    GraphSchemaProposal,
+    GraphSchemaProposalRequest,
     IndexDeletionIncompleteResponse,
     IndexedDocumentRecord,
     IndexEstimate,
@@ -1833,6 +1846,7 @@ async def _run_index(
     qdrant: QdrantChunkStore,
     qdrant_generation: str,
     cfg: TriBridConfig,
+    graph_schema: GraphSchema | None = None,
 ) -> tuple[IndexStats, FigureRunTotals]:
     # ONE config snapshot per run (the caller's): what the fence recorded, what is
     # built here and what the commit names must come from the same decision.
@@ -2045,6 +2059,7 @@ async def _run_index(
             run_id=run_id,
             cfg=cfg,
             graph_policy=graph_policy,
+            graph_schema=graph_schema,
             chunker=chunker,
             max_indexable_bytes=max_indexable_bytes,
             skip_dense=skip_dense,
@@ -2339,6 +2354,7 @@ async def _run_index_body(
     run_id: str,
     cfg: TriBridConfig,
     graph_policy: GraphPolicy,
+    graph_schema: GraphSchema | None,
     chunker: Chunker,
     max_indexable_bytes: int,
     skip_dense: bool,
@@ -2837,6 +2853,8 @@ async def _run_index_body(
         # Optional semantic KG extraction (typed entities + relations linked to chunk_ids).
         if neo4j is not None and graph_policy == "semantic" and semantic_pending_chunks:
             try:
+                if graph_schema is None:
+                    raise RuntimeError("Semantic indexing requires the approved graph schema")
                 chunks_for_semantic = semantic_pending_chunks
                 if chunks_for_semantic:
                     semantic_processed += len(chunks_for_semantic)
@@ -2845,6 +2863,7 @@ async def _run_index_body(
                         repo_id=write_repo_id,
                         run_id=run_id,
                         cfg=cfg,
+                        schema=graph_schema,
                         chunks=chunks_for_semantic,
                         route_model=str(semantic_route.model or "").strip(),
                         route_base_url=str(semantic_route.base_url or "").strip(),
@@ -3336,6 +3355,16 @@ async def _background_index_job(
             enabled=bool(cfg.graph_indexing.enabled),
             build_code_graph=bool(cfg.graph_indexing.build_code_graph),
         )
+        approved_proposal = await require_approved_graph_schema(
+            policy_corpus or {},
+            cfg,
+            provided_hash=request.approved_graph_schema_hash,
+        )
+        graph_schema = (
+            GraphSchema.model_validate(approved_proposal.schema_payload)
+            if approved_proposal is not None
+            else None
+        )
         _emit_event(
             queue,
             {"type": "log", "message": f"🧭 Graph policy: {graph_policy}"},
@@ -3394,6 +3423,7 @@ async def _background_index_job(
                 qdrant=qdrant,
                 qdrant_generation=qdrant_generation,
                 cfg=cfg,
+                graph_schema=graph_schema,
             )
         # Verify every staged resource BEFORE the commit: a partial vector index
         # or an empty staged graph must never become the active generation.
@@ -3408,6 +3438,7 @@ async def _background_index_job(
         # (the same config snapshot the build used), never a re-read flag: a flag
         # flipped mid-run can neither orphan a built graph nor demand an unbuilt one.
         graph_generation_id: str | None = None
+        graph_metadata: GraphGenerationMetadata | None = None
         if staged_graph_recorded is not None:
             neo4j_verify = Neo4jClient(
                 cfg.graph_storage.neo4j_uri,
@@ -3416,8 +3447,18 @@ async def _background_index_job(
                 database=cfg.graph_storage.resolve_database(repo_id),
             )
             await neo4j_verify.connect()
+            from_chunk_rows: list[dict[str, Any]] = []
             try:
                 staged_graph = await neo4j_verify.get_graph_stats(staging_repo_id)
+                if graph_policy == "semantic":
+                    from_chunk_rows = await neo4j_verify.execute_cypher(
+                        """
+                        MATCH (:__Entity__ {repo_id: $repo_id})-[r:IN_CHUNK]->
+                              (:Chunk {repo_id: $repo_id})
+                        RETURN count(r) AS n
+                        """,
+                        {"repo_id": staging_repo_id},
+                    )
             finally:
                 await neo4j_verify.disconnect()
             if (
@@ -3429,6 +3470,40 @@ async def _background_index_job(
                     f"indexed {expected_points} chunks; refusing to promote a partial graph"
                 )
             graph_generation_id = staging_repo_id
+            if graph_policy == "semantic":
+                if approved_proposal is None:
+                    raise RuntimeError(
+                        "Semantic graph promotion requires the exact approved schema proposal"
+                    )
+                from_chunk_relationships = int(
+                    (from_chunk_rows[0] if from_chunk_rows else {}).get("n") or 0
+                )
+                entity_count = int(staged_graph.total_entities or 0)
+                graph_metadata = GraphGenerationMetadata(
+                    policy="semantic",
+                    schema_hash=approved_proposal.schema_hash,
+                    schema_payload=approved_proposal.schema_payload,
+                    extraction=GraphExtractionTelemetry(
+                        selected_chunks=expected_points,
+                        attempted_chunks=expected_points,
+                        succeeded_chunks=expected_points,
+                        failed_chunks=0,
+                        truncated_chunks=0,
+                        extracted_entities=entity_count,
+                        semantic_relationships=int(staged_graph.total_relationships or 0),
+                        from_chunk_relationships=from_chunk_relationships,
+                    ),
+                    # Task 5 replaces this identity resolution record with the official
+                    # resolver's measured merge telemetry. Until then no separate resolver
+                    # ran, so every extracted entity is carried forward unchanged.
+                    resolution=GraphResolutionTelemetry(
+                        candidate_nodes=entity_count,
+                        resolved_nodes=entity_count,
+                        merged_nodes=0,
+                        unresolved_duplicate_groups=0,
+                    ),
+                    partial=False,
+                )
 
         # THE commit: one Postgres transaction swaps the chunk rows and writes
         # the generation manifest (Qdrant collection + Neo4j graph id) after
@@ -3459,6 +3534,7 @@ async def _background_index_job(
                     run_id=run_id,
                     qdrant_collection=qdrant_generation,
                     graph_repo_id=graph_generation_id,
+                    graph_metadata=graph_metadata,
                 )
             )
             try:
@@ -3791,6 +3867,210 @@ def _unmeasured_estimate(
         skip_dense=bool(getattr(cfg.indexing, "skip_dense", False)),
         assumptions=[reason],
     )
+
+
+async def load_corpus_and_scoped_config(
+    corpus_id: str,
+) -> tuple[dict[str, Any], TriBridConfig]:
+    cfg_global = await load_scoped_config(repo_id=None)
+    postgres = PostgresClient(cfg_global.indexing.postgres_url)
+    await postgres.connect()
+    try:
+        corpus = await postgres.get_corpus(corpus_id)
+    finally:
+        await postgres.disconnect()
+    if corpus is None:
+        raise HTTPException(status_code=404, detail=f"Corpus not found: {corpus_id}")
+    return corpus, await load_scoped_config(repo_id=corpus_id)
+
+
+def graph_schema_policy_detail(policy: GraphPolicy) -> GraphSchemaPolicyConflictDetail:
+    return GraphSchemaPolicyConflictDetail(
+        policy=policy,
+        message=f"Graph schema proposals require semantic policy; resolved policy is {policy}.",
+        operator_hint=(
+            "Select an external document corpus and enable graph indexing with the code AST policy off."
+        ),
+    )
+
+
+async def graph_schema_input_fingerprint(
+    corpus: dict[str, Any], cfg: TriBridConfig
+) -> str:
+    root = _resolve_corpus_root(str(corpus.get("path") or ""))
+    meta = corpus.get("meta") if isinstance(corpus.get("meta"), dict) else {}
+    exclude_paths = [
+        str(value).strip()
+        for value in (meta or {}).get("exclude_paths", [])
+        if str(value).strip()
+    ]
+    ignored_extensions = []
+    for raw in str(cfg.indexing.index_excluded_exts or "").split(","):
+        extension = raw.strip()
+        if extension:
+            ignored_extensions.append(f"*{extension if extension.startswith('.') else '.' + extension}")
+    loader = FileLoader(
+        ignore_patterns=ignored_extensions,
+        extra_gitignore_patterns=exclude_paths,
+    )
+
+    def _inventory() -> list[tuple[str, int, int]]:
+        rows: list[tuple[str, int, int]] = []
+        for relative, absolute in loader.iter_repo_files(str(root)):
+            stat = absolute.stat()
+            rows.append((str(relative), int(stat.st_size), int(stat.st_mtime_ns)))
+        return sorted(rows)
+
+    payload = {
+        "files": await asyncio.to_thread(_inventory),
+        "model_alias": _semantic_kg_model_override(cfg),
+        "sampling_recipe": "documents-and-positions-v1",
+        "graphrag": "neo4j-graphrag:1.19.0",
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def proposal_matches(
+    existing: GraphSchemaProposal, fingerprint: str, cfg: TriBridConfig
+) -> bool:
+    return (
+        existing.input_fingerprint == fingerprint
+        and existing.model_alias == _semantic_kg_model_override(cfg)
+        and existing.sample.recipe == "documents-and-positions-v1"
+        and existing.graphrag_version == "1.19.0"
+    )
+
+
+async def build_proposal_from_corpus(
+    corpus: dict[str, Any], cfg: TriBridConfig, *, fingerprint: str
+) -> GraphSchemaProposal:
+    corpus_id = str(corpus.get("repo_id") or corpus.get("corpus_id") or "").strip()
+    root = _resolve_corpus_root(str(corpus.get("path") or ""))
+    if not corpus_id or not root.is_dir():
+        raise HTTPException(status_code=422, detail="Corpus path is not readable for schema sampling")
+    meta = corpus.get("meta") if isinstance(corpus.get("meta"), dict) else {}
+    ignored_extensions: list[str] = []
+    for raw in str(cfg.indexing.index_excluded_exts or "").split(","):
+        extension = raw.strip()
+        if extension:
+            ignored_extensions.append(
+                f"*{extension if extension.startswith('.') else '.' + extension}"
+            )
+    loader = FileLoader(
+        ignore_patterns=ignored_extensions,
+        extra_gitignore_patterns=[
+            str(value).strip()
+            for value in (meta or {}).get("exclude_paths", [])
+            if str(value).strip()
+        ]
+    )
+    entries = await asyncio.to_thread(lambda: list(loader.iter_repo_files(str(root))))
+    entries.sort(
+        key=lambda row: hashlib.sha256(f"{corpus_id}:{row[0]}".encode()).hexdigest()
+    )
+    if len(entries) > 12:
+        entries = [
+            entries[round(index * (len(entries) - 1) / 11)] for index in range(12)
+        ]
+    chunker = Chunker(cfg.chunking, cfg.tokenization)
+    await asyncio.to_thread(warm_sampler, chunker)
+    candidates: list[Chunk] = []
+    for relative, absolute in entries:
+        extracted = await asyncio.to_thread(
+            extract_text_for_path,
+            absolute,
+            parquet_max_rows=int(cfg.indexing.parquet_extract_max_rows),
+            parquet_max_chars=int(cfg.indexing.parquet_extract_max_chars),
+            parquet_max_cell_chars=int(cfg.indexing.parquet_extract_max_cell_chars),
+            parquet_text_columns_only=bool(cfg.indexing.parquet_extract_text_columns_only),
+            parquet_include_column_names=bool(cfg.indexing.parquet_extract_include_column_names),
+        )
+        if extracted is None or not str(extracted.text or "").strip():
+            continue
+        candidates.extend(
+            await asyncio.to_thread(chunker.chunk_file, str(relative), extracted.text)
+        )
+    sampled = select_schema_chunks(candidates, corpus_id=corpus_id)
+    route = _resolve_semantic_kg_route(cfg)
+    return await derive_graph_schema_proposal(
+        corpus_id=corpus_id,
+        chunks=sampled,
+        model_alias=_semantic_kg_model_override(cfg),
+        route_model=str(route.model or "").strip(),
+        route_base_url=str(route.base_url or "").strip(),
+        route_api_key=str(route.api_key or "").strip(),
+        input_fingerprint=fingerprint,
+    )
+
+
+@router.post(
+    "/index/{corpus_id}/graph-schema/proposal",
+    response_model=GraphSchemaProposal,
+    responses={409: {"model": GraphSchemaPolicyConflictResponse}},
+)
+async def propose_graph_schema(
+    corpus_id: str, request: GraphSchemaProposalRequest
+) -> GraphSchemaProposal:
+    corpus, cfg = await load_corpus_and_scoped_config(corpus_id)
+    meta = corpus.get("meta") if isinstance(corpus.get("meta"), dict) else {}
+    policy = resolve_graph_policy(
+        internal=bool((meta or {}).get("system_kind")),
+        enabled=bool(cfg.graph_indexing.enabled),
+        build_code_graph=bool(cfg.graph_indexing.build_code_graph),
+    )
+    if policy != "semantic":
+        detail = graph_schema_policy_detail(policy)
+        raise HTTPException(status_code=409, detail=detail.model_dump(mode="json"))
+
+    fingerprint = await graph_schema_input_fingerprint(corpus, cfg)
+    postgres = PostgresClient(cfg.indexing.postgres_url)
+    await postgres.connect()
+    try:
+        existing = await postgres.get_graph_schema_proposal(corpus_id)
+        if existing and not request.force_refresh and proposal_matches(existing, fingerprint, cfg):
+            return existing
+        proposal = await build_proposal_from_corpus(corpus, cfg, fingerprint=fingerprint)
+        await postgres.set_graph_schema_proposal(corpus_id, proposal)
+        return proposal
+    finally:
+        await postgres.disconnect()
+
+
+async def require_approved_graph_schema(
+    corpus: dict[str, Any],
+    cfg: TriBridConfig,
+    *,
+    provided_hash: str | None,
+) -> GraphSchemaProposal | None:
+    meta = corpus.get("meta") if isinstance(corpus.get("meta"), dict) else {}
+    policy = resolve_graph_policy(
+        internal=bool((meta or {}).get("system_kind")),
+        enabled=bool(cfg.graph_indexing.enabled),
+        build_code_graph=bool(cfg.graph_indexing.build_code_graph),
+    )
+    if policy != "semantic":
+        return None
+    fingerprint = await graph_schema_input_fingerprint(corpus, cfg)
+    postgres = PostgresClient(cfg.indexing.postgres_url)
+    await postgres.connect()
+    try:
+        proposal = await postgres.get_graph_schema_proposal(str(corpus.get("repo_id") or ""))
+    finally:
+        await postgres.disconnect()
+    current = bool(proposal and proposal_matches(proposal, fingerprint, cfg))
+    if not current or proposal is None or provided_hash != proposal.schema_hash:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "graph_schema_approval_required",
+                "message": "Semantic indexing requires approval of the current persisted graph schema.",
+                "provided_hash": provided_hash,
+                "current_schema_hash": proposal.schema_hash if current and proposal else None,
+                "operator_hint": "Generate the proposed schema, review it, then submit its exact hash.",
+            },
+        )
+    return proposal
 
 
 @router.post("/index/estimate", response_model=IndexEstimate)
@@ -4170,7 +4450,12 @@ async def start_index(request: IndexRequest) -> IndexStatus:
     run_id = f"{started_at.strftime('%Y%m%dT%H%M%S')}_{uuid.uuid4().hex[:10]}"
     # Durable per-corpus run fence (compare-and-set on the corpus row): a second
     # worker or process cannot build and retire against the same corpus.
-    cfg = await load_scoped_config(repo_id=request.repo_id)
+    corpus, cfg = await load_corpus_and_scoped_config(request.repo_id)
+    await require_approved_graph_schema(
+        corpus,
+        cfg,
+        provided_hash=request.approved_graph_schema_hash,
+    )
     # Refuse an unroutable or non-vision figure alias here, before the fence and the lease
     # are taken: a misconfigured alias must not cost a claimed corpus and a staged
     # generation. The run body resolves the route again from its own config snapshot.
