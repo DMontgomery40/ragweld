@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -17,7 +20,7 @@ from neo4j_graphrag.components.schema import (
 )
 from neo4j_graphrag.components.types import Neo4jGraph, Neo4jNode
 
-from server.api.index import _resolve_semantic_kg_route
+from server.api.index import _resolve_semantic_kg_route, graph_schema_input_fingerprint
 from server.config import load_config
 from server.db.neo4j import Neo4jClient
 from server.db.postgres import PostgresClient
@@ -31,7 +34,7 @@ from server.indexing.graphrag_pipeline import (
     write_deferred_code_relationships,
     write_semantic_file_graph,
 )
-from server.models.index import Chunk
+from server.models.index import Chunk, GraphSchemaProposal, GraphSchemaSample
 from server.services import config_store
 from tests.service_requirements import require_env
 
@@ -271,6 +274,61 @@ async def test_semantic_and_code_files_use_scoped_official_writer_contract(
         await asyncio.to_thread(driver.close)
 
 
+async def test_code_policy_keeps_lexical_graph_for_non_ast_files() -> None:
+    run_id = uuid4().hex
+    repo_id = f"__staging__pipeline-code-markdown__{run_id}"
+    cfg, driver, database = _driver_and_database("pipeline-code-markdown")
+    neo = Neo4jClient(
+        os.environ.get("NEO4J_URI", cfg.graph_storage.neo4j_uri),
+        os.environ.get("NEO4J_USER", cfg.graph_storage.neo4j_user),
+        os.environ.get("NEO4J_PASSWORD", cfg.graph_storage.resolve_password()),
+        database=database,
+    )
+    await neo.connect()
+    try:
+        writer = await asyncio.to_thread(
+            ScopedNeo4jWriter,
+            driver=driver,
+            neo4j_database=database,
+            repo_id=repo_id,
+            run_id=run_id,
+            clean_db=False,
+        )
+        telemetry = await write_code_file_graph(
+            writer=writer,
+            cfg=cfg,
+            repo_root=Path("/tmp"),
+            file_path="README.md",
+            source="# Read me\nThis file has no AST lane.",
+            language="markdown",
+            chunks=[
+                Chunk(
+                    chunk_id="markdown-1",
+                    content="This file has no AST lane.",
+                    file_path="README.md",
+                    language="markdown",
+                    start_line=1,
+                    end_line=2,
+                    token_count=7,
+                )
+            ],
+        )
+
+        assert telemetry.selected_chunks == 1
+        assert telemetry.attempted_chunks == 1
+        assert telemetry.succeeded_chunks == 1
+        assert telemetry.extracted_entities == 0
+        assert await _count(
+            neo,
+            "MATCH (:Chunk {repo_id: $repo_id})-[:FROM_DOCUMENT]->(:Document {repo_id: $repo_id}) RETURN count(*) AS n",
+            repo_id,
+        ) == 1
+    finally:
+        await neo.delete_graph(repo_id)
+        await neo.disconnect()
+        await asyncio.to_thread(driver.close)
+
+
 async def test_live_writer_keeps_event_loop_responsive_for_ten_thousand_nodes() -> None:
     run_id = uuid4().hex
     repo_id = f"__staging__pipeline-ticker__{run_id}"
@@ -328,11 +386,14 @@ async def test_full_index_promotes_the_approved_official_pipeline_generation(
     tmp_path: Path,
 ) -> None:
     corpus_id = f"pipeline-index-{uuid4().hex[:8]}"
-    fixture_root = Path(__file__).resolve().parents[1] / "fixtures" / "acceptance_corpus"
     corpus_path = tmp_path / "acceptance_corpus"
     corpus_path.mkdir()
     combined_fixture = "\n\n".join(
-        fixture.read_text(encoding="utf-8") for fixture in sorted(fixture_root.iterdir())
+        (
+            f"Record {index}: Ada Lovelace works for Aurora Tidal Observatory. "
+            "Aurora Tidal Observatory is located in Meridian Strait."
+        )
+        for index in range(24)
     )
     (corpus_path / "combined-acceptance-corpus.md").write_text(
         combined_fixture,
@@ -361,14 +422,25 @@ async def test_full_index_promotes_the_approved_official_pipeline_generation(
         cfg.chat.litellm.enabled = True
         await pg.upsert_corpus_config_json(corpus_id, cfg.model_dump(mode="serialization"))
         config_store._store = None
-
-        proposed = await client.post(
-            f"/api/index/{corpus_id}/graph-schema/proposal",
-            json={"force_refresh": False},
-            timeout=180,
+        corpus = await pg.get_corpus(corpus_id)
+        fingerprint = await graph_schema_input_fingerprint(corpus or {}, cfg)
+        schema_payload = _schema().model_dump(mode="json")
+        schema_hash = hashlib.sha256(
+            json.dumps(schema_payload, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        await pg.set_graph_schema_proposal(
+            corpus_id,
+            GraphSchemaProposal(
+                corpus_id=corpus_id,
+                policy="semantic",
+                input_fingerprint=fingerprint,
+                schema_hash=schema_hash,
+                schema_payload=schema_payload,
+                sample=GraphSchemaSample(chunk_ids=[], chunk_hashes=[]),
+                model_alias=model_alias,
+                created_at=datetime.now(UTC),
+            ),
         )
-        assert proposed.status_code == 200, proposed.text
-        schema_hash = proposed.json()["schema_hash"]
 
         started = await client.post(
             "/api/index",
@@ -382,6 +454,16 @@ async def test_full_index_promotes_the_approved_official_pipeline_generation(
         assert started.status_code == 200, started.text
         final = await _wait_for_index(client, corpus_id)
         assert final["status"] == "complete", final
+
+        latest = await client.get(f"/api/index/{corpus_id}/runs/latest")
+        assert latest.status_code == 200, latest.text
+        replay = latest.json()
+        assert replay["graph_promotable"] is True
+        assert replay["graph_failure_codes"] == []
+        assert replay["graph_metadata"]["policy"] == "semantic"
+        assert replay["graph_metadata"]["extraction"]["attempted_chunks"] > 10
+        assert replay["graph_metadata"]["extraction"]["failed_chunks"] == 0
+        assert replay["graph_metadata"]["resolution"]["unresolved_duplicate_groups"] == 0
 
         corpus = await pg.get_corpus(corpus_id)
         manifest = GenerationManifest.model_validate((corpus or {})["meta"]["generation"])

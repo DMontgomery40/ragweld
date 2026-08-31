@@ -7,7 +7,7 @@ import json
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 ExtractionMethod = Literal["docling", "direct"]
 DocumentKind = Literal["text", "pdf", "rich"]
@@ -234,6 +234,16 @@ class IndexRequest(BaseModel):
         description="Audited sparse-graph override reason; accepted only for eligible invariant failures",
     )
 
+    @field_validator("graph_empty_override_reason")
+    @classmethod
+    def _override_reason_has_visible_content(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        visible = value.strip()
+        if len(visible) < 20:
+            raise ValueError("graph_empty_override_reason requires 20 visible characters")
+        return visible
+
 
 class IndexStatus(BaseModel):
     """Current status of repository indexing."""
@@ -271,6 +281,18 @@ class IndexRunSummary(BaseModel):
         default=0.0, ge=0.0, le=1.0, description="Best-effort progress for this run"
     )
     error: str | None = Field(default=None, description="Error message when status='error'")
+    graph_metadata: GraphGenerationMetadata | None = Field(
+        default=None,
+        description="Graph extraction, resolution, community, and override telemetry for this run",
+    )
+    graph_failure_codes: list[str] = Field(
+        default_factory=list,
+        description="Typed graph promotion invariant failures observed before commit",
+    )
+    graph_promotable: bool | None = Field(
+        default=None,
+        description="Whether the staged graph passed promotion or an audited sparse override",
+    )
     total_files: int = Field(default=0, ge=0, description="Indexed file count for this run")
     total_chunks: int = Field(default=0, ge=0, description="Indexed chunk count for this run")
     total_tokens: int = Field(default=0, ge=0, description="Indexed token count for this run")

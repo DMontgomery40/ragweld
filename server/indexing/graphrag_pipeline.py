@@ -15,6 +15,7 @@ from neo4j_graphrag.components.entity_relation_extractor import (
 from neo4j_graphrag.components.graph_pruning import GraphPruning
 from neo4j_graphrag.components.kg_writer import KGWriterModel, Neo4jWriter
 from neo4j_graphrag.components.lexical_graph import LexicalGraphBuilder
+from neo4j_graphrag.components.resolver import SinglePropertyExactMatchResolver
 from neo4j_graphrag.components.schema import GraphSchema
 from neo4j_graphrag.components.types import (
     DocumentInfo,
@@ -28,7 +29,7 @@ from neo4j_graphrag.experimental.pipeline import Pipeline
 from neo4j_graphrag.llm import OpenAILLM
 
 from server.indexing.code_graph import CODE_GRAPH_LANGUAGES, extract_code_graph
-from server.models.index import Chunk
+from server.models.index import Chunk, GraphResolutionTelemetry
 from server.models.tribrid_config_model import TriBridConfig
 
 ResultT = TypeVar("ResultT")
@@ -168,6 +169,66 @@ async def run_async_component_off_event_loop(
     run: Callable[[], Coroutine[Any, Any, ResultT]],
 ) -> ResultT:
     return await asyncio.to_thread(run_component_coroutine_in_worker, run)
+
+
+def cypher_literal(value: str) -> str:
+    return "'" + str(value).replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+
+def _execute_query_rows(
+    driver: Driver,
+    query: str,
+    parameters: dict[str, Any],
+    database: str,
+) -> list[dict[str, Any]]:
+    records, _, _ = driver.execute_query(query, parameters_=parameters, database_=database)
+    return [dict(record) for record in records]
+
+
+async def resolve_staged_entities(
+    *,
+    driver: Driver,
+    neo4j_database: str,
+    repo_id: str,
+) -> GraphResolutionTelemetry:
+    scoped_repo_id = require_staging_graph_id(repo_id)
+    resolver = SinglePropertyExactMatchResolver(
+        driver=driver,
+        filter_query=f"WHERE entity.repo_id = {cypher_literal(scoped_repo_id)} ",
+        resolve_property="name",
+        neo4j_database=neo4j_database,
+    )
+    stats = await run_async_component_off_event_loop(resolver.run)
+    rows = await asyncio.to_thread(
+        _execute_query_rows,
+        driver,
+        """
+        MATCH (entity:__Entity__ {repo_id: $repo_id})
+        WITH count(entity) AS resolved_nodes
+        CALL () {
+            MATCH (entity:__Entity__ {repo_id: $repo_id})
+            WHERE entity.name IS NOT NULL
+            WITH entity.name AS name,
+                 apoc.coll.sort([label IN labels(entity)
+                    WHERE NOT label IN ['__Entity__', '__KGBuilder__']]) AS domain_labels,
+                 count(*) AS n
+            WHERE n > 1
+            RETURN count(*) AS duplicate_groups
+        }
+        RETURN resolved_nodes, duplicate_groups
+        """,
+        {"repo_id": scoped_repo_id},
+        neo4j_database,
+    )
+    row = rows[0] if rows else {}
+    candidates = int(stats.number_of_nodes_to_resolve or 0)
+    resolved = int(row.get("resolved_nodes") or 0)
+    return GraphResolutionTelemetry(
+        candidate_nodes=candidates,
+        resolved_nodes=resolved,
+        merged_nodes=max(0, candidates - resolved),
+        unresolved_duplicate_groups=int(row.get("duplicate_groups") or 0),
+    )
 
 
 class ScopedNeo4jWriter(Neo4jWriter):
@@ -364,28 +425,31 @@ async def write_code_file_graph(
     chunks: list[Chunk],
     deferred_relationships: list[Neo4jRelationship] | None = None,
 ) -> GraphFileTelemetry:
-    if str(language or "") not in CODE_GRAPH_LANGUAGES:
-        return GraphFileTelemetry(len(chunks), 0, 0, 0, 0, 0, 0, 0, 0)
     lexical = lexical_graph_config()
     lexical_result = await LexicalGraphBuilder(config=lexical).run(
         text_chunks=chunks_to_text_chunks(chunks),
         document_info=document_info(file_path),
     )
-    code = extract_code_graph(
-        repo_id=writer.repo_id,
-        run_id=writer.run_id,
-        file_path=file_path,
-        source=source,
-        language=language,
-        chunks=chunks,
-        cfg=cfg,
-        root=repo_root,
-    )
-    if deferred_relationships is not None:
-        deferred_relationships.extend(code.deferred_relationships)
+    code_nodes: list[Any] = []
+    code_relationships: list[Neo4jRelationship] = []
+    if str(language or "") in CODE_GRAPH_LANGUAGES:
+        code = extract_code_graph(
+            repo_id=writer.repo_id,
+            run_id=writer.run_id,
+            file_path=file_path,
+            source=source,
+            language=language,
+            chunks=chunks,
+            cfg=cfg,
+            root=repo_root,
+        )
+        code_nodes = list(code.graph.nodes)
+        code_relationships = list(code.graph.relationships)
+        if deferred_relationships is not None:
+            deferred_relationships.extend(code.deferred_relationships)
     combined = Neo4jGraph(
-        nodes=[*lexical_result.graph.nodes, *code.graph.nodes],
-        relationships=[*lexical_result.graph.relationships, *code.graph.relationships],
+        nodes=[*lexical_result.graph.nodes, *code_nodes],
+        relationships=[*lexical_result.graph.relationships, *code_relationships],
     )
     validate_no_reserved_scope_keys(combined, RESERVED_SCOPE_KEYS)
     await writer.run(combined, lexical)
@@ -422,10 +486,12 @@ __all__ = [
     "ScopedNeo4jWriter",
     "build_semantic_pipeline",
     "chunks_to_text_chunks",
+    "cypher_literal",
     "document_info",
     "lexical_graph_config",
     "require_run_id",
     "require_staging_graph_id",
+    "resolve_staged_entities",
     "run_async_component_off_event_loop",
     "run_component_coroutine_in_worker",
     "run_writer_coroutine_in_worker",

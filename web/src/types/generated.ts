@@ -1141,6 +1141,17 @@ export interface GraphExtractionTelemetry {
   from_chunk_relationships: number;
 }
 
+export interface GraphGenerationMetadata {
+  policy: "semantic" | "code";
+  schema_hash?: string | null; // default: None
+  schema?: Record<string, unknown> | null; // default: None
+  extraction: GraphExtractionTelemetry;
+  resolution: GraphResolutionTelemetry;
+  communities?: GraphCommunityTelemetry | null; // default: None
+  override?: GraphPromotionOverride | null; // default: None
+  partial?: boolean; // default: False
+}
+
 /** Configuration for building/persisting graph data during indexing. */
 export interface GraphIndexingConfig {
   /** Enable graph building during indexing (Neo4j) */
@@ -3986,17 +3997,6 @@ export interface GenerationUnavailableResponse {
   detail: GenerationUnavailableDetail;
 }
 
-export interface GraphGenerationMetadata {
-  policy: "semantic" | "code";
-  schema_hash?: string | null;
-  schema?: Record<string, unknown> | null;
-  extraction: GraphExtractionTelemetry;
-  resolution: GraphResolutionTelemetry;
-  communities?: GraphCommunityTelemetry | null;
-  override?: GraphPromotionOverride | null;
-  partial?: boolean;
-}
-
 /** A graph slice: entities plus the relationships induced among exactly those entities.  Used for an entity neighborhood, a community, and the whole-corpus/search view. ``total_matched`` is what the query found before ``limit`` was applied, so the UI can say "showing 200 of 5,179" instead of an undenominated "200 shown". */
 export interface GraphNeighborsResponse {
   /** Entities in the neighborhood (includes the center entity) */
@@ -4167,6 +4167,12 @@ export interface IndexRunSummary {
   progress?: number;
   /** Error message when status='error' */
   error?: string | null;
+  /** Graph extraction, resolution, community, and override telemetry for this run */
+  graph_metadata?: GraphGenerationMetadata | null;
+  /** Typed graph promotion invariant failures observed before commit */
+  graph_failure_codes?: string[];
+  /** Whether the staged graph passed promotion or an audited sparse override */
+  graph_promotable?: boolean | null;
   /** Indexed file count for this run */
   total_files?: number;
   /** Indexed chunk count for this run */

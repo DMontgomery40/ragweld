@@ -264,6 +264,7 @@ export function IndexingSubtab() {
   const [graphSchemaProposal, setGraphSchemaProposal] = useState<GraphSchemaProposal | null>(null);
   const [graphSchemaLoading, setGraphSchemaLoading] = useState(false);
   const [graphSchemaError, setGraphSchemaError] = useState<string | null>(null);
+  const [graphOverrideReason, setGraphOverrideReason] = useState('');
   const [estimateLoading, setEstimateLoading] = useState(false);
   const [estimateWarmup, setEstimateWarmup] = useState('');
 
@@ -1078,8 +1079,9 @@ export function IndexingSubtab() {
     }
   }, [activeRepo, api, flushPendingPatches, semanticGraphActive]);
 
-  const handleStartIndex = useCallback(async () => {
+  const handleStartIndex = useCallback(async (requestedGraphOverrideReason?: string) => {
     const rid = String(activeRepo || '').trim();
+    const auditedOverrideReason = String(requestedGraphOverrideReason || '').trim();
     if (!rid) {
       setErrorBanner('No corpus is selected. Pick one in the corpus selector before indexing.');
       return;
@@ -1100,7 +1102,10 @@ export function IndexingSubtab() {
       // up-to-date settings when it loads scoped config for this index run.
       await flushPendingPatches();
 
-      if (semanticGraphActive && !graphSchemaProposal) {
+      const approvedSchemaHash =
+        graphSchemaProposal?.schema_hash ??
+        (auditedOverrideReason ? latestRun?.graph_metadata?.schema_hash ?? null : null);
+      if (semanticGraphActive && !approvedSchemaHash) {
         setErrorBanner('Generate and review the current graph schema before semantic indexing.');
         return;
       }
@@ -1109,7 +1114,8 @@ export function IndexingSubtab() {
         corpus_id: rid,
         repo_path: effectivePath,
         force_reindex: Boolean(forceReindex),
-        approved_graph_schema_hash: graphSchemaProposal?.schema_hash ?? null,
+        approved_graph_schema_hash: approvedSchemaHash,
+        graph_empty_override_reason: auditedOverrideReason || null,
       };
 
       setErrorBanner(null);
@@ -1222,6 +1228,13 @@ export function IndexingSubtab() {
           `Cost (est): ${cost} • Time (est): ${time}`,
           ...(costBreakdown ? [`Cost breakdown: ${costBreakdown}`] : []),
           ...(timeBreakdown ? [`Time breakdown (est): ${timeBreakdown}`] : []),
+          ...(auditedOverrideReason
+            ? [
+                'AUDITED ENTITY-SPARSE OVERRIDE: this retry may promote only the complete chunk/vector generation. Graph retrieval remains disabled.',
+                `Reason: ${auditedOverrideReason}`,
+                'The API accepts this only through an authenticated proxy Remote-User and only when the sole failures are zero entities/semantic relationships after complete extraction.',
+              ]
+            : []),
           // A run does not add to the live index, it replaces it: the new generation is
           // published on commit and the current one is retired.
           ...(hasIndexedCorpus
@@ -1234,9 +1247,10 @@ export function IndexingSubtab() {
         ].join('\n');
 
         const proceed = await confirmDialog({
-          title: 'Start indexing?',
+          title: auditedOverrideReason ? 'Retry with audited sparse-graph override?' : 'Start indexing?',
           message: msg,
-          confirmLabel: 'Start indexing',
+          confirmLabel: auditedOverrideReason ? 'Re-index without graph retrieval' : 'Start indexing',
+          danger: Boolean(auditedOverrideReason),
         });
         if (!proceed) {
           return;
@@ -1254,6 +1268,9 @@ export function IndexingSubtab() {
       terminalRef.current?.appendLine(`   Provider: ${String(embeddingType || '')}, Model: ${String(currentModel || '')}`);
       terminalRef.current?.appendLine(`   Chunk Size: ${chunkSize}, Strategy: ${chunkingStrategy}`);
       terminalRef.current?.appendLine(`   Graph indexing: ${graphIndexingEnabled ? 'enabled' : 'disabled'} • Skip dense: ${skipDense ? 'yes' : 'no'}`);
+      if (auditedOverrideReason) {
+        terminalRef.current?.appendLine(`   Audited sparse override requested: ${auditedOverrideReason}`);
+      }
 
       const st = await startAndStream(body, {
         terminalId: 'indexing_terminal',
@@ -1290,6 +1307,7 @@ export function IndexingSubtab() {
         },
       });
       setIndexStatus(st);
+      if (auditedOverrideReason) setGraphOverrideReason('');
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Indexing failed';
       setErrorBanner(msg);
@@ -1312,12 +1330,22 @@ export function IndexingSubtab() {
     hasIndexedCorpus,
     loadLatestRunReplay,
     loadStats,
+    latestRun,
     resetTerminal,
     refreshStatus,
     skipDense,
     startAndStream,
     semanticGraphActive,
   ]);
+
+  const handleSparseGraphOverride = useCallback(async () => {
+    const reason = graphOverrideReason.trim();
+    if (reason.length < 20) {
+      setErrorBanner('Explain the entity-sparse exception in at least 20 visible characters.');
+      return;
+    }
+    await handleStartIndex(reason);
+  }, [graphOverrideReason, handleStartIndex]);
 
   const handleDeleteIndex = useCallback(async () => {
     const rid = String(activeRepo || '').trim();
@@ -1353,6 +1381,24 @@ export function IndexingSubtab() {
       setErrorBanner(e instanceof Error ? e.message : 'Delete failed');
     }
   }, [activeRepo, api, loadStats, refreshStatus]);
+
+  const graphRunMetadata = latestRun?.graph_metadata ?? null;
+  const graphFailureCodes = Array.isArray(latestRun?.graph_failure_codes)
+    ? latestRun.graph_failure_codes
+    : [];
+  const graphOverrideEligible = Boolean(
+    latestRun?.status === 'error' &&
+      graphRunMetadata?.policy === 'semantic' &&
+      graphFailureCodes.length > 0 &&
+      graphFailureCodes.every(
+        (code) => code === 'zero_entities' || code === 'zero_semantic_relationships'
+      ) &&
+      graphRunMetadata.extraction.selected_chunks > 0 &&
+      graphRunMetadata.extraction.attempted_chunks === graphRunMetadata.extraction.selected_chunks &&
+      graphRunMetadata.extraction.succeeded_chunks === graphRunMetadata.extraction.selected_chunks &&
+      graphRunMetadata.extraction.failed_chunks === 0 &&
+      graphRunMetadata.extraction.truncated_chunks === 0
+  );
 
   // Avoid rendering “blank defaults” before config arrives
   if (!config) {
@@ -1472,6 +1518,154 @@ export function IndexingSubtab() {
               </span>
             ) : null}
           </div>
+
+
+          {graphRunMetadata && (
+            <div
+              data-testid="index-run-graph-telemetry"
+              style={{
+                marginTop: '10px',
+                padding: '10px 12px',
+                borderRadius: '8px',
+                border: `1px solid ${latestRun?.graph_promotable === false ? 'var(--error)' : 'var(--line)'}`,
+                background: latestRun?.graph_promotable === false ? 'rgba(var(--error-rgb), 0.08)' : 'var(--bg-elev2)',
+                fontSize: '12px',
+                color: 'var(--fg)',
+              }}
+            >
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '8px' }}>
+                <strong>Graph generation</strong>
+                <span data-testid="index-run-graph-policy">policy: {graphRunMetadata.policy}</span>
+                <span
+                  data-testid="index-run-graph-verdict"
+                  style={{
+                    fontWeight: 800,
+                    color:
+                      latestRun?.graph_promotable === false
+                        ? 'var(--error)'
+                        : latestRun?.graph_promotable == null
+                          ? 'var(--fg-muted)'
+                        : graphRunMetadata.partial
+                          ? 'var(--warn)'
+                          : 'var(--ok)',
+                  }}
+                >
+                  {latestRun?.graph_promotable === false
+                    ? 'PROMOTION REFUSED'
+                    : latestRun?.graph_promotable == null
+                      ? 'PROMOTION NOT EVALUATED'
+                    : graphRunMetadata.partial
+                      ? 'PARTIAL CHUNK-ONLY OVERRIDE'
+                      : 'PROMOTABLE'}
+                </span>
+              </div>
+              {graphRunMetadata.schema_hash ? (
+                <div style={{ marginBottom: '6px', color: 'var(--fg-muted)', fontFamily: 'var(--font-mono)', wordBreak: 'break-all' }}>
+                  schema: {graphRunMetadata.schema_hash}
+                </div>
+              ) : null}
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(185px, 1fr))',
+                  gap: '4px 14px',
+                }}
+              >
+                <span>
+                  Chunks: {formatNumber(graphRunMetadata.extraction.selected_chunks)} selected /{' '}
+                  {formatNumber(graphRunMetadata.extraction.attempted_chunks)} attempted /{' '}
+                  {formatNumber(graphRunMetadata.extraction.succeeded_chunks)} succeeded
+                </span>
+                <span>
+                  Extraction failures: {formatNumber(graphRunMetadata.extraction.failed_chunks)} failed /{' '}
+                  {formatNumber(graphRunMetadata.extraction.truncated_chunks)} truncated
+                </span>
+                <span>Entities extracted: {formatNumber(graphRunMetadata.extraction.extracted_entities)}</span>
+                <span>Entities resolved: {formatNumber(graphRunMetadata.resolution.resolved_nodes)}</span>
+                <span>Entities merged: {formatNumber(graphRunMetadata.resolution.merged_nodes)}</span>
+                <span>
+                  Semantic/AST relations: {formatNumber(graphRunMetadata.extraction.semantic_relationships)}
+                </span>
+                <span>
+                  Provenance links: {formatNumber(graphRunMetadata.extraction.from_chunk_relationships)}
+                </span>
+                <span>
+                  Duplicate groups: {formatNumber(graphRunMetadata.resolution.unresolved_duplicate_groups)}
+                </span>
+                <span>
+                  Communities:{' '}
+                  {graphRunMetadata.communities
+                    ? `${formatNumber(graphRunMetadata.communities.community_count)} (${graphRunMetadata.communities.algorithm})`
+                    : 'not run yet'}
+                </span>
+              </div>
+              {graphFailureCodes.length > 0 ? (
+                <div data-testid="index-run-graph-failure-codes" style={{ marginTop: '8px', color: 'var(--error)' }}>
+                  Failed invariants: {graphFailureCodes.join(', ')}
+                </div>
+              ) : null}
+              {graphRunMetadata.override ? (
+                <div data-testid="index-run-graph-override-audit" style={{ marginTop: '8px', color: 'var(--warn)' }}>
+                  Override by {graphRunMetadata.override.actor} at {new Date(graphRunMetadata.override.created_at).toLocaleString()}:
+                  {' '}{graphRunMetadata.override.reason}
+                </div>
+              ) : null}
+            </div>
+          )}
+
+          {graphOverrideEligible && (
+            <div
+              data-testid="index-run-graph-override"
+              style={{
+                marginTop: '10px',
+                padding: '10px 12px',
+                borderRadius: '8px',
+                border: '1px solid var(--warn)',
+                background: 'rgba(var(--warn-rgb), 0.08)',
+              }}
+            >
+              <div style={{ fontWeight: 700, fontSize: '12px', marginBottom: '6px' }}>
+                Authenticated entity-sparse retry
+              </div>
+              <div style={{ fontSize: '11.5px', color: 'var(--fg-muted)', marginBottom: '8px' }}>
+                Available only because the full approved extraction succeeded and found no graph. The retry promotes chunks and vectors only; graph retrieval stays disabled. The proxy identity, reason, timestamp, and telemetry are persisted.
+              </div>
+              <textarea
+                data-testid="index-run-graph-override-reason"
+                value={graphOverrideReason}
+                onChange={(event) => setGraphOverrideReason(event.target.value)}
+                placeholder="Explain why this reviewed corpus is intentionally entity sparse (minimum 20 characters)"
+                rows={3}
+                style={{
+                  width: '100%',
+                  boxSizing: 'border-box',
+                  borderRadius: '6px',
+                  border: '1px solid var(--line)',
+                  background: 'var(--input-bg, var(--card-bg))',
+                  color: 'var(--fg)',
+                  padding: '8px 10px',
+                  resize: 'vertical',
+                  marginBottom: '8px',
+                }}
+              />
+              <button
+                data-testid="index-run-graph-override-retry"
+                disabled={graphOverrideReason.trim().length < 20 || isIndexing}
+                onClick={() => void handleSparseGraphOverride()}
+                style={{
+                  padding: '7px 12px',
+                  borderRadius: '6px',
+                  border: '1px solid var(--warn)',
+                  background: 'transparent',
+                  color: 'var(--warn)',
+                  cursor: graphOverrideReason.trim().length >= 20 && !isIndexing ? 'pointer' : 'not-allowed',
+                  fontWeight: 700,
+                }}
+              >
+                Review override and re-index
+              </button>
+            </div>
+          )}
 
 
           {figureOutcomes.length > 0 && (
@@ -3954,7 +4148,7 @@ export function IndexingSubtab() {
           ) : (
             <>
               <button
-                onClick={handleStartIndex}
+                onClick={() => void handleStartIndex()}
                 data-testid="index-now-button"
                 disabled={!canIndex || estimateLoading || graphSchemaLoading}
                 aria-busy={estimateLoading || graphSchemaLoading}

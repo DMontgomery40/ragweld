@@ -1220,6 +1220,77 @@ class Neo4jClient:
             relationship_breakdown=rel_breakdown,
         )
 
+    async def get_graph_invariant_counts(self, repo_id: str, run_id: str) -> dict[str, int]:
+        rows = await self.execute_cypher(
+            """
+            CALL () {
+                MATCH (chunk:Chunk {repo_id: $repo_id})
+                RETURN count(chunk) AS total_chunks
+            }
+            CALL () {
+                MATCH (entity:__Entity__ {repo_id: $repo_id})
+                RETURN count(entity) AS total_entities
+            }
+            CALL () {
+                MATCH (:__Entity__ {repo_id: $repo_id})-[relationship]->
+                      (:__Entity__ {repo_id: $repo_id})
+                WHERE relationship.repo_id = $repo_id
+                RETURN count(relationship) AS semantic_relationships
+            }
+            CALL () {
+                MATCH (:__Entity__ {repo_id: $repo_id})-[relationship:FROM_CHUNK]->
+                      (chunk:Chunk {repo_id: $repo_id})
+                WHERE relationship.repo_id = $repo_id
+                RETURN count(relationship) AS from_chunk_relationships,
+                       count(DISTINCT chunk) AS linked_chunks
+            }
+            CALL () {
+                MATCH (entity:__Entity__ {repo_id: $repo_id})
+                WHERE entity.name IS NOT NULL
+                WITH entity.name AS name,
+                     apoc.coll.sort([label IN labels(entity)
+                        WHERE NOT label IN ['__Entity__', '__KGBuilder__']]) AS domain_labels,
+                     count(*) AS n
+                WHERE n > 1
+                RETURN count(*) AS duplicate_groups
+            }
+            CALL () {
+                MATCH (node)
+                WHERE node.run_id = $run_id
+                  AND (node.repo_id IS NULL OR node.repo_id <> $repo_id)
+                RETURN count(node) AS cross_scope_nodes
+            }
+            CALL () {
+                MATCH (start)-[relationship]->(finish)
+                WHERE relationship.run_id = $run_id
+                  AND (
+                    relationship.repo_id IS NULL OR relationship.repo_id <> $repo_id
+                    OR start.repo_id IS NULL OR start.repo_id <> $repo_id
+                    OR finish.repo_id IS NULL OR finish.repo_id <> $repo_id
+                  )
+                RETURN count(relationship) AS cross_scope_relationships
+            }
+            RETURN total_chunks, total_entities, semantic_relationships,
+                   from_chunk_relationships, linked_chunks, duplicate_groups,
+                   cross_scope_nodes, cross_scope_relationships
+            """,
+            {"repo_id": repo_id, "run_id": run_id},
+        )
+        row = rows[0] if rows else {}
+        return {
+            key: int(row.get(key) or 0)
+            for key in (
+                "total_chunks",
+                "total_entities",
+                "semantic_relationships",
+                "from_chunk_relationships",
+                "linked_chunks",
+                "duplicate_groups",
+                "cross_scope_nodes",
+                "cross_scope_relationships",
+            )
+        }
+
     async def delete_graph(self, repo_id: str) -> None:
         """Delete all graph data (entities, rels, communities) for a corpus."""
         driver = self._require_driver()

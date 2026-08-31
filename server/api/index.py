@@ -23,7 +23,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal, TypeVar
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from neo4j import Driver, GraphDatabase
 from neo4j_graphrag.components.schema import GraphSchema
 from neo4j_graphrag.components.types import Neo4jRelationship
@@ -67,6 +67,11 @@ from server.indexing.generations import (
     reclaim_stale_run,
     staging_repo_id,
 )
+from server.indexing.graph_invariants import (
+    GraphPromotionRefusedError,
+    authorize_sparse_graph_override,
+    verify_graph_promotion,
+)
 from server.indexing.graph_policy import (
     GraphChunkCeilingExceeded,
     GraphPolicy,
@@ -76,6 +81,7 @@ from server.indexing.graph_policy import (
 from server.indexing.graphrag_pipeline import (
     ScopedNeo4jWriter,
     build_semantic_pipeline,
+    resolve_staged_entities,
     write_code_file_graph,
     write_deferred_code_relationships,
     write_semantic_file_graph,
@@ -1817,6 +1823,7 @@ async def _run_index(
     qdrant_generation: str,
     cfg: TriBridConfig,
     graph_schema: GraphSchema | None = None,
+    graph_extraction: GraphExtractionTelemetry | None = None,
 ) -> tuple[IndexStats, FigureRunTotals]:
     # ONE config snapshot per run (the caller's): what the fence recorded, what is
     # built here and what the commit names must come from the same decision.
@@ -2015,6 +2022,7 @@ async def _run_index(
             cfg=cfg,
             graph_policy=graph_policy,
             graph_schema=graph_schema,
+            graph_extraction=graph_extraction,
             semantic_pipeline=semantic_pipeline,
             code_writer=code_writer,
             chunker=chunker,
@@ -2328,6 +2336,7 @@ async def _run_index_body(
     write_repo_id: str,
     qdrant: QdrantChunkStore,
     qdrant_generation: str,
+    graph_extraction: GraphExtractionTelemetry | None = None,
 ) -> tuple[IndexStats, FigureRunTotals]:
     """Core indexing loop -- extracted to allow _run_index() to guarantee Neo4j cleanup via finally.
 
@@ -2423,6 +2432,8 @@ async def _run_index_body(
                 eligible_chunks=semantic_eligible_chunks + len(chunks),
                 ceiling=semantic_ceiling,
             )
+        if graph_extraction is not None:
+            graph_extraction.selected_chunks += len(chunks)
         target.extend(chunks)
 
     async def _upsert_chunk_batch(chunks: list[Chunk]) -> list[Chunk]:
@@ -2509,41 +2520,54 @@ async def _run_index_body(
         nonlocal semantic_empty_chunks
         if not chunks or graph_policy not in {"semantic", "code"}:
             return
-        if graph_policy == "semantic":
-            if semantic_pipeline is None or graph_schema is None:
-                raise RuntimeError("Semantic graph writer was not initialized")
-            with INDEX_STAGE_LATENCY_SECONDS.labels(
-                stage="neo4j_write_semantic_file"
-            ).time():
-                telemetry = await write_semantic_file_graph(
-                    pipeline=semantic_pipeline,
-                    file_path=file_path,
-                    chunks=chunks,
-                    schema=graph_schema,
-                )
-        else:
-            if code_writer is None:
-                raise RuntimeError("Code graph writer was not initialized")
-            source_path = Path(repo_path).expanduser() / file_path
-            try:
-                source = await asyncio.to_thread(
-                    source_path.read_text, encoding="utf-8", errors="ignore"
-                )
-            except OSError as exc:
-                raise RuntimeError(
-                    f"Code graph source became unreadable: {file_path}"
-                ) from exc
-            with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_write_code_file").time():
-                telemetry = await write_code_file_graph(
-                    writer=code_writer,
-                    cfg=cfg,
-                    repo_root=Path(repo_path).expanduser(),
-                    file_path=file_path,
-                    source=source,
-                    language=str(chunks[0].language or "") or None,
-                    chunks=chunks,
-                    deferred_relationships=code_graph_deferred,
-                )
+        try:
+            if graph_policy == "semantic":
+                if semantic_pipeline is None or graph_schema is None:
+                    raise RuntimeError("Semantic graph writer was not initialized")
+                with INDEX_STAGE_LATENCY_SECONDS.labels(
+                    stage="neo4j_write_semantic_file"
+                ).time():
+                    telemetry = await write_semantic_file_graph(
+                        pipeline=semantic_pipeline,
+                        file_path=file_path,
+                        chunks=chunks,
+                        schema=graph_schema,
+                    )
+            else:
+                if code_writer is None:
+                    raise RuntimeError("Code graph writer was not initialized")
+                source_path = Path(repo_path).expanduser() / file_path
+                try:
+                    source = await asyncio.to_thread(
+                        source_path.read_text, encoding="utf-8", errors="ignore"
+                    )
+                except OSError as exc:
+                    raise RuntimeError(
+                        f"Code graph source became unreadable: {file_path}"
+                    ) from exc
+                with INDEX_STAGE_LATENCY_SECONDS.labels(stage="neo4j_write_code_file").time():
+                    telemetry = await write_code_file_graph(
+                        writer=code_writer,
+                        cfg=cfg,
+                        repo_root=Path(repo_path).expanduser(),
+                        file_path=file_path,
+                        source=source,
+                        language=str(chunks[0].language or "") or None,
+                        chunks=chunks,
+                        deferred_relationships=code_graph_deferred,
+                    )
+        except Exception:
+            if graph_extraction is not None:
+                graph_extraction.attempted_chunks += len(chunks)
+                graph_extraction.failed_chunks += len(chunks)
+            raise
+        if graph_extraction is not None:
+            graph_extraction.attempted_chunks += telemetry.attempted_chunks
+            graph_extraction.succeeded_chunks += telemetry.succeeded_chunks
+            graph_extraction.failed_chunks += telemetry.failed_chunks
+            graph_extraction.extracted_entities += telemetry.extracted_entities
+            graph_extraction.semantic_relationships += telemetry.semantic_relationships
+            graph_extraction.from_chunk_relationships += telemetry.from_chunk_relationships
         semantic_processed += telemetry.attempted_chunks
         semantic_entities_total += telemetry.extracted_entities
         semantic_relations_total += telemetry.semantic_relationships
@@ -3182,6 +3206,9 @@ def _publish_complete(
     stats: IndexStats,
     queue: asyncio.Queue[dict[str, Any]],
     figures: FigureRunTotals | None = None,
+    graph_metadata: GraphGenerationMetadata | None = None,
+    graph_failure_codes: list[str] | None = None,
+    graph_promotable: bool | None = None,
 ) -> None:
     """The manifest is committed: this run IS the live index, whatever happens afterwards."""
     figure_totals = figures or FigureRunTotals()
@@ -3203,6 +3230,9 @@ def _publish_complete(
         completed_at=datetime.now(UTC),
         progress=1.0,
         error=None,
+        graph_metadata=graph_metadata,
+        graph_failure_codes=list(graph_failure_codes or []),
+        graph_promotable=graph_promotable,
         total_files=int(getattr(stats, "total_files", 0) or 0),
         total_chunks=int(getattr(stats, "total_chunks", 0) or 0),
         total_tokens=int(getattr(stats, "total_tokens", 0) or 0),
@@ -3220,7 +3250,11 @@ def _publish_complete(
 
 
 async def _background_index_job(
-    request: IndexRequest, queue: asyncio.Queue[dict[str, Any]], *, run_id: str
+    request: IndexRequest,
+    queue: asyncio.Queue[dict[str, Any]],
+    *,
+    run_id: str,
+    override_actor: str | None = None,
 ) -> None:
     """One index run; ``run_id`` is the fence this run holds on the corpus row (released in ``finally``)."""
     repo_id = request.repo_id
@@ -3255,11 +3289,39 @@ async def _background_index_job(
     commit_unknown = False  # promotion interrupted and the manifest unreadable: touch nothing
     stats: IndexStats | None = None
     figure_totals: FigureRunTotals | None = None  # this run's figure phase, priced for the summary
+    graph_extraction: GraphExtractionTelemetry | None = None
+    graph_resolution: GraphResolutionTelemetry | None = None
+    graph_run_metadata: GraphGenerationMetadata | None = None
+    graph_failure_codes: list[str] = []
+    graph_promotable: bool | None = None
+    graph_policy: GraphPolicy = "off"
+    approved_proposal: GraphSchemaProposal | None = None
     complete_published = False
     heartbeat: _FenceHeartbeat | None = None
     staged_collection: str | None = None  # the name recorded on the fence BEFORE creation
     staged_graph_recorded: str | None = None  # the graph id recorded on the fence
     cleanup_recorded = True  # False only when an uncommitted run could not record its handoff
+
+    def _current_graph_metadata(
+        *, override: Any | None = None, partial: bool = False
+    ) -> GraphGenerationMetadata | None:
+        if graph_extraction is None or graph_policy not in {"semantic", "code"}:
+            return None
+        resolution = graph_resolution or GraphResolutionTelemetry(
+            candidate_nodes=0,
+            resolved_nodes=0,
+            merged_nodes=0,
+            unresolved_duplicate_groups=0,
+        )
+        return GraphGenerationMetadata(
+            policy="semantic" if graph_policy == "semantic" else "code",
+            schema_hash=approved_proposal.schema_hash if approved_proposal else None,
+            schema_payload=approved_proposal.schema_payload if approved_proposal else None,
+            extraction=graph_extraction,
+            resolution=resolution,
+            override=override,
+            partial=partial,
+        )
 
     def _publish_complete_once() -> None:
         nonlocal complete_published
@@ -3273,6 +3335,9 @@ async def _background_index_job(
             stats=stats,
             queue=queue,
             figures=figure_totals,
+            graph_metadata=graph_run_metadata,
+            graph_failure_codes=graph_failure_codes,
+            graph_promotable=graph_promotable,
         )
 
     try:
@@ -3295,6 +3360,17 @@ async def _background_index_job(
             enabled=bool(cfg.graph_indexing.enabled),
             build_code_graph=bool(cfg.graph_indexing.build_code_graph),
         )
+        if graph_policy in {"semantic", "code"}:
+            graph_extraction = GraphExtractionTelemetry(
+                selected_chunks=0,
+                attempted_chunks=0,
+                succeeded_chunks=0,
+                failed_chunks=0,
+                truncated_chunks=0,
+                extracted_entities=0,
+                semantic_relationships=0,
+                from_chunk_relationships=0,
+            )
         approved_proposal = await require_approved_graph_schema(
             policy_corpus or {},
             cfg,
@@ -3364,6 +3440,7 @@ async def _background_index_job(
                 qdrant_generation=qdrant_generation,
                 cfg=cfg,
                 graph_schema=graph_schema,
+                graph_extraction=graph_extraction,
             )
         # Verify every staged resource BEFORE the commit: a partial vector index
         # or an empty staged graph must never become the active generation.
@@ -3378,72 +3455,143 @@ async def _background_index_job(
         # (the same config snapshot the build used), never a re-read flag: a flag
         # flipped mid-run can neither orphan a built graph nor demand an unbuilt one.
         graph_generation_id: str | None = None
-        graph_metadata: GraphGenerationMetadata | None = None
         if staged_graph_recorded is not None:
+            if graph_extraction is None:
+                raise RuntimeError("Graph promotion requires measured extraction telemetry")
+            graph_database = cfg.graph_storage.resolve_database(repo_id)
+            resolver_driver = await asyncio.to_thread(_create_sync_graph_driver, cfg)
+            try:
+                await asyncio.to_thread(resolver_driver.verify_connectivity)
+                graph_resolution = await resolve_staged_entities(
+                    driver=resolver_driver,
+                    neo4j_database=graph_database,
+                    repo_id=staging_repo_id,
+                )
+            finally:
+                await asyncio.to_thread(resolver_driver.close)
+            _emit_event(
+                queue,
+                {
+                    "type": "log",
+                    "message": (
+                        "🧩 Exact entity resolution: "
+                        f"candidates={graph_resolution.candidate_nodes} "
+                        f"resolved={graph_resolution.resolved_nodes} "
+                        f"merged={graph_resolution.merged_nodes} "
+                        f"duplicates={graph_resolution.unresolved_duplicate_groups}"
+                    ),
+                    "meta": {
+                        "stage": "graph_resolution",
+                        **graph_resolution.model_dump(mode="json"),
+                    },
+                },
+                drop_oldest=True,
+            )
+            schema_hash = approved_proposal.schema_hash if approved_proposal else None
+
             neo4j_verify = Neo4jClient(
                 cfg.graph_storage.neo4j_uri,
                 cfg.graph_storage.neo4j_user,
                 cfg.graph_storage.resolve_password(),
-                database=cfg.graph_storage.resolve_database(repo_id),
+                database=graph_database,
             )
             await neo4j_verify.connect()
-            from_chunk_rows: list[dict[str, Any]] = []
             try:
-                staged_graph = await neo4j_verify.get_graph_stats(staging_repo_id)
-                if graph_policy == "semantic":
-                    from_chunk_rows = await neo4j_verify.execute_cypher(
-                        """
-                        MATCH (:__Entity__ {repo_id: $repo_id})-[r:FROM_CHUNK]->
-                              (:Chunk {repo_id: $repo_id})
-                        RETURN count(r) AS n
-                        """,
-                        {"repo_id": staging_repo_id},
+                try:
+                    report = await verify_graph_promotion(
+                        neo4j=neo4j_verify,
+                        repo_id=staging_repo_id,
+                        policy=graph_policy,
+                        expected_chunks=expected_points,
+                        extraction=graph_extraction,
+                        schema_hash=schema_hash,
+                    )
+                except GraphPromotionRefusedError as refusal:
+                    graph_failure_codes = list(refusal.report.failure_codes)
+                    graph_promotable = False
+                    graph_run_metadata = _current_graph_metadata()
+                    assert graph_run_metadata is not None
+                    if request.graph_empty_override_reason is None:
+                        _emit_event(
+                            queue,
+                            {
+                                "type": "error",
+                                "message": str(refusal),
+                                "meta": {
+                                    "stage": "graph_promotion",
+                                    "promotable": False,
+                                    "failure_codes": graph_failure_codes,
+                                    "operator_hint": refusal.operator_hint,
+                                    "graph_metadata": graph_run_metadata.model_dump(mode="json"),
+                                },
+                            },
+                            guarantee=True,
+                        )
+                        raise
+                    override = authorize_sparse_graph_override(
+                        refusal.report,
+                        extraction=graph_extraction,
+                        actor=override_actor,
+                        reason=request.graph_empty_override_reason,
+                    )
+                    graph_run_metadata = _current_graph_metadata(override=override, partial=True)
+                    assert graph_run_metadata is not None
+                    graph_promotable = True
+                    # An audited sparse override promotes the complete chunk/vector
+                    # generation only. The empty graph is removed and omitted from
+                    # the manifest, so graph retrieval can never present it as success.
+                    await neo4j_verify.delete_graph(staging_repo_id)
+                    _emit_event(
+                        queue,
+                        {
+                            "type": "warning",
+                            "message": (
+                                "Graph is entity-sparse; authenticated override accepted. "
+                                "Chunk/vector retrieval will be promoted without graph retrieval."
+                            ),
+                            "meta": {
+                                "stage": "graph_promotion",
+                                "promotable": True,
+                                "partial": True,
+                                "failure_codes": graph_failure_codes,
+                                "override": override.model_dump(mode="json"),
+                            },
+                        },
+                        drop_oldest=True,
+                    )
+                else:
+                    if request.graph_empty_override_reason is not None:
+                        raise GraphPromotionRefusedError(
+                            report,
+                            detail=(
+                                "Graph promotion override was supplied for a graph that already "
+                                "passes every invariant; remove the override reason and retry."
+                            ),
+                        )
+                    graph_generation_id = staging_repo_id
+                    graph_run_metadata = _current_graph_metadata()
+                    assert graph_run_metadata is not None
+                    graph_promotable = True
+                    _emit_event(
+                        queue,
+                        {
+                            "type": "log",
+                            "message": "✅ Staged graph passed every promotion invariant",
+                            "meta": {
+                                "stage": "graph_promotion",
+                                "promotable": True,
+                                "failure_codes": [],
+                                "total_chunks": report.total_chunks,
+                                "total_entities": report.total_entities,
+                                "semantic_relationships": report.semantic_relationships,
+                                "from_chunk_relationships": report.from_chunk_relationships,
+                                "linked_chunks": report.linked_chunks,
+                            },
+                        },
+                        drop_oldest=True,
                     )
             finally:
                 await neo4j_verify.disconnect()
-            if (
-                cfg.graph_indexing.build_lexical_graph
-                and int(staged_graph.total_chunks or 0) != expected_points
-            ):
-                raise RuntimeError(
-                    f"Staged graph {staging_repo_id} holds {staged_graph.total_chunks} chunk nodes but the run "
-                    f"indexed {expected_points} chunks; refusing to promote a partial graph"
-                )
-            graph_generation_id = staging_repo_id
-            if graph_policy == "semantic":
-                if approved_proposal is None:
-                    raise RuntimeError(
-                        "Semantic graph promotion requires the exact approved schema proposal"
-                    )
-                from_chunk_relationships = int(
-                    (from_chunk_rows[0] if from_chunk_rows else {}).get("n") or 0
-                )
-                entity_count = int(staged_graph.total_entities or 0)
-                graph_metadata = GraphGenerationMetadata(
-                    policy="semantic",
-                    schema_hash=approved_proposal.schema_hash,
-                    schema_payload=approved_proposal.schema_payload,
-                    extraction=GraphExtractionTelemetry(
-                        selected_chunks=expected_points,
-                        attempted_chunks=expected_points,
-                        succeeded_chunks=expected_points,
-                        failed_chunks=0,
-                        truncated_chunks=0,
-                        extracted_entities=entity_count,
-                        semantic_relationships=int(staged_graph.total_relationships or 0),
-                        from_chunk_relationships=from_chunk_relationships,
-                    ),
-                    # Task 5 replaces this identity resolution record with the official
-                    # resolver's measured merge telemetry. Until then no separate resolver
-                    # ran, so every extracted entity is carried forward unchanged.
-                    resolution=GraphResolutionTelemetry(
-                        candidate_nodes=entity_count,
-                        resolved_nodes=entity_count,
-                        merged_nodes=0,
-                        unresolved_duplicate_groups=0,
-                    ),
-                    partial=False,
-                )
 
         # THE commit: one Postgres transaction swaps the chunk rows and writes
         # the generation manifest (Qdrant collection + Neo4j graph id) after
@@ -3474,7 +3622,7 @@ async def _background_index_job(
                     run_id=run_id,
                     qdrant_collection=qdrant_generation,
                     graph_repo_id=graph_generation_id,
-                    graph_metadata=graph_metadata,
+                    graph_metadata=graph_run_metadata,
                 )
             )
             try:
@@ -3625,6 +3773,8 @@ async def _background_index_job(
         except Exception:
             pass
         prev = _STATUS.get(repo_id)
+        if graph_run_metadata is None:
+            graph_run_metadata = _current_graph_metadata()
         _STATUS[repo_id] = IndexStatus(
             repo_id=repo_id,
             status="cancelled",
@@ -3642,6 +3792,9 @@ async def _background_index_job(
             completed_at=datetime.now(UTC),
             progress=float(prev.progress) if prev else 0.0,
             error=None,
+            graph_metadata=graph_run_metadata,
+            graph_failure_codes=graph_failure_codes,
+            graph_promotable=graph_promotable,
             total_files=0,
             total_chunks=0,
             total_tokens=0,
@@ -3684,6 +3837,23 @@ async def _background_index_job(
         with contextlib.suppress(Exception):
             await _clear_semantic_cache_for_repo(repo_id)
         INDEX_ERRORS_TOTAL.inc()
+        if graph_extraction is not None and graph_policy == "semantic":
+            if graph_extraction.failed_chunks > 0:
+                graph_failure_codes = list(
+                    dict.fromkeys([*graph_failure_codes, "extraction_failure"])
+                )
+            if (
+                graph_extraction.truncated_chunks > 0
+                or graph_extraction.attempted_chunks != graph_extraction.selected_chunks
+                or isinstance(e, GraphChunkCeilingExceeded)
+            ):
+                graph_failure_codes = list(
+                    dict.fromkeys([*graph_failure_codes, "silent_truncation"])
+                )
+        if graph_extraction is not None and graph_promotable is None:
+            graph_promotable = False
+        if graph_run_metadata is None:
+            graph_run_metadata = _current_graph_metadata()
         prev = _STATUS.get(repo_id)
         _STATUS[repo_id] = IndexStatus(
             repo_id=repo_id,
@@ -3702,6 +3872,9 @@ async def _background_index_job(
             completed_at=datetime.now(UTC),
             progress=float(prev.progress) if prev else 0.0,
             error=str(e),
+            graph_metadata=graph_run_metadata,
+            graph_failure_codes=graph_failure_codes,
+            graph_promotable=graph_promotable,
             total_files=0,
             total_chunks=0,
             total_tokens=0,
@@ -4362,7 +4535,7 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
         },
     },
 )
-async def start_index(request: IndexRequest) -> IndexStatus:
+async def start_index(request: IndexRequest, http_request: Request) -> IndexStatus:
     # Fail closed on a path the API cannot read: the loader yields nothing for a
     # missing root and the run would otherwise "complete" with zero files.
     root = _resolve_corpus_root(str(request.repo_path or ""))
@@ -4394,6 +4567,26 @@ async def start_index(request: IndexRequest) -> IndexStatus:
     # Durable per-corpus run fence (compare-and-set on the corpus row): a second
     # worker or process cannot build and retire against the same corpus.
     corpus, cfg = await load_corpus_and_scoped_config(request.repo_id)
+    override_actor = str(http_request.headers.get("Remote-User") or "").strip() or None
+    requested_policy = resolve_graph_policy(
+        internal=bool(((corpus or {}).get("meta") or {}).get("system_kind")),
+        enabled=bool(cfg.graph_indexing.enabled),
+        build_code_graph=bool(cfg.graph_indexing.build_code_graph),
+    )
+    if request.graph_empty_override_reason is not None:
+        if requested_policy != "semantic":
+            raise HTTPException(
+                status_code=409,
+                detail="A sparse-graph override is available only for semantic graph policy.",
+            )
+        if override_actor is None:
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "A sparse-graph override requires the authenticated proxy to supply "
+                    "Remote-User; direct or anonymous overrides are unavailable."
+                ),
+            )
     await require_approved_graph_schema(
         corpus,
         cfg,
@@ -4449,7 +4642,14 @@ async def start_index(request: IndexRequest) -> IndexStatus:
         _EVENT_QUEUES[request.repo_id] = queue
         _LAST_STARTED_REPO = request.repo_id
 
-        task = asyncio.create_task(_background_index_job(request, queue, run_id=run_id))
+        task = asyncio.create_task(
+            _background_index_job(
+                request,
+                queue,
+                run_id=run_id,
+                override_actor=override_actor,
+            )
+        )
         _TASKS[request.repo_id] = task
     except BaseException:
         # Anything failing (or a request cancelled) between a successful claim and

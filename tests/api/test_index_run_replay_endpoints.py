@@ -11,7 +11,12 @@ import pytest
 from httpx import AsyncClient
 
 import server.api.index as index_api
-from server.models.index import IndexRunSummary
+from server.models.index import (
+    GraphExtractionTelemetry,
+    GraphGenerationMetadata,
+    GraphResolutionTelemetry,
+    IndexRunSummary,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -90,6 +95,58 @@ async def test_latest_run_and_events_endpoints(client: AsyncClient) -> None:
     assert len(events_payload["events"]) == 2
     assert events_payload["events"][0]["type"] == "log"
     assert events_payload["events"][1]["type"] == "error"
+
+
+@pytest.mark.asyncio
+async def test_latest_run_replays_graph_promotion_telemetry_and_refusal(client: AsyncClient) -> None:
+    corpus_id = "graph-refusal-replay"
+    run_id = "run_20260831_graph_refusal"
+    graph = GraphGenerationMetadata(
+        policy="semantic",
+        schema_hash="a" * 64,
+        schema_payload={"node_types": []},
+        extraction=GraphExtractionTelemetry(
+            selected_chunks=3,
+            attempted_chunks=3,
+            succeeded_chunks=3,
+            failed_chunks=0,
+            truncated_chunks=0,
+            extracted_entities=0,
+            semantic_relationships=0,
+            from_chunk_relationships=0,
+        ),
+        resolution=GraphResolutionTelemetry(
+            candidate_nodes=0,
+            resolved_nodes=0,
+            merged_nodes=0,
+            unresolved_duplicate_groups=0,
+        ),
+    )
+    index_api._persist_run_summary(
+        IndexRunSummary(
+            run_id=run_id,
+            repo_id=corpus_id,
+            status="error",
+            started_at=datetime.now(UTC),
+            completed_at=datetime.now(UTC),
+            error="Graph promotion refused (zero_entities, zero_semantic_relationships)",
+            graph_metadata=graph,
+            graph_failure_codes=["zero_entities", "zero_semantic_relationships"],
+            graph_promotable=False,
+        )
+    )
+
+    response = await client.get(f"/api/index/{corpus_id}/runs/latest")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["graph_promotable"] is False
+    assert payload["graph_failure_codes"] == [
+        "zero_entities",
+        "zero_semantic_relationships",
+    ]
+    assert payload["graph_metadata"]["extraction"]["selected_chunks"] == 3
+    assert payload["graph_metadata"]["resolution"]["resolved_nodes"] == 0
 
 
 @pytest.mark.asyncio

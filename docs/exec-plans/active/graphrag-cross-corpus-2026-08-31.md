@@ -158,7 +158,45 @@ The first incremental GitNexus update for this task exposed null bytes in the de
 
 ## Task 5 - Resolution and promotion invariants
 
-Status: pending
+Status: complete
+
+### Pre-edit impact analysis
+
+- `SinglePropertyExactMatchResolver`: external dependency boundary, not present in the repo graph; UNKNOWN until wrapped by the new scoped symbol.
+- `_run_index_body`: LOW, one direct / five total dependants, one `start_index` flow.
+- `Neo4jClient.get_graph_stats`: LOW, two direct / five total dependants, two API processes.
+- `start_index`: LOW, no indexed upstream caller.
+- `GenerationManifest`: MEDIUM, 12 direct / 49 total dependants.
+- Backend `IndexRunSummary`, `GraphGenerationMetadata`, `GraphResolutionTelemetry`, and `IndexRequest`: CRITICAL, 30 direct / 125 total dependants each.
+- Generated `IndexRunSummary`: CRITICAL, 94 direct / 141 total dependants.
+- `_background_index_job`: LOW, one direct dependant and one `start_index` flow; `_publish_complete`: LOW, one direct / three total; `_run_index`: LOW, two direct / five total.
+- `IndexingSubtab`: LOW, one direct caller through `RAGTab`.
+
+The CRITICAL public model surface was reported before mutation. Containment is generated-contract validation, replay/API coverage, the live refusal/override matrix, TypeScript compilation/build, and visible browser proof.
+
+Post-task GitNexus refresh completed at 18,738 nodes, 39,779 edges, 749 clusters, and 300 flows. `detect-changes --scope compare --base-ref main` reported MEDIUM risk across 45 symbols and one affected `IndexingSubtab → Api` flow, matching the reviewed public-boundary/UI scope.
+
+### TDD and verification evidence
+
+- RED 1: the invariant/resolver suites failed collection because `server.indexing.graph_invariants` and `resolve_staged_entities` did not exist.
+- RED 2: persisted run replay dropped graph verdict/telemetry because `IndexRunSummary` did not own those fields.
+- RED 3: 20 spaces passed the override reason's raw length constraint; a field validator now trims and requires 20 visible characters.
+- Core GREEN: 54/54 focused invariant, official pipeline, generation metadata, run summary, replay, batching, corpus-root, schema, and metrics tests passed on LXC100 in 29.15s; banned-pattern and generated-type validation passed first.
+- Live GREEN: the resolver plus full promotion/refusal/override matrix passed 10/10 in 39.43s after moving new Cypher subqueries to the non-deprecated scoped syntax. It covers official resolver isolation across two colliding generations, all eight typed mutation failures with the prior manifest unchanged, a real DeepSeek semantic run refused for zero entities, its anonymous override rejected before the fence, and its authenticated override promoting chunk/vector retrieval only with audited metadata.
+- Mixed code corpus regression: RED showed a non-AST Markdown file was skipped by the code graph writer (`attempted_chunks=0`); GREEN writes its official lexical Document/Chunk graph while reserving AST entities for supported languages (1/1 in 0.26s).
+- Normal semantic promotion: an inference-driven schema proposal made the first final rerun honestly refuse a zero-relationship graph. The success-path fixture now persists a fixed approved domain schema and uses explicit repeated `Person WORKS_FOR Organization LOCATED_IN Location` facts, separating pipeline/promotion proof from Task 3's already-covered proposal inference. The corrected multi-batch run passed 1/1 in 88.61s.
+- Generated types remained in sync for 238 registered models. TypeScript lint and the Vite production build passed after the final UI correction.
+- Headed in-app browser against isolated overlay API/UI: page identity `RAG · Indexing — task5-refusal-browser — ragweld`; visible refused state showed exact schema, 1/1 successful extraction, zero entities/relations/provenance, zero duplicate groups, no community phase, typed failure codes, and the prior error state after reload. The drive found and fixed a reloaded-page retry bug by reusing the persisted approved schema hash. A 20+ character reason enabled the retry and opened the danger-styled audited override confirmation; cancelling left the run in error and started nothing. No application API console errors were present; isolated-dev Faro receiver noise and the pre-existing Three.js duplicate-instance warning were unrelated.
+- Disposable browser and leaked failed-fixture corpora were resolved by exact id and deleted; a read-back found no `promotion-active-*`, `promotion-refusal-*`, `pipeline-index-*`, or Task 5 browser corpus left behind.
+
+### DeepSeek V4 Flash review
+
+- Response id: `gen-1788219968-RUcoQvsC88LhAr3AqaRc`.
+- Resolved model: `deepseek.deepseek-v4-flash`.
+- Usage: 25,973 prompt + 5,880 completion = 31,853 tokens.
+- Cost: `$0.00528262`.
+- Findings: no P1/P2 findings. Two P3 notes covered the scoped Cypher literal and APOC use. The literal receives only the strict server-generated staging-id allowlist and is the exact installed-1.19 `filter_query` contract required by the approved plan; APOC is already required by the official resolver's `apoc.refactor.mergeNodes`, so neither is an unowned production dependency.
+- Final verdict: **PASS**.
 
 ## Task 6 - Qdrant-seeded traversal
 
