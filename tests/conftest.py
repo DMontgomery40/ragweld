@@ -65,6 +65,30 @@ def cleanup_private_test_config() -> Generator[None, None, None]:
         shutil.rmtree(_TEST_CONFIG_RUNTIME_DIR, ignore_errors=True)
 
 
+@pytest.fixture(scope="session", autouse=True)
+def reap_leaked_test_corpora() -> Generator[None, None, None]:
+    """Delete stale test corpora from the live registry at session start and end.
+
+    API tests that create corpora leak them into the operator's registry when a
+    run aborts. This reaps rows with a recognized test-corpus prefix that are old
+    enough that no concurrent session can still own them, with a Postgres-only
+    cascade (no Neo4j credentials, so it never 503s the way `DELETE /api/corpora`
+    would). It is best-effort and never fails the session; an unconfigured or
+    unreachable Postgres simply reaps nothing.
+    """
+    from tests.corpus_reaper import reap_quietly
+
+    started = reap_quietly()
+    if started:
+        print(f"\n[corpus-reaper] session start: reaped {len(started)} stale test corpora: {started}")
+    try:
+        yield
+    finally:
+        ended = reap_quietly()
+        if ended:
+            print(f"\n[corpus-reaper] session end: reaped {len(ended)} stale test corpora: {ended}")
+
+
 @pytest.fixture(scope="session")
 def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
     """Create event loop for async tests."""
