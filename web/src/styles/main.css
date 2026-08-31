@@ -1599,13 +1599,9 @@
                 font-size: 13px;
             }
 
-            /* Onboarding: single column */
-            .ob-container {
-                grid-template-columns: 1fr;
-                padding: 20px 12px;
-                gap: 20px;
-            }
-
+            /* Onboarding narrow layout is owned by the #tab-start container
+               query above: the dock pane is narrow at desktop viewports, so a
+               viewport media query is the wrong key for it. */
             .ob-choice-cards {
                 grid-template-columns: 1fr;
             }
@@ -1894,14 +1890,39 @@
            All using CSS tokens for light/dark themes
            ============================================ */
 
+        /* Get Started renders both as the main page and inside the ~360px dock
+           pane, so its layout keys off the width of #tab-start (a size
+           container), never the viewport. The old `1fr 300px` grid reserved a
+           300px track for the help panel deleted in the 2026-08-25 wizard
+           rebuild; docked, that phantom track squeezed the content column
+           below zero and step text wrapped one character per line. */
+        #tab-start {
+            container-type: inline-size;
+        }
+
         .ob-container {
             max-width: 1000px;
             margin: 0 auto;
             padding: 40px 20px;
             display: grid;
-            grid-template-columns: 1fr 300px;
+            grid-template-columns: 1fr;
             gap: 40px;
             align-items: start;
+        }
+
+        @container (max-width: 768px) {
+            .ob-container {
+                padding: 20px 12px;
+                gap: 20px;
+            }
+
+            .ob-main {
+                padding: 24px 18px;
+            }
+
+            .ob-title {
+                font-size: 22px;
+            }
         }
 
         .ob-progress-dots {
