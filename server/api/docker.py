@@ -25,6 +25,7 @@ from server.models.tribrid_config_model import (
     LokiStatus,
     TriBridConfig,
 )
+from server.observability.metrics import LOKI_PROBE_TIMEOUTS_TOTAL
 
 router = APIRouter(tags=["docker"])
 
@@ -96,6 +97,25 @@ async def _http_ok(url: str, timeout_s: float = 1.5) -> bool:
             r = await client.get(url)
             # Treat any non-5xx response as “reachable”.
             return r.status_code < 500
+    except Exception:
+        return False
+
+
+async def _loki_ready_ok(url: str, *, timeout_s: float) -> bool:
+    """Probe Loki `/ready`, counting timeouts so a busy box is visible in metrics.
+
+    A timeout means the box is busy, not that Loki is absent, and it is deliberately
+    not logged (a log line would restore the journal noise the resolved-URL cache
+    exists to remove). The counter is the signal instead. Every other failure — a
+    refused connection, a bad status — reads the same "not ready" as before.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=timeout_s) as client:
+            r = await client.get(url)
+            return r.status_code < 500
+    except httpx.TimeoutException:
+        LOKI_PROBE_TIMEOUTS_TOTAL.inc()
+        return False
     except Exception:
         return False
 
@@ -240,7 +260,7 @@ async def _resolve_loki_base_url(
     probe_timeout = _LOKI_PROBE_TIMEOUT_SECONDS if timeout_s is None else float(timeout_s)
     ttl = _LOKI_CACHE_TTL_SECONDS if cache_ttl_s is None else float(cache_ttl_s)
     for base in _loki_candidate_urls():
-        if await _http_ok(f"{base}/ready", timeout_s=probe_timeout):
+        if await _loki_ready_ok(f"{base}/ready", timeout_s=probe_timeout):
             _LOKI_BASE_CACHE = (base, time.monotonic() + ttl)
             return base
     return None

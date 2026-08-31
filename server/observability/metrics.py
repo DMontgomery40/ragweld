@@ -510,6 +510,21 @@ INDEX_TOKENS_TOTAL = Counter(
 )
 
 # --------------------------------------------------------------------------------------
+# Loki log-store probe
+# --------------------------------------------------------------------------------------
+#
+# The `/ready` probe that resolves Loki's URL shares a box with indexing; under a
+# heavy re-index it can time out while Loki is up. That timeout is deliberately not
+# logged -- a log line would restore the journal noise the resolved-URL cache exists
+# to remove -- so this counter is the only signal that the box was too busy to probe
+# Loki. Unlabelled by design (the no-high-cardinality contract).
+LOKI_PROBE_TIMEOUTS_TOTAL = Counter(
+    "tribrid_loki_probe_timeouts_total",
+    "Total number of Loki /ready probe timeouts (box busy; probe abandoned, not logged).",
+)
+
+
+# --------------------------------------------------------------------------------------
 # Process-level gauges (for Grafana stat panels)
 # --------------------------------------------------------------------------------------
 #

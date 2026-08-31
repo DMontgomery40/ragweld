@@ -399,12 +399,20 @@ class _LokiStubHandler(BaseHTTPRequestHandler):
         self._respond(404, b"", "text/plain")
 
     def _respond(self, status: int, body: bytes, content_type: str) -> None:
-        self.send_response(status)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        if body:
-            self.wfile.write(body)
+        # After a stall the client (the resolver's probe) may have already timed out
+        # and closed the socket. Writing the late response then raises BrokenPipe/
+        # ConnectionReset, which BaseHTTPRequestHandler prints to stderr as if the
+        # test failed. The abandoned socket is exactly the tested condition, so the
+        # write is best-effort.
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            if body:
+                self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            return
 
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A002 - stdlib signature
         """Keep the real server out of the pytest log."""
@@ -591,6 +599,25 @@ async def test_a_slow_but_reachable_loki_keeps_the_cached_url(
     assert payload["url"] == stub.base_url
     assert "Timeout" in payload["status"], payload
     assert docker_api._LOKI_BASE_CACHE is not None, "a busy probe must not tear down the cache"
+
+
+@pytest.mark.asyncio
+async def test_a_loki_probe_timeout_is_counted() -> None:
+    """A `/ready` probe timeout is deliberately not logged, so the Prometheus counter
+    is its only signal that the box was too busy to probe Loki. One timed-out probe
+    against the stub must bump `tribrid_loki_probe_timeouts_total` by exactly one."""
+    from prometheus_client import REGISTRY
+
+    metric = "tribrid_loki_probe_timeouts_total"
+    before = REGISTRY.get_sample_value(metric) or 0.0
+    with _loki_stub() as stub:
+        # The probe connects but never gets an answer inside its budget.
+        stub.ready_stall_s = 5.0
+        docker_api._LOKI_BASE_CACHE = None
+        resolved = await docker_api._resolve_loki_base_url(timeout_s=0.2)
+    assert resolved is None
+    after = REGISTRY.get_sample_value(metric) or 0.0
+    assert after == before + 1.0, (before, after)
 
 
 @pytest.mark.asyncio
