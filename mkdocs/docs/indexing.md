@@ -134,6 +134,9 @@ async function reindex(path: string) {
 | `graph_indexing.semantic_kg_reasoning_effort` | medium | Reasoning effort for Responses-compatible extraction models |
 | `graph_indexing.semantic_kg_llm_timeout_s` | 90 | Per-chunk extraction timeout (seconds) |
 
+!!! note "Timeout and reasoning effort now bind to the extraction LLM"
+    Both knobs are carried by the actual GraphRAG extraction calls (`semantic_extraction_llm` in `server/indexing/graphrag_pipeline.py`): `graph_indexing.semantic_kg_llm_timeout_s` is the OpenAI client's per-request timeout, so every chunk extraction is bounded by it, and `graph_indexing.semantic_kg_reasoning_effort` is sent with every request as `reasoning_effort`. A pipeline built with a non-positive timeout or a blank effort refuses fast with a typed error instead of promoting a graph under unbounded calls. Previously both controls were shown on the Indexing page but neither reached the pipeline — a 5-second timeout with `xhigh` effort still let a 13-second extraction call promote a graph. If your extraction alias is a reasoning model, budget the timeout for its thinking trace, not just its JSON reply: a high effort can spend most of a small budget before it writes anything.
+
 ### Derived graph policy: one decision per corpus
 
 There is no separate semantic-KG toggle. `server/indexing/graph_policy.py` derives exactly one policy per run:
@@ -154,6 +157,9 @@ A semantic run cannot start without a reviewed graph schema:
 1. **Propose** — `POST /api/index/{corpus_id}/graph-schema/proposal` deterministically samples documents (first/middle/last chunk per document), asks the extraction alias for a closed-world `GraphSchema`, rejects generic catch-all labels such as `OBJECT` or `RELATED_TO`, and persists a `GraphSchemaProposal` keyed by a canonical schema hash plus a source-inventory fingerprint. PDF sources are sampled through a bounded page reader (`_extract_schema_sample_text_for_path` in `server/api/index.py`): every page of a document with twelve pages or fewer, or nine positionally representative pages (front, middle, back) of a larger one, read through the same fast pypdfium2 substrate the estimator uses, with each sampled page stamped `# <file> page <n>` so the sampled positions stay reviewable. Whole-document Docling conversion never runs behind this synchronous request.
 2. **Review** — the **RAG → Indexing** proposal card shows node types, relationship types, patterns, constraints, the sampled chunk ids with SHA-256 hashes, the model alias, the GraphRAG version (`1.19.0`), and a bulk-cost estimate.
 3. **Approve** — starting the run sends `approved_graph_schema_hash`; the server refuses with `409 graph_schema_approval_required` when the hash is missing, or when any corpus file or extraction setting changed since the review (the fingerprint no longer matches).
+
+!!! note "The proposal runs under the same reasoning effort"
+    The schema-proposal call sends the same `graph_indexing.semantic_kg_reasoning_effort` the extraction run will use (`server/indexing/graphrag_schema.py`), so the schema you review is derived under the reasoning setting extraction runs with. If a proposal's entity/relationship quality looks off, adjusting the effort and regenerating the proposal is the first knob to try — the sampler, alias, and timeout stay the same.
 
 !!! note "Approved labels become the graph's type vocabulary"
     The reviewed proposal's node labels and relationship types are exactly what lands on the promoted graph — `Entity.entity_type` and `Relationship.relation_type` are open strings on the wire (`server/models/tribrid_config_model.py`), not a fixed enum, so `Tank`, `LaunchSite`, `CONTAINS`, or `LOCATED_AT` surface verbatim in the Graph explorer instead of being coerced to a generic kind. See [Graph API](api_graph.md).
