@@ -76,6 +76,8 @@ The graph view is where you validate entity extraction quality and relationship 
 
 Entity and relationship types are whatever the graph actually stores: AST kinds (`function`, `class`, `module`) for code corpora, and the approved schema's labels (`Tank`, `LaunchSite`, `CONTAINS`, `LOCATED_AT`, …) for semantic corpora — never coerced to a generic "(concept)" fallback. Schema-labelled entities get a stable palette colour keyed by the label text, and every view (entity table, neighbourhood, communities) returns the stored schema edges, so a semantic generation shows real edge counts instead of "0 edges".
 
+Entity names come from the graph too: an entity stored without a `name` — possible only on generations approved before the proposal's `name` identity rule — is labelled with its stable entity id instead of an empty name, and it reads back over the API as an empty string, never the text `None`. Newer generations always carry a name; see the [Indexing pipeline](../indexing.md).
+
 ### Recall gating and memory policy controls
 
 ![Recall gating controls in chat settings](../assets/images/recall-gating.png)

@@ -50,6 +50,14 @@ Indexing turns a folder into a set of **retrieval primitives**:
 !!! note "Graph indexing is policy-derived"
     There is no separate semantic-KG toggle. With graph indexing enabled, external document corpora run semantic entity extraction and code corpora can select the AST policy (`graph_indexing.build_code_graph`); runtime-managed corpora (Recall, Codex sessions) are excluded. A semantic run also requires a reviewed graph schema — **RAG → Indexing** walks you through generate → review → approve, and the API refuses a run without the approved hash. See the [Indexing pipeline](../indexing.md).
 
+??? question "Why does the proposal show a `name` property on every node type — and where did my `body` property go?"
+    Two domain rules are applied to every proposal before it is hashed for review (`normalize_domain_schema` in `server/indexing/graphrag_schema.py`):
+
+    - **Every node type gets a STRING `name` identity property plus a mandatory constraint on it.** An extraction that omits the name is dropped instead of writing an anonymous entity the resolver and the Graph explorer cannot address.
+    - **Document-text properties (`body`, `content`, `text`, and similar) are removed.** The chunk store owns the document text; a graph property holding it makes the extraction stream carry whole documents and the provider's output moderation cuts the run.
+
+    Both rules are enforced again when the approved proposal is validated, so a hand-edited or stale proposal cannot sneak either shape through. See the [Indexing pipeline](../indexing.md).
+
 ??? question "Generate proposal returns 422: 'no embedded PDF text'"
     The schema-proposal sampler reads a bounded, positionally representative set of PDF pages — every page of a document with twelve pages or fewer, nine representative pages (front, middle, back) of a larger one — instead of converting the whole document behind the synchronous request. A corpus of image-only or unreadable PDFs yields no sample text, so the API refuses with a typed `422` rather than starting unbounded whole-document OCR behind the public proxy window. Run a real index first (text extraction and figure description happen during indexing, not during the proposal call), or point the corpus at a text-bearing source, then generate the proposal again. See the [Indexing pipeline](../indexing.md).
 

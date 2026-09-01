@@ -158,6 +158,15 @@ A semantic run cannot start without a reviewed graph schema:
 !!! note "Approved labels become the graph's type vocabulary"
     The reviewed proposal's node labels and relationship types are exactly what lands on the promoted graph — `Entity.entity_type` and `Relationship.relation_type` are open strings on the wire (`server/models/tribrid_config_model.py`), not a fixed enum, so `Tank`, `LaunchSite`, `CONTAINS`, or `LOCATED_AT` surface verbatim in the Graph explorer instead of being coerced to a generic kind. See [Graph API](api_graph.md).
 
+### Every node type gets a `name` identity; document text stays in the chunk store
+
+Before a proposal is hashed for review, `normalize_domain_schema` (`server/indexing/graphrag_schema.py`) applies two domain rules the extractor cannot be trusted to follow:
+
+1. **Identity.** Every node type carries a STRING `name` property and a mandatory (`EXISTENCE` or `KEY`) constraint on it. The official exact-match entity resolver merges on `name` and skips nodes where it is null, and the explorer names nodes by it — so the pruner drops an extraction that omits the name instead of writing an anonymous node. A proposal whose node types lacked the property produced a generation with 2,021 of 2,112 extracted entities anonymous — present in the graph, but unaddressable by entity resolution and invisible to the explorer.
+2. **No document text on the graph.** Text-shaped properties (`body`, `content`, `text`, `full_text`, `transcript`, and similar) are stripped from node types, relationship types, and constraints. The chunk store owns the document text; a graph property that asks the extractor to copy the source text back makes the structured-output stream carry whole documents, which provider moderation cuts mid-JSON (`finish_reason=content_filter`) — the run then fails closed. Graph properties are attributes, never bodies.
+
+Normalization is deterministic and idempotent — normalizing a normalized schema is a no-op — so the schema hash the operator approves is the hash of exactly the shape that lands on the graph. `validate_domain_schema` enforces both rules again on the validated proposal: a node type without the STRING `name` identity (or without a mandatory constraint on it), or any node/relationship type carrying a document-text property, refuses with a named error instead of promoting a graph of anonymous nodes or full-text copies.
+
 The approved hash, schema payload, extraction telemetry, entity-resolution counts, community telemetry, and any override are persisted on the generation manifest (`GraphGenerationMetadata`), so every promoted graph is auditable.
 
 !!! note "A textless PDF refuses the proposal synchronously"
