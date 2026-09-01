@@ -321,6 +321,41 @@ def document_info(file_path: str) -> DocumentInfo:
     )
 
 
+def semantic_extraction_llm(
+    *,
+    route_model: str,
+    route_base_url: str,
+    route_api_key: str,
+    llm_timeout_s: int,
+    reasoning_effort: str,
+) -> OpenAILLM:
+    """The official OpenAILLM for semantic extraction, carrying the operator's controls.
+
+    ``graph_indexing.semantic_kg_llm_timeout_s`` bounds every gateway call (the OpenAI
+    client's request timeout) and ``semantic_kg_reasoning_effort`` is sent with every
+    request; the Indexing page showed both, but neither reached the pipeline before
+    (Task 8 drive defect D9).
+    """
+    if not str(route_model or "").strip():
+        raise RuntimeError("GraphRAG semantic extraction requires a resolved model id")
+    if not str(route_base_url or "").strip():
+        raise RuntimeError("GraphRAG semantic extraction requires a resolved base URL")
+    if not str(route_api_key or "").strip():
+        raise RuntimeError("GraphRAG semantic extraction requires an authenticated route")
+    if int(llm_timeout_s) <= 0:
+        raise RuntimeError("GraphRAG semantic extraction requires a positive per-chunk timeout")
+    effort = str(reasoning_effort or "").strip()
+    if not effort:
+        raise RuntimeError("GraphRAG semantic extraction requires a reasoning effort")
+    return OpenAILLM(
+        model_name=str(route_model).strip(),
+        model_params={"temperature": 0, "reasoning_effort": effort},
+        api_key=str(route_api_key).strip(),
+        base_url=str(route_base_url).strip(),
+        timeout=float(int(llm_timeout_s)),
+    )
+
+
 def build_semantic_pipeline(
     *,
     driver: Driver,
@@ -331,18 +366,15 @@ def build_semantic_pipeline(
     route_base_url: str,
     route_api_key: str,
     max_concurrency: int,
+    llm_timeout_s: int,
+    reasoning_effort: str,
 ) -> Pipeline:
-    if not str(route_model or "").strip():
-        raise RuntimeError("GraphRAG semantic pipeline requires a resolved model id")
-    if not str(route_base_url or "").strip():
-        raise RuntimeError("GraphRAG semantic pipeline requires a resolved base URL")
-    if not str(route_api_key or "").strip():
-        raise RuntimeError("GraphRAG semantic pipeline requires an authenticated route")
-    llm = OpenAILLM(
-        model_name=str(route_model or "").strip(),
-        model_params={"temperature": 0},
-        api_key=str(route_api_key or "").strip(),
-        base_url=str(route_base_url or "").strip(),
+    llm = semantic_extraction_llm(
+        route_model=route_model,
+        route_base_url=route_base_url,
+        route_api_key=route_api_key,
+        llm_timeout_s=llm_timeout_s,
+        reasoning_effort=reasoning_effort,
     )
     extractor = LLMEntityRelationExtractor(
         llm=llm,
@@ -511,6 +543,7 @@ __all__ = [
     "require_staging_graph_id",
     "resolution_property_for_policy",
     "resolve_staged_entities",
+    "semantic_extraction_llm",
     "run_async_component_off_event_loop",
     "run_component_coroutine_in_worker",
     "run_writer_coroutine_in_worker",

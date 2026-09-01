@@ -16,6 +16,7 @@ from server.indexing.graphrag_pipeline import (
     require_staging_graph_id,
     resolution_property_for_policy,
     run_component_coroutine_in_worker,
+    semantic_extraction_llm,
     stamp_graph_scope,
     validate_no_reserved_scope_keys,
 )
@@ -130,6 +131,8 @@ def test_semantic_pipeline_refuses_an_incomplete_route_before_driver_use(
             route_base_url=base_url,
             route_api_key=api_key,
             max_concurrency=1,
+            llm_timeout_s=30,
+            reasoning_effort="medium",
         )
 
 
@@ -147,3 +150,39 @@ def test_resolution_property_follows_the_graph_policy(policy: str, expected: str
 def test_resolution_property_rejects_policies_without_a_graph(policy: str) -> None:
     with pytest.raises(ValueError, match="resolvable graph"):
         resolution_property_for_policy(policy)
+
+
+def test_semantic_extraction_llm_binds_the_operator_timeout_and_reasoning_effort() -> None:
+    """Task 8 drive defect D9: the Indexing page offers "Per-chunk timeout (seconds)" and
+    "Reasoning effort", but neither reached the extraction LLM - a 5 s timeout with
+    ``xhigh`` effort still let a 13 s Luna call promote a graph. The official OpenAILLM
+    must carry both: the timeout on its OpenAI clients, the effort in its model params.
+    """
+    llm = semantic_extraction_llm(
+        route_model="openai.gpt-5.6-luna",
+        route_base_url="http://127.0.0.1:54000/v1",
+        route_api_key="not-a-real-key",
+        llm_timeout_s=5,
+        reasoning_effort="xhigh",
+    )
+    assert llm.model_name == "openai.gpt-5.6-luna"
+    assert llm.model_params == {"temperature": 0, "reasoning_effort": "xhigh"}
+    assert float(llm.async_client.timeout) == 5.0
+    assert float(llm.client.timeout) == 5.0
+    assert str(llm.async_client.base_url).rstrip("/") == "http://127.0.0.1:54000/v1"
+
+
+@pytest.mark.parametrize(
+    ("timeout_s", "effort"), [(0, "medium"), (-5, "medium"), (30, ""), (30, "   ")]
+)
+def test_semantic_extraction_llm_refuses_a_zero_timeout_or_blank_effort(
+    timeout_s: int, effort: str
+) -> None:
+    with pytest.raises(RuntimeError, match="requires"):
+        semantic_extraction_llm(
+            route_model="openai.gpt-5.6-luna",
+            route_base_url="http://127.0.0.1:54000/v1",
+            route_api_key="not-a-real-key",
+            llm_timeout_s=timeout_s,
+            reasoning_effort=effort,
+        )
