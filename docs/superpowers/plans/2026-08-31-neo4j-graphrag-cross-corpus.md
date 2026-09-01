@@ -71,7 +71,7 @@ Include `git diff <task-base>...HEAD` (or the exact staged diff before commit), 
 - Consumes: current pin `neo4j-graphrag[openai]==1.14.1` and experimental component imports.
 - Produces: installed 1.19.0 contract, non-experimental component imports, and executable characterization evidence for every external API later tasks rely on.
 
-- [ ] **Step 1: Run impact analysis for edited import-owning symbols**
+- [x] **Step 1: Run impact analysis for edited import-owning symbols**
 
 Run:
 
@@ -83,7 +83,7 @@ node .gitnexus/run.cjs impact --repo ragweld --direction upstream --target extra
 
 Record direct callers, affected processes, and risk in the execution ledger. Stop and report before edits if any result is HIGH or CRITICAL.
 
-- [ ] **Step 2: Write the 1.19 contract test before changing the dependency**
+- [x] **Step 2: Write the 1.19 contract test before changing the dependency**
 
 Create `tests/unit/test_neo4j_graphrag_119_contract.py` with real imports and signature/default assertions:
 
@@ -113,7 +113,7 @@ def test_pinned_graphrag_contract_matches_the_replacement_design() -> None:
     assert iscoroutinefunction(Neo4jWriter.run), "1.19 Neo4jWriter.run is async despite using a sync driver"
 ```
 
-- [ ] **Step 3: Run the contract test on LXC100 and observe RED**
+- [x] **Step 3: Run the contract test on LXC100 and observe RED**
 
 Run in the LXC overlay:
 
@@ -124,7 +124,7 @@ Run in the LXC overlay:
 
 Expected: collection fails because 1.14.1 lacks the non-experimental component imports or the version assertion reports `1.14.1`.
 
-- [ ] **Step 4: Change the exact pin and regenerate the lock on LXC100**
+- [x] **Step 4: Change the exact pin and regenerate the lock on LXC100**
 
 Change the dependency to:
 
@@ -142,7 +142,7 @@ uv sync --extra dev
 
 Copy only the generated `uv.lock` back to the Mac. Do not run `uv lock` or `uv sync` on the Mac.
 
-- [ ] **Step 5: Replace experimental component imports**
+- [x] **Step 5: Replace experimental component imports**
 
 Use these 1.19 modules everywhere except `Pipeline`:
 
@@ -160,7 +160,7 @@ from neo4j_graphrag.llm import OpenAILLM
 
 Do not change behavior in this task; only make the installed contract importable.
 
-- [ ] **Step 6: Run focused and dependency-boundary verification on LXC100**
+- [x] **Step 6: Run focused and dependency-boundary verification on LXC100**
 
 Run:
 
@@ -175,11 +175,11 @@ uv run scripts/check_banned.py
 
 Expected: all tests and checks PASS with 1.19.0.
 
-- [ ] **Step 7: Obtain DeepSeek V4 Flash PASS for Task 1**
+- [x] **Step 7: Obtain DeepSeek V4 Flash PASS for Task 1**
 
 Submit the complete dependency/import diff, the characterization test, `uv lock` result, and focused output. Fix every substantiated P1/P2 and rerun Step 6 before re-review. Record a completed PASS in the ledger.
 
-- [ ] **Step 8: Detect scope and commit Task 1**
+- [x] **Step 8: Detect scope and commit Task 1**
 
 Run:
 
@@ -217,7 +217,7 @@ Expected: only dependency/import/characterization surfaces are affected.
 - Consumes: corpus `meta.system_kind`, `GraphIndexingConfig.enabled`, and `build_code_graph`.
 - Produces: `resolve_graph_policy(*, internal: bool, enabled: bool, build_code_graph: bool) -> GraphPolicy`, where `GraphPolicy = Literal["semantic", "code", "off", "excluded"]`; one truthful graph configuration/UI surface.
 
-- [ ] **Step 1: Run impact analysis on policy/config/UI symbols**
+- [x] **Step 1: Run impact analysis on policy/config/UI symbols**
 
 Run:
 
@@ -232,7 +232,7 @@ node .gitnexus/run.cjs impact --repo ragweld --direction upstream --target Retri
 
 Record blast radius and warn before editing on HIGH/CRITICAL.
 
-- [ ] **Step 2: Write policy and config RED tests**
+- [x] **Step 2: Write policy and config RED tests**
 
 Create `tests/unit/test_graph_policy.py`:
 
@@ -265,7 +265,7 @@ def test_graph_config_has_one_policy_surface_without_a_second_semantic_toggle() 
 
 The schema type lists remain until Task 3 replaces them with the approved per-corpus schema. Neo4j vector/search fields remain until Task 6 replaces their consumers. Community fields remain until Task 7 replaces the Community-node implementation. This task removes only the contradictory semantic toggle and truly unused heuristic controls.
 
-- [ ] **Step 3: Run policy/config tests and observe RED**
+- [x] **Step 3: Run policy/config tests and observe RED**
 
 Run on LXC100:
 
@@ -276,7 +276,7 @@ uv run pytest -q --no-cov -p no:cacheprovider \
 
 Expected: missing policy module and obsolete fields still serialized.
 
-- [ ] **Step 4: Implement the pure policy resolver**
+- [x] **Step 4: Implement the pure policy resolver**
 
 Create `server/indexing/graph_policy.py`:
 
@@ -296,7 +296,7 @@ def resolve_graph_policy(*, internal: bool, enabled: bool, build_code_graph: boo
 
 Resolve `internal` from the corpus row's own `meta.system_kind` at estimate/start time. Do not hardcode `recall_default` and do not accept a request/config override for internal corpora.
 
-- [ ] **Step 5: Remove dead configuration and make semantic extraction the external default**
+- [x] **Step 5: Remove dead configuration and make semantic extraction the external default**
 
 Remove the second semantic enablement and unused heuristic controls while retaining the fields still consumed by later replacement tasks. The effective policy ignores any stale persisted `semantic_kg_enabled` key because Pydantic no longer defines it:
 
@@ -324,7 +324,7 @@ class GraphIndexingConfig(BaseModel):
 
 `semantic_kg_max_chunks` becomes a preflight ceiling: if estimated or actual eligible chunks exceed it, the run is refused as non-promotable. It never slices the input.
 
-- [ ] **Step 6: Replace the Indexing and Retrieval graph controls**
+- [x] **Step 6: Replace the Indexing and Retrieval graph controls**
 
 The Indexing card renders one enablement plus a read-only derived policy badge:
 
@@ -344,7 +344,7 @@ The Indexing card renders one enablement plus a read-only derived policy badge:
 
 Remove the separate semantic checkbox and disabled heuristic engine selector. Keep the current storage/retrieval controls until their owning replacement tasks, plus model, reasoning effort, timeout, ceiling, code-graph selection, and AST weights. The main graph card and policy badge must state that an enabled external document corpus will run semantic extraction; there is no second switch that can contradict it.
 
-- [ ] **Step 7: Regenerate and verify public contracts on LXC100**
+- [x] **Step 7: Regenerate and verify public contracts on LXC100**
 
 Run:
 
@@ -358,7 +358,7 @@ cd web && npm run lint && npm run build
 
 Copy generated `web/src/types/generated.ts` and mirrored `web/public/glossary.json` back to the Mac. Expected: removed fields have no generated representation and all checks PASS.
 
-- [ ] **Step 8: Add real Playwright policy coverage**
+- [x] **Step 8: Add real Playwright policy coverage**
 
 `web/tests/e2e/exhaustive/graph_policy.spec.ts` must select an external corpus and the internal Recall corpus through visible dropdowns, open Graph & Enrichment, and assert:
 
@@ -371,11 +371,11 @@ await expect(page.getByTestId('graph-indexing-enabled')).toBeDisabled();
 
 No request interception. Run headed on LXC100 against the real API.
 
-- [ ] **Step 9: Obtain DeepSeek V4 Flash PASS for Task 2**
+- [x] **Step 9: Obtain DeepSeek V4 Flash PASS for Task 2**
 
 Submit policy/config/UI diff, generated-contract evidence, pytest output, frontend lint/build, and headed Playwright output. Resolve P1/P2, rerun Steps 7-8, and obtain PASS.
 
-- [ ] **Step 10: Detect scope and commit Task 2**
+- [x] **Step 10: Detect scope and commit Task 2**
 
 Run `detect-changes`, then commit explicit files:
 
@@ -406,11 +406,11 @@ Expected affected processes: config load/save, indexing preflight, Indexing/Retr
 - Consumes: external semantic graph policy, corpus file inventory, canonical chunks, and resolved semantic model route.
 - Produces: `GraphSchemaProposal`, persisted `corpora.meta.graph_schema_proposal`, `GenerationManifest.graph_metadata.schema_hash`, proposal endpoint, and `IndexRequest.approved_graph_schema_hash`.
 
-- [ ] **Step 1: Run impact analysis**
+- [x] **Step 1: Run impact analysis**
 
 Run impact for `IndexRequest`, `IndexEstimate`, `GenerationManifest`, `PostgresClient.promote_staging_index`, `start_index`, and `IndexingSubtab`. Report HIGH/CRITICAL before mutation.
 
-- [ ] **Step 2: Write schema determinism and boundary RED tests**
+- [x] **Step 2: Write schema determinism and boundary RED tests**
 
 Define public models in `server/models/index.py`:
 
@@ -481,7 +481,7 @@ class GraphGenerationMetadata(BaseModel):
 
 Test that canonical JSON key ordering yields the same SHA-256, sample selection spans multiple documents and early/middle/late positions, openness fields are false, generic `Object`/`RELATED_TO`/`ASSOCIATED_WITH` labels are rejected, and proposal validation rejects a mismatched hash.
 
-- [ ] **Step 3: Run schema tests and observe RED**
+- [x] **Step 3: Run schema tests and observe RED**
 
 Run on LXC100:
 
@@ -492,7 +492,7 @@ uv run pytest -q --no-cov -p no:cacheprovider \
 
 Expected: models/module/endpoints do not exist.
 
-- [ ] **Step 4: Implement deterministic stratified sampling and schema normalization**
+- [x] **Step 4: Implement deterministic stratified sampling and schema normalization**
 
 In `server/indexing/graphrag_schema.py`, implement:
 
@@ -579,7 +579,7 @@ async def derive_graph_schema_proposal(
 
 Selection sorts documents by a stable SHA-256 of `corpus_id:file_path`, chooses up to 12 spread across that order, then chooses first/middle/last nonempty chunk from each document and records IDs plus content hashes. Concatenate bounded excerpts with document/chunk headings, call `SchemaFromTextExtractor` with the configured `OpenAILLM` instance shown above and `use_structured_output=True`, then rebuild `GraphSchema` with `additional_node_types=False`, `additional_relationship_types=False`, and `additional_patterns=False`. Validate precise Neo4j naming and reject prohibited catch-alls before hashing. Task 3 also removes `semantic_kg_allowed_entity_types` and `semantic_kg_allowed_relation_types` from configuration, checked-in JSON, glossary, and generated types because the approved proposal now owns those contracts.
 
-- [ ] **Step 5: Persist proposal and manifest metadata in Postgres authority**
+- [x] **Step 5: Persist proposal and manifest metadata in Postgres authority**
 
 Add:
 
@@ -603,7 +603,7 @@ async def PostgresClient.set_graph_schema_proposal(
 
 `patch_corpus_meta_locked` is a new private Postgres helper implemented with `SELECT meta FROM corpora WHERE repo_id=$1 FOR UPDATE`, a dict-only JSON merge, and `UPDATE corpora SET meta=$2::jsonb WHERE repo_id=$1` in the same transaction. Store under `corpora.meta.graph_schema_proposal`. Extend `GenerationManifest` with `graph_metadata: GraphGenerationMetadata | None`; extend `build_generation` and `promote_staging_index` to accept the exact graph metadata created by the run. Do not fall back to a prior proposal when the approved hash is absent/mismatched.
 
-- [ ] **Step 6: Add explicit proposal and approval API**
+- [x] **Step 6: Add explicit proposal and approval API**
 
 Add:
 
@@ -643,23 +643,23 @@ Define the endpoint helpers in `server/api/index.py` with these exact contracts:
 
 Refuse internal/off/code policies with typed 409. Reuse a persisted proposal only when corpus content fingerprint, sampling recipe, model alias, and 1.19 version match; otherwise derive and persist a new proposal. Extend `IndexRequest` with `approved_graph_schema_hash: str | None` and make `start_index` reject a semantic run unless the hash matches the current proposal.
 
-- [ ] **Step 7: Add visible schema review UI**
+- [x] **Step 7: Add visible schema review UI**
 
 The confirmation flow has an explicit **Generate proposed schema** button before **Approve schema & index**. Render node types, properties, relationship verbs, directed patterns, constraints, sample documents/positions, model, hash, and estimated bulk cost. The final POST sends exactly the displayed `schema_hash`; a changed corpus/config invalidates the view and disables approval.
 
-- [ ] **Step 8: Run live proposal and browser tests on LXC100**
+- [x] **Step 8: Run live proposal and browser tests on LXC100**
 
 Use a real Apollo subset and the configured production semantic alias. Assert one real proposal, persisted readback, stable hash on unchanged input, changed hash on changed sample, typed refusal for Recall, and 409 for missing/stale approval. The headed browser test must click generation, expand schema sections, approve, and observe the outgoing run enter indexing without request interception.
 
-- [ ] **Step 9: Regenerate contracts and run verification**
+- [x] **Step 9: Regenerate contracts and run verification**
 
 Run `generate_types`, `validate_types`, focused pytest, frontend lint/build, and the headed schema flow. Expected: PASS.
 
-- [ ] **Step 10: Obtain DeepSeek V4 Flash PASS for Task 3**
+- [x] **Step 10: Obtain DeepSeek V4 Flash PASS for Task 3**
 
 Submit exact diff plus source evidence for `SchemaFromTextExtractor`, `GraphSchema` openness fields, persistence/locking tests, real gateway response, and browser proof. Resolve P1/P2 and re-review.
 
-- [ ] **Step 11: Detect scope and commit Task 3**
+- [x] **Step 11: Detect scope and commit Task 3**
 
 Commit with:
 
@@ -686,11 +686,11 @@ git commit -m "feat: add reviewed per-corpus graph schemas"
 - Consumes: approved `GraphSchemaProposal`, canonical chunks, semantic/code policy, sync Neo4j driver, manifest staging `graph_repo_id`.
 - Produces: `ScopedNeo4jWriter`, `build_semantic_pipeline(...) -> Pipeline`, `write_semantic_file_graph(...) -> GraphFileTelemetry`, `write_code_file_graph(...) -> GraphFileTelemetry`, official lexical relationships, and no Neo4j chunk embeddings.
 
-- [ ] **Step 1: Run impact analysis**
+- [x] **Step 1: Run impact analysis**
 
 Run impact for `_run_index_body`, `_write_code_graph`, `extract_semantic_kg_with_graphrag`, `write_lexical_graph_with_graphrag`, `Neo4jClient.upsert_graphrag_graph`, `_upsert_graphrag_nodes`, `_upsert_graphrag_relationships`, and `extract_code_graph`. Report HIGH/CRITICAL before editing.
 
-- [ ] **Step 2: Write official-writer and relationship RED tests**
+- [x] **Step 2: Write official-writer and relationship RED tests**
 
 Tests must assert:
 
@@ -704,11 +704,11 @@ assert all(rel.type != "IN_CHUNK" for rel in graph.relationships)
 
 The live writer test writes one semantic file and one code file to unique staging ids, then queries Neo4j and proves all Document/Chunk/entity nodes plus all relationships carry `repo_id` and `run_id`; chunks carry `graphJoinId`; every entity has `entity_id`, `entity_type`, and `FROM_CHUNK` provenance; no Community nodes, `IN_COMMUNITY`, `IN_CHUNK`, or chunk embedding property exists. Insert an extracted node with reserved `repo_id` and prove the writer refuses before the node count changes.
 
-- [ ] **Step 3: Run writer/pipeline tests and observe RED**
+- [x] **Step 3: Run writer/pipeline tests and observe RED**
 
 Run focused tests on LXC100. Expected: current custom writer emits `IN_CHUNK` and chunk embeddings, and no scoped official writer exists.
 
-- [ ] **Step 4: Implement the thin official writer seam**
+- [x] **Step 4: Implement the thin official writer seam**
 
 Create:
 
@@ -802,7 +802,7 @@ Implement the helpers in the same module:
 - `base_run = super().run` is a bound async method; `base_run(graph, lexical_graph_config)` creates the `Coroutine[Any, Any, KGWriterModel]` consumed by the helper. `asyncio.to_thread(...)` itself returns a coroutine, so `ScopedNeo4jWriter.run` must await it exactly as shown. `Neo4jWriter.__init__` currently accepts `driver`, `neo4j_database`, `batch_size`, and `clean_db`; the subclass deliberately forwards all positional/keyword arguments unchanged before adding only scoped ids.
 - Define `ResultT = TypeVar("ResultT")`. `run_async_component_off_event_loop` and its guarded worker helper are the no-argument equivalent used by Task 5's official resolver and any later 1.19 component whose async method wraps synchronous driver work.
 
-- [ ] **Step 5: Build the exact official semantic pipeline**
+- [x] **Step 5: Build the exact official semantic pipeline**
 
 Use one `Pipeline` per staging run with connections copied from the 1.19 template contract:
 
@@ -817,23 +817,23 @@ pipeline.connect("pruner", "writer", {"graph": "pruner.graph"})
 
 Run data supplies `extractor.chunks`, `extractor.document_info`, `extractor.lexical_graph_config`, `extractor.schema`, `pruner.schema`, `pruner.lexical_graph_config`, and `writer.lexical_graph_config`. Use `OnError.RAISE`, structured output, and the approved persisted schema. Execute the sync Neo4j writer/driver work in a worker thread so it never blocks the FastAPI event loop.
 
-- [ ] **Step 6: Write one complete graph per file, not one graph per vector batch**
+- [x] **Step 6: Write one complete graph per file, not one graph per vector batch**
 
 Make `_upsert_chunk_batch` write only Postgres/Qdrant. Accumulate the embedded chunks for the current file, then call the semantic or code graph writer once after the complete file is available. The streaming path enforces the preflight chunk ceiling and retains the file's eligible chunks only after the run has passed that ceiling; it may not create duplicate Document nodes or broken `NEXT_CHUNK` boundaries.
 
 For code policy, build the official lexical graph with `LexicalGraphBuilder(LexicalGraphConfig())`, merge its graph with `extract_code_graph(...)`, and submit one combined graph to `ScopedNeo4jWriter`. Remove current custom `Neo4jClient.upsert_graphrag_graph` and custom node/relationship serialization.
 
-- [ ] **Step 7: Run real pipeline and bug-family tests**
+- [x] **Step 7: Run real pipeline and bug-family tests**
 
 Run the unit suites plus the live Neo4j/gateway pipeline test. Add a matrix covering one file, multiple files, a file larger than one vector batch, code, semantic prose, missing route, malformed LLM output, all-pruned output, reserved-key collision, and graph-disabled policy. All expected failures must leave the staging graph unpromoted and deletable.
 
 Add a real event-loop isolation test with a live Neo4j write of at least 10,000 nodes. Run a concurrent `asyncio.sleep(0)` ticker while awaiting `ScopedNeo4jWriter.run`; assert the ticker advances before the writer completes and the resulting node count is exact. Do not patch the parent writer or use a fake driver.
 
-- [ ] **Step 8: Obtain DeepSeek V4 Flash PASS for Task 4**
+- [x] **Step 8: Obtain DeepSeek V4 Flash PASS for Task 4**
 
 Submit exact pipeline/writer/index-loop diff, 1.19 writer/Pipeline source, live test queries, and event-loop handling. Resolve P1/P2 and rerun.
 
-- [ ] **Step 9: Detect scope and commit Task 4**
+- [x] **Step 9: Detect scope and commit Task 4**
 
 Commit:
 
@@ -861,11 +861,11 @@ git commit -m "feat: build graphs through the official pipeline"
 - Consumes: completely written staged graph and approved schema hash.
 - Produces: `resolve_staged_entities(...) -> GraphResolutionTelemetry`, `verify_graph_promotion(...) -> GraphInvariantReport`, explicit sparse-corpus override, persisted graph telemetry, and promotion refusal on every invalid state.
 
-- [ ] **Step 1: Run impact analysis**
+- [x] **Step 1: Run impact analysis**
 
 Run impact for `SinglePropertyExactMatchResolver` call boundary, `_run_index_body`, `get_graph_stats`, `start_index`, `IndexRunSummary`, and `GenerationManifest`. Warn before HIGH/CRITICAL edits.
 
-- [ ] **Step 2: Write resolver isolation and RED invariant tests**
+- [x] **Step 2: Write resolver isolation and RED invariant tests**
 
 Define the invariant result in `server/indexing/graph_invariants.py`:
 
@@ -907,11 +907,11 @@ cases = [
 
 Each case starts a real staging generation, mutates only that staging graph, calls the real promotion verifier, asserts a typed failure code, and proves the active manifest still names the previous generation.
 
-- [ ] **Step 3: Run tests and observe RED**
+- [x] **Step 3: Run tests and observe RED**
 
 Expected: no resolution phase/report exists and current promotion checks only chunk count.
 
-- [ ] **Step 4: Run official exact-match resolution once after all file writes**
+- [x] **Step 4: Run official exact-match resolution once after all file writes**
 
 Create a sync driver and:
 
@@ -928,7 +928,7 @@ stats = await run_async_component_off_event_loop(resolver.run)
 
 `validated_graph_repo_id` must match the server-generated staging-id allowlist before literal encoding; no user value enters the clause. Record candidates (`number_of_nodes_to_resolve`), created nodes, inferred merges, conflicts, and unresolved duplicate groups. Fuzzy resolution is absent.
 
-- [ ] **Step 5: Implement one typed promotion report**
+- [x] **Step 5: Implement one typed promotion report**
 
 `verify_graph_promotion` queries:
 
@@ -943,23 +943,23 @@ stats = await run_async_component_off_event_loop(resolver.run)
 
 Semantic policy refuses promotion on any failed/truncated extraction, zero entities, zero semantic relationships, zero provenance, cross-scope record, or unresolved duplicate group. Code policy requires nonzero AST entities/relationships/provenance but not a semantic schema.
 
-- [ ] **Step 6: Implement audited entity-sparse override**
+- [x] **Step 6: Implement audited entity-sparse override**
 
 Extend `IndexRequest` with `graph_empty_override_reason: str | None` (minimum 20 visible characters). Permit it only for the `zero_entities`/`zero_semantic_relationships` class after extraction attempted the entire approved scope successfully. Capture `Remote-User` from the authenticated proxy; if missing, override is unavailable. Persist actor, reason, timestamp, telemetry, and `partial=True` in `GraphGenerationMetadata`. It never enables graph retrieval or changes chunk-only retrieval into graph success.
 
-- [ ] **Step 7: Surface telemetry and refusal in the real run UI**
+- [x] **Step 7: Surface telemetry and refusal in the real run UI**
 
 Run history shows policy, schema hash, chunks selected/attempted/succeeded/failed/truncated, extracted/resolved entities, semantic relations, provenance links, duplicate groups, community status, promotion verdict, and override audit. A failed invariant is a visible error with operator hint; no completed badge appears.
 
-- [ ] **Step 8: Run live RED/GREEN suite and UI refusal proof**
+- [x] **Step 8: Run live RED/GREEN suite and UI refusal proof**
 
 Run all mutation cases, resolver collision test, run replay tests, generated types, lint/build, and a headed browser case that sees a real safe test corpus refused and confirms the previous generation remains selected after reload.
 
-- [ ] **Step 9: Obtain DeepSeek V4 Flash PASS for Task 5**
+- [x] **Step 9: Obtain DeepSeek V4 Flash PASS for Task 5**
 
 Submit the full invariant matrix and actual active-manifest assertions. Resolve P1/P2 and re-review.
 
-- [ ] **Step 10: Detect scope and commit Task 5**
+- [x] **Step 10: Detect scope and commit Task 5**
 
 Commit:
 
@@ -987,11 +987,11 @@ git commit -m "feat: fail graph promotion on invalid generations"
 - Consumes: promoted `GenerationManifest.qdrant_collection`, `graph_repo_id`, Qdrant payload `graph_join_id`, Neo4j `Chunk.graphJoinId`, canonical query vector, GraphSearchConfig Top-K/hops/window.
 - Produces: `retrieve_graph_chunks(...) -> GraphTraversalResult`, traversal-only graph matches, truthful debug fields, and no Neo4j vector index/search path.
 
-- [ ] **Step 1: Run impact analysis**
+- [x] **Step 1: Run impact analysis**
 
 Run impact for `QdrantChunkStore.write_chunks`, `TriBridFusion._search_single_corpus`, `Neo4jClient.chunk_vector_search`, `expand_chunks_via_entities`, `entity_chunk_search`, `ChatDebugInfo`, and chat debug aggregation. Report HIGH/CRITICAL.
 
-- [ ] **Step 2: Write join/isolation and no-double-credit RED tests**
+- [x] **Step 2: Write join/isolation and no-double-credit RED tests**
 
 Define the internal result in `server/retrieval/graphrag_retriever.py`:
 
@@ -1009,11 +1009,11 @@ The unit contract test asserts the official constructor fields and the retrieval
 
 The live test creates two retained generations with identical raw chunk ids, different physical Qdrant collections, and different `graphJoinId` values. It proves a request constructs a fresh retriever for the manifest's physical collection and cannot return the retired graph. It also proves every graph result lies outside the original Qdrant seed set and Postgres hydration returns exact canonical content.
 
-- [ ] **Step 3: Run retrieval tests and observe RED**
+- [x] **Step 3: Run retrieval tests and observe RED**
 
 Expected: current graph leg calls `Neo4jClient.chunk_vector_search`, debug says entity hits for chunk seeds, and the same Qdrant/dense evidence can be fused twice.
 
-- [ ] **Step 4: Stamp top-level Qdrant join payloads atomically per batch**
+- [x] **Step 4: Stamp top-level Qdrant join payloads atomically per batch**
 
 After Haystack writes documents, use Qdrant `batch_update_points` with one `SetPayloadOperation` per deterministic point id:
 
@@ -1028,7 +1028,7 @@ SetPayloadOperation(
 
 Pass the staging `graph_repo_id` into `write_chunks`. The method returns only after vector and payload writes succeed. Add an exact pre-promotion payload-count check; missing join keys fail the run.
 
-- [ ] **Step 5: Implement the official request-scoped retriever**
+- [x] **Step 5: Implement the official request-scoped retriever**
 
 Construct in a worker thread:
 
@@ -1050,7 +1050,7 @@ result = retriever.search(query_vector=query_vector, top_k=seed_k)
 
 The generated Cypher starts from the matched Chunk, follows incoming `FROM_CHUNK`, traverses only entity-entity relationships whose `repo_id` equals `node.repo_id`, returns related chunks through `FROM_CHUNK`, optionally adds `NEXT_CHUNK` neighbors, and excludes all generation-qualified seed ids from `$match_params`. Inline only validated bounded hop/window integers.
 
-- [ ] **Step 6: Replace fusion and debug contracts**
+- [x] **Step 6: Replace fusion and debug contracts**
 
 Delete mode branches, Neo4j vector search, overfetch, entity text match, and expansion blend. Hydrate traversal chunk ids from Postgres. Replace debug with:
 
@@ -1066,23 +1066,23 @@ Replace public `graph_entity_hits` with the corresponding truthful fields. RRF/w
 
 API and Chat contract tests must assert `fusion_graph_entity_hits` is absent and that `fusion_graph_qdrant_seed_chunks`, `fusion_graph_relationship_expansion_hits`, and `fusion_graph_hydrated_chunks` are present with exact integer values.
 
-- [ ] **Step 7: Delete obsolete Neo4j vector and graph-search code**
+- [x] **Step 7: Delete obsolete Neo4j vector and graph-search code**
 
 Remove `ensure_vector_index`, `_assert_vector_index_contract`, `chunk_vector_search`, `graph_search`, `entity_chunk_search`, `expand_chunks_via_entities`, their configuration, metrics, and tests. Search the repo for `IN_CHUNK`, `fusion_graph_entity_hits`, `chunk_vector_index_name`, and `chunk_seed_overfetch_multiplier`; expected result is no production hit.
 
-- [ ] **Step 8: Run real retrieval matrix on LXC100**
+- [x] **Step 8: Run real retrieval matrix on LXC100**
 
 Use real Apollo calibration and Epstein flight-record questions. Test dense-only, graph-only, tri-brid, graph-disabled, missing manifest graph, Qdrant outage, Neo4j outage, retained-generation collision, and zero-traversal results. Required graph failure stays typed/fail-closed. Assert graph results include at least one chunk outside Qdrant seeds for each semantic corpus.
 
-- [ ] **Step 9: Regenerate contracts and verify**
+- [x] **Step 9: Regenerate contracts and verify**
 
 Run generated types, banned checks, focused/live retrieval tests, chat tests, lint/build. Expected: PASS and no obsolete symbol search hits.
 
-- [ ] **Step 10: Obtain DeepSeek V4 Flash PASS for Task 6**
+- [x] **Step 10: Obtain DeepSeek V4 Flash PASS for Task 6**
 
 Submit official 1.19 retriever source/signature, exact generated Cypher, collision/no-double-credit tests, and failure matrix. Resolve P1/P2 and re-review.
 
-- [ ] **Step 11: Detect scope and commit Task 6**
+- [x] **Step 11: Detect scope and commit Task 6**
 
 Commit:
 
@@ -1114,21 +1114,21 @@ git commit -m "feat: seed graph traversal from Qdrant"
 - Consumes: resolved, scoped entity graph with relationship weights.
 - Produces: `detect_leiden_communities(repo_id) -> GraphCommunityTelemetry`, `communityPath` list plus scalar `communityId` on entities, derived community APIs/UI, and no `Community`/`IN_COMMUNITY` ontology.
 
-- [ ] **Step 1: Run impact analysis**
+- [x] **Step 1: Run impact analysis**
 
 Run impact for `Neo4jClient.detect_communities`, `_store_communities`, `_modularity_groups`, `get_communities`, community member/subgraph methods, `get_graph_stats`, `list_communities`, `useGraph`, and `GraphSubtab`. Report HIGH/CRITICAL.
 
-- [ ] **Step 2: Write deployment and community RED tests**
+- [x] **Step 2: Write deployment and community RED tests**
 
 Deployment tests assert Neo4j 5.26.20 includes APOC and GDS 2.13.x plugin configuration, unrestricted/allowlisted `apoc.*,gds.*`, and a readiness probe that calls `gds.version()`.
 
 Live tests create two weighted cliques joined by a weak bridge, run detection twice, and assert identical `communityPath`/`communityId`, two connected final communities, `concurrency=1`, fixed random seed, no Community nodes/IN_COMMUNITY edges, and projection removal. Repeat with AST relationship types to prove code corpora receive communities.
 
-- [ ] **Step 3: Run tests and observe RED**
+- [x] **Step 3: Run tests and observe RED**
 
 Expected: GDS absent, code graphs get zero communities, and current implementation creates Community nodes through NetworkX Louvain.
 
-- [ ] **Step 4: Install the documented compatible plugin**
+- [x] **Step 4: Install the documented compatible plugin**
 
 Use Neo4j's plugin contract:
 
@@ -1140,7 +1140,7 @@ NEO4J_dbms_security_procedures_allowlist: apoc.*,gds.*
 
 Pin/verify the installed GDS result is `2.13.x`; do not upgrade Neo4j in this slice. Update deployment contract and readiness to fail closed when GDS is required but unavailable.
 
-- [ ] **Step 5: Implement scoped weighted Leiden**
+- [x] **Step 5: Implement scoped weighted Leiden**
 
 `server/graph/communities.py` must:
 
@@ -1164,21 +1164,21 @@ YIELD communityCount, ranLevels, modularity, modularities,
 5. verify every eligible entity received both properties and no out-of-scope entity changed;
 6. drop the named projection in `finally`, including failure paths.
 
-- [ ] **Step 6: Derive API communities from entity properties**
+- [x] **Step 6: Derive API communities from entity properties**
 
 Delete Community constraints, nodes, membership edges, `_store_communities`, and `_modularity_groups`. `get_communities` groups scoped entities by `communityId`, selects a deterministic highest-degree/name hub, returns the existing `Community` view model with member ids and level derived from `communityPath`. Member/subgraph routes match entity properties. Stats counts distinct non-null `communityId`.
 
 Keep the public route shapes needed by Graph Explorer, but they now represent derived views, not persisted Community objects. Remove any UI wording claiming communities are separate nodes.
 
-- [ ] **Step 7: Run live GDS/API/UI tests**
+- [x] **Step 7: Run live GDS/API/UI tests**
 
 Run deployment contract, live Leiden semantic/code tests, graph endpoint tests, generated types, lint/build, and headed Graph Explorer. The browser test selects a real corpus, clicks a community filter, selects members, expands a neighborhood, uses zoom/pan/fit, and reloads; no route interception.
 
-- [ ] **Step 8: Obtain DeepSeek V4 Flash PASS for Task 7**
+- [x] **Step 8: Obtain DeepSeek V4 Flash PASS for Task 7**
 
 Submit GDS 2.13 compatibility/Leiden docs, deployment diff, projection/drop queries, deterministic tests, and browser evidence. Resolve P1/P2 and re-review.
 
-- [ ] **Step 9: Detect scope and commit Task 7**
+- [x] **Step 9: Detect scope and commit Task 7**
 
 Commit:
 
@@ -1201,11 +1201,11 @@ git commit -m "feat: derive graph communities with GDS Leiden"
 - Consumes: DeepSeek-PASS Tasks 1-7, clean Mac/LXC checkouts, production credentials, and acceptance corpora.
 - Produces: pushed/deployed exact hash, rebuilt NASA/Epstein/code graphs, negative invariant proof, visible click ledger/screenshots, complete docs, and completion-audit evidence.
 
-- [ ] **Step 1: Freeze the requirement/evidence matrix**
+- [x] **Step 1: Freeze the requirement/evidence matrix**
 
 In the ledger, create one row for every spec section and goal requirement: 1.19 upgrade, schema proposal/review, default policy, Recall exclusion, official lexical names, official writer/Pipeline, resolution, promotion RED tests, Qdrant traversal/no double credit, GDS deployment/Leiden/code communities, dead-surface removal, DeepSeek reviews, LXC gates, deploy parity, three-corpus visible drive, and future Recall Intelligence note. Each row names the exact test/output/screenshot that will prove it.
 
-- [ ] **Step 2: Run the full LXC100 quality gate before deployment**
+- [x] **Step 2: Run the full LXC100 quality gate before deployment**
 
 On `/opt/ragweld` after syncing/committing the exact candidate:
 
@@ -1227,11 +1227,11 @@ Record exact counts and failures. Fix root causes, rerun the failed family, then
 
 Submit the complete spec-to-main diff, all task review verdicts, full gate output, remaining dead-symbol searches, deployment diff, and acceptance matrix. Resolve every substantiated P1/P2, rerun impacted tests/full gate, and get PASS.
 
-- [ ] **Step 4: Commit, push, and deploy the exact candidate**
+- [x] **Step 4: Commit, push, and deploy the exact candidate**
 
 Run final `detect-changes` against `main`, commit docs/evidence by explicit path, and push `main` non-force. On LXC100: require a clean checkout, fast-forward to `origin/main`, run the deployment render, rebuild frontend/runtime images as required, restart through the systemd-owned launcher, and wait for `/api/health`, `/api/ready`, Neo4j/APOC/GDS, Qdrant, Postgres, LiteLLM, and deployment marker readiness. Record Mac/origin/LXC/deployment hashes; all must match.
 
-- [ ] **Step 5: Rebuild NASA through visible controls**
+- [x] **Step 5: Rebuild NASA through visible controls**
 
 In the authenticated in-app browser:
 
@@ -1272,7 +1272,7 @@ Use real corpus questions, including Apollo sensor/calibration content and Epste
 
 Use a safe temporary external corpus whose approved extraction is forced into one invariant failure through the test-only fixture path. Start it through visible controls, observe the typed failure and operator hint, verify no completed badge/promoted generation appears after reload, then delete the temporary corpus through visible UI. Do not mutate NASA/Epstein/code active generations for the negative proof.
 
-- [ ] **Step 9: Audit replacement cleanup and runtime state**
+- [x] **Step 9: Audit replacement cleanup and runtime state**
 
 Require zero production hits for obsolete names/settings (`IN_CHUNK`, Neo4j chunk vector index, `graph_entity_hits`, heuristic semantic KG, Community nodes/IN_COMMUNITY, NetworkX community code). Query live Neo4j for zero obsolete relationships/nodes on new generations, zero cross-generation edges/memberships, and no chunk embeddings. Verify one Mac branch/worktree, one LXC branch/worktree, clean status, no active index, no abandoned staging generation/projection, and healthy backups.
 

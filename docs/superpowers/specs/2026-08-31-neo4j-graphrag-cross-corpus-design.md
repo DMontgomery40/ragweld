@@ -160,6 +160,23 @@ properties use camelCase; stable business keys receive uniqueness constraints. G
 `Object`, `RELATED_TO`, and `ASSOCIATED_WITH` catch-alls are prohibited unless a corpus-specific
 schema review provides a concrete, documented meaning.
 
+Amendment 2026-09-01 (Task 8 live drive, defects D3/D4): two domain rules are applied to every
+proposal before it is hashed, so the operator reviews exactly the shape that will run
+(`normalize_domain_schema`, enforced again by `validate_domain_schema` at every boundary):
+
+1. Every node type carries a STRING `name` identity property with a mandatory constraint on it
+   (EXISTENCE, or an existing KEY on `name`). Without it the official exact-match resolver skips
+   the anonymous nodes and the explorer has nothing to show; the gpt-4o-mini NASA proposal left
+   2,021 of 2,112 entities anonymous.
+2. No node or relationship type carries a document-text property (`body`, `content`, `text`,
+   `full_text`, `raw_text`, `html`, `message`, `message_body`, `email_body`, `transcript`), and no
+   constraint references one. The chunk store owns text; a body property makes the extractor
+   copy whole documents into the structured-output stream, which provider moderation cuts
+   mid-JSON (`finish_reason=content_filter`) and the run then fails closed.
+
+A proposal that still has no node types, relationship types, or patterns after these rules is
+answered with a typed 422 `graph_schema_unusable`, never a server fault.
+
 ## 7. Pipeline boundary and scoped writing
 
 Use the composable `Pipeline` components rather than `SimpleKGPipeline` because Ragweld already
@@ -211,6 +228,13 @@ before validation/community detection.
 
 Communities are invalid until this phase succeeds because duplicate entity nodes fragment the
 graph and cap community quality regardless of algorithm.
+
+Amendment 2026-09-01 (Task 8 live drive, defect D7): the identity property is owned by the graph
+policy. Semantic entities resolve on `name` (the approved schema's extracted name); code entities
+resolve on `entity_id` (the qualified `path::Qualified.symbol`, which the store keeps unique per
+generation), because resolving code on the bare name merged every `__init__` and `main` of a
+corpus into one node and produced artifact communities. `resolution_property_for_policy` in
+`server/indexing/graphrag_pipeline.py` is the single place that decides.
 
 ## 9. Retrieval replacement
 

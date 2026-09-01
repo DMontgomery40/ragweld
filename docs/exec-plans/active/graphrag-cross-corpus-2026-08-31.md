@@ -338,6 +338,132 @@ This table is the completion authority for Task 8. `Pending` may become `Proves`
 - First review response `gen-1788278390-YCwMCNiS21dhGwygBXrW` resolved to `deepseek.deepseek-v4-flash`, used 2,799 prompt + 4,893 completion tokens (7,692 total), and cost `$0.0009584736`. Verdict: **FAIL**. Its P1 found that post-open PDF exceptions could bypass the fallback; its P2 found that the fallback still recreated the original timeout for image-only PDFs; its P3 requested small-PDF, boundary, malformed/textless coverage. All findings were reproduced or covered and fixed.
 - Re-review response `gen-1788278762-2ZOgeh0KbK8SgPcdZZuO` resolved to `deepseek.deepseek-v4-flash`, used 3,318 prompt + 2,120 completion tokens (5,438 total), and cost `$0.000846496`. Verdict: **PASS**, with no P1/P2 findings and all five correction claims verified.
 
+### Live drive defects found after deployment (2026-09-01, continued by Claude/Fable after the Codex thread was paused)
+
+Operator hand-off at 18:17 UTC: the Codex goal thread was stopped right after the NASA run
+`c799bd43e94c4a1697ae355b5f9be0f9` completed (18:15:52 UTC, `graph_promotable=true`, 1,002/1,002 chunks,
+2,992 entities, 2,112 resolved, 880 merged, 1,938 relationships, 215 Leiden communities, modularity 0.797,
+$0.17). Mac/origin/LXC100/marker parity at `8a4d20c9` re-verified. The visible click ledger and screenshots for
+everything below live in `output/task8-graphrag-acceptance/click-ledger-2026-09-01.md`.
+
+- **Operator rule recorded mid-drive:** "do not use 4o it's 2026". The Codex NASA rebuild routed schema and
+  extraction through `openai.gpt-4o-mini` after GLM (1,002/1,002 "improper format") and DeepSeek 0423 (empty
+  schema) / 0731 (edge-cancelled) failed. The operator re-staged Epstein to `openai.gpt-5.6-luna`; the promoted
+  NASA generation is still bound to the gpt-4o-mini schema `6667c8fe…c91b` and is listed as a residual below.
+- **D1 (fixed):** Graph Explorer showed every NASA entity as "(concept)" and "1 nodes • 0 edges" for a
+  `LaunchSite` that holds a `LOCATED_AT` edge in Neo4j. `server/db/neo4j.py` coerced labels outside an AST-era
+  `Literal` to `concept` and filtered every edge through `ALL_RELATION_TYPES`; the approved schema's labels and
+  relationship types were never in either vocabulary. Fix: `Entity.entity_type` / `Relationship.relation_type`
+  are non-empty strings owned by the stored label (public contract regenerated, 298 exports), the closed
+  vocabularies and `_coerce_entity_type` are deleted, no explorer query filters by edge type, and the
+  neighbourhood walk is confined to `__Entity__` nodes of the generation so provenance edges can never bridge
+  two entities through a Chunk. GitNexus: `_coerce_entity_type` LOW, both query methods LOW, `Entity` class
+  CRITICAL (96 direct dependants = the shared generated-type blast radius, contained by regeneration + tsc).
+  RED on LXC100: 3 unit failures + the new live test; GREEN: 59 unit, 4 live Neo4j/GDS tests (new
+  `test_schema_labelled_semantic_graph_keeps_types_and_edges_in_every_explorer_view`), ruff, mypy,
+  generate/validate types, banned scan, web tsc. DeepSeek V4 Flash review `gen-1788288811-5G9t0fcHBjx3dPMCYIFx`
+  (`deepseek.deepseek-v4-flash`, 11,118 prompt + 6,829 completion = 17,947 tokens, `$0.002774912`):
+  **PASS**, no P1/P2. detect-changes: MEDIUM, 7 files / 36 symbols / 3 Graph Explorer flows.
+- **D2 (fixed, 0f79a7c3):** after Start indexing from the Indexing page, the "Current run" panel kept the
+  previous run's id and its PROMOTION REFUSED metadata under the new `indexing` badge for the whole run
+  (reproduced on the Epstein and code rebuilds). `IndexingSubtab.tsx`: a locally owned stream short-circuits the
+  status poll and `loadLatestRunReplay` refuses while indexing, so `latestRun` only refreshed at stream end.
+  Fix: clear the replayed run at local start and adopt the run id from the stream's "Indexing started …
+  (run_id=…)" line via `runs/latest` (accepted only when the API names the same run); `index-run-id` test id.
+  `web/tests/e2e/exhaustive/graph_policy.spec.ts` now polls `runs/latest` for the live id after Start and
+  requires the panel to show it. RED against the production component (+ test id only): panel never showed
+  `run_id: c382a462…`; GREEN with the fix: 2 passed in 29 s — both on LXC100 through an overlay Vite server
+  (`VITE_API_PROXY_TARGET` → production API) with the real corpus fixture and Luna. DeepSeek V4 Flash review
+  `gen-1788291447-ZovjOR80cKLUxIc8sCO9` (2,158 prompt + 3,672 completion = 5,830 tokens, `$0.00070903924`):
+  **PASS**, two P3 notes. Deploy pending until the Epstein run ends (a restart would kill it).
+- **D7 (fixed):** the rebuilt code generation (run `ad2236ed…`) held exactly one `__init__` node that 81
+  classes "contained", one `main`, one `_chunk`, and Leiden named artifact communities ("__init__" 273
+  members, "main" 314). `resolve_staged_entities` always keyed the official exact-match resolver on `name`;
+  a code symbol's identity is its qualified `entity_id` (unique per generation by the store's constraint).
+  Fix: `resolution_property_for_policy` (`name` for semantic, `entity_id` for code, error otherwise);
+  `resolve_staged_entities(policy=…)` keys both the resolver and the duplicate-group telemetry on it; the
+  promotion path passes the run's recorded policy. RED: ImportError (and the store's uniqueness constraint
+  rejected a duplicate `entity_id` seed, which shaped the live test); GREEN: 19 passed (unit mapping,
+  live semantic isolation with `policy="semantic"`, live code test keeping two `__init__` of different
+  classes apart, communities suite); ruff, mypy (stale `type: ignore` on `ScopedNeo4jWriter` removed),
+  banned scan clean. DeepSeek V4 Flash review `gen-1788291924-h7KVGbbg3P4XdG7HZlNk` (3,397 prompt + 2,693
+  completion = 6,090 tokens, `$0.000983696`): **PASS**, no findings. A further visible `ragweld_code`
+  rebuild is required after deployment for the promoted graph to reflect this.
+- **D8 (fixed):** a corpus whose sampled text carries no extractable domain (numeric-only, or a names-only
+  list) makes the proposer return an empty / relationship-less schema; `validate_domain_schema` raised and
+  `POST /api/index/{corpus}/graph-schema/proposal` surfaced it as an unhandled 500 ("Internal Server Error"
+  under the Generate button, reproduced twice). Fix: the endpoint maps the validator's ValueError to a typed
+  422 `graph_schema_unusable` (corpus_id, model_alias, message, operator_hint). RED: the new live test
+  `test_numeric_only_corpus_proposal_is_a_typed_422_not_a_500` surfaced the raw ValueError; GREEN: live
+  proposal tests (3, real gateway, Luna) + API schema tests = 13 passed in 50.7 s, ruff, mypy. DeepSeek V4
+  Flash review `gen-1788292482-Qv5sUy9C7hdYvqCMSGgm` (1,463 prompt + 4,221 completion = 5,684 tokens,
+  `$0.0007238574`): **PASS**, three P3 notes (corpus_id assertion added; the corpus-scoped config is removed
+  with the corpus; `_MODEL` is the file's module constant).
+- **D9 (fixed):** the Indexing page's "Per-chunk timeout (seconds)" and "Reasoning effort" controls never reached
+  the pipeline: `build_semantic_pipeline` and `derive_graph_schema_proposal` built `OpenAILLM(model_params=
+  {"temperature": 0})` with no request timeout, so a visible 5 s / `xhigh` setting on the disposable corpus still
+  let a 13 s Luna extraction promote (run `4e6f9312…`). Fix: `semantic_extraction_llm` builds the official
+  OpenAILLM with `timeout=` (both OpenAI clients, per the 1.19 kwargs contract) and `reasoning_effort` in the
+  model params; the pipeline and the proposal deriver take the operator values from the corpus-scoped config
+  (the proposal carries the effort only). RED: TypeError (and Neo4jWriter's constructor touching the driver,
+  which is why the factory is unit-tested directly); GREEN: 42 unit/API tests, live proposal tests 3/3 through
+  the real gateway with the effort sent, ruff, mypy, banned scan. Review: a first DeepSeek response
+  `gen-1788293253-ZjVKXIVu0caO4ec9BH7T` spent its whole 12,000-token ceiling on reasoning and emitted no content
+  (`$0.00378`, rejected as a non-review); the retry `gen-1788293443-lmFBWWP4ZQhCqYZTdyR0` (3,000 prompt +
+  570 completion = 3,570 tokens, `$0.0003726`): **PASS**, four P3 notes (proposal call intentionally carries
+  the effort but not the per-chunk timeout; duplicate route validation removed; effort validation lives in the
+  factory; refusal test renamed).
+- **D10 (fixed):** no operator surface rendered the graph leg's traversal accounting after the Task 6 contract
+  replacement (the chat debug footer printed only run/provider/trace ids and `llm_used`), so step 7's "visible
+  debug disclosure" had nowhere to be read. Fix: the chat footer prints one line from the message's own
+  `ChatDebugInfo` (`graph: graph_enabled=… graph_qdrant_seed_chunks=… graph_relationship_expansion_hits=…
+  graph_hydrated_chunks=…`, test id `chat-debug-graph`); no entity-hit figure exists in either contract. A real
+  NASA search recorded 6 seeds / 24 resolved entities / 6 expansions / 6 hydrated chunks with no
+  `fusion_graph_entity_hits` key. Regression `chat_workbench.spec.ts` T8-7 builds a real promoted semantic graph
+  on the exhaustive fixture through the API (Luna proposal, approved run, 16 entities / 12 relations / 4
+  communities), searches with include_graph (top_k 2: 2 seeds / 9 resolved / 2 expansions / 2 hydrated; at
+  top_k 4 every chunk is a seed and nothing is left to hydrate, by design), seeds the assistant message with the
+  recorded values under the chat contract names and requires the footer to equal them. RED: element missing on
+  the production component; GREEN: 1 passed in 42.9 s; tsc clean. DeepSeek V4 Flash: first review
+  `gen-1788293719` FAIL (two P1 / two P2 / one P3, all about test strength: graph_enabled never asserted true,
+  counters possibly undefined; plus two misreadings of fixture auth and `dispose`), fixed by the real-graph
+  build and explicit assertions; re-review `gen-1788294337-kB9sMnjDMZcxNTNAmJEt` (2,703 prompt + 4,003
+  completion = 6,706 tokens, `$0.00076762112`): **PASS**, no findings.
+- **ragweld_code visible rebuild (done, superseded by D7 rebuild):** the first Index Now failed closed on the same
+  `stored=deterministic` embedding contract (run `4ef886da…`); the visible Force reindex run
+  `ad2236ed255a4086b286e1c0dbae8eb2` (19:26:39–19:32:48 UTC) promoted: 894 files, 7,092 chunks, 6,225 AST
+  entities → 5,683 resolved (542 merged), 9,856 relations, 6,227 provenance links, 479 Leiden communities
+  (5 levels, modularity 0.960). Live stats: module 668 / function 4,429 / class 586; contains 5,486 /
+  calls 4,235 / inherits 2.
+- **D3 (corpus/provider, not code):** the Epstein force run `0d70ababe9ac4424af6a3353b7b3ebcc` failed closed at
+  its third file (`extraction_failure`, "LLM response has improper format") after two files extracted
+  correctly. Reproduced 4/4 with the persisted Luna schema: the proposal carries an `Email.body` STRING
+  property, the model copies the whole email into the JSON, and OpenRouter returns
+  `finish_reason=content_filter` with the JSON cut mid-string (luna, terra and sol alike; independent of
+  max_tokens). With the same schema minus `body`, Luna returns a valid graph (finish=stop, 464 tokens);
+  DeepSeek 0731 also validates but spends ~4.5k reasoning tokens per chunk. Evidence:
+  `output/task8-graphrag-acceptance/2026-09-01-epstein-D3-model-probe.txt`. The pipeline's fail-closed
+  behaviour is the specified one; the remedy is a schema without free-text body properties.
+- **D4 (fixed with D3):** `Tank` (1,037) and `PressureTransducerAssembly` (984) nodes of the promoted NASA
+  generation carry no `name` property because the gpt-4o-mini proposal never typed one; the official
+  `SinglePropertyExactMatchResolver(resolve_property="name")` skips null names (`WHERE prop IS NOT NULL`), so
+  2,021 of 2,112 entities never resolve, and the explorer API returned the literal string "None" for them.
+  Terra's Epstein proposal (`888b0614…56bc`) repeated both shapes (`Email.body`, `Email` without `name`), so the
+  defect is the deriver's, not a model's. Fix: `normalize_domain_schema` in `server/indexing/graphrag_schema.py`
+  runs before hashing and gives every node type a STRING `name` identity property plus a mandatory EXISTENCE
+  constraint (a KEY on `name` already suffices; the official pruner then drops anonymous extractions), and drops
+  document-text properties (body, content, text, full_text, raw_text, html, message, message_body, email_body,
+  transcript) together with constraints that reference them; `validate_domain_schema` enforces both invariants
+  at every boundary; the explorer maps a null stored name to "" and labels legacy entities by entity id.
+  RED: ImportError + `name == "None"`; GREEN on LXC100: 85 unit/API tests (12 in `test_graphrag_schema.py`),
+  live `test_graph_schema_proposal_live.py` 2/2 in 46 s through the real gateway with
+  `GRAPH_E2E_KG_MODEL=openai.gpt-5.6-luna`, ruff, mypy, banned scan. DeepSeek V4 Flash review
+  `gen-1788289806-exEgjFS3aglG2AFbBoe1` (`deepseek.deepseek-v4-flash`, 5,648 prompt + 5,382 completion =
+  11,030 tokens, `$0.00229768`): **PASS**, three P3 notes (existing non-STRING `name` is rejected by validation
+  rather than coerced; the unit test pins the identity property at index 0; `fulltext` and `full_text` both
+  blocked). detect-changes: CRITICAL, 8 files / 14 symbols / 282 affected because the schema validator gates every
+  index-start flow (intended containment).
+
 ### Final precommit GitNexus scope
 
 - Task 8 uncommitted range: HIGH risk across 55 files, 99 indexed symbols, eight affected flows. The named flows are `start_index` persisted/config resolution, mechanical docs automation helpers, and `RetrievalSubtab` config/readiness loading.

@@ -2455,6 +2455,19 @@
             "description": "Fusion method used for retrieval results",
             "title": "Fusion Method"
           },
+          "graph_community_expansion_hits": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Chunks found through graph communities",
+            "title": "Graph Community Expansion Hits"
+          },
           "graph_enabled": {
             "anyOf": [
               {
@@ -2466,19 +2479,6 @@
             ],
             "description": "Graph leg enabled in config",
             "title": "Graph Enabled"
-          },
-          "graph_entity_hits": {
-            "anyOf": [
-              {
-                "minimum": 0.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Graph entity hits (pre-hydration)",
-            "title": "Graph Entity Hits"
           },
           "graph_hydrated_chunks": {
             "anyOf": [
@@ -2492,6 +2492,45 @@
             ],
             "description": "Graph hydrated chunks returned",
             "title": "Graph Hydrated Chunks"
+          },
+          "graph_qdrant_seed_chunks": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Qdrant seed chunks passed to graph traversal",
+            "title": "Graph Qdrant Seed Chunks"
+          },
+          "graph_relationship_expansion_hits": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Chunks found through entity relationships",
+            "title": "Graph Relationship Expansion Hits"
+          },
+          "graph_resolved_entities": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Unique graph entities resolved during traversal",
+            "title": "Graph Resolved Entities"
           },
           "graph_weight": {
             "anyOf": [
@@ -6241,7 +6280,7 @@
         "type": "object"
       },
       "Entity": {
-        "description": "Knowledge graph node representing a code entity.",
+        "description": "Knowledge graph node of one corpus generation (code AST entity or schema entity).",
         "properties": {
           "description": {
             "anyOf": [
@@ -6256,23 +6295,13 @@
             "title": "Description"
           },
           "entity_id": {
-            "description": "Unique identifier",
+            "description": "Unique identifier within the corpus generation",
             "title": "Entity Id",
             "type": "string"
           },
           "entity_type": {
-            "description": "Type of entity",
-            "enum": [
-              "function",
-              "class",
-              "module",
-              "variable",
-              "concept",
-              "person",
-              "org",
-              "location",
-              "event"
-            ],
+            "description": "Entity kind as stored on the node: the AST kind for code graphs (function, class, module) or the approved schema node label for semantic graphs",
+            "minLength": 1,
             "title": "Entity Type",
             "type": "string"
           },
@@ -6289,7 +6318,7 @@
             "title": "File Path"
           },
           "name": {
-            "description": "Entity name (function name, class name, etc)",
+            "description": "Entity name (function name, class name, extracted entity name)",
             "title": "Name",
             "type": "string"
           },
@@ -7891,6 +7920,177 @@
         "title": "GenerationUnavailableResponse",
         "type": "object"
       },
+      "GraphCommunityTelemetry": {
+        "properties": {
+          "algorithm": {
+            "const": "gds-leiden-2.13",
+            "default": "gds-leiden-2.13",
+            "title": "Algorithm",
+            "type": "string"
+          },
+          "community_count": {
+            "minimum": 0.0,
+            "title": "Community Count",
+            "type": "integer"
+          },
+          "did_converge": {
+            "title": "Did Converge",
+            "type": "boolean"
+          },
+          "levels": {
+            "minimum": 0.0,
+            "title": "Levels",
+            "type": "integer"
+          },
+          "modularity": {
+            "title": "Modularity",
+            "type": "number"
+          },
+          "nodes_written": {
+            "minimum": 0.0,
+            "title": "Nodes Written",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "community_count",
+          "levels",
+          "modularity",
+          "did_converge",
+          "nodes_written"
+        ],
+        "title": "GraphCommunityTelemetry",
+        "type": "object"
+      },
+      "GraphExtractionTelemetry": {
+        "properties": {
+          "attempted_chunks": {
+            "minimum": 0.0,
+            "title": "Attempted Chunks",
+            "type": "integer"
+          },
+          "extracted_entities": {
+            "minimum": 0.0,
+            "title": "Extracted Entities",
+            "type": "integer"
+          },
+          "failed_chunks": {
+            "minimum": 0.0,
+            "title": "Failed Chunks",
+            "type": "integer"
+          },
+          "from_chunk_relationships": {
+            "minimum": 0.0,
+            "title": "From Chunk Relationships",
+            "type": "integer"
+          },
+          "selected_chunks": {
+            "minimum": 0.0,
+            "title": "Selected Chunks",
+            "type": "integer"
+          },
+          "semantic_relationships": {
+            "minimum": 0.0,
+            "title": "Semantic Relationships",
+            "type": "integer"
+          },
+          "succeeded_chunks": {
+            "minimum": 0.0,
+            "title": "Succeeded Chunks",
+            "type": "integer"
+          },
+          "truncated_chunks": {
+            "minimum": 0.0,
+            "title": "Truncated Chunks",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "selected_chunks",
+          "attempted_chunks",
+          "succeeded_chunks",
+          "failed_chunks",
+          "truncated_chunks",
+          "extracted_entities",
+          "semantic_relationships",
+          "from_chunk_relationships"
+        ],
+        "title": "GraphExtractionTelemetry",
+        "type": "object"
+      },
+      "GraphGenerationMetadata": {
+        "properties": {
+          "communities": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GraphCommunityTelemetry"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "extraction": {
+            "$ref": "#/components/schemas/GraphExtractionTelemetry"
+          },
+          "override": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GraphPromotionOverride"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "partial": {
+            "default": false,
+            "title": "Partial",
+            "type": "boolean"
+          },
+          "policy": {
+            "enum": [
+              "semantic",
+              "code"
+            ],
+            "title": "Policy",
+            "type": "string"
+          },
+          "resolution": {
+            "$ref": "#/components/schemas/GraphResolutionTelemetry"
+          },
+          "schema": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema"
+          },
+          "schema_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Hash"
+          }
+        },
+        "required": [
+          "policy",
+          "extraction",
+          "resolution"
+        ],
+        "title": "GraphGenerationMetadata",
+        "type": "object"
+      },
       "GraphIndexingConfig": {
         "description": "Configuration for building/persisting graph data during indexing.",
         "properties": {
@@ -7938,86 +8138,10 @@
             "title": "Build Lexical Graph",
             "type": "boolean"
           },
-          "chunk_embedding_property": {
-            "default": "embedding",
-            "description": "Chunk node property that stores the embedding vector",
-            "title": "Chunk Embedding Property",
-            "type": "string"
-          },
-          "chunk_vector_index_name": {
-            "default": "tribrid_chunk_embeddings",
-            "description": "Neo4j vector index name for Chunk embeddings (mode='chunk')",
-            "title": "Chunk Vector Index Name",
-            "type": "string"
-          },
           "enabled": {
             "default": true,
             "description": "Enable graph building during indexing (Neo4j)",
             "title": "Enabled",
-            "type": "boolean"
-          },
-          "semantic_kg_allowed_entity_types": {
-            "default": [
-              "person",
-              "org",
-              "location",
-              "event",
-              "concept"
-            ],
-            "description": "Allowed semantic KG entity types produced by extraction.",
-            "items": {
-              "enum": [
-                "person",
-                "org",
-                "location",
-                "event",
-                "concept"
-              ],
-              "type": "string"
-            },
-            "title": "Semantic Kg Allowed Entity Types",
-            "type": "array"
-          },
-          "semantic_kg_allowed_relation_types": {
-            "default": [
-              "associated_with",
-              "met_with",
-              "communicated_with",
-              "works_for",
-              "member_of",
-              "founded",
-              "owns",
-              "funded",
-              "participated_in",
-              "located_in",
-              "references",
-              "related_to"
-            ],
-            "description": "Allowed semantic KG relationship types produced by extraction.",
-            "items": {
-              "enum": [
-                "associated_with",
-                "met_with",
-                "communicated_with",
-                "works_for",
-                "member_of",
-                "founded",
-                "owns",
-                "funded",
-                "participated_in",
-                "located_in",
-                "references",
-                "related_to"
-              ],
-              "type": "string"
-            },
-            "title": "Semantic Kg Allowed Relation Types",
-            "type": "array"
-          },
-          "semantic_kg_enabled": {
-            "default": false,
-            "description": "Build an official Neo4j GraphRAG semantic graph with typed entities and relationships linked to chunks during indexing",
-            "title": "Semantic Kg Enabled",
             "type": "boolean"
           },
           "semantic_kg_llm_model": {
@@ -8027,54 +8151,20 @@
             "type": "string"
           },
           "semantic_kg_llm_timeout_s": {
-            "default": 30,
+            "default": 90,
             "description": "Timeout (seconds) for semantic KG LLM extraction per chunk",
-            "maximum": 120.0,
+            "maximum": 600.0,
             "minimum": 5.0,
             "title": "Semantic Kg Llm Timeout S",
             "type": "integer"
           },
           "semantic_kg_max_chunks": {
             "default": 40000,
-            "description": "Maximum chunks to process for semantic KG extraction per indexing run (0 = disabled)",
+            "description": "Maximum eligible chunks for a semantic GraphRAG run. Runs above this ceiling fail before promotion; the corpus is never sliced into a partial graph.",
             "maximum": 100000.0,
-            "minimum": 0.0,
+            "minimum": 1.0,
             "title": "Semantic Kg Max Chunks",
             "type": "integer"
-          },
-          "semantic_kg_max_concepts_per_chunk": {
-            "default": 8,
-            "description": "Maximum semantic concepts to extract per chunk",
-            "maximum": 50.0,
-            "minimum": 0.0,
-            "title": "Semantic Kg Max Concepts Per Chunk",
-            "type": "integer"
-          },
-          "semantic_kg_max_relations_per_chunk": {
-            "default": 12,
-            "description": "Maximum semantic relations to retain per chunk during GraphRAG extraction",
-            "maximum": 200.0,
-            "minimum": 0.0,
-            "title": "Semantic Kg Max Relations Per Chunk",
-            "type": "integer"
-          },
-          "semantic_kg_min_concept_len": {
-            "default": 4,
-            "description": "Minimum length for semantic concept tokens",
-            "maximum": 20.0,
-            "minimum": 3.0,
-            "title": "Semantic Kg Min Concept Len",
-            "type": "integer"
-          },
-          "semantic_kg_mode": {
-            "default": "llm",
-            "description": "Semantic KG extraction mode. This branch targets the official Neo4j GraphRAG LLM path; 'heuristic' is a stale legacy setting.",
-            "enum": [
-              "heuristic",
-              "llm"
-            ],
-            "title": "Semantic Kg Mode",
-            "type": "string"
           },
           "semantic_kg_reasoning_effort": {
             "default": "medium",
@@ -8088,64 +8178,6 @@
             ],
             "title": "Semantic Kg Reasoning Effort",
             "type": "string"
-          },
-          "semantic_kg_relation_weight_heuristic": {
-            "default": 0.5,
-            "description": "Edge weight for semantic concept relations in heuristic fallback mode.",
-            "maximum": 1.0,
-            "minimum": 0.0,
-            "title": "Semantic Kg Relation Weight Heuristic",
-            "type": "number"
-          },
-          "semantic_kg_relation_weight_llm": {
-            "default": 0.7,
-            "description": "Edge weight for semantic concept relations in LLM mode.",
-            "maximum": 1.0,
-            "minimum": 0.0,
-            "title": "Semantic Kg Relation Weight Llm",
-            "type": "number"
-          },
-          "semantic_kg_require_llm_success": {
-            "default": false,
-            "description": "When true, fail the indexing run if GraphRAG semantic extraction fails for a chunk.",
-            "title": "Semantic Kg Require Llm Success",
-            "type": "boolean"
-          },
-          "semantic_kg_typed_entities_enabled": {
-            "default": true,
-            "description": "When true, semantic KG extraction preserves typed entities (person, org, location, event, concept).",
-            "title": "Semantic Kg Typed Entities Enabled",
-            "type": "boolean"
-          },
-          "store_chunk_embeddings": {
-            "default": true,
-            "description": "Store chunk embeddings on Chunk nodes for Neo4j vector search (requires dense embeddings)",
-            "title": "Store Chunk Embeddings",
-            "type": "boolean"
-          },
-          "vector_index_online_timeout_s": {
-            "default": 60.0,
-            "description": "Timeout waiting for Neo4j vector index ONLINE (seconds)",
-            "maximum": 600.0,
-            "minimum": 1.0,
-            "title": "Vector Index Online Timeout S",
-            "type": "number"
-          },
-          "vector_similarity_function": {
-            "default": "cosine",
-            "description": "Neo4j vector similarity function",
-            "enum": [
-              "cosine",
-              "euclidean"
-            ],
-            "title": "Vector Similarity Function",
-            "type": "string"
-          },
-          "wait_vector_index_online": {
-            "default": true,
-            "description": "Wait for the Neo4j vector index to come ONLINE after (re)creating it",
-            "title": "Wait Vector Index Online",
-            "type": "boolean"
           }
         },
         "title": "GraphIndexingConfig",
@@ -8192,37 +8224,237 @@
         "title": "GraphNeighborsResponse",
         "type": "object"
       },
+      "GraphPromotionOverride": {
+        "properties": {
+          "actor": {
+            "minLength": 1,
+            "title": "Actor",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "failure_codes": {
+            "items": {
+              "enum": [
+                "zero_entities",
+                "zero_semantic_relationships"
+              ],
+              "type": "string"
+            },
+            "title": "Failure Codes",
+            "type": "array"
+          },
+          "reason": {
+            "minLength": 20,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor",
+          "reason",
+          "created_at",
+          "failure_codes"
+        ],
+        "title": "GraphPromotionOverride",
+        "type": "object"
+      },
+      "GraphResolutionTelemetry": {
+        "properties": {
+          "candidate_nodes": {
+            "minimum": 0.0,
+            "title": "Candidate Nodes",
+            "type": "integer"
+          },
+          "merged_nodes": {
+            "minimum": 0.0,
+            "title": "Merged Nodes",
+            "type": "integer"
+          },
+          "resolved_nodes": {
+            "minimum": 0.0,
+            "title": "Resolved Nodes",
+            "type": "integer"
+          },
+          "unresolved_duplicate_groups": {
+            "minimum": 0.0,
+            "title": "Unresolved Duplicate Groups",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "candidate_nodes",
+          "resolved_nodes",
+          "merged_nodes",
+          "unresolved_duplicate_groups"
+        ],
+        "title": "GraphResolutionTelemetry",
+        "type": "object"
+      },
+      "GraphSchemaPolicyConflictDetail": {
+        "description": "Public 409 detail when schema proposal is not valid for the corpus graph policy.",
+        "properties": {
+          "code": {
+            "const": "graph_schema_policy_not_semantic",
+            "default": "graph_schema_policy_not_semantic",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "operator_hint": {
+            "title": "Operator Hint",
+            "type": "string"
+          },
+          "policy": {
+            "enum": [
+              "semantic",
+              "code",
+              "off",
+              "excluded"
+            ],
+            "title": "Policy",
+            "type": "string"
+          }
+        },
+        "required": [
+          "policy",
+          "message",
+          "operator_hint"
+        ],
+        "title": "GraphSchemaPolicyConflictDetail",
+        "type": "object"
+      },
+      "GraphSchemaPolicyConflictResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/GraphSchemaPolicyConflictDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "GraphSchemaPolicyConflictResponse",
+        "type": "object"
+      },
+      "GraphSchemaProposal": {
+        "properties": {
+          "corpus_id": {
+            "title": "Corpus Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "graphrag_version": {
+            "const": "1.19.0",
+            "default": "1.19.0",
+            "title": "Graphrag Version",
+            "type": "string"
+          },
+          "input_fingerprint": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Input Fingerprint",
+            "type": "string"
+          },
+          "model_alias": {
+            "title": "Model Alias",
+            "type": "string"
+          },
+          "policy": {
+            "const": "semantic",
+            "title": "Policy",
+            "type": "string"
+          },
+          "sample": {
+            "$ref": "#/components/schemas/GraphSchemaSample"
+          },
+          "schema": {
+            "additionalProperties": true,
+            "title": "Schema",
+            "type": "object"
+          },
+          "schema_hash": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Schema Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "corpus_id",
+          "policy",
+          "input_fingerprint",
+          "schema_hash",
+          "schema",
+          "sample",
+          "model_alias",
+          "created_at"
+        ],
+        "title": "GraphSchemaProposal",
+        "type": "object"
+      },
+      "GraphSchemaProposalRequest": {
+        "properties": {
+          "force_refresh": {
+            "default": false,
+            "title": "Force Refresh",
+            "type": "boolean"
+          }
+        },
+        "title": "GraphSchemaProposalRequest",
+        "type": "object"
+      },
+      "GraphSchemaSample": {
+        "properties": {
+          "chunk_hashes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Chunk Hashes",
+            "type": "array"
+          },
+          "chunk_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Chunk Ids",
+            "type": "array"
+          },
+          "recipe": {
+            "const": "documents-and-positions-v1",
+            "default": "documents-and-positions-v1",
+            "title": "Recipe",
+            "type": "string"
+          },
+          "seed": {
+            "default": 0,
+            "title": "Seed",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "chunk_ids",
+          "chunk_hashes"
+        ],
+        "title": "GraphSchemaSample",
+        "type": "object"
+      },
       "GraphSearchConfig": {
         "description": "Configuration for graph-based search using Neo4j.",
         "properties": {
-          "chunk_entity_expansion_enabled": {
-            "default": true,
-            "description": "When mode='chunk', expand from seed chunks via Entity graph (IN_CHUNK links) to find related chunks",
-            "title": "Chunk Entity Expansion Enabled",
-            "type": "boolean"
-          },
-          "chunk_entity_expansion_weight": {
-            "default": 0.8,
-            "description": "Blend weight for entity-expansion scores relative to seed chunk scores (mode='chunk')",
-            "maximum": 1.0,
-            "minimum": 0.0,
-            "title": "Chunk Entity Expansion Weight",
-            "type": "number"
-          },
           "chunk_neighbor_window": {
             "default": 1,
-            "description": "When mode='chunk', include up to N adjacent chunks (NEXT_CHUNK) around each seed hit",
+            "description": "Include up to N adjacent chunks (NEXT_CHUNK) around relationship hits",
             "maximum": 10.0,
             "minimum": 0.0,
             "title": "Chunk Neighbor Window",
-            "type": "integer"
-          },
-          "chunk_seed_overfetch_multiplier": {
-            "default": 10,
-            "description": "When mode='chunk' and Neo4j uses a shared database, overfetch seed hits before filtering by corpus_id",
-            "maximum": 50.0,
-            "minimum": 1.0,
-            "title": "Chunk Seed Overfetch Multiplier",
             "type": "integer"
           },
           "enabled": {
@@ -8244,16 +8476,6 @@
             "minimum": 1.0,
             "title": "Max Hops",
             "type": "integer"
-          },
-          "mode": {
-            "default": "chunk",
-            "description": "Graph retrieval mode. 'chunk' uses lexical chunk nodes + Neo4j vector index; 'entity' uses the legacy code-entity graph.",
-            "enum": [
-              "chunk",
-              "entity"
-            ],
-            "title": "Mode",
-            "type": "string"
           },
           "top_k": {
             "default": 30,
@@ -8331,16 +8553,6 @@
       "GraphStorageConfig": {
         "description": "Configuration for Neo4j graph storage and traversal.",
         "properties": {
-          "community_algorithm": {
-            "default": "louvain",
-            "description": "Community detection algorithm",
-            "enum": [
-              "louvain",
-              "label_propagation"
-            ],
-            "title": "Community Algorithm",
-            "type": "string"
-          },
           "entity_types": {
             "default": [
               "function",
@@ -9118,11 +9330,37 @@
       "IndexRequest": {
         "description": "Request to index a repository.",
         "properties": {
+          "approved_graph_schema_hash": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Exact reviewed graph schema hash required for semantic indexing",
+            "title": "Approved Graph Schema Hash"
+          },
           "force_reindex": {
             "default": false,
             "description": "Force full reindex even if up-to-date",
             "title": "Force Reindex",
             "type": "boolean"
+          },
+          "graph_empty_override_reason": {
+            "anyOf": [
+              {
+                "minLength": 20,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Audited sparse-graph override reason; accepted only for eligible invariant failures",
+            "title": "Graph Empty Override Reason"
           },
           "repo_id": {
             "description": "Corpus identifier",
@@ -9470,6 +9708,37 @@
             "minimum": 0.0,
             "title": "Figures Undescribed",
             "type": "integer"
+          },
+          "graph_failure_codes": {
+            "description": "Typed graph promotion invariant failures observed before commit",
+            "items": {
+              "type": "string"
+            },
+            "title": "Graph Failure Codes",
+            "type": "array"
+          },
+          "graph_metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GraphGenerationMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Graph extraction, resolution, community, and override telemetry for this run"
+          },
+          "graph_promotable": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether the staged graph passed promotion or an audited sparse override",
+            "title": "Graph Promotable"
           },
           "progress": {
             "default": 0.0,
@@ -13908,7 +14177,7 @@
         "type": "object"
       },
       "Relationship": {
-        "description": "Knowledge graph edge connecting two entities.",
+        "description": "Knowledge graph edge connecting two entities of one corpus generation.",
         "properties": {
           "properties": {
             "additionalProperties": true,
@@ -13917,25 +14186,8 @@
             "type": "object"
           },
           "relation_type": {
-            "description": "Type of relationship",
-            "enum": [
-              "calls",
-              "imports",
-              "inherits",
-              "contains",
-              "associated_with",
-              "met_with",
-              "communicated_with",
-              "works_for",
-              "member_of",
-              "founded",
-              "owns",
-              "funded",
-              "participated_in",
-              "located_in",
-              "references",
-              "related_to"
-            ],
+            "description": "Relationship type as stored on the edge: the AST edge kind for code graphs (calls, imports, inherits, contains) or the approved schema relationship type for semantic graphs",
+            "minLength": 1,
             "title": "Relation Type",
             "type": "string"
           },
@@ -25791,6 +26043,68 @@
           }
         },
         "summary": "Delete Index",
+        "tags": [
+          "index"
+        ]
+      }
+    },
+    "/api/index/{corpus_id}/graph-schema/proposal": {
+      "post": {
+        "operationId": "propose_graph_schema_api_index__corpus_id__graph_schema_proposal_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "corpus_id",
+            "required": true,
+            "schema": {
+              "title": "Corpus Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GraphSchemaProposalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GraphSchemaProposal"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GraphSchemaPolicyConflictResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Propose Graph Schema",
         "tags": [
           "index"
         ]
