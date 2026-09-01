@@ -486,6 +486,7 @@ export function IndexingSubtab() {
   const foreignRunIdRef = useRef<string>('');
   const foreignEventsSeenRef = useRef(0);
   const localRunRef = useRef(false);
+  const localRunIdRef = useRef<string>('');
   const isIndexingRef = useRef(false);
   const [latestRun, setLatestRun] = useState<IndexRunSummary | null>(null);
   const [latestRunEvents, setLatestRunEvents] = useState<IndexRunEvent[]>([]);
@@ -854,6 +855,21 @@ export function IndexingSubtab() {
     t?.clear();
     t?.setTitle(title);
   }, []);
+
+  const adoptLocalRun = useCallback(
+    async (rid: string, runId: string) => {
+      try {
+        const latestResp = await fetch(api(`index/${encodeURIComponent(rid)}/runs/latest`));
+        if (!latestResp.ok) return;
+        const latest: IndexRunSummary = await latestResp.json();
+        if (String(latest.run_id || '') !== runId || localRunIdRef.current !== runId) return;
+        setLatestRun(latest);
+      } catch {
+        // the stream keeps the terminal truthful; the panel adopts the run on the next line
+      }
+    },
+    [api]
+  );
 
   const loadLatestRunReplay = useCallback(async () => {
     const rid = String(activeRepo || '').trim();
@@ -1257,8 +1273,15 @@ export function IndexingSubtab() {
       }
 
       localRunRef.current = true;
+      localRunIdRef.current = '';
       setIsIndexing(true);
       setForeignRun(false);
+      // The panel must never show the previous run's id and graph verdict under the new
+      // run's badge (Task 8 drive observation D2): drop the replayed run now and adopt the
+      // new run as soon as the stream names it.
+      setLatestRun(null);
+      setLatestRunEvents([]);
+      setLatestRunEventTotal(0);
       setProgress({ current: 0, total: 100, status: 'Starting...' });
       setTerminalVisible(true);
       resetTerminal(`Indexing: ${rid}`);
@@ -1273,7 +1296,14 @@ export function IndexingSubtab() {
 
       const st = await startAndStream(body, {
         terminalId: 'indexing_terminal',
-        onLine: (line) => terminalRef.current?.appendLine(line),
+        onLine: (line) => {
+          terminalRef.current?.appendLine(line);
+          const started = /run_id=([0-9a-f]{32})/.exec(String(line || ''));
+          if (started && started[1] !== localRunIdRef.current) {
+            localRunIdRef.current = started[1];
+            void adoptLocalRun(rid, started[1]);
+          }
+        },
         onProgress: (percent, message) => {
           setProgress({ current: percent, total: 100, status: message || `Progress: ${percent}%` });
           terminalRef.current?.updateProgress(percent, message);
@@ -1495,7 +1525,10 @@ export function IndexingSubtab() {
               {String(_indexStatus?.status || latestRun?.status || 'idle')}
             </span>
             {latestRun?.run_id ? (
-              <span style={{ fontSize: '11px', color: 'var(--fg-muted)', fontFamily: 'var(--font-mono)' }}>
+              <span
+                data-testid="index-run-id"
+                style={{ fontSize: '11px', color: 'var(--fg-muted)', fontFamily: 'var(--font-mono)' }}
+              >
                 run_id: {String(latestRun.run_id)}
               </span>
             ) : null}

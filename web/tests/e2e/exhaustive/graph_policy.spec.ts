@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import {
+  API_BASE,
   patchCorpusConfigSection,
   provisionExhaustiveCorpus,
   type ExhaustiveCorpus,
@@ -45,7 +46,7 @@ test('external documents derive semantic policy while Recall stays excluded', as
   await expect(page.getByTestId('semantic-graph-settings')).toHaveCount(0);
 });
 
-test('operator reviews the proposed schema before approving a semantic run', async ({ page }) => {
+test('operator reviews the proposed schema before approving a semantic run', async ({ page, request }) => {
   await page.goto(`rag?subtab=indexing&corpus=${encodeURIComponent(corpus.corpusId)}`, {
     waitUntil: 'domcontentloaded',
   });
@@ -83,6 +84,21 @@ test('operator reviews the proposed schema before approving a semantic run', asy
   await page.getByTestId('confirm-dialog-accept').click();
   expect((await started).status()).toBe(200);
   await expect(page.getByRole('button', { name: 'Stop Indexing' })).toBeVisible({ timeout: 30_000 });
+
+  // Task 8 drive observation D2: the run panel used to keep the PREVIOUS run's id and
+  // graph verdict under the new run's "indexing" badge for the whole run. The panel must
+  // name the run the API is actually executing, and nothing else, while it is live.
+  let liveRunId = '';
+  for (let attempt = 0; attempt < 15 && !liveRunId; attempt += 1) {
+    const latest = await request.get(`${API_BASE}/index/${encodeURIComponent(corpus.corpusId)}/runs/latest`);
+    if (latest.ok()) {
+      const body = (await latest.json()) as { run_id?: string; status?: string };
+      if (body.status === 'indexing') liveRunId = String(body.run_id || '');
+    }
+    if (!liveRunId) await page.waitForTimeout(1000);
+  }
+  expect(liveRunId).toMatch(/^[0-9a-f]{32}$/);
+  await expect(page.getByTestId('index-run-id')).toHaveText(`run_id: ${liveRunId}`, { timeout: 30_000 });
 
   await page.getByRole('button', { name: 'Stop Indexing' }).click();
   await expect(page.getByTestId('index-now-button')).toBeVisible({ timeout: 60_000 });
