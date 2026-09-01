@@ -304,6 +304,9 @@ The **RAG → Indexing** tab used to only show progress for runs *it* started. T
 
 If a run you started in this tab is in flight, its own event stream owns the UI and the polling stays quiet — there is no double-reporting.
 
+!!! note "The panel always names the run that is actually executing"
+    Pressing **Start** drops the previous run's summary and event log immediately — the panel can no longer sit showing the last run's id and graph verdict under the new run's `indexing` badge for the whole run. As soon as the terminal stream reports the new run's id (`run_id=…`), the panel adopts it by re-reading `GET /api/index/{corpus_id}/runs/latest` and shows `run_id: <id>` in the status header, so the id, the graph verdict, and the progress bar all belong to the run the API is executing. See [Indexing API](../api_indexing.md).
+
 *Concept diagram (the run-adoption mechanism only — the full fused retrieval pipeline is on the [generated retrieval-pipeline page](../reference/architecture/retrieval-pipeline.md)):*
 
 ```mermaid

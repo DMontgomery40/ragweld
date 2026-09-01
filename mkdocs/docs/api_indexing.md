@@ -67,6 +67,9 @@
 !!! note "Schema proposal sampling is bounded, and a textless PDF refuses fast"
     `POST /api/index/{corpus_id}/graph-schema/proposal` no longer converts whole documents behind the synchronous HTTP boundary. Text-bearing PDFs are sampled through a fast pypdfium2 page reader (`_extract_schema_sample_text_for_path` in `server/api/index.py`) — every page of a document with twelve or fewer pages, or nine positionally representative pages (front, middle, back) of a larger one — with each sampled page stamped `# <file> page <n>` so the sampled positions stay reviewable. The chunker tokenizer's warm-up is deferred until the first non-empty sample. A corpus whose sampled documents yield no text answers `422` naming the problem instead of starting whole-document OCR behind the public proxy window. See [Indexing pipeline](indexing.md).
 
+!!! note "A corpus with no usable domain schema answers a typed 422, not a 500"
+    When the sampled text yields no extractable domain — the proposer returns no node types or relationships, or a forbidden label — the domain validator rejects the shape and `POST /api/index/{corpus_id}/graph-schema/proposal` answers a typed `422 graph_schema_unusable` (previously the proposer's `ValueError` escaped as an unhandled `500`). The detail carries `corpus_id`, the extraction alias that ran (`model_alias`), the proposer's own `message`, and an `operator_hint`: provide text with named entities and relationships, or point `graph_indexing.semantic_kg_llm_model` at another KG model alias, then generate the proposal again. This is a review outcome the operator must read, not a server fault. See [Indexing pipeline](indexing.md).
+
 ```mermaid
 flowchart LR
     Start["POST /api/index"] --> Worker["Indexer"]
