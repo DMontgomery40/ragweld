@@ -31,6 +31,19 @@ Notes:
 
 Selectors and server config validation enforce capability compatibility. Known mismatches are rejected with `422`.
 
+## Catalog rows are candidates, not runtime guarantees
+
+Every catalog row carries `selection_*` metadata that separates the broad candidate catalog from what the runtime can actually select today:
+
+| Field | Meaning |
+|-------|---------|
+| `selection_status` | `catalog_only` marks a row as pricing/candidate metadata only — it shows up in cost estimates and picker candidates but is not a runtime-selectable target right now |
+| `selection_reason` | Why the row holds that status (for example, generation provider rows are priced candidates; runtime selection comes from authenticated LiteLLM aliases) |
+| `selection_roles` | The runtime roles a row is wired for, when any |
+
+!!! tip "Check `/api/runtime-capabilities` before promising a model"
+    `data/models.json` is the broad catalog for pricing and candidates; **runtime-selectable truth** comes from the catalog's `selection_*` metadata plus `server/runtime_capabilities.py`, served as `GET /api/runtime-capabilities`. A model appearing in `/api/models` with `selection_status: "catalog_only"` does not mean ragweld can route to it today. The daily refresh adds, re-prices, and drops rows — the 2026-09-01 refresh added IBM Granite 4.2 8B, a wave of OpenAI batch-priced variants, and price updates for DeepSeek V4 Flash/Pro — so treat any specific row as volatile and read the runtime capabilities endpoint when a decision depends on what is selectable now.
+
 ## Upsert Flow
 
 Use `POST /api/models/upsert` to add or update entries safely:
@@ -52,10 +65,9 @@ Behavior:
 - Runs daily in GitHub Actions (UTC schedule) plus manual `workflow_dispatch`.
 - Uses a single machine-readable source (OpenRouter feed) for managed providers:
   - `openai`, `anthropic`, `google`, `cohere`, `mistral`, `deepseek`, `xai`
-- Normalizes only text-output models and ignores `:` snapshot/alias variants to reduce churn.
+- Normalizes text-output models from the feed. Batch-priced variants (model ids ending in `:batch`) are added as catalog-only rows carrying the batch tier pricing; other `:` snapshot/alias variants are ignored to reduce churn.
 - Updates existing managed `GEN` rows in place (pricing, context, base URL, components, unit).
-- Keeps removed managed rows and marks them deprecated in `notes` with:
-  - `[auto-refresh] deprecated_on=YYYY-MM-DD`
+- Removes managed rows that the feed no longer lists.
 - Adds newly discovered models even if pricing is unavailable:
   - Missing price rows are added with null price fields and
     `[auto-refresh] pricing_unknown=true`.

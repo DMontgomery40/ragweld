@@ -151,11 +151,42 @@ The UI shows the derived policy as a badge in **RAG → Indexing** and **RAG →
 
 A semantic run cannot start without a reviewed graph schema:
 
-1. **Propose** — `POST /api/index/{corpus_id}/graph-schema/proposal` deterministically samples documents (first/middle/last chunk per document), asks the extraction alias for a closed-world `GraphSchema`, rejects generic catch-all labels such as `OBJECT` or `RELATED_TO`, and persists a `GraphSchemaProposal` keyed by a canonical schema hash plus a source-inventory fingerprint.
+1. **Propose** — `POST /api/index/{corpus_id}/graph-schema/proposal` deterministically samples documents (first/middle/last chunk per document), asks the extraction alias for a closed-world `GraphSchema`, rejects generic catch-all labels such as `OBJECT` or `RELATED_TO`, and persists a `GraphSchemaProposal` keyed by a canonical schema hash plus a source-inventory fingerprint. PDF sources are sampled through a bounded page reader (`_extract_schema_sample_text_for_path` in `server/api/index.py`): every page of a document with twelve pages or fewer, or nine positionally representative pages (front, middle, back) of a larger one, read through the same fast pypdfium2 substrate the estimator uses, with each sampled page stamped `# <file> page <n>` so the sampled positions stay reviewable. Whole-document Docling conversion never runs behind this synchronous request.
 2. **Review** — the **RAG → Indexing** proposal card shows node types, relationship types, patterns, constraints, the sampled chunk ids with SHA-256 hashes, the model alias, the GraphRAG version (`1.19.0`), and a bulk-cost estimate.
 3. **Approve** — starting the run sends `approved_graph_schema_hash`; the server refuses with `409 graph_schema_approval_required` when the hash is missing, or when any corpus file or extraction setting changed since the review (the fingerprint no longer matches).
 
 The approved hash, schema payload, extraction telemetry, entity-resolution counts, community telemetry, and any override are persisted on the generation manifest (`GraphGenerationMetadata`), so every promoted graph is auditable.
+
+!!! note "A textless PDF refuses the proposal synchronously"
+    Image-only or unreadable PDFs contribute no sample text, and a corpus whose sampled documents yield none answers a typed `422` — "Graph schema proposal sampling found no embedded PDF text or other indexable text" — instead of starting unbounded whole-document OCR behind the public request window. Whole-document OCR remains an indexing operation, not a synchronous proposal request. The sampler also defers the chunker tokenizer's warm-up until the first non-empty sample, so a proposal over an image-only corpus fails fast instead of paying the tokenizer load first. See [Indexing a corpus](manual/indexing.md) for the operator walkthrough.
+
+*Concept diagram (the bounded proposal sampling only — the full fused pipeline is on the [generated retrieval-pipeline page](reference/architecture/retrieval-pipeline.md)):*
+
+```mermaid
+flowchart LR
+  subgraph s_prop["Graph schema proposal sampling (server/api/index.py)"]
+    INV["Corpus inventory\n(positionally stratified entries)"]
+    EX{"Source file"}
+    PDFS["Bounded PDF sampler\n(_extract_schema_sample_text_for_path)\nall pages when 12 or fewer,\nelse 9 stratified pages via pypdfium2"]
+    TX["Generic extractor\n(extract_text_for_path,\nindexing.parquet_extract_* caps)"]
+    CH["Chunker\n(tokenizer warm-up deferred\nuntil the first non-empty sample)"]
+    SEL["select_schema_chunks\n(first / middle / last per document)"]
+    ALIAS["Extraction alias\n(graph_indexing.semantic_kg_llm_model,\nelse the gateway default)"]
+    PROP["GraphSchemaProposal\ncanonical schema hash\n+ source-inventory fingerprint"]
+    REF["Typed 422:\nno embedded PDF text\nor other indexable text"]
+  end
+  INV --> EX
+  EX -->|"PDF"| PDFS
+  EX -->|"other file"| TX
+  PDFS -->|"text found"| CH
+  PDFS -->|"no embedded text"| REF
+  TX -->|"text found"| CH
+  TX -->|"empty"| REF
+  CH --> SEL
+  SEL -->|"no sampled chunks"| REF
+  SEL -->|"sampled chunks"| ALIAS
+  ALIAS --> PROP
+```
 
 ### Promotion invariants, communities, and the audited sparse override
 

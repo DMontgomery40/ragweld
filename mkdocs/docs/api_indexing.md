@@ -64,6 +64,9 @@
 !!! note "Semantic runs need an approved graph schema"
     When the derived graph policy is `semantic` (external corpus, `graph_indexing.enabled`, AST policy off), `POST /api/index` requires `approved_graph_schema_hash` — the exact hash from a reviewed proposal (`POST /api/index/{corpus_id}/graph-schema/proposal`). A missing hash, or a corpus change since the review, answers `409 graph_schema_approval_required` before any run fence is taken. An authenticated operator may also retry a refused entity-sparse run with `graph_empty_override_reason`; the override promotes chunks and vectors only. See [Indexing a corpus](manual/indexing.md) and [Indexing pipeline](indexing.md).
 
+!!! note "Schema proposal sampling is bounded, and a textless PDF refuses fast"
+    `POST /api/index/{corpus_id}/graph-schema/proposal` no longer converts whole documents behind the synchronous HTTP boundary. Text-bearing PDFs are sampled through a fast pypdfium2 page reader (`_extract_schema_sample_text_for_path` in `server/api/index.py`) — every page of a document with twelve or fewer pages, or nine positionally representative pages (front, middle, back) of a larger one — with each sampled page stamped `# <file> page <n>` so the sampled positions stay reviewable. The chunker tokenizer's warm-up is deferred until the first non-empty sample. A corpus whose sampled documents yield no text answers `422` naming the problem instead of starting whole-document OCR behind the public proxy window. See [Indexing pipeline](indexing.md).
+
 ```mermaid
 flowchart LR
     Start["POST /api/index"] --> Worker["Indexer"]
