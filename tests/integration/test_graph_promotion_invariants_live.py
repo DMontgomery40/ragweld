@@ -393,3 +393,68 @@ async def test_real_empty_semantic_run_is_refused_then_authenticated_chunk_only_
         await client.delete(f"/api/index/{corpus_id}")
         await client.delete(f"/api/corpora/{corpus_id}")
         await pg.disconnect()
+
+
+async def test_code_policy_keeps_same_name_entities_with_distinct_ids_promotable() -> None:
+    """Task 8 drive defect D14: once code resolution keyed on ``entity_id`` (D7), the promotion
+    invariant still grouped duplicates by ``name``, so every code graph with two ``__init__``
+    methods was refused (live run ``c58050a6``: 6,237 entities, resolver duplicates 0, invariant
+    ``unresolved_duplicate_entity``). The invariant must count duplicates on the policy's
+    resolution property: ``entity_id`` for code, ``name`` for semantic.
+    """
+    active_id = f"promotion-code-{uuid4().hex[:8]}"
+    staged_run = uuid4().hex
+    staged_id = f"__staging__{active_id}__{staged_run}"
+    cfg = load_config()
+    database = cfg.graph_storage.resolve_database(active_id)
+    neo = Neo4jClient(
+        os.environ.get("NEO4J_URI", cfg.graph_storage.neo4j_uri),
+        os.environ.get("NEO4J_USER", cfg.graph_storage.neo4j_user),
+        os.environ.get("NEO4J_PASSWORD", cfg.graph_storage.resolve_password()),
+        database=database,
+    )
+    driver = GraphDatabase.driver(
+        os.environ.get("NEO4J_URI", cfg.graph_storage.neo4j_uri),
+        auth=(
+            os.environ.get("NEO4J_USER", cfg.graph_storage.neo4j_user),
+            os.environ.get("NEO4J_PASSWORD", cfg.graph_storage.resolve_password()),
+        ),
+    )
+    await neo.connect()
+    try:
+        await _seed_valid_graph(driver, database, staged_id, staged_run)
+        await _mutate(driver, database, "unresolved_duplicate_entity", staged_id, staged_run)
+
+        report = await verify_graph_promotion(
+            neo4j=neo,
+            repo_id=staged_id,
+            policy="code",
+            expected_chunks=2,
+            extraction=_extraction("valid"),
+            schema_hash=None,
+        )
+        assert report.promotable
+        assert report.failure_codes == ()
+        assert report.total_entities == 3
+        assert report.duplicate_groups == 0
+
+        with pytest.raises(GraphPromotionRefusedError) as raised:
+            await verify_graph_promotion(
+                neo4j=neo,
+                repo_id=staged_id,
+                policy="semantic",
+                expected_chunks=2,
+                extraction=_extraction("valid"),
+                schema_hash="a" * 64,
+            )
+        assert raised.value.report.failure_codes == ("unresolved_duplicate_entity",)
+        assert raised.value.report.duplicate_groups == 1
+    finally:
+        await _write(
+            driver,
+            database,
+            "MATCH (n) WHERE n.run_id = $run_id DETACH DELETE n",
+            {"run_id": staged_run},
+        )
+        await neo.disconnect()
+        await asyncio.to_thread(driver.close)

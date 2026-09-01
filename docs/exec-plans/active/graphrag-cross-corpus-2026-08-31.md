@@ -488,6 +488,24 @@ everything below live in `output/task8-graphrag-acceptance/click-ledger-2026-09-
   165 added lines and no deletions). detect-changes (stale index, hunks mapped by line): low, 6 files, no
   affected flows. Run record: `output/task8-graphrag-acceptance/2026-09-01-epstein-run-eba9b356-error.json`.
 
+- **D14 (fixed):** the first code-corpus force rebuild after D7 (run `c58050a6…`, 7,132 chunks, 6,237
+  entities, 9,876 relationships, resolver telemetry `unresolved_duplicate_groups: 0`) was refused at promotion
+  with `unresolved_duplicate_entity`; the previous generation stayed active. Cause:
+  `Neo4jClient.get_graph_invariant_counts` grouped `__Entity__` nodes by `name` + domain labels for every policy,
+  while D7 keys code resolution on `entity_id`, so a code graph with two `__init__` methods can never promote
+  and the invariant contradicts the resolver on the same run. Fix: the count takes
+  `identity_property` (parameterised `entity[$identity_property]`, blank refused) and `verify_graph_promotion`
+  derives it from `resolution_property_for_policy(policy)`. RED: the new live
+  `test_code_policy_keeps_same_name_entities_with_distinct_ids_promotable` raised the exact live refusal;
+  GREEN on LXC100: 33 tests (promotion-invariant matrix, invariant unit tests, explorer, resolution isolation,
+  communities), ruff, mypy. DeepSeek V4 Flash review `gen-1788299720-xX7oJ1hKkabrOmt1Eflz` (2,467 prompt + 700
+  completion = 3,167 tokens, `$0.00028511`): **PASS**, no findings (its remark that the unit tests were updated to
+  pass the parameter is inaccurate: they exercise `evaluate_graph_invariants` on a counts mapping and did not
+  change). GitNexus detect-changes: low, `Neo4jClient.get_graph_invariant_counts` + `verify_graph_promotion`, no
+  affected flows beyond `start_index`. Deploy waits for the Epstein run `ca5b8d92…` (restart ban during an active
+  run); the code corpus is rebuilt again afterwards. Run record:
+  `output/task8-graphrag-acceptance/2026-09-01-code-run-c58050a6-refused.json`.
+
 ### Final precommit GitNexus scope
 
 - Task 8 uncommitted range: HIGH risk across 55 files, 99 indexed symbols, eight affected flows. The named flows are `start_index` persisted/config resolution, mechanical docs automation helpers, and `RetrievalSubtab` config/readiness loading.

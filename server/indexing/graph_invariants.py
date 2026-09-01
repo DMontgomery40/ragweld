@@ -7,7 +7,10 @@ from typing import Literal, cast
 
 from server.db.neo4j import Neo4jClient
 from server.indexing.graph_policy import GraphPolicy
-from server.indexing.graphrag_pipeline import require_staging_graph_id
+from server.indexing.graphrag_pipeline import (
+    require_staging_graph_id,
+    resolution_property_for_policy,
+)
 from server.models.index import GraphExtractionTelemetry, GraphPromotionOverride
 
 GraphInvariantFailureCode = Literal[
@@ -132,7 +135,9 @@ async def verify_graph_promotion(
 ) -> GraphInvariantReport:
     scoped_repo_id = require_staging_graph_id(repo_id)
     run_id = scoped_repo_id.rsplit("__", 1)[-1]
-    counts = await neo4j.get_graph_invariant_counts(scoped_repo_id, run_id)
+    counts = await neo4j.get_graph_invariant_counts(
+        scoped_repo_id, run_id, identity_property=resolution_property_for_policy(policy)
+    )
     report = evaluate_graph_invariants(
         policy=policy,
         expected_chunks=expected_chunks,

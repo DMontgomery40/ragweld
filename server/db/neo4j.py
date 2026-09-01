@@ -862,7 +862,18 @@ class Neo4jClient:
             relationship_breakdown=rel_breakdown,
         )
 
-    async def get_graph_invariant_counts(self, repo_id: str, run_id: str) -> dict[str, int]:
+    async def get_graph_invariant_counts(
+        self, repo_id: str, run_id: str, *, identity_property: str
+    ) -> dict[str, int]:
+        """Count the staged generation's promotion invariants.
+
+        ``identity_property`` is the property the policy resolves entities on
+        (``name`` for semantic graphs, ``entity_id`` for code graphs); two
+        entities that share it and their domain labels form one duplicate group.
+        """
+        identity = str(identity_property or "").strip()
+        if not identity:
+            raise ValueError("identity_property must name the policy's resolution property")
         rows = await self.execute_cypher(
             """
             CALL () {
@@ -888,8 +899,8 @@ class Neo4jClient:
             }
             CALL () {
                 MATCH (entity:__Entity__ {repo_id: $repo_id})
-                WHERE entity.name IS NOT NULL
-                WITH entity.name AS name,
+                WHERE entity[$identity_property] IS NOT NULL
+                WITH entity[$identity_property] AS identity,
                      apoc.coll.sort([label IN labels(entity)
                         WHERE NOT label IN ['__Entity__', '__KGBuilder__']]) AS domain_labels,
                      count(*) AS n
@@ -916,7 +927,7 @@ class Neo4jClient:
                    from_chunk_relationships, linked_chunks, duplicate_groups,
                    cross_scope_nodes, cross_scope_relationships
             """,
-            {"repo_id": repo_id, "run_id": run_id},
+            {"repo_id": repo_id, "run_id": run_id, "identity_property": identity},
         )
         row = rows[0] if rows else {}
         return {
