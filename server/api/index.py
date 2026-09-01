@@ -3488,6 +3488,7 @@ async def _background_index_job(
                     driver=resolver_driver,
                     neo4j_database=graph_database,
                     repo_id=staging_repo_id,
+                    policy=graph_policy,
                 )
             finally:
                 await asyncio.to_thread(resolver_driver.close)

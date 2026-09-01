@@ -84,6 +84,7 @@ async def test_official_exact_match_resolution_is_scoped_to_one_staged_generatio
             driver=driver,
             neo4j_database=database,
             repo_id=target,
+            policy="semantic",
         )
 
         target_count = await neo.execute_cypher(
@@ -102,6 +103,89 @@ async def test_official_exact_match_resolution_is_scoped_to_one_staged_generatio
             database,
             "MATCH (n) WHERE n.repo_id IN $repo_ids DETACH DELETE n",
             {"repo_ids": [target, other]},
+        )
+        await neo.disconnect()
+        await asyncio.to_thread(driver.close)
+
+
+async def test_code_policy_resolution_keeps_same_named_symbols_apart() -> None:
+    """Task 8 drive defect D7 against a live Neo4j.
+
+    The promoted ``ragweld_code`` generation ended with exactly one ``__init__`` node that
+    81 classes "contained", because the official exact-match resolver merged on ``name``.
+    Code entities are identified by their qualified id (``path::Qualified.symbol``), which
+    the store already keeps unique per generation, so two ``__init__`` methods of different
+    classes must survive resolution untouched.
+    """
+    run_id = uuid4().hex
+    staging = f"__staging__resolver-code__{run_id}"
+    cfg = load_config()
+    database = cfg.graph_storage.resolve_database("resolver-code")
+    neo = Neo4jClient(
+        os.environ.get("NEO4J_URI", cfg.graph_storage.neo4j_uri),
+        os.environ.get("NEO4J_USER", cfg.graph_storage.neo4j_user),
+        os.environ.get("NEO4J_PASSWORD", cfg.graph_storage.resolve_password()),
+        database=database,
+    )
+    driver = GraphDatabase.driver(
+        os.environ.get("NEO4J_URI", cfg.graph_storage.neo4j_uri),
+        auth=(
+            os.environ.get("NEO4J_USER", cfg.graph_storage.neo4j_user),
+            os.environ.get("NEO4J_PASSWORD", cfg.graph_storage.resolve_password()),
+        ),
+    )
+    await neo.connect()
+    try:
+        await _write(
+            driver,
+            database,
+            """
+            CREATE (:__Entity__:Concept {
+                entity_id: 'pkg/a.py::A.__init__', name: '__init__', entity_type: 'function',
+                file_path: 'pkg/a.py', repo_id: $repo_id, run_id: $run_id
+            })
+            CREATE (:__Entity__:Concept {
+                entity_id: 'pkg/b.py::B.__init__', name: '__init__', entity_type: 'function',
+                file_path: 'pkg/b.py', repo_id: $repo_id, run_id: $run_id
+            })
+            CREATE (:__Entity__:Concept {
+                entity_id: 'pkg/b.py::B', name: 'B', entity_type: 'class',
+                file_path: 'pkg/b.py', repo_id: $repo_id, run_id: $run_id
+            })
+            """,
+            {"repo_id": staging, "run_id": run_id},
+        )
+
+        telemetry = await resolve_staged_entities(
+            driver=driver,
+            neo4j_database=database,
+            repo_id=staging,
+            policy="code",
+        )
+
+        rows = await neo.execute_cypher(
+            """
+            MATCH (n:__Entity__ {repo_id: $repo_id})
+            RETURN n.entity_id AS entity_id, n.name AS name
+            ORDER BY entity_id
+            """,
+            {"repo_id": staging},
+        )
+        assert telemetry.candidate_nodes == 3
+        assert telemetry.resolved_nodes == 3
+        assert telemetry.merged_nodes == 0
+        assert telemetry.unresolved_duplicate_groups == 0
+        assert [(row["entity_id"], row["name"]) for row in rows] == [
+            ("pkg/a.py::A.__init__", "__init__"),
+            ("pkg/b.py::B", "B"),
+            ("pkg/b.py::B.__init__", "__init__"),
+        ]
+    finally:
+        await _write(
+            driver,
+            database,
+            "MATCH (n) WHERE n.repo_id = $repo_id DETACH DELETE n",
+            {"repo_id": staging},
         )
         await neo.disconnect()
         await asyncio.to_thread(driver.close)

@@ -14,6 +14,7 @@ from server.indexing.graphrag_pipeline import (
     build_semantic_pipeline,
     require_run_id,
     require_staging_graph_id,
+    resolution_property_for_policy,
     run_component_coroutine_in_worker,
     stamp_graph_scope,
     validate_no_reserved_scope_keys,
@@ -130,3 +131,19 @@ def test_semantic_pipeline_refuses_an_incomplete_route_before_driver_use(
             route_api_key=api_key,
             max_concurrency=1,
         )
+
+
+@pytest.mark.parametrize(("policy", "expected"), [("semantic", "name"), ("code", "entity_id")])
+def test_resolution_property_follows_the_graph_policy(policy: str, expected: str) -> None:
+    """Task 8 drive defect D7: exact-match resolution keyed on ``name`` collapsed every
+    ``__init__``/``main`` of the code corpus into one node (81 classes "containing" one
+    ``__init__``). A code symbol's identity is its qualified id; a semantic entity's is its
+    extracted name.
+    """
+    assert resolution_property_for_policy(policy) == expected
+
+
+@pytest.mark.parametrize("policy", ["off", "excluded", ""])
+def test_resolution_property_rejects_policies_without_a_graph(policy: str) -> None:
+    with pytest.raises(ValueError, match="resolvable graph"):
+        resolution_property_for_policy(policy)

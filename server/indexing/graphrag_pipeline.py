@@ -29,6 +29,7 @@ from neo4j_graphrag.experimental.pipeline import Pipeline
 from neo4j_graphrag.llm import OpenAILLM
 
 from server.indexing.code_graph import CODE_GRAPH_LANGUAGES, extract_code_graph
+from server.indexing.graph_policy import GraphPolicy
 from server.models.index import Chunk, GraphResolutionTelemetry
 from server.models.tribrid_config_model import TriBridConfig
 
@@ -185,17 +186,34 @@ def _execute_query_rows(
     return [dict(record) for record in records]
 
 
+def resolution_property_for_policy(policy: GraphPolicy | str) -> str:
+    """The identity exact-match resolution merges on, per graph policy.
+
+    A semantic entity is what the approved schema extracted under a name, so equal
+    names within one generation are the same thing. A code entity is identified by
+    its qualified id (``path::Qualified.symbol``); merging on the bare name collapsed
+    every ``__init__`` and ``main`` of the corpus into one node (Task 8 drive defect D7).
+    """
+    if policy == "semantic":
+        return "name"
+    if policy == "code":
+        return "entity_id"
+    raise ValueError(f"graph policy {policy!r} does not build a resolvable graph")
+
+
 async def resolve_staged_entities(
     *,
     driver: Driver,
     neo4j_database: str,
     repo_id: str,
+    policy: GraphPolicy | str,
 ) -> GraphResolutionTelemetry:
     scoped_repo_id = require_staging_graph_id(repo_id)
+    resolve_property = resolution_property_for_policy(policy)
     resolver = SinglePropertyExactMatchResolver(
         driver=driver,
         filter_query=f"WHERE entity.repo_id = {cypher_literal(scoped_repo_id)} ",
-        resolve_property="name",
+        resolve_property=resolve_property,
         neo4j_database=neo4j_database,
     )
     stats = await run_async_component_off_event_loop(resolver.run)
@@ -207,8 +225,8 @@ async def resolve_staged_entities(
         WITH count(entity) AS resolved_nodes
         CALL () {
             MATCH (entity:__Entity__ {repo_id: $repo_id})
-            WHERE entity.name IS NOT NULL
-            WITH entity.name AS name,
+            WHERE entity[$resolve_property] IS NOT NULL
+            WITH entity[$resolve_property] AS identity,
                  apoc.coll.sort([label IN labels(entity)
                     WHERE NOT label IN ['__Entity__', '__KGBuilder__']]) AS domain_labels,
                  count(*) AS n
@@ -217,7 +235,7 @@ async def resolve_staged_entities(
         }
         RETURN resolved_nodes, duplicate_groups
         """,
-        {"repo_id": scoped_repo_id},
+        {"repo_id": scoped_repo_id, "resolve_property": resolve_property},
         neo4j_database,
     )
     row = rows[0] if rows else {}
@@ -231,7 +249,7 @@ async def resolve_staged_entities(
     )
 
 
-class ScopedNeo4jWriter(Neo4jWriter):  # type: ignore[misc]  # GraphRAG lacks PEP 561 metadata
+class ScopedNeo4jWriter(Neo4jWriter):
     def __init__(self, *args: Any, repo_id: str, run_id: str, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.repo_id = require_staging_graph_id(repo_id)
@@ -491,6 +509,7 @@ __all__ = [
     "lexical_graph_config",
     "require_run_id",
     "require_staging_graph_id",
+    "resolution_property_for_policy",
     "resolve_staged_entities",
     "run_async_component_off_event_loop",
     "run_component_coroutine_in_worker",
