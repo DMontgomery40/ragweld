@@ -105,6 +105,9 @@ flowchart LR
 !!! note "Conservative resolution"
     Imports and calls only produce edges when the target is defined inside the corpus or the import explicitly resolves to a corpus file. Everything else is counted as unresolved rather than guessed, keeping the graph high-signal.
 
+!!! note "Same-name entities no longer block code-graph promotion"
+    The code policy resolves entities on the qualified `entity_id` (`path::Qualified.symbol`), and the promotion invariant counts duplicate groups on that same resolution property (`server/indexing/graph_invariants.py`) — so two `__init__` methods of different classes promote normally. The semantic policy still resolves on `name`, and two extracted entities sharing a name there is still a promotion refusal (`unresolved_duplicate_entity`). See the [Indexing pipeline](../indexing.md) for the invariant details.
+
 !!! warning "Enable per corpus, then re-index"
     The code graph is built during indexing, so toggling `build_code_graph` has no effect until the corpus is re-indexed. It only pays for code corpora — leave it off for prose-only corpora.
 
