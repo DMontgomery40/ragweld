@@ -11,8 +11,8 @@ Ownership boundary:
   promotes the chunk rows; a full index builds a fresh staged generation and
   the commit is that single manifest write. Superseded generations are retired
   afterwards. There are no Qdrant aliases.
-- Neo4j keeps its own chunk-vector index as the graph leg's implementation
-  detail; it is not a vector engine for the vector leg.
+- The graph leg seeds traversal from this same Qdrant generation and joins to
+  Neo4j through generation-qualified ``graph_join_id`` payloads.
 
 Writes go through the Haystack Qdrant document store so the collection schema
 (named `text-dense` / `text-sparse` vectors, IDF modifier) is the Haystack
@@ -366,9 +366,15 @@ class QdrantChunkStore:
         return physical
 
     async def write_chunks(
-        self, corpus_id: str, physical: str, chunks: list[Chunk], *, embedding_dim: int
+        self,
+        corpus_id: str,
+        physical: str,
+        chunks: list[Chunk],
+        *,
+        embedding_dim: int,
+        graph_repo_id: str | None = None,
     ) -> int:
-        """Write dense + sparse vectors for chunks into a physical generation."""
+        """Write vectors and the optional generation-qualified graph join payload."""
         if not chunks:
             return 0
         from haystack.document_stores.types import DuplicatePolicy
@@ -382,9 +388,33 @@ class QdrantChunkStore:
         def _write() -> int:
             store = self._document_store(physical, embedding_dim=embedding_dim, recreate=False)
             try:
-                return int(store.write_documents(documents, policy=DuplicatePolicy.OVERWRITE))
+                written = int(store.write_documents(documents, policy=DuplicatePolicy.OVERWRITE))
             finally:
                 self._close_store(store)
+            if graph_repo_id:
+                from qdrant_client import models as qmodels
+
+                client = self._client()
+                try:
+                    operations = [
+                        qmodels.SetPayloadOperation(
+                            set_payload=qmodels.SetPayload(
+                                payload={
+                                    "graph_join_id": f"{graph_repo_id}:{chunk.chunk_id}"
+                                },
+                                points=[point_id_for_chunk(chunk.chunk_id)],
+                            )
+                        )
+                        for chunk in chunks
+                    ]
+                    client.batch_update_points(
+                        collection_name=physical,
+                        update_operations=operations,
+                        wait=True,
+                    )
+                finally:
+                    client.close()
+            return written
 
         try:
             return await asyncio.to_thread(_write)
@@ -392,6 +422,42 @@ class QdrantChunkStore:
             self._raise_boundary(
                 exc, operation="Qdrant chunk write", corpus_id=corpus_id, collection=physical
             )
+            raise
+
+    async def count_graph_join_payloads(self, physical: str, graph_repo_id: str) -> int:
+        """Count exact payloads belonging to one staged graph in a physical generation."""
+        prefix = f"{graph_repo_id}:"
+
+        def _count() -> int:
+            client = self._client()
+            count = 0
+            offset: Any = None
+            try:
+                while True:
+                    points, offset = client.scroll(
+                        collection_name=physical,
+                        limit=256,
+                        offset=offset,
+                        with_payload=["graph_join_id"],
+                        with_vectors=False,
+                    )
+                    count += sum(
+                        1
+                        for point in points
+                        if str((point.payload or {}).get("graph_join_id") or "").startswith(prefix)
+                    )
+                    if offset is None:
+                        return count
+            finally:
+                client.close()
+
+        try:
+            return await asyncio.to_thread(_count)
+        except Exception as exc:
+            if is_qdrant_unavailable(exc):
+                raise DependencyUnavailableError(
+                    "qdrant", "Qdrant graph join payload count"
+                ) from exc
             raise
 
     async def count_points(self, physical: str) -> int:

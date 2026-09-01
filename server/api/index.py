@@ -2451,7 +2451,11 @@ async def _run_index_body(
                 await postgres.upsert_chunks(write_repo_id, chunks)
             with INDEX_STAGE_LATENCY_SECONDS.labels(stage="qdrant_write_chunks").time():
                 await qdrant.write_chunks(
-                    repo_id, qdrant_generation, chunks, embedding_dim=vector_dim
+                    repo_id,
+                    qdrant_generation,
+                    chunks,
+                    embedding_dim=vector_dim,
+                    graph_repo_id=write_repo_id if has_graph_upserts else None,
                 )
             return chunks
 
@@ -2474,7 +2478,11 @@ async def _run_index_body(
             await postgres.upsert_chunks(write_repo_id, embedded)
         with INDEX_STAGE_LATENCY_SECONDS.labels(stage="qdrant_write_chunks").time():
             await qdrant.write_chunks(
-                repo_id, qdrant_generation, embedded, embedding_dim=vector_dim
+                repo_id,
+                qdrant_generation,
+                embedded,
+                embedding_dim=vector_dim,
+                graph_repo_id=write_repo_id if has_graph_upserts else None,
             )
         return embedded
 
@@ -3451,6 +3459,16 @@ async def _background_index_job(
                 f"Staged Qdrant generation {qdrant_generation} holds {staged_points} points but the run "
                 f"indexed {expected_points} chunks; refusing to promote a partial vector index"
             )
+        if staged_graph_recorded is not None:
+            staged_graph_joins = await qdrant.count_graph_join_payloads(
+                qdrant_generation, staging_repo_id
+            )
+            if staged_graph_joins != expected_points:
+                raise RuntimeError(
+                    f"Staged Qdrant generation {qdrant_generation} holds {staged_graph_joins} "
+                    f"graph join payloads for {staging_repo_id} but the run indexed "
+                    f"{expected_points} chunks; refusing to promote a partial graph join"
+                )
         # Graph participation is the decision recorded on the fence at the start
         # (the same config snapshot the build used), never a re-read flag: a flag
         # flipped mid-run can neither orphan a built graph nor demand an unbuilt one.

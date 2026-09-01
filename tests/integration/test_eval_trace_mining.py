@@ -68,10 +68,8 @@ async def test_sse_eval_persists_answer_provenance_and_mining_rejects_answer_lea
         cfg.vector_search.enabled = True
         cfg.sparse_search.enabled = True
         cfg.graph_search.enabled = False
-        cfg.graph_search.mode = "chunk"
         cfg.graph_indexing.enabled = False
         cfg.graph_indexing.build_lexical_graph = True
-        cfg.graph_indexing.store_chunk_embeddings = True
         cfg.chat.litellm.enabled = False
         cfg.semantic_cache.enabled = False
         cfg.reranking.reranker_mode = "none"

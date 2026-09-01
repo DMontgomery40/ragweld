@@ -229,15 +229,8 @@ export function RetrievalSubtab() {
   const [graphReadiness, setGraphReadiness] = useState<GraphStats | null>(null);
   const [graphIndexingEnabled] = useConfigField<boolean>('graph_indexing.enabled', true);
   const [buildCodeGraph] = useConfigField<boolean>('graph_indexing.build_code_graph', false);
-  const [graphMode, setGraphMode] = useConfigField<'chunk' | 'entity'>('graph_search.mode', 'chunk');
   const [graphSearchEnabled, setGraphSearchEnabled] = useConfigField<boolean>('graph_search.enabled', true);
   const [chunkNeighborWindow, setChunkNeighborWindow] = useConfigField<number>('graph_search.chunk_neighbor_window', 1);
-  const [chunkSeedOverfetchMultiplier, setChunkSeedOverfetchMultiplier] =
-    useConfigField<number>('graph_search.chunk_seed_overfetch_multiplier', 10);
-  const [chunkEntityExpansionEnabled, setChunkEntityExpansionEnabled] =
-    useConfigField<boolean>('graph_search.chunk_entity_expansion_enabled', true);
-  const [chunkEntityExpansionWeight, setChunkEntityExpansionWeight] =
-    useConfigField<number>('graph_search.chunk_entity_expansion_weight', 0.8);
   const [graphMaxHops, setGraphMaxHops] = useConfigField<number>('graph_search.max_hops', 2);
   const [graphIncludeCommunities, setGraphIncludeCommunities] = useConfigField<boolean>('graph_search.include_communities', true);
   const [graphSearchTopK, setGraphSearchTopK] = useConfigField<number>('graph_search.top_k', 30);
@@ -763,10 +756,9 @@ export function RetrievalSubtab() {
                     >
                       {(graphReadiness.total_entities ?? 0) === 0 ? (
                         <>
-                          <strong>This corpus has no entity graph.</strong> Entity mode and entity expansion cannot
-                          contribute for it; only chunk mode can, over{' '}
-                          {(graphReadiness.total_chunks ?? 0).toLocaleString()} chunk nodes. Enable graph indexing in
-                          RAG &gt; Indexing, confirm the derived corpus policy, and re-index to populate it.
+                          <strong>This corpus has no entity graph.</strong> Qdrant can still identify dense seed chunks,
+                          but relationship traversal cannot contribute. Enable graph indexing in RAG &gt; Indexing,
+                          confirm the derived corpus policy, and re-index to populate it.
                         </>
                       ) : (
                         <>
@@ -774,7 +766,7 @@ export function RetrievalSubtab() {
                           {(graphReadiness.total_relationships ?? 0).toLocaleString()} relationships,{' '}
                           {(graphReadiness.total_communities ?? 0).toLocaleString()} communities.
                           {(graphReadiness.total_relationships ?? 0) === 0
-                            ? ' With no relationships, entity expansion has nothing to walk.'
+                            ? ' With no relationships, traversal has nothing to walk.'
                             : ''}
                         </>
                       )}
@@ -782,7 +774,7 @@ export function RetrievalSubtab() {
                   ) : null}
                   <div className="input-group">
                     <label>
-                      Graph Top-K <TooltipIcon name="GRAPH_SEARCH_TOP_K" />
+                      Qdrant Seed Top-K <TooltipIcon name="GRAPH_SEARCH_TOP_K" />
                     </label>
                     <NumberField
                       min={5}
@@ -791,20 +783,6 @@ export function RetrievalSubtab() {
                       onCommit={setGraphSearchTopK}
                       disabled={!graphSearchEnabled}
                     />
-                  </div>
-                  <div className="input-group">
-                    <label>
-                      Graph Mode <TooltipIcon name="GRAPH_SEARCH_MODE" />
-                    </label>
-                    <select
-                      data-testid="graph-search-mode"
-                      value={graphMode}
-                      onChange={(e) => setGraphMode(e.target.value as any)}
-                      disabled={!graphSearchEnabled}
-                    >
-                      <option value="chunk">chunk</option>
-                      <option value="entity">entity</option>
-                    </select>
                   </div>
                   <div className="input-group">
                     <label>
@@ -825,65 +803,24 @@ export function RetrievalSubtab() {
                     <select
                       value={graphIncludeCommunities ? '1' : '0'}
                       onChange={(e) => setGraphIncludeCommunities(e.target.value === '1')}
-                      disabled={!graphSearchEnabled || graphMode !== 'entity'}
+                      disabled={!graphSearchEnabled}
                     >
                       <option value="1">Enabled</option>
                       <option value="0">Disabled</option>
                     </select>
                   </div>
-
-                  {graphMode === 'chunk' && (
-                    <>
-                      <div className="input-group">
-                        <label>
-                          Chunk Neighbor Window <TooltipIcon name="GRAPH_CHUNK_NEIGHBOR_WINDOW" />
-                        </label>
-                        <NumberField
-                          min={0}
-                          max={10}
-                          value={chunkNeighborWindow}
-                          onCommit={setChunkNeighborWindow}
-                          disabled={!graphSearchEnabled}
-                        />
-                      </div>
-                      <div className="input-group">
-                        <label>
-                          Seed Overfetch Multiplier <TooltipIcon name="GRAPH_CHUNK_SEED_OVERFETCH" />
-                        </label>
-                        <NumberField
-                          min={1}
-                          max={50}
-                          value={chunkSeedOverfetchMultiplier}
-                          onCommit={setChunkSeedOverfetchMultiplier}
-                          disabled={!graphSearchEnabled}
-                        />
-                      </div>
-                      <div className="input-group">
-                        <label>
-                          <input
-                            type="checkbox"
-                            checked={chunkEntityExpansionEnabled}
-                            onChange={(e) => setChunkEntityExpansionEnabled(e.target.checked)}
-                            disabled={!graphSearchEnabled}
-                          />{' '}
-                          Expand via Entities <TooltipIcon name="GRAPH_CHUNK_ENTITY_EXPANSION_ENABLED" />
-                        </label>
-                      </div>
-                      <div className="input-group">
-                        <label>
-                          Entity Expansion Weight <TooltipIcon name="GRAPH_CHUNK_ENTITY_EXPANSION_WEIGHT" />
-                        </label>
-                        <NumberField
-                          min={0}
-                          max={1}
-                          step={0.05}
-                          value={chunkEntityExpansionWeight}
-                          onCommit={setChunkEntityExpansionWeight}
-                          disabled={!graphSearchEnabled || !chunkEntityExpansionEnabled}
-                        />
-                      </div>
-                    </>
-                  )}
+                  <div className="input-group">
+                    <label>
+                      Related Chunk Window <TooltipIcon name="GRAPH_CHUNK_NEIGHBOR_WINDOW" />
+                    </label>
+                    <NumberField
+                      min={0}
+                      max={10}
+                      value={chunkNeighborWindow}
+                      onCommit={setChunkNeighborWindow}
+                      disabled={!graphSearchEnabled}
+                    />
+                  </div>
                 </div>
               </div>
             </div>

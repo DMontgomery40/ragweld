@@ -294,7 +294,16 @@ class _RecordingQdrant:
         self.sparse_contract = sparse_contract
         self.writes: list[tuple[str, str, int, int]] = []
 
-    async def write_chunks(self, corpus_id: str, physical: str, chunks, *, embedding_dim: int) -> int:
+    async def write_chunks(
+        self,
+        corpus_id: str,
+        physical: str,
+        chunks,
+        *,
+        embedding_dim: int,
+        graph_repo_id: str | None = None,
+    ) -> int:
+        assert graph_repo_id is None
         self.writes.append((corpus_id, physical, len(chunks), int(embedding_dim)))
         return len(chunks)
 

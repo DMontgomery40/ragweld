@@ -34,12 +34,11 @@ def test_runtime_capabilities_response_matches_backend_constants() -> None:
         "qdrant_dense",
         "qdrant_sparse_idf",
         "neo4j_lexical_graph",
-        "neo4j_chunk_vector",
         "neo4j_semantic_kg",
     }
-    assert {item.id for item in response.search.vector_backends} == {
-        "qdrant_dense",
-        "neo4j_chunk_vector",
+    assert {item.id for item in response.search.vector_backends} == {"qdrant_dense"}
+    assert {item.id for item in response.search.graph_backends} == {
+        "qdrant_neo4j_traversal"
     }
 
 

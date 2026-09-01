@@ -207,7 +207,6 @@
     "enabled": true,
     "build_lexical_graph": true,
     "build_code_graph": false,
-    "store_chunk_embeddings": true,
     "ast_contains_weight": 1.0,
     "ast_inherits_weight": 1.0,
     "ast_imports_weight": 1.0,
@@ -215,12 +214,7 @@
     "semantic_kg_reasoning_effort": "medium",
     "semantic_kg_max_chunks": 40000,
     "semantic_kg_llm_model": "",
-    "semantic_kg_llm_timeout_s": 90,
-    "chunk_vector_index_name": "tribrid_chunk_embeddings",
-    "chunk_embedding_property": "embedding",
-    "vector_similarity_function": "cosine",
-    "wait_vector_index_online": true,
-    "vector_index_online_timeout_s": 60.0
+    "semantic_kg_llm_timeout_s": 90
   },
   "qdrant": {
     "url": "http://127.0.0.1:56333"
@@ -245,12 +239,8 @@
     "bm25_b": 0.4
   },
   "graph_search": {
-    "mode": "chunk",
     "enabled": true,
     "chunk_neighbor_window": 1,
-    "chunk_seed_overfetch_multiplier": 10,
-    "chunk_entity_expansion_enabled": true,
-    "chunk_entity_expansion_weight": 0.8,
     "max_hops": 2,
     "include_communities": true,
     "top_k": 30

@@ -36,7 +36,6 @@ async def test_neo4j_outage_is_attributed_and_does_not_delete_corpus(client: Asy
         cfg = load_config()
         cfg.graph_storage.neo4j_uri = "bolt://127.0.0.1:1"
         cfg.graph_search.enabled = True
-        cfg.graph_search.mode = "entity"
         cfg.vector_search.enabled = False
         cfg.sparse_search.enabled = False
         await pg.upsert_corpus_config_json(corpus_id, cfg.model_dump(mode="serialization"))
@@ -44,8 +43,10 @@ async def test_neo4j_outage_is_attributed_and_does_not_delete_corpus(client: Asy
             corpus_id,
             build_generation(
                 run_id=f"{corpus_id}-promoted",
-                qdrant_collection=None,
-                graph_repo_id=corpus_id,
+                qdrant_collection="missing-graph-seed-generation",
+                graph_repo_id=(
+                    f"__staging__{corpus_id}__0123456789abcdef0123456789abcdef"
+                ),
             ),
         )
 

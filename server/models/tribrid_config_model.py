@@ -1374,7 +1374,18 @@ class ChatDebugInfo(BaseModel):
     final_k_used: int | None = Field(default=None, ge=1, le=500, description="Final K used for retrieval context")
     vector_results: int | None = Field(default=None, ge=0, description="Vector leg results returned")
     sparse_results: int | None = Field(default=None, ge=0, description="Sparse leg results returned")
-    graph_entity_hits: int | None = Field(default=None, ge=0, description="Graph entity hits (pre-hydration)")
+    graph_qdrant_seed_chunks: int | None = Field(
+        default=None, ge=0, description="Qdrant seed chunks passed to graph traversal"
+    )
+    graph_resolved_entities: int | None = Field(
+        default=None, ge=0, description="Unique graph entities resolved during traversal"
+    )
+    graph_relationship_expansion_hits: int | None = Field(
+        default=None, ge=0, description="Chunks found through entity relationships"
+    )
+    graph_community_expansion_hits: int | None = Field(
+        default=None, ge=0, description="Chunks found through graph communities"
+    )
     graph_hydrated_chunks: int | None = Field(default=None, ge=0, description="Graph hydrated chunks returned")
     final_results: int | None = Field(default=None, ge=0, description="Final fused results returned")
     top1_score: float | None = Field(default=None, description="Top-1 fused score (raw)")
@@ -4958,12 +4969,6 @@ class SparseSearchConfig(BaseModel):
 class GraphSearchConfig(BaseModel):
     """Configuration for graph-based search using Neo4j."""
 
-    mode: Literal["chunk", "entity"] = Field(
-        default="chunk",
-        description="Graph retrieval mode. 'chunk' uses lexical chunk nodes + Neo4j vector index; "
-        "'entity' uses the legacy code-entity graph.",
-    )
-
     enabled: bool = Field(
         default=True,
         description="Enable graph search in tri-brid retrieval"
@@ -4973,26 +4978,7 @@ class GraphSearchConfig(BaseModel):
         default=1,
         ge=0,
         le=10,
-        description="When mode='chunk', include up to N adjacent chunks (NEXT_CHUNK) around each seed hit",
-    )
-
-    chunk_seed_overfetch_multiplier: int = Field(
-        default=10,
-        ge=1,
-        le=50,
-        description="When mode='chunk' and Neo4j uses a shared database, overfetch seed hits before filtering by corpus_id",
-    )
-
-    chunk_entity_expansion_enabled: bool = Field(
-        default=True,
-        description="When mode='chunk', expand from seed chunks via Entity graph (IN_CHUNK links) to find related chunks",
-    )
-
-    chunk_entity_expansion_weight: float = Field(
-        default=0.8,
-        ge=0.0,
-        le=1.0,
-        description="Blend weight for entity-expansion scores relative to seed chunk scores (mode='chunk')",
+        description="Include up to N adjacent chunks (NEXT_CHUNK) around relationship hits",
     )
 
     max_hops: int = Field(
@@ -5038,11 +5024,6 @@ class GraphIndexingConfig(BaseModel):
             "contains/inherits/imports/calls relationships (tree-sitter; Python, TypeScript, JavaScript), "
             "each linked to the chunk that defines it"
         ),
-    )
-
-    store_chunk_embeddings: bool = Field(
-        default=True,
-        description="Store chunk embeddings on Chunk nodes for Neo4j vector search (requires dense embeddings)",
     )
 
     ast_contains_weight: float = Field(
@@ -5103,33 +5084,6 @@ class GraphIndexingConfig(BaseModel):
         ge=5,
         le=600,
         description="Timeout (seconds) for semantic KG LLM extraction per chunk",
-    )
-
-    chunk_vector_index_name: str = Field(
-        default="tribrid_chunk_embeddings",
-        description="Neo4j vector index name for Chunk embeddings (mode='chunk')",
-    )
-
-    chunk_embedding_property: str = Field(
-        default="embedding",
-        description="Chunk node property that stores the embedding vector",
-    )
-
-    vector_similarity_function: Literal["cosine", "euclidean"] = Field(
-        default="cosine",
-        description="Neo4j vector similarity function",
-    )
-
-    wait_vector_index_online: bool = Field(
-        default=True,
-        description="Wait for the Neo4j vector index to come ONLINE after (re)creating it",
-    )
-
-    vector_index_online_timeout_s: float = Field(
-        default=60.0,
-        ge=1.0,
-        le=600.0,
-        description="Timeout waiting for Neo4j vector index ONLINE (seconds)",
     )
 
 

@@ -146,7 +146,6 @@ async def test_requested_leg_execution_failure_never_returns_partial_success(
         cfg.vector_search.enabled = leg == "vector"
         cfg.sparse_search.enabled = leg == "sparse"
         cfg.graph_search.enabled = leg == "graph"
-        cfg.graph_search.mode = "chunk"
         cfg.chat.litellm.enabled = False
         if leg in {"vector", "graph"}:
             cfg.embedding.embedding_backend = "provider"
@@ -169,8 +168,10 @@ async def test_requested_leg_execution_failure_never_returns_partial_success(
                 corpus_id,
                 build_generation(
                     run_id=f"{corpus_id}-promoted",
-                    qdrant_collection=None,
-                    graph_repo_id=corpus_id,
+                    qdrant_collection="missing-graph-seed-generation",
+                    graph_repo_id=(
+                        f"__staging__{corpus_id}__0123456789abcdef0123456789abcdef"
+                    ),
                 ),
             )
         if leg == "sparse":

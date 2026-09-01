@@ -98,10 +98,8 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         cfg.vector_search.enabled = True
         cfg.sparse_search.enabled = True
         cfg.graph_search.enabled = True
-        cfg.graph_search.mode = "chunk"
         cfg.graph_indexing.enabled = True
         cfg.graph_indexing.build_lexical_graph = True
-        cfg.graph_indexing.store_chunk_embeddings = True
         cfg.graph_indexing.semantic_kg_llm_model = "deepseek.deepseek-v4-flash"
         cfg.chat.litellm.enabled = True
         cfg.semantic_cache.enabled = False

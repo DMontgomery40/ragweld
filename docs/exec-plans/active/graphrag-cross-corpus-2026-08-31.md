@@ -200,7 +200,43 @@ Post-task GitNexus refresh completed at 18,738 nodes, 39,779 edges, 749 clusters
 
 ## Task 6 - Qdrant-seeded traversal
 
-Status: pending
+Status: complete
+
+### Pre-edit impact analysis
+
+- `QdrantChunkStore.write_chunks`: CRITICAL, one direct / 327 total dependants across 55 indexed processes.
+- Nested `TriBridFusion._search_single_corpus`: CRITICAL, one direct / four total dependants across 51 indexed processes.
+- `Neo4jClient.chunk_vector_search`, `expand_chunks_via_entities`, and `entity_chunk_search`: HIGH, one direct / three total dependants across four indexed processes.
+- Backend `ChatDebugInfo`, `GraphSearchConfig`, and `GraphIndexingConfig`: CRITICAL, 96 direct / 123 total dependants each.
+- `build_chat_debug_info`: CRITICAL, three direct / 313 total dependants across 55 indexed processes.
+- `chat_once` and `chat_stream` were not independently named in the current index, but their two aggregation blocks were treated as the same public debug boundary.
+
+The CRITICAL config/retrieval surface was reported before mutation. Containment is the exact Qdrant payload gate, strict staged-id Cypher, real retained-generation collision proof, typed outage matrix, generated contracts, chat debug regression, and frontend compilation/build.
+
+### TDD and verification evidence
+
+- RED: the new unit/live contract suite failed collection with `ModuleNotFoundError: server.retrieval.graphrag_retriever`.
+- Qdrant join GREEN: 8/8 official constructor/query and real payload tests passed. Every staged point receives top-level `graph_join_id=<staged graph id>:<raw chunk id>` only after the Haystack write; promotion now requires its exact count to equal the indexed chunk count.
+- Real collision/no-double-credit GREEN: two retained physical collections and graphs reused identical raw chunk ids but different generation-qualified joins. Fresh official `QdrantNeo4jRetriever` calls selected only the manifest collection/graph, excluded every Qdrant seed, traversed `FROM_CHUNK` plus bounded entity relationships, exercised both zero and nonzero `NEXT_CHUNK` windows, and hydrated exact active content from Postgres. The same proof passed through `/api/search` with exact new integer debug fields and no legacy entity-hit field.
+- Required-leg/config/API matrix: 43/43 passed in 172.91s across unit contracts, runtime capabilities, index batching, Qdrant, graph hydration, required-leg failures, and asymmetric Qdrant/Neo4j outage attribution.
+- Chat public boundary: 3/3 passed; Recall contributes no graph counts and `ChatDebugInfo` exposes seed/resolution/relationship/community/hydration counts.
+- Final focused retriever run: 8/8 passed in 36.57s, including the official neighbor-query branch. Changed-file Ruff, banned-pattern validation, generated-type validation, TypeScript lint, and Vite production build passed.
+- Obsolete production search is empty for `IN_CHUNK`, `fusion_graph_entity_hits`, `chunk_vector_index_name`, `chunk_seed_overfetch_multiplier`, Neo4j vector search, and entity text-search implementations. Removed persisted names remain only in the explicit config migration strip list; tests retain negative assertions.
+
+### DeepSeek V4 Flash review
+
+- First response id: `resp_z7JsWI6rvuFH2ZxTJGPZHX8lu2kgptToJPBeaceFxYF_jdor_1yEeyw3Q8FbC3XOxkB-aXJ8aN-PAjoe8rTYo78kLBd87NY-OdCaA6kPwEoR-EwVS-yXJtvewBwMpwOeoNNeEiYO5zThyXkoyFzpVJ85ecvWFrQOboawSsKggd2Fca6E1J6iD_m0mq7d9u5hGjBVa_5yFmCL-hG3NXMQtku8GYP1MJOh0Ay3JLQ_Grfm8f5Q_F9larl47PTKuiZH_CpqkyZjm7-JAPDASCfH6BvsVKiqKh2b4tz_0hmWxEBBW-ZeRhsVzxJrbj644xJn5UwOOHlC2MJ18XgOQu6rNKU_Umt9g6Q-PgH0Z3kxAqS-zckX5o9dz-eKLwOV2BmC6TC7_ELKNfAKdkFoDSHZpgvysK89uEyioqFlZD8lXXJYbCaWZspUFZkXpVxndQ==`.
+- First verdict: FAIL because the normal tracked-file diff omitted all untracked new files. It therefore incorrectly inferred that `resolved_entity_ids`, `QdrantChunkStore.url`, and client cleanup were absent.
+- Resolution: resubmitted the tracked diff plus full `/dev/null` diffs for every new source/test and the existing store constructor. The visible code proved the optional entity-id evidence field, `self.url` initialization, and Qdrant/Neo4j closure in `finally`; no implementation defect existed.
+- Re-review response id: `resp_5sP2G879VzvOebDr1MTmxudhmebVBRgoKhh-lBg2NDcel3FWP9l7TauNv3bk_sliUsmMsSP4sE6tLaakCD19vza12uLQI29Tq7aDaIMIa3GHT15m5jkl1R_JeiVQSb-Y3mQlUXAtM3x27lXpoXiinnyXAFM1BXI3MP6wIZ5Bxpm3FpoliG9tu-y21kDGvawM2TRVqVPMC71xsou51LNSvAvTEKDij9GwFPdE1zOuE6FQjPKHulXhsEqweTdM3_BCa3Pwfil0LRYkmAewwEzZUVYNWWP4i4tXvkktg4dFignpYR-4kfkjgogQTQPdvwqvX6DPlmKk8E_629nNh1m1MZ-Nkrdjtp5n-J3ipDHBGnwfjiX20WVgojs5pgy5iTBMzAfGFu9LFf9uHerrJsbnoxV_z3MUFxgnNDiVjWf4FxDgocVM2PECu0ynZBkb3Q==`.
+- Resolved model: `deepseek.deepseek-v4-flash`.
+- Re-review usage: 36,981 input + 7,567 output = 44,548 tokens.
+- Re-review cost: `$0.0072961`.
+- Final verdict: **PASS**.
+
+### GitNexus scope gate
+
+`detect-changes --scope compare --base-ref main --repo ragweld` reported CRITICAL risk across 26 files, 62 indexed symbols, and 17 affected flows. The named flows are the expected search, benchmark, evaluation, generation, cache-key, and fusion paths reached through `_search_fused`; the public config/debug blast radius matches the pre-edit warning and the verified Task 6 scope.
 
 ## Task 7 - GDS Leiden communities
 

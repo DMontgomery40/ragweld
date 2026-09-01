@@ -7,7 +7,6 @@ from collections import defaultdict
 from datetime import datetime
 from typing import Any, Literal
 
-from server.db.neo4j import Neo4jClient
 from server.db.postgres import PostgresClient
 from server.dependency_errors import (
     DependencyUnavailableError,
@@ -31,7 +30,11 @@ from server.models.tribrid_config_model import (
 from server.observability.metrics import (
     GRAPH_LEG_LATENCY_SECONDS,
     SEARCH_ERRORS_TOTAL,
+    SEARCH_GRAPH_COMMUNITY_EXPANSION_HITS_COUNT,
     SEARCH_GRAPH_HYDRATED_CHUNKS_COUNT,
+    SEARCH_GRAPH_QDRANT_SEED_CHUNKS_COUNT,
+    SEARCH_GRAPH_RELATIONSHIP_EXPANSION_HITS_COUNT,
+    SEARCH_GRAPH_RESOLVED_ENTITIES_COUNT,
     SEARCH_LATENCY_SECONDS,
     SEARCH_LEG_RESULTS_COUNT,
     SEARCH_REQUESTS_TOTAL,
@@ -49,7 +52,12 @@ from server.retrieval.errors import (
     RequiredRetrievalLegError,
     SparseContractMismatchError,
 )
-from server.retrieval.qdrant_store import QdrantChunkStore, QdrantCollectionMissingError
+from server.retrieval.graphrag_retriever import retrieve_graph_chunks
+from server.retrieval.qdrant_store import (
+    QdrantChunkStore,
+    QdrantCollectionMissingError,
+    is_qdrant_unavailable,
+)
 from server.retrieval.rerank import Reranker
 from server.retrieval.scoring_boosts import apply_scoring_boosts
 from server.services.config_store import get_config as load_scoped_config
@@ -81,12 +89,6 @@ def _raise_qdrant_boundary_error(
     if is_transport_unavailable(exc):
         raise DependencyUnavailableError("qdrant", operation) from exc
     raise RequiredRetrievalLegError(leg=leg, operation=operation) from exc
-
-
-def _raise_neo4j_boundary_error(exc: Exception, *, operation: str) -> None:
-    if is_neo4j_unavailable(exc) or is_transport_unavailable(exc):
-        raise DependencyUnavailableError("neo4j", operation) from exc
-    raise RequiredRetrievalLegError(leg="graph", operation=operation) from exc
 
 
 def _raise_required_leg_error(
@@ -343,7 +345,6 @@ class TriBridFusion:
                 if primary_cfg
                 else "",
                 "graph_enabled": bool(getattr(primary_graph, "enabled", True)),
-                "graph_mode": str(getattr(primary_graph, "mode", "") or ""),
                 "graph_top_k": int(getattr(primary_graph, "top_k", 0) or 0),
                 "graph_max_hops": int(getattr(primary_graph, "max_hops", 0) or 0),
                 "graph_include_communities": bool(
@@ -351,12 +352,6 @@ class TriBridFusion:
                 ),
                 "graph_chunk_neighbor_window": int(
                     getattr(primary_graph, "chunk_neighbor_window", 0) or 0
-                ),
-                "graph_chunk_entity_expansion_enabled": bool(
-                    getattr(primary_graph, "chunk_entity_expansion_enabled", False)
-                ),
-                "graph_chunk_entity_expansion_weight": float(
-                    getattr(primary_graph, "chunk_entity_expansion_weight", 0.0) or 0.0
                 ),
                 "retrieval_final_k": int(getattr(primary_retrieval, "final_k", 0) or 0),
                 "retrieval_dedup_by": str(getattr(primary_retrieval, "dedup_by", "") or ""),
@@ -483,15 +478,13 @@ class TriBridFusion:
                 "fusion_sparse_error": None,
                 "fusion_sparse_error_kind": None,
                 "fusion_sparse_engine": None,
-                "fusion_graph_entity_hits": 0,
+                "fusion_graph_qdrant_seed_chunks": 0,
+                "fusion_graph_resolved_entities": 0,
+                "fusion_graph_relationship_expansion_hits": 0,
+                "fusion_graph_community_expansion_hits": 0,
                 "fusion_graph_hydrated_chunks": 0,
                 "fusion_graph_attempted": False,
                 "fusion_graph_error": None,
-                "fusion_graph_mode": str(getattr(cfg.graph_search, "mode", "entity")),
-                "fusion_graph_entity_expansion_enabled": bool(
-                    getattr(cfg.graph_search, "chunk_entity_expansion_enabled", False)
-                ),
-                "fusion_graph_entity_expansion_hits": 0,
             }
 
             # Use real storage backends per corpus config.
@@ -603,7 +596,10 @@ class TriBridFusion:
                 debug["fusion_vector_dim_mismatch"] = stored_dim > 0 and stored_dim != current_dim
                 debug["fusion_vector_dim_stored"] = stored_dim
                 debug["fusion_vector_dim_query"] = current_dim
-                if include_vector and cfg.vector_search.enabled:
+                if (
+                    (include_vector and cfg.vector_search.enabled)
+                    or (include_graph and cfg.graph_search.enabled and corpus_graph_id)
+                ):
                     raise EmbeddingContractMismatchError(
                         corpus_id=cid,
                         expected_contract={
@@ -746,7 +742,8 @@ class TriBridFusion:
                 )
             debug["fusion_sparse_results"] = len(sparse_results)
 
-            # Graph retrieval: query Neo4j for relevant entities, then hydrate to chunks from Postgres.
+            # Graph retrieval: seed from the manifest's physical Qdrant generation,
+            # traverse only the manifest's Neo4j generation, then hydrate from Postgres.
             if include_graph and cfg.graph_search.enabled and not corpus_graph_id:
                 # No promoted graph generation (graph indexing off for this corpus,
                 # or never indexed): an empty graph leg is the truthful answer.
@@ -755,203 +752,96 @@ class TriBridFusion:
             if include_graph and cfg.graph_search.enabled and corpus_graph_id:
                 debug["fusion_graph_attempted"] = True
                 graph_k = int(top_k or cfg.graph_search.top_k)
-                db_name = cfg.graph_storage.resolve_database(cid)
-                neo4j: Neo4jClient | None = None
                 try:
                     with (
                         stage_span("retrieval.graph", ragweld_corpus_id=cid),
                         GRAPH_LEG_LATENCY_SECONDS.time(),
                     ):
-                        neo4j = Neo4jClient(
-                            cfg.graph_storage.neo4j_uri,
-                            cfg.graph_storage.neo4j_user,
-                            cfg.graph_storage.resolve_password(),
-                            database=db_name,
-                        )
-                        try:
-                            with SEARCH_STAGE_LATENCY_SECONDS.labels(stage="neo4j_connect").time():
-                                await neo4j.connect()
-                        except Exception as e:
-                            _raise_neo4j_boundary_error(e, operation="Neo4j graph connect")
-                            raise
-                        if getattr(cfg.graph_search, "mode", "entity") == "chunk":
-                            # Chunk-level graph retrieval: Neo4j vector index over Chunk nodes.
-                            if q_emb is None:
-                                try:
-                                    with SEARCH_STAGE_LATENCY_SECONDS.labels(
-                                        stage="embed_query"
-                                    ).time():
-                                        q_emb = await embedder.embed(query)
-                                except Exception as e:
-                                    _raise_required_leg_error(
-                                        e,
-                                        leg="graph",
-                                        operation="graph query embedding",
-                                    )
-                                    raise
-                            overfetch = (
-                                int(
-                                    getattr(cfg.graph_search, "chunk_seed_overfetch_multiplier", 1)
-                                    or 1
-                                )
-                                if cfg.graph_storage.neo4j_database_mode == "shared"
-                                else 1
-                            )
-                            with SEARCH_STAGE_LATENCY_SECONDS.labels(
-                                stage="neo4j_chunk_vector_search"
-                            ).time():
-                                try:
-                                    hits = await neo4j.chunk_vector_search(
-                                        corpus_graph_id,
-                                        q_emb,
-                                        index_name=cfg.graph_indexing.chunk_vector_index_name,
-                                        top_k=graph_k,
-                                        neighbor_window=int(
-                                            getattr(cfg.graph_search, "chunk_neighbor_window", 0)
-                                            or 0
-                                        ),
-                                        overfetch_multiplier=overfetch,
-                                    )
-                                except Exception as e:
-                                    _raise_neo4j_boundary_error(
-                                        e, operation="Neo4j chunk vector search"
-                                    )
-                                    raise
-                            debug["fusion_graph_entity_hits"] = len(hits)
-
-                            score_by_id = {chunk_id: float(score) for chunk_id, score in hits}
-
-                            # Expand via entities (semantic KG / code entities linked to chunks).
-                            if (
-                                bool(
-                                    getattr(
-                                        cfg.graph_search, "chunk_entity_expansion_enabled", False
-                                    )
-                                )
-                                and int(cfg.graph_search.max_hops) > 0
-                            ):
+                        if q_emb is None:
+                            try:
                                 with SEARCH_STAGE_LATENCY_SECONDS.labels(
-                                    stage="neo4j_expand_chunks_via_entities"
+                                    stage="embed_query"
                                 ).time():
-                                    try:
-                                        exp_hits = await neo4j.expand_chunks_via_entities(
-                                            corpus_graph_id,
-                                            hits,
-                                            max_hops=int(cfg.graph_search.max_hops),
-                                            top_k=graph_k,
-                                        )
-                                    except Exception as e:
-                                        _raise_neo4j_boundary_error(
-                                            e,
-                                            operation="Neo4j entity expansion",
-                                        )
-                                        raise
-                                debug["fusion_graph_entity_expansion_hits"] = len(exp_hits)
-                                w = float(
-                                    getattr(cfg.graph_search, "chunk_entity_expansion_weight", 1.0)
-                                    or 0.0
+                                    q_emb = await embedder.embed(query)
+                            except Exception as e:
+                                _raise_required_leg_error(
+                                    e, leg="graph", operation="graph query embedding"
                                 )
-                                for chunk_id, score in exp_hits:
-                                    score_by_id[chunk_id] = max(
-                                        float(score_by_id.get(chunk_id) or 0.0), float(score) * w
-                                    )
-
-                            chunk_ids = sorted(
-                                score_by_id,
-                                key=lambda chunk_id: (-float(score_by_id[chunk_id]), chunk_id),
-                            )[:graph_k]
-                            with SEARCH_STAGE_LATENCY_SECONDS.labels(
-                                stage="postgres_get_chunks"
-                            ).time():
-                                try:
-                                    hydrated = await postgres.get_chunks(cid, chunk_ids)
-                                except Exception as e:
-                                    _raise_postgres_boundary_error(
-                                        e,
-                                        operation="Postgres graph chunk hydration",
-                                        leg="graph",
-                                    )
-                                    raise
-                            graph_results = [
-                                ChunkMatch(
-                                    chunk_id=ch.chunk_id,
-                                    content=ch.content,
-                                    file_path=ch.file_path,
-                                    start_line=ch.start_line,
-                                    end_line=ch.end_line,
-                                    language=ch.language,
-                                    provenance=ch.provenance,
-                                    score=float(score_by_id.get(ch.chunk_id) or 0.0),
-                                    source="graph",
-                                    metadata={
-                                        **(ch.metadata or {}),
-                                        "corpus_id": cid,
-                                        "graph_mode": "chunk",
-                                        "graph_index": cfg.graph_indexing.chunk_vector_index_name,
-                                    },
+                                raise
+                        if not corpus_collection:
+                            raise RequiredRetrievalLegError(
+                                leg="graph", operation="Qdrant graph seed collection"
+                            )
+                        with SEARCH_STAGE_LATENCY_SECONDS.labels(
+                            stage="graphrag_qdrant_neo4j_traversal"
+                        ).time():
+                            traversal = await retrieve_graph_chunks(
+                                neo4j_uri=cfg.graph_storage.neo4j_uri,
+                                neo4j_user=cfg.graph_storage.neo4j_user,
+                                neo4j_password=cfg.graph_storage.resolve_password(),
+                                neo4j_database=cfg.graph_storage.resolve_database(cid),
+                                qdrant_url=qdrant.url,
+                                collection_name=corpus_collection,
+                                graph_repo_id=corpus_graph_id,
+                                query_vector=q_emb,
+                                top_k=graph_k,
+                                max_hops=int(cfg.graph_search.max_hops),
+                                neighbor_window=int(cfg.graph_search.chunk_neighbor_window),
+                            )
+                        debug["fusion_graph_qdrant_seed_chunks"] = (
+                            traversal.qdrant_seed_chunks
+                        )
+                        debug["fusion_graph_resolved_entities"] = traversal.resolved_entities
+                        debug["fusion_graph_relationship_expansion_hits"] = (
+                            traversal.relationship_expansion_hits
+                        )
+                        debug["fusion_graph_community_expansion_hits"] = (
+                            traversal.community_expansion_hits
+                        )
+                        score_by_id = dict(traversal.chunk_scores)
+                        with SEARCH_STAGE_LATENCY_SECONDS.labels(
+                            stage="postgres_get_chunks"
+                        ).time():
+                            try:
+                                hydrated = await postgres.get_chunks(
+                                    cid, list(score_by_id)
                                 )
-                                for ch in hydrated
-                                if ch.chunk_id in score_by_id
-                            ]
-                            debug["fusion_graph_hydrated_chunks"] = len(graph_results)
-                        else:
-                            # Entity-mode graph retrieval: return real chunk_ids via Entity-[:IN_CHUNK]->Chunk.
-                            with SEARCH_STAGE_LATENCY_SECONDS.labels(
-                                stage="neo4j_entity_chunk_search"
-                            ).time():
-                                try:
-                                    hits = await neo4j.entity_chunk_search(
-                                        corpus_graph_id,
-                                        query,
-                                        cfg.graph_search.max_hops,
-                                        graph_k,
-                                    )
-                                except Exception as e:
-                                    _raise_neo4j_boundary_error(
-                                        e, operation="Neo4j entity chunk search"
-                                    )
-                                    raise
-                            debug["fusion_graph_entity_hits"] = len(hits)
-
-                            score_by_id = {chunk_id: float(score) for chunk_id, score in hits}
-                            chunk_ids = [chunk_id for chunk_id, _score in hits]
-                            with SEARCH_STAGE_LATENCY_SECONDS.labels(
-                                stage="postgres_get_chunks"
-                            ).time():
-                                try:
-                                    hydrated = await postgres.get_chunks(cid, chunk_ids)
-                                except Exception as e:
-                                    _raise_postgres_boundary_error(
-                                        e,
-                                        operation="Postgres graph chunk hydration",
-                                        leg="graph",
-                                    )
-                                    raise
-                            graph_results = [
-                                ChunkMatch(
-                                    chunk_id=ch.chunk_id,
-                                    content=ch.content,
-                                    file_path=ch.file_path,
-                                    start_line=ch.start_line,
-                                    end_line=ch.end_line,
-                                    language=ch.language,
-                                    provenance=ch.provenance,
-                                    score=float(score_by_id.get(ch.chunk_id) or 0.0),
-                                    source="graph",
-                                    metadata={
-                                        **(ch.metadata or {}),
-                                        "corpus_id": cid,
-                                        "graph_mode": "entity",
-                                    },
+                            except Exception as e:
+                                _raise_postgres_boundary_error(
+                                    e,
+                                    operation="Postgres graph chunk hydration",
+                                    leg="graph",
                                 )
-                                for ch in hydrated
-                                if ch.chunk_id in score_by_id
-                            ]
-                            debug["fusion_graph_hydrated_chunks"] = len(graph_results)
+                                raise
+                        graph_results = [
+                            ChunkMatch(
+                                chunk_id=chunk.chunk_id,
+                                content=chunk.content,
+                                file_path=chunk.file_path,
+                                start_line=chunk.start_line,
+                                end_line=chunk.end_line,
+                                language=chunk.language,
+                                provenance=chunk.provenance,
+                                score=float(score_by_id.get(chunk.chunk_id) or 0.0),
+                                source="graph",
+                                metadata={
+                                    **(chunk.metadata or {}),
+                                    "corpus_id": cid,
+                                },
+                            )
+                            for chunk in hydrated
+                            if chunk.chunk_id in score_by_id
+                        ]
+                        graph_results.sort(key=lambda hit: (-hit.score, hit.chunk_id))
+                        debug["fusion_graph_hydrated_chunks"] = len(graph_results)
                 except Exception as e:
                     if isinstance(e, (DependencyUnavailableError, RequiredRetrievalLegError)):
                         raise
                     SEARCH_STAGE_ERRORS_TOTAL.labels(stage="graph_leg").inc()
+                    if is_qdrant_unavailable(e):
+                        raise DependencyUnavailableError(
+                            "qdrant", "Qdrant graph seed retrieval"
+                        ) from e
                     if is_neo4j_unavailable(e):
                         raise DependencyUnavailableError("neo4j", "Neo4j graph retrieval") from e
                     if is_postgres_unavailable(e):
@@ -962,12 +852,6 @@ class TriBridFusion:
                         leg="graph",
                         operation="graph retrieval",
                     ) from e
-                finally:
-                    if neo4j is not None:
-                        try:
-                            await neo4j.disconnect()
-                        except Exception:
-                            pass
                 min_g = float(getattr(cfg.retrieval, "min_score_graph", 0.0) or 0.0)
                 if min_g > 0:
                     graph_results = [r for r in graph_results if float(r.score) >= float(min_g)]
@@ -1003,8 +887,10 @@ class TriBridFusion:
         total_vector = 0
         total_sparse = 0
         total_graph = 0
-        total_graph_hits = 0
-        total_graph_exp_hits = 0
+        total_graph_seed_chunks = 0
+        total_graph_resolved_entities = 0
+        total_graph_relationship_hits = 0
+        total_graph_community_hits = 0
         any_vector_enabled = False
         any_sparse_enabled = False
         any_graph_enabled = False
@@ -1038,8 +924,16 @@ class TriBridFusion:
             total_vector += len(v)
             total_sparse += len(s)
             total_graph += len(g)
-            total_graph_hits += int(dbg.get("fusion_graph_entity_hits") or 0)
-            total_graph_exp_hits += int(dbg.get("fusion_graph_entity_expansion_hits") or 0)
+            total_graph_seed_chunks += int(dbg.get("fusion_graph_qdrant_seed_chunks") or 0)
+            total_graph_resolved_entities += int(
+                dbg.get("fusion_graph_resolved_entities") or 0
+            )
+            total_graph_relationship_hits += int(
+                dbg.get("fusion_graph_relationship_expansion_hits") or 0
+            )
+            total_graph_community_hits += int(
+                dbg.get("fusion_graph_community_expansion_hits") or 0
+            )
             any_vector_enabled = any_vector_enabled or bool(dbg.get("fusion_vector_enabled"))
             any_sparse_enabled = any_sparse_enabled or bool(dbg.get("fusion_sparse_enabled"))
             any_graph_enabled = any_graph_enabled or bool(dbg.get("fusion_graph_enabled"))
@@ -1054,24 +948,7 @@ class TriBridFusion:
             if dbg.get("fusion_graph_error"):
                 graph_errors.append({"corpus_id": cid, "error": str(dbg.get("fusion_graph_error"))})
 
-        graph_modes: list[str] = []
-        for cid in corpus_ids:
-            try:
-                mode = str((per_corpus_debug.get(cid) or {}).get("fusion_graph_mode") or "").strip()
-            except Exception:
-                mode = ""
-            if mode:
-                graph_modes.append(mode)
-        unique_graph_modes = list(dict.fromkeys(graph_modes))
-        graph_mode: str | None
-        if not unique_graph_modes:
-            graph_mode = None
-        elif len(unique_graph_modes) == 1:
-            graph_mode = unique_graph_modes[0]
-        else:
-            graph_mode = "mixed"
-
-        # Aggregate debug (keep legacy top-level keys for existing UI/debug tooling).
+        # Aggregate debug for the request across corpus-isolated traversals.
         debug: dict[str, Any] = {
             "fusion_corpora": list(corpus_ids),
             "fusion_vector_requested": bool(include_vector),
@@ -1082,19 +959,16 @@ class TriBridFusion:
             "fusion_graph_enabled": bool(any_graph_enabled),
             "fusion_vector_results": int(total_vector),
             "fusion_sparse_results": int(total_sparse),
-            "fusion_graph_entity_hits": int(total_graph_hits),
-            "fusion_graph_mode": graph_mode,
+            "fusion_graph_qdrant_seed_chunks": int(total_graph_seed_chunks),
+            "fusion_graph_resolved_entities": int(total_graph_resolved_entities),
+            "fusion_graph_relationship_expansion_hits": int(
+                total_graph_relationship_hits
+            ),
+            "fusion_graph_community_expansion_hits": int(total_graph_community_hits),
             "fusion_graph_hydrated_chunks": int(total_graph),
             "fusion_graph_attempted": bool(any_graph_attempted),
             "fusion_graph_error": graph_errors[0]["error"] if graph_errors else None,
             "fusion_graph_errors": graph_errors,
-            "fusion_graph_entity_expansion_enabled": bool(
-                any(
-                    bool(d.get("fusion_graph_entity_expansion_enabled"))
-                    for d in per_corpus_debug.values()
-                )
-            ),
-            "fusion_graph_entity_expansion_hits": int(total_graph_exp_hits),
             "fusion_degraded_retrieval": bool(any_degraded_retrieval),
             "fusion_degraded_reasons": degraded_reasons,
             "fusion_per_corpus": per_corpus_debug,
@@ -1103,6 +977,12 @@ class TriBridFusion:
         SEARCH_LEG_RESULTS_COUNT.labels(leg="vector").observe(int(total_vector))
         SEARCH_LEG_RESULTS_COUNT.labels(leg="sparse").observe(int(total_sparse))
         SEARCH_LEG_RESULTS_COUNT.labels(leg="graph").observe(int(total_graph))
+        SEARCH_GRAPH_QDRANT_SEED_CHUNKS_COUNT.observe(int(total_graph_seed_chunks))
+        SEARCH_GRAPH_RESOLVED_ENTITIES_COUNT.observe(int(total_graph_resolved_entities))
+        SEARCH_GRAPH_RELATIONSHIP_EXPANSION_HITS_COUNT.observe(
+            int(total_graph_relationship_hits)
+        )
+        SEARCH_GRAPH_COMMUNITY_EXPANSION_HITS_COUNT.observe(int(total_graph_community_hits))
         SEARCH_GRAPH_HYDRATED_CHUNKS_COUNT.observe(int(total_graph))
 
         # Fuse once across all corpora.

@@ -373,7 +373,6 @@ export function IndexingSubtab() {
   const [skipDense, setSkipDense] = useConfigField<boolean>('indexing.skip_dense', false);
   const [graphIndexingEnabled, setGraphIndexingEnabled] = useConfigField<boolean>('graph_indexing.enabled', true);
   const [lexicalGraphEnabled, setLexicalGraphEnabled] = useConfigField<boolean>('graph_indexing.build_lexical_graph', true);
-  const [storeChunkEmbeddings, setStoreChunkEmbeddings] = useConfigField<boolean>('graph_indexing.store_chunk_embeddings', true);
   const [buildCodeGraph, setBuildCodeGraph] = useConfigField<boolean>('graph_indexing.build_code_graph', false);
   const [semanticKgMaxChunks, setSemanticKgMaxChunks] = useConfigField<number>('graph_indexing.semantic_kg_max_chunks', 40000);
   const [semanticKgLlmModel, setSemanticKgLlmModel] = useConfigField<string>('graph_indexing.semantic_kg_llm_model', '');
@@ -3436,47 +3435,6 @@ export function IndexingSubtab() {
                     </div>
                   </div>
                 </label>
-              </div>
-
-              <div
-                style={{
-                  padding: '16px',
-                  background: 'var(--bg-elev2)',
-                  borderRadius: '8px',
-                  border: storeChunkEmbeddings ? '1px solid var(--line)' : '1px solid var(--line)',
-                  opacity: graphIndexingEnabled && lexicalGraphEnabled ? 1 : 0.6,
-                }}
-              >
-                <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
-                  <input
-                    data-testid="graph-store-chunk-embeddings"
-                    type="checkbox"
-                    checked={storeChunkEmbeddings}
-                    onChange={(e) => setStoreChunkEmbeddings(e.target.checked)}
-                    disabled={graphCorpusIsInternal || !graphIndexingEnabled || !lexicalGraphEnabled}
-                    style={{ width: '18px', height: '18px' }}
-                  />
-                  <div>
-                    <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--fg)' }}>Store chunk embeddings in Neo4j</div>
-                    <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginTop: '2px' }}>
-                      Enables Neo4j native vector index over Chunk nodes (requires dense embeddings).
-                    </div>
-                  </div>
-                </label>
-                {skipDense && storeChunkEmbeddings && (
-                  <div
-                    style={{
-                      marginTop: '10px',
-                      padding: '8px 12px',
-                      background: 'rgba(var(--warn-rgb), 0.1)',
-                      borderRadius: '6px',
-                      color: 'var(--warn)',
-                      fontSize: '11px',
-                    }}
-                  >
-                    Skip dense disables embeddings. Re-index with dense enabled to populate Neo4j vectors.
-                  </div>
-                )}
               </div>
 
               <div

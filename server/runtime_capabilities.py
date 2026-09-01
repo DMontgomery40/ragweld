@@ -183,11 +183,6 @@ INDEXING_STORAGE_BACKEND_OPTIONS: tuple[RuntimeOption, ...] = (
         description="Optional lexical graph projection over documents and chunks.",
     ),
     RuntimeOption(
-        id="neo4j_chunk_vector",
-        label="Neo4j chunk vectors",
-        description="Optional Neo4j native vector index over Chunk nodes when dense embeddings are stored.",
-    ),
-    RuntimeOption(
         id="neo4j_semantic_kg",
         label="Neo4j semantic KG",
         description="Optional semantic knowledge graph extraction and storage during indexing.",
@@ -199,11 +194,6 @@ SEARCH_VECTOR_BACKEND_OPTIONS: tuple[RuntimeOption, ...] = (
         id="qdrant_dense",
         label="Qdrant dense vectors",
         description="Dense vector retrieval against the corpus Qdrant generation (cosine similarity).",
-    ),
-    RuntimeOption(
-        id="neo4j_chunk_vector",
-        label="Neo4j chunk vectors",
-        description="Neo4j chunk-vector search when graph storage keeps dense embeddings.",
     ),
 )
 
@@ -217,14 +207,9 @@ SEARCH_SPARSE_BACKEND_OPTIONS: tuple[RuntimeOption, ...] = (
 
 SEARCH_GRAPH_BACKEND_OPTIONS: tuple[RuntimeOption, ...] = (
     RuntimeOption(
-        id="neo4j_entity_chunk",
-        label="Neo4j entity-chunk graph",
-        description="Graph retrieval over linked entities, documents, and chunks in Neo4j.",
-    ),
-    RuntimeOption(
-        id="neo4j_expand_chunks_via_entities",
-        label="Neo4j entity expansion",
-        description="Graph-based chunk expansion through entity adjacency and lexical/semantic links.",
+        id="qdrant_neo4j_traversal",
+        label="Qdrant-seeded Neo4j traversal",
+        description="Dense Qdrant seeds joined to generation-scoped Neo4j entities and related chunks.",
     ),
 )
 

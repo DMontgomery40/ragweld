@@ -19,6 +19,7 @@ from server.retrieval.qdrant_store import (
     QdrantCollectionMissingError,
     QdrantGenerationExistsError,
     corpus_collection_prefix,
+    point_id_for_chunk,
 )
 from tests.service_requirements import require_env
 
@@ -137,6 +138,50 @@ async def test_staged_generations_serve_both_legs_and_retire_after_the_manifest_
     finally:
         await store.delete_corpus(corpus_id)
     assert await store.status(corpus_id, physical=None) is None
+
+
+async def test_generation_qualified_graph_join_payloads_are_exact_and_counted() -> None:
+    store = QdrantChunkStore(load_config())
+    corpus_id = f"qdrant-graph-join-{uuid.uuid4().hex[:8]}"
+    graph_repo_id = f"staging-{corpus_id}-run-a"
+    try:
+        generation = await store.create_generation(corpus_id, embedding_dim=4)
+        chunks = [
+            _chunk("same-raw-id", "active generation seed", embedding=[1.0, 0.0, 0.0, 0.0], ordinal=0),
+            _chunk("related", "active generation relation", embedding=[0.0, 1.0, 0.0, 0.0], ordinal=1),
+        ]
+
+        assert (
+            await store.write_chunks(
+                corpus_id,
+                generation,
+                chunks,
+                embedding_dim=4,
+                graph_repo_id=graph_repo_id,
+            )
+            == 2
+        )
+        assert await store.count_graph_join_payloads(generation, graph_repo_id) == 2
+        assert await store.count_graph_join_payloads(generation, "staging-other-run") == 0
+
+        from qdrant_client import QdrantClient
+
+        client = QdrantClient(url=store.url)
+        try:
+            points = client.retrieve(
+                collection_name=generation,
+                ids=[point_id_for_chunk(chunk.chunk_id) for chunk in chunks],
+                with_payload=True,
+                with_vectors=False,
+            )
+        finally:
+            client.close()
+        assert {point.payload["graph_join_id"] for point in points} == {
+            f"{graph_repo_id}:same-raw-id",
+            f"{graph_repo_id}:related",
+        }
+    finally:
+        await store.delete_corpus(corpus_id)
 
 
 async def test_sparse_only_generation_serves_sparse_and_reports_zero_dense_points() -> None:

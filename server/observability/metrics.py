@@ -168,6 +168,30 @@ SEARCH_GRAPH_HYDRATED_CHUNKS_COUNT = Histogram(
     buckets=(0, 1, 2, 5, 10, 20, 50, 100, 200),
 )
 
+SEARCH_GRAPH_QDRANT_SEED_CHUNKS_COUNT = Histogram(
+    "tribrid_search_graph_qdrant_seed_chunks_count",
+    "Number of Qdrant seed chunks passed to Neo4j traversal.",
+    buckets=(0, 1, 2, 5, 10, 20, 50, 100),
+)
+
+SEARCH_GRAPH_RESOLVED_ENTITIES_COUNT = Histogram(
+    "tribrid_search_graph_resolved_entities_count",
+    "Number of unique entities resolved during graph traversal.",
+    buckets=(0, 1, 2, 5, 10, 20, 50, 100, 200),
+)
+
+SEARCH_GRAPH_RELATIONSHIP_EXPANSION_HITS_COUNT = Histogram(
+    "tribrid_search_graph_relationship_expansion_hits_count",
+    "Number of graph chunks found through entity relationships.",
+    buckets=(0, 1, 2, 5, 10, 20, 50, 100, 200),
+)
+
+SEARCH_GRAPH_COMMUNITY_EXPANSION_HITS_COUNT = Histogram(
+    "tribrid_search_graph_community_expansion_hits_count",
+    "Number of graph chunks found through communities.",
+    buckets=(0, 1, 2, 5, 10, 20, 50, 100, 200),
+)
+
 # --------------------------------------------------------------------------------------
 # Semantic cache metrics
 # --------------------------------------------------------------------------------------
@@ -558,10 +582,7 @@ _SEARCH_STAGES = (
     "embed_query",
     "qdrant_vector_search",
     "qdrant_sparse_search",
-    "neo4j_connect",
-    "neo4j_chunk_vector_search",
-    "neo4j_expand_chunks_via_entities",
-    "neo4j_entity_chunk_search",
+    "graphrag_qdrant_neo4j_traversal",
     "postgres_get_chunks",
     "fusion_rrf",
     "normalize_scores",

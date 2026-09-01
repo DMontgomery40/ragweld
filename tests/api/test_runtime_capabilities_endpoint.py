@@ -51,12 +51,10 @@ async def test_runtime_capabilities_endpoint_exposes_current_runtime_surface(cli
         "qdrant_dense",
         "qdrant_sparse_idf",
         "neo4j_lexical_graph",
-        "neo4j_chunk_vector",
         "neo4j_semantic_kg",
     } == indexing_storage
 
     search_vector = {str(item.get("id") or "") for item in body["search"]["vector_backends"]}
-    assert search_vector == {
-        "qdrant_dense",
-        "neo4j_chunk_vector",
-    }
+    assert search_vector == {"qdrant_dense"}
+    search_graph = {str(item.get("id") or "") for item in body["search"]["graph_backends"]}
+    assert search_graph == {"qdrant_neo4j_traversal"}

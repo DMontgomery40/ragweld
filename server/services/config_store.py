@@ -55,6 +55,16 @@ _REMOVED_NESTED_KEYS: tuple[str, ...] = (
     "chat.system_prompt_base",
     "chat.system_prompt_rag_suffix",
     "chat.system_prompt_recall_suffix",
+    "graph_search.mode",
+    "graph_search.chunk_seed_overfetch_multiplier",
+    "graph_search.chunk_entity_expansion_enabled",
+    "graph_search.chunk_entity_expansion_weight",
+    "graph_indexing.store_chunk_embeddings",
+    "graph_indexing.chunk_vector_index_name",
+    "graph_indexing.chunk_embedding_property",
+    "graph_indexing.vector_similarity_function",
+    "graph_indexing.wait_vector_index_online",
+    "graph_indexing.vector_index_online_timeout_s",
 )
 
 _REMOVED_FLAT_KEYS: tuple[str, ...] = (

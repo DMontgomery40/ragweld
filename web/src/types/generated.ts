@@ -267,8 +267,14 @@ export interface ChatDebugInfo {
   vector_results?: number | null; // default: None
   /** Sparse leg results returned */
   sparse_results?: number | null; // default: None
-  /** Graph entity hits (pre-hydration) */
-  graph_entity_hits?: number | null; // default: None
+  /** Qdrant seed chunks passed to graph traversal */
+  graph_qdrant_seed_chunks?: number | null; // default: None
+  /** Unique graph entities resolved during traversal */
+  graph_resolved_entities?: number | null; // default: None
+  /** Chunks found through entity relationships */
+  graph_relationship_expansion_hits?: number | null; // default: None
+  /** Chunks found through graph communities */
+  graph_community_expansion_hits?: number | null; // default: None
   /** Graph hydrated chunks returned */
   graph_hydrated_chunks?: number | null; // default: None
   /** Final fused results returned */
@@ -1160,8 +1166,6 @@ export interface GraphIndexingConfig {
   build_lexical_graph?: boolean; // default: True
   /** Build an AST code graph during indexing: module, class and function entities with contains/inherits/imports/calls relationships (tree-sitter; Python, TypeScript, JavaScript), each linked to the chunk that defines it */
   build_code_graph?: boolean; // default: False
-  /** Store chunk embeddings on Chunk nodes for Neo4j vector search (requires dense embeddings) */
-  store_chunk_embeddings?: boolean; // default: True
   /** Edge weight for AST containment relationships (module->class/function, class->method). */
   ast_contains_weight?: number; // default: 1.0
   /** Edge weight for AST inheritance relationships (class->base). */
@@ -1178,16 +1182,6 @@ export interface GraphIndexingConfig {
   semantic_kg_llm_model?: string; // default: ""
   /** Timeout (seconds) for semantic KG LLM extraction per chunk */
   semantic_kg_llm_timeout_s?: number; // default: 90
-  /** Neo4j vector index name for Chunk embeddings (mode='chunk') */
-  chunk_vector_index_name?: string; // default: "tribrid_chunk_embeddings"
-  /** Chunk node property that stores the embedding vector */
-  chunk_embedding_property?: string; // default: "embedding"
-  /** Neo4j vector similarity function */
-  vector_similarity_function?: "cosine" | "euclidean"; // default: "cosine"
-  /** Wait for the Neo4j vector index to come ONLINE after (re)creating it */
-  wait_vector_index_online?: boolean; // default: True
-  /** Timeout waiting for Neo4j vector index ONLINE (seconds) */
-  vector_index_online_timeout_s?: number; // default: 60.0
 }
 
 export interface GraphPromotionOverride {
@@ -1221,18 +1215,10 @@ export interface GraphSchemaSample {
 
 /** Configuration for graph-based search using Neo4j. */
 export interface GraphSearchConfig {
-  /** Graph retrieval mode. 'chunk' uses lexical chunk nodes + Neo4j vector index; 'entity' uses the legacy code-entity graph. */
-  mode?: "chunk" | "entity"; // default: "chunk"
   /** Enable graph search in tri-brid retrieval */
   enabled?: boolean; // default: True
-  /** When mode='chunk', include up to N adjacent chunks (NEXT_CHUNK) around each seed hit */
+  /** Include up to N adjacent chunks (NEXT_CHUNK) around relationship hits */
   chunk_neighbor_window?: number; // default: 1
-  /** When mode='chunk' and Neo4j uses a shared database, overfetch seed hits before filtering by corpus_id */
-  chunk_seed_overfetch_multiplier?: number; // default: 10
-  /** When mode='chunk', expand from seed chunks via Entity graph (IN_CHUNK links) to find related chunks */
-  chunk_entity_expansion_enabled?: boolean; // default: True
-  /** Blend weight for entity-expansion scores relative to seed chunk scores (mode='chunk') */
-  chunk_entity_expansion_weight?: number; // default: 0.8
   /** Maximum graph traversal hops */
   max_hops?: number; // default: 2
   /** Include community-based expansion in graph search */
