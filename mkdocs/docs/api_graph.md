@@ -12,7 +12,7 @@
 
     ---
 
-    calls, imports, inherits, contains, references.
+    Code-graph edge kinds (`calls`, `imports`, `inherits`, `contains`) plus the approved schema's relationship types for semantic graphs.
 
 -   :material-account-group:{ .lg .middle } **Communities**
 
@@ -34,6 +34,11 @@
 
 !!! warning "Hops"
     High `max_hops` increases latency and noise. Start at 2.
+
+!!! note "The approved schema owns the type vocabulary"
+    `Entity.entity_type` and `Relationship.relation_type` are **open strings** in the Pydantic boundary models (`server/models/tribrid_config_model.py`) — not a fixed enum. Code graphs store AST kinds (`function`, `class`, `module`); semantic graphs store the operator-approved schema's node labels and relationship types (`Tank`, `LaunchSite`, `CONTAINS`, `LOCATED_AT`, …) **verbatim**, exactly as they were written at index time. Responses are never filtered against a fixed type allowlist, so a semantic generation's schema edges appear in every explorer view (entity list, stats breakdowns, subgraph, neighbours, community members). Empty values are refused (`min_length=1`), because an unlabelled node would hide the graph's shape.
+
+    Neighbourhood and community walks are confined to `__Entity__` nodes of the current generation (`server/db/neo4j.py`): a 2-hop path can never cross a `Chunk` node, so entities that merely share a source chunk are not reported as neighbours.
 
 | Route | Method | Description |
 |-------|--------|-------------|

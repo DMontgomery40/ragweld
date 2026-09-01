@@ -64,6 +64,9 @@ Cross-file edges are held back during the per-file pass and written in one relat
 
 The entity inspection endpoints take the id as a query parameter (`/graph/{corpus_id}/entity?entity_id=...`), so ids containing `/` and `::` (for example `server/services/traces.py::TraceStore.add_event`) need no path encoding. See [Graph API](../api_graph.md).
 
+!!! note "Types come from the graph, not from an enum"
+    The wire models carry `entity_type` and `relation_type` as open strings (`server/models/tribrid_config_model.py`): AST kinds for code graphs, and the approved schema's node labels and relationship types verbatim for semantic graphs. `server/db/neo4j.py` returns what the store holds — no coercion to a generic kind, no filtering against a fixed type allowlist — so schema edges survive into every explorer response. Neighbourhood and community walks are confined to `__Entity__` nodes of the generation, so a traversal can never cross a `Chunk` node and report co-mentioned entities as neighbours.
+
 After a successful index, ragweld also runs deterministic GDS Leiden community detection over the staged entities (`server/graph/communities.py`, GDS 2.13) and writes `communityId`/`communityPath` onto every entity, powering the community views here and community expansion in retrieval.
 
 !!! tip "If you're not sure"

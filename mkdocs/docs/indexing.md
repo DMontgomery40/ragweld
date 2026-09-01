@@ -155,6 +155,9 @@ A semantic run cannot start without a reviewed graph schema:
 2. **Review** — the **RAG → Indexing** proposal card shows node types, relationship types, patterns, constraints, the sampled chunk ids with SHA-256 hashes, the model alias, the GraphRAG version (`1.19.0`), and a bulk-cost estimate.
 3. **Approve** — starting the run sends `approved_graph_schema_hash`; the server refuses with `409 graph_schema_approval_required` when the hash is missing, or when any corpus file or extraction setting changed since the review (the fingerprint no longer matches).
 
+!!! note "Approved labels become the graph's type vocabulary"
+    The reviewed proposal's node labels and relationship types are exactly what lands on the promoted graph — `Entity.entity_type` and `Relationship.relation_type` are open strings on the wire (`server/models/tribrid_config_model.py`), not a fixed enum, so `Tank`, `LaunchSite`, `CONTAINS`, or `LOCATED_AT` surface verbatim in the Graph explorer instead of being coerced to a generic kind. See [Graph API](api_graph.md).
+
 The approved hash, schema payload, extraction telemetry, entity-resolution counts, community telemetry, and any override are persisted on the generation manifest (`GraphGenerationMetadata`), so every promoted graph is auditable.
 
 !!! note "A textless PDF refuses the proposal synchronously"

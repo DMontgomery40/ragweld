@@ -74,6 +74,8 @@ This is the core operator loop: ask, inspect sources, adjust retrieval settings,
 
 The graph view is where you validate entity extraction quality and relationship coverage. Communities are GDS Leiden partitions derived at index time — re-index the corpus to refresh them.
 
+Entity and relationship types are whatever the graph actually stores: AST kinds (`function`, `class`, `module`) for code corpora, and the approved schema's labels (`Tank`, `LaunchSite`, `CONTAINS`, `LOCATED_AT`, …) for semantic corpora — never coerced to a generic "(concept)" fallback. Schema-labelled entities get a stable palette colour keyed by the label text, and every view (entity table, neighbourhood, communities) returns the stored schema edges, so a semantic generation shows real edge counts instead of "0 edges".
+
 ### Recall gating and memory policy controls
 
 ![Recall gating controls in chat settings](../assets/images/recall-gating.png)
