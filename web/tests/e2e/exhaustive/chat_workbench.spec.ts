@@ -2,6 +2,9 @@
 // localStorage and drives only client behaviour — no gateway model is called, so the whole
 // file costs nothing to run. The paid Stop proof lives in chat_reliability.spec.ts.
 import { expect, test, type Page } from '@playwright/test';
+import { API_BASE, patchCorpusConfigSection, provisionExhaustiveCorpus } from './corpus_fixture';
+
+const SCHEMA_MODEL = String(process.env.GRAPH_E2E_KG_MODEL || '').trim() || 'deepseek.deepseek-v4-flash';
 
 const THREADS_KEY = 'ragweld-chat-threads:v2';
 
@@ -285,5 +288,105 @@ test.describe.serial('chat workbench (seeded, no paid sends)', () => {
     await expect(trigger).toContainText('Recall');
     await expect(trigger).not.toContainText(/\bselected\b/);
     await expect(trigger).not.toContainText(/\bcorpus\b|\bcorpora\b/);
+  });
+
+  test('T8-7: the debug footer discloses the graph-leg counters recorded by the API', async ({ page, request }) => {
+    // Task 8 step 7: a graph-including search must disclose the traversal accounting the
+    // API actually recorded — Qdrant-seeded chunks, relationship expansions, hydrated chunks —
+    // and never the retired entity-hit figure. The footer renders the message's own
+    // ChatDebugInfo, so the assistant message is seeded with the REAL /api/search response of
+    // a corpus that holds a real promoted semantic graph (schema proposed, approved and
+    // extracted through the official pipeline against the live gateway).
+    test.setTimeout(8 * 60 * 1000);
+    const corpus = await provisionExhaustiveCorpus(request, { index: false });
+    try {
+      await patchCorpusConfigSection(request, corpus.corpusId, 'graph_indexing', {
+        enabled: true,
+        build_code_graph: false,
+        semantic_kg_llm_model: SCHEMA_MODEL,
+      });
+      const proposalRes = await request.post(`${API_BASE}/index/${encodeURIComponent(corpus.corpusId)}/graph-schema/proposal`, {
+        data: { force_refresh: false },
+      });
+      expect(proposalRes.ok(), await proposalRes.text()).toBeTruthy();
+      const proposal = (await proposalRes.json()) as { schema_hash: string };
+      expect(proposal.schema_hash).toMatch(/^[0-9a-f]{64}$/);
+
+      const started = await request.post(`${API_BASE}/index`, {
+        data: {
+          corpus_id: corpus.corpusId,
+          repo_path: corpus.corpusPath,
+          force_reindex: true,
+          approved_graph_schema_hash: proposal.schema_hash,
+        },
+      });
+      expect(started.ok(), await started.text()).toBeTruthy();
+      const deadline = Date.now() + 6 * 60 * 1000;
+      let latest: { status?: string; error?: string | null; graph_promotable?: boolean | null } = {};
+      while (Date.now() < deadline) {
+        const latestRes = await request.get(`${API_BASE}/index/${encodeURIComponent(corpus.corpusId)}/runs/latest`);
+        if (latestRes.ok()) {
+          latest = (await latestRes.json()) as typeof latest;
+          if (latest.status === 'complete' || latest.status === 'error' || latest.status === 'cancelled') break;
+        }
+        await page.waitForTimeout(3000);
+      }
+      expect(latest.status, `run ended ${latest.status}: ${latest.error || ''}`).toBe('complete');
+      expect(latest.graph_promotable).toBe(true);
+
+      const res = await request.post(`${API_BASE}/search`, {
+        data: {
+          query: 'tidal calibration campaign',
+          corpus_id: corpus.corpusId,
+          // The fixture has four chunks and traversal credits only NON-seed chunks, so a
+          // four-seed search has nothing left to hydrate; two seeds leave two to reach.
+          top_k: 2,
+          include_vector: true,
+          include_sparse: true,
+          include_graph: true,
+          cache_mode: 'bypass',
+        },
+      });
+      expect(res.ok(), await res.text()).toBeTruthy();
+      const body = (await res.json()) as { matches: unknown[]; debug: Record<string, unknown> };
+      // A graph-including search on a promoted graph: the leg ran and every counter is a real number.
+      expect(body.debug.fusion_graph_enabled).toBe(true);
+      expect(body.debug).not.toHaveProperty('fusion_graph_entity_hits');
+      for (const key of ['fusion_graph_qdrant_seed_chunks', 'fusion_graph_relationship_expansion_hits', 'fusion_graph_hydrated_chunks']) {
+        expect(typeof body.debug[key], key).toBe('number');
+      }
+      expect(Number(body.debug.fusion_graph_qdrant_seed_chunks)).toBeGreaterThan(0);
+      expect(Number(body.debug.fusion_graph_hydrated_chunks)).toBeGreaterThan(0);
+      // The chat wire contract (ChatDebugInfo) carries the same accounting under its own
+      // names; the seed carries the recorded search values under those names.
+      const debug = {
+        llm_used: true,
+        graph_enabled: body.debug.fusion_graph_enabled,
+        graph_qdrant_seed_chunks: body.debug.fusion_graph_qdrant_seed_chunks,
+        graph_relationship_expansion_hits: body.debug.fusion_graph_relationship_expansion_hits,
+        graph_hydrated_chunks: body.debug.fusion_graph_hydrated_chunks,
+      };
+
+      await seedThread(page, {
+        sources: { corpus_ids: [corpus.corpusId] },
+        messages: [
+          { id: 'u1', role: 'user', createdAt: new Date().toISOString(), content: [{ type: 'text', text: 'tidal calibration campaign' }] },
+          completedAssistant('Grounded answer seeded from retrieval.', { sources: body.matches, debug }),
+        ],
+      });
+      await gotoChat(page);
+
+      const graphLine = page.getByTestId('chat-debug-graph');
+      await expect(graphLine).toBeVisible();
+      await expect(graphLine).toHaveText(
+        'graph: graph_enabled=true ' +
+          `graph_qdrant_seed_chunks=${String(debug.graph_qdrant_seed_chunks)} ` +
+          `graph_relationship_expansion_hits=${String(debug.graph_relationship_expansion_hits)} ` +
+          `graph_hydrated_chunks=${String(debug.graph_hydrated_chunks)}`
+      );
+      await expect(graphLine).not.toContainText('entity_hits');
+    } finally {
+      await corpus.dispose(request);
+    }
   });
 });

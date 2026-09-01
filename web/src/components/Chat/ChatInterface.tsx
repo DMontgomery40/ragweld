@@ -846,6 +846,17 @@ function AssistantThreadMessage(props: AssistantThreadMessageProps) {
             <div>correlation_id: {custom.correlationId || 'n/a'}</div>
             <div>llm_used: {String(custom.debug.llm_used)}</div>
             {custom.debug.llm_error ? <div>llm_error: {custom.debug.llm_error}</div> : null}
+            {typeof custom.debug.graph_enabled === 'boolean' ? (
+              // The graph leg's own accounting, verbatim from the chat debug contract:
+              // Qdrant-seeded traversal, relationship expansion, hydrated chunks. There is no
+              // entity-hit figure any more, so none is shown (Task 8 drive, step 7).
+              <div data-testid="chat-debug-graph">
+                graph: graph_enabled={String(custom.debug.graph_enabled)}
+                {' '}graph_qdrant_seed_chunks={String(custom.debug.graph_qdrant_seed_chunks ?? 0)}
+                {' '}graph_relationship_expansion_hits={String(custom.debug.graph_relationship_expansion_hits ?? 0)}
+                {' '}graph_hydrated_chunks={String(custom.debug.graph_hydrated_chunks ?? 0)}
+              </div>
+            ) : null}
             {props.showRecallGateSignals && recallSignals ? (
               <div>
                 recall_signals:
