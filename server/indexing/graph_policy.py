@@ -1,10 +1,9 @@
 from typing import Literal
 
-
 GraphPolicy = Literal["semantic", "code", "off", "excluded"]
 
 
-class GraphChunkCeilingExceeded(ValueError):
+class GraphChunkCeilingExceeded(ValueError):  # noqa: N818 - approved public policy error name
     pass
 
 

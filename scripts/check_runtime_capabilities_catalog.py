@@ -7,7 +7,10 @@ import json
 import sys
 from pathlib import Path
 
-from server.runtime_capabilities import apply_selection_metadata_to_catalog, validate_catalog_selection_metadata
+from server.runtime_capabilities import (
+    apply_selection_metadata_to_catalog,
+    validate_catalog_selection_metadata,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CATALOG_PATH = PROJECT_ROOT / "data" / "models.json"

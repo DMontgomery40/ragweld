@@ -126,6 +126,12 @@ async def test_deindex_repairs_a_corrupt_reclaim_backlog(client: AsyncClient) ->
             "/api/corpora", json={"corpus_id": corpus_id, "name": corpus_id, "path": "."}
         )
         assert created.status_code in (200, 201), created.text
+        # Keep semantic policy explicitly active while the row is corrupt: the
+        # persisted-state 409 must take precedence over schema approval.
+        cfg.graph_indexing.enabled = True
+        cfg.graph_indexing.build_code_graph = False
+        await pg.upsert_corpus_config_json(corpus_id, cfg.model_dump(mode="serialization"))
+        config_store._store = None
         # Real staged resources of the dead run: a Qdrant collection, a Neo4j graph, staging rows.
         driver = neo4j._require_driver()
         async with driver.session(database=neo4j.database) as session:
@@ -179,6 +185,12 @@ async def test_deindex_repairs_a_corrupt_reclaim_backlog(client: AsyncClient) ->
         ).physical_collection is None
         assert (await neo4j.get_graph_stats(staged_graph)).total_entities == 0
         assert await pg.get_corpus(staged_graph) is None
+        # This test's post-repair run only proves that the repaired corpus can
+        # claim a fence.  Turn graph indexing off so that independent schema
+        # approval policy does not become its next required operator action.
+        cfg.graph_indexing.enabled = False
+        await pg.upsert_corpus_config_json(corpus_id, cfg.model_dump(mode="serialization"))
+        config_store._store = None
         started = await client.post(
             "/api/index", json={"corpus_id": corpus_id, "repo_path": ".", "force_reindex": True}
         )
@@ -272,6 +284,9 @@ async def test_deindex_absorbs_a_dead_runs_fence_inventory_and_orphan_staging_ro
         assert await pg.get_corpus(ghost_rows) is None
         # ... and the sibling corpus's staging rows are untouched.
         assert await pg.get_corpus(sibling_rows) is not None
+        cfg.graph_indexing.enabled = False
+        await pg.upsert_corpus_config_json(corpus_id, cfg.model_dump(mode="serialization"))
+        config_store._store = None
         started = await client.post(
             "/api/index", json={"corpus_id": corpus_id, "repo_path": ".", "force_reindex": True}
         )

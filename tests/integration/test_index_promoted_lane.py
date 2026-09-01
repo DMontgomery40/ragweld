@@ -7,7 +7,10 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
+import json
 import os
+import shutil
 import tempfile
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -15,8 +18,16 @@ from pathlib import Path
 
 import pytest
 from httpx import AsyncClient
+from neo4j_graphrag.components.schema import (
+    GraphSchema,
+    NodeType,
+    Pattern,
+    PropertyType,
+    RelationshipType,
+)
 
 import server.api.index as index_api
+from server.api.index import graph_schema_input_fingerprint
 from server.config import load_config
 from server.db.neo4j import Neo4jClient
 from server.db.postgres import PostgresClient
@@ -27,6 +38,7 @@ from server.indexing.generations import (
     reclaim_stale_run,
     staging_repo_id,
 )
+from server.models.index import GraphSchemaProposal, GraphSchemaSample
 from server.retrieval.contracts import sparse_contract_from_config
 from server.retrieval.qdrant_store import QdrantChunkStore
 from server.services import config_store
@@ -41,6 +53,43 @@ pytestmark = [
 ]
 
 _CORPUS_PATH = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "acceptance_corpus"
+
+
+def _promoted_lane_schema() -> GraphSchema:
+    named = [PropertyType(name="name", type="STRING")]
+    return GraphSchema(
+        node_types=[
+            NodeType(label="Station", description="A named research station", properties=named),
+            NodeType(label="Gateway", description="A named telemetry gateway", properties=named),
+            NodeType(label="Database", description="A named datastore", properties=named),
+            NodeType(label="Sensor", description="A named sensor or sensor array", properties=named),
+            NodeType(
+                label="CalibrationStandard",
+                description="A named calibration standard",
+                properties=named,
+            ),
+        ],
+        relationship_types=[
+            RelationshipType(label="USES", description="Uses a system"),
+            RelationshipType(label="WRITES_TO", description="Writes telemetry to a datastore"),
+            RelationshipType(
+                label="CALIBRATED_WITH",
+                description="Is calibrated with a named standard",
+            ),
+        ],
+        patterns=[
+            Pattern(source="Station", relationship="USES", target="Database"),
+            Pattern(source="Gateway", relationship="WRITES_TO", target="Database"),
+            Pattern(
+                source="Sensor",
+                relationship="CALIBRATED_WITH",
+                target="CalibrationStandard",
+            ),
+        ],
+        additional_node_types=False,
+        additional_relationship_types=False,
+        additional_patterns=False,
+    )
 
 
 def _metric_value(metrics_text: str, name: str) -> float:
@@ -78,15 +127,30 @@ async def _wait_fence_released(
     )
 
 
-async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> None:
+async def test_index_search_and_delete_on_promoted_lane(
+    client: AsyncClient, tmp_path: Path
+) -> None:
     corpus_id = f"promoted-lane-{uuid.uuid4().hex[:8]}"
+    corpus_root = tmp_path / "promoted-corpus"
+    shutil.copytree(_CORPUS_PATH, corpus_root)
+    (corpus_root / "graph-facts.md").write_text(
+        "\n\n".join(
+            (
+                "Aurora Tidal Observatory uses KestrelDB. "
+                "The Pelican gateway writes telemetry to KestrelDB. "
+                "The salinity sensor array is calibrated with Halcyon reference brine."
+            )
+            for _ in range(12)
+        ),
+        encoding="utf-8",
+    )
     pg = PostgresClient(require_env("POSTGRES_DSN"))
     qdrant = QdrantChunkStore(load_config())
     try:
         await pg.connect()
         created = await client.post(
             "/api/corpora",
-            json={"corpus_id": corpus_id, "name": corpus_id, "path": str(_CORPUS_PATH)},
+            json={"corpus_id": corpus_id, "name": corpus_id, "path": str(corpus_root)},
         )
         assert created.status_code in (200, 201), created.text
 
@@ -103,8 +167,36 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         cfg.graph_indexing.semantic_kg_llm_model = "deepseek.deepseek-v4-flash"
         cfg.chat.litellm.enabled = True
         cfg.semantic_cache.enabled = False
+        cfg.chunking.chunking_strategy = "fixed_chars"
+        cfg.chunking.chunk_size = 1000
+        cfg.chunking.chunk_overlap = 0
         await pg.upsert_corpus_config_json(corpus_id, cfg.model_dump(mode="serialization"))
         config_store._store = None
+
+        corpus = await pg.get_corpus(corpus_id)
+        fingerprint = await graph_schema_input_fingerprint(corpus or {}, cfg)
+        schema_payload = _promoted_lane_schema().model_dump(mode="json")
+        schema_hash = hashlib.sha256(
+            json.dumps(schema_payload, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        await pg.set_graph_schema_proposal(
+            corpus_id,
+            GraphSchemaProposal(
+                corpus_id=corpus_id,
+                policy="semantic",
+                input_fingerprint=fingerprint,
+                schema_hash=schema_hash,
+                schema_payload=schema_payload,
+                sample=GraphSchemaSample(chunk_ids=[], chunk_hashes=[]),
+                model_alias=cfg.graph_indexing.semantic_kg_llm_model,
+                created_at=datetime.now(UTC),
+            ),
+        )
+        index_request = {
+            "corpus_id": corpus_id,
+            "repo_path": str(corpus_root),
+            "approved_graph_schema_hash": schema_hash,
+        }
 
         metrics_before = await client.get("/metrics")
         assert metrics_before.status_code == 200
@@ -115,7 +207,7 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
 
         started = await client.post(
             "/api/index",
-            json={"corpus_id": corpus_id, "repo_path": str(_CORPUS_PATH), "force_reindex": True},
+            json={**index_request, "force_reindex": True},
         )
         assert started.status_code == 200, started.text
         final = await _wait_for_index(client, corpus_id)
@@ -137,7 +229,7 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         ).acquired
         refused = await client.post(
             "/api/index",
-            json={"corpus_id": corpus_id, "repo_path": str(_CORPUS_PATH), "force_reindex": True},
+            json={**index_request, "force_reindex": True},
         )
         assert refused.status_code == 409, refused.text
         assert refused.json()["detail"]["run_id"] == "foreign-run-1"
@@ -166,7 +258,7 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         ).acquired
         takeover = await client.post(
             "/api/index",
-            json={"corpus_id": corpus_id, "repo_path": str(_CORPUS_PATH), "force_reindex": False},
+            json={**index_request, "force_reindex": False},
         )
         assert takeover.status_code == 200, takeover.text
         taken = await pg.get_index_fence(corpus_id)
@@ -257,7 +349,9 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         )
         assert all(ch.embedding is None for ch in stored_chunks)
 
-        # All three legs return results for a grounded query.
+        # Dense and sparse return grounded results.  The graph traversal itself
+        # also runs; on this tiny corpus every chunk can be a Qdrant seed, so the
+        # no-double-credit contract may truthfully leave zero non-seed expansions.
         body = {
             "query": "How often is the salinity sensor calibrated?",
             "corpus_id": corpus_id,
@@ -275,7 +369,10 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         debug = payload["debug"]
         assert int(debug["fusion_vector_results"]) > 0
         assert int(debug["fusion_sparse_results"]) > 0
-        assert int(debug["fusion_graph_hydrated_chunks"]) > 0
+        assert debug["fusion_graph_requested"] is True
+        assert debug["fusion_graph_enabled"] is True
+        assert debug["fusion_graph_attempted"] is True
+        assert int(debug["fusion_graph_qdrant_seed_chunks"]) > 0
         per_corpus = debug["fusion_per_corpus"][corpus_id]
         assert per_corpus["fusion_sparse_engine"] == "qdrant_sparse_idf"
         assert any("calibrat" in m["content"].lower() for m in matches)
@@ -296,7 +393,7 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         # "Staging corpus not found", leaving a permanent error run).
         reindex = await client.post(
             "/api/index",
-            json={"corpus_id": corpus_id, "repo_path": str(_CORPUS_PATH), "force_reindex": False},
+            json={**index_request, "force_reindex": False},
         )
         assert reindex.status_code == 200, reindex.text
         final_reindex = await _wait_for_index(client, corpus_id)
@@ -322,7 +419,7 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         config_store._store = None
         third = await client.post(
             "/api/index",
-            json={"corpus_id": corpus_id, "repo_path": str(_CORPUS_PATH), "force_reindex": False},
+            json={**index_request, "force_reindex": False},
         )
         assert third.status_code == 200, third.text
         assert (await _wait_for_index(client, corpus_id))["status"] == "complete"
@@ -340,7 +437,7 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         # (single-previous retention would have dropped the older one).
         fourth = await client.post(
             "/api/index",
-            json={"corpus_id": corpus_id, "repo_path": str(_CORPUS_PATH), "force_reindex": False},
+            json={**index_request, "force_reindex": False},
         )
         assert fourth.status_code == 200, fourth.text
         assert (await _wait_for_index(client, corpus_id))["status"] == "complete"
@@ -359,7 +456,7 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         config_store._store = None
         fifth = await client.post(
             "/api/index",
-            json={"corpus_id": corpus_id, "repo_path": str(_CORPUS_PATH), "force_reindex": False},
+            json={**index_request, "force_reindex": False},
         )
         assert fifth.status_code == 200, fifth.text
         assert (await _wait_for_index(client, corpus_id))["status"] == "complete"
@@ -399,7 +496,7 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         )
         sixth = await client.post(
             "/api/index",
-            json={"corpus_id": corpus_id, "repo_path": str(_CORPUS_PATH), "force_reindex": False},
+            json={**index_request, "force_reindex": False},
         )
         assert sixth.status_code == 200, sixth.text
         # Cancellation at/after the commit boundary: stop the run the moment its
@@ -512,7 +609,7 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         await pg.set_generation(corpus_id, seeded)
         seventh = await client.post(
             "/api/index",
-            json={"corpus_id": corpus_id, "repo_path": str(_CORPUS_PATH), "force_reindex": False},
+            json={**index_request, "force_reindex": False},
         )
         assert seventh.status_code == 200, seventh.text
         assert (await _wait_for_index(client, corpus_id))["status"] == "complete"
@@ -576,8 +673,8 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         missing = await client.post(
             "/api/index",
             json={
-                "corpus_id": corpus_id,
-                "repo_path": str(_CORPUS_PATH / "does-not-exist"),
+                **index_request,
+                "repo_path": str(corpus_root / "does-not-exist"),
                 "force_reindex": False,
             },
         )
@@ -587,7 +684,7 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         try:
             bogus = await client.post(
                 "/api/index",
-                json={"corpus_id": corpus_id, "repo_path": empty_dir, "force_reindex": False},
+                json={**index_request, "repo_path": empty_dir, "force_reindex": False},
             )
             assert bogus.status_code == 200, bogus.text
             failed = await _wait_for_index(client, corpus_id)
@@ -636,6 +733,12 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
         lat0 = _metric_value(m0.text, "tribrid_search_latency_seconds_count")
         counted_search = await client.post("/api/search", json={**body, "cache_mode": "bypass"})
         assert counted_search.status_code == 200, counted_search.text
+        chat_scoped = await config_store.get_config(repo_id=corpus_id)
+        chat_scoped.chat.litellm.enabled = False
+        await pg.upsert_corpus_config_json(
+            corpus_id, chat_scoped.model_dump(mode="serialization")
+        )
+        config_store._store = None
         chat = await client.post(
             "/api/chat",
             json={
@@ -706,8 +809,7 @@ async def test_index_search_and_delete_on_promoted_lane(client: AsyncClient) -> 
             client.post(
                 "/api/index",
                 json={
-                    "corpus_id": corpus_id,
-                    "repo_path": str(_CORPUS_PATH),
+                    **index_request,
                     "force_reindex": True,
                 },
             ),

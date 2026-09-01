@@ -231,7 +231,7 @@ async def resolve_staged_entities(
     )
 
 
-class ScopedNeo4jWriter(Neo4jWriter):
+class ScopedNeo4jWriter(Neo4jWriter):  # type: ignore[misc]  # GraphRAG lacks PEP 561 metadata
     def __init__(self, *args: Any, repo_id: str, run_id: str, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.repo_id = require_staging_graph_id(repo_id)

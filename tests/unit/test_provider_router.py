@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import os
-from contextlib import contextmanager
 from collections.abc import Iterator
+from contextlib import contextmanager
 
 import pytest
 
-from server.gateway_catalog import warm_gateway_catalog
 from server.chat.provider_router import select_provider_route
+from server.gateway_catalog import warm_gateway_catalog
 from server.models.chat_config import ChatConfig, LiteLLMConfig
 from server.models.tribrid_config_model import TriBridConfig
 

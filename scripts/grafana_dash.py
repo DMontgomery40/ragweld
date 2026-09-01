@@ -35,7 +35,7 @@ def provision_dashboard(grafana_url: str, dashboard_path: str, api_key: str | No
         response = httpx.post(url, json=payload, headers=headers, timeout=30)
         if response.status_code == 200:
             result = response.json()
-            print(f"Dashboard provisioned successfully")
+            print("Dashboard provisioned successfully")
             print(f"  URL: {grafana_url}/d/{result.get('uid')}")
         else:
             print(f"Failed to provision dashboard: {response.status_code}")

@@ -19,7 +19,7 @@ from server.indexing.generations import build_generation
 from server.indexing.graphrag_pipeline import ScopedNeo4jWriter
 from server.indexing.official_graphrag import write_lexical_graph_with_graphrag
 from server.main import app
-from server.models.index import Chunk
+from server.models.index import Chunk, ChunkProvenance, PageRegion
 from server.retrieval.contracts import sparse_contract_from_config
 from server.retrieval.graphrag_retriever import retrieve_graph_chunks
 from server.retrieval.qdrant_store import QdrantChunkStore
@@ -47,6 +47,7 @@ def _chunks(*, generation: str) -> list[Chunk]:
             token_count=7,
             embedding=[1.0, 0.0, 0.0, 0.0],
             metadata={"chunk_ordinal": 0},
+            provenance=ChunkProvenance(extraction="direct"),
         ),
         Chunk(
             chunk_id="shared-related",
@@ -57,6 +58,20 @@ def _chunks(*, generation: str) -> list[Chunk]:
             token_count=7,
             embedding=[0.0, 1.0, 0.0, 0.0],
             metadata={"chunk_ordinal": 1},
+            provenance=ChunkProvenance(
+                extraction="docling",
+                page_start=2,
+                page_end=2,
+                regions=[
+                    PageRegion(
+                        page=2,
+                        left=0.1,
+                        top=0.2,
+                        right=0.8,
+                        bottom=0.4,
+                    )
+                ],
+            ),
         ),
     ]
 
@@ -101,6 +116,12 @@ async def _write_generation_graph(
 
 async def test_manifest_collection_and_graph_prevent_raw_chunk_id_collisions() -> None:
     cfg = load_config()
+    cfg.graph_storage.neo4j_uri = os.environ.get(
+        "NEO4J_URI", cfg.graph_storage.neo4j_uri
+    )
+    cfg.graph_storage.neo4j_user = os.environ.get(
+        "NEO4J_USER", cfg.graph_storage.neo4j_user
+    )
     corpus_id = f"graph-hydrate-{uuid4().hex[:8]}"
     retired_run = uuid4().hex
     active_run = uuid4().hex
@@ -274,6 +295,20 @@ async def test_manifest_collection_and_graph_prevent_raw_chunk_id_collisions() -
         assert response.status_code == 200, response.text
         payload = response.json()
         assert [match["chunk_id"] for match in payload["matches"]] == ["shared-related"]
+        assert payload["matches"][0]["provenance"] == {
+            "extraction": "docling",
+            "page_start": 2,
+            "page_end": 2,
+            "regions": [
+                {
+                    "page": 2,
+                    "left": 0.1,
+                    "top": 0.2,
+                    "right": 0.8,
+                    "bottom": 0.4,
+                }
+            ],
+        }
         debug = payload["debug"]
         assert "fusion_graph_entity_hits" not in debug
         assert debug["fusion_graph_qdrant_seed_chunks"] == 1

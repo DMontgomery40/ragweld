@@ -2,7 +2,6 @@
 
 from pathlib import Path
 
-
 GENERATED_TS = Path(__file__).resolve().parents[2] / "web" / "src" / "types" / "generated.ts"
 
 

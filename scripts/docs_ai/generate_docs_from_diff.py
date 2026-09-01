@@ -20,15 +20,13 @@ from __future__ import annotations
 
 import argparse
 import difflib
-from dataclasses import dataclass
 import os
 import re
 import shlex
-import tempfile
 import subprocess
+import tempfile
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, List, Optional, Tuple
-
 
 ROOT = Path(__file__).resolve().parents[2]
 PROMPT_BASE_PATH = ROOT / "scripts" / "docs_ai" / "docs_prompt_base.md"
@@ -142,8 +140,7 @@ def run(cmd: str, *, check: bool = True) -> str:
         cmd,
         cwd=str(ROOT),
         shell=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         text=True,
     )
     if check and p.returncode != 0:
@@ -211,7 +208,7 @@ def should_include_file(path: str) -> bool:
     return True
 
 
-def git_diff_names(base: str) -> List[str]:
+def git_diff_names(base: str) -> list[str]:
     base = normalize_base_ref(base)
     out = run(f"git diff --name-only {shlex.quote(base)}..HEAD")
     files = [ln.strip() for ln in out.splitlines() if ln.strip()]
@@ -236,7 +233,7 @@ def _first_heading(md: str) -> str:
     return ""
 
 
-def scan_docs_tree() -> List[str]:
+def scan_docs_tree() -> list[str]:
     docs_dir = ROOT / "mkdocs" / "docs"
     if not docs_dir.exists():
         return []
@@ -248,7 +245,7 @@ def scan_docs_tree() -> List[str]:
     return entries
 
 
-def scan_screenshot_assets(*, limit: int = 80) -> List[str]:
+def scan_screenshot_assets(*, limit: int = 80) -> list[str]:
     """List current screenshot assets that docs pages may reference."""
 
     roots = [
@@ -277,7 +274,7 @@ def scan_screenshot_assets(*, limit: int = 80) -> List[str]:
     return out
 
 
-def _select_context_files(changed: List[str], *, limit: int) -> List[str]:
+def _select_context_files(changed: list[str], *, limit: int) -> list[str]:
     """Pick a high-signal subset of files to include diffs for."""
 
     preferred = [
@@ -386,7 +383,7 @@ def _select_context_files(changed: List[str], *, limit: int) -> List[str]:
     return selected[:limit]
 
 
-def _all_docs_context(*, budget_chars: int) -> tuple[List[str], int]:
+def _all_docs_context(*, budget_chars: int) -> tuple[list[str], int]:
     """Quote the current text of every docs page, newest-shallowest first.
 
     The single highest-leverage input: a model can only emit context lines that
@@ -417,7 +414,7 @@ def _all_docs_context(*, budget_chars: int) -> tuple[List[str], int]:
     return blocks, omitted
 
 
-def _selected_docs_context(*, rel_paths: Optional[List[str]] = None, max_chars_per_file: int = 7000) -> List[str]:
+def _selected_docs_context(*, rel_paths: list[str] | None = None, max_chars_per_file: int = 7000) -> list[str]:
     """Return a named set of existing docs content (used for targeted excerpts)."""
 
     docs_dir = ROOT / "mkdocs" / "docs"
@@ -558,8 +555,8 @@ def build_plan(base_ref: str) -> str:
     return "\n".join(sections).strip() + "\n"
 
 
-def _parse_diff_paths(patch_text: str) -> List[Tuple[str, str]]:
-    paths: list[Tuple[str, str]] = []
+def _parse_diff_paths(patch_text: str) -> list[tuple[str, str]]:
+    paths: list[tuple[str, str]] = []
     for line in (patch_text or "").splitlines():
         if not line.startswith("diff --git "):
             continue
@@ -573,7 +570,7 @@ def _parse_diff_paths(patch_text: str) -> List[Tuple[str, str]]:
     return paths
 
 
-def _validate_patch_paths(patch_text: str) -> List[str]:
+def _validate_patch_paths(patch_text: str) -> list[str]:
     text = (patch_text or "").lstrip()
     if text.startswith("*** Begin Patch"):
         return _validate_cursor_patch_paths(patch_text)
@@ -591,7 +588,7 @@ def _validate_patch_paths(patch_text: str) -> List[str]:
     return errors
 
 
-def _validate_cursor_patch_paths(patch_text: str) -> List[str]:
+def _validate_cursor_patch_paths(patch_text: str) -> list[str]:
     errors: list[str] = []
     for raw in (patch_text or "").splitlines():
         line = raw.strip()
@@ -615,8 +612,8 @@ def _cursor_patch_line_stats(patch_text: str) -> dict[str, dict[str, int]]:
     """Return per-file added/removed line counts from Cursor-style patch format."""
 
     stats: dict[str, dict[str, int]] = {}
-    current_path: Optional[str] = None
-    current_mode: Optional[str] = None  # add | update
+    current_path: str | None = None
+    current_mode: str | None = None  # add | update
 
     for raw in (patch_text or "").splitlines():
         line = raw.rstrip("\n")
@@ -667,8 +664,8 @@ def _patch_line_stats(patch_text: str) -> dict[str, dict[str, int]]:
         return _cursor_patch_line_stats(patch_text)
 
     stats: dict[str, dict[str, int]] = {}
-    current_add_path: Optional[str] = None
-    current_del_path: Optional[str] = None
+    current_add_path: str | None = None
+    current_del_path: str | None = None
 
     for raw in (patch_text or "").splitlines():
         line = raw.rstrip("\n")
@@ -703,7 +700,7 @@ def _patch_line_stats(patch_text: str) -> dict[str, dict[str, int]]:
     return stats
 
 
-def _validate_patch_safety(patch_text: str, *, allow_large_deletes: bool) -> List[str]:
+def _validate_patch_safety(patch_text: str, *, allow_large_deletes: bool) -> list[str]:
     """Reject suspiciously destructive docs rewrites in normal incremental mode."""
 
     if allow_large_deletes:
@@ -898,8 +895,8 @@ def _is_allowed_patch_path(path: str) -> bool:
 class _CursorPatchOperation:
     kind: str
     path: str
-    content: Optional[str] = None
-    move_to: Optional[str] = None
+    content: str | None = None
+    move_to: str | None = None
 
 
 def _parse_cursor_style_patch(patch_text: str) -> list[_CursorPatchOperation]:
@@ -933,7 +930,7 @@ def _parse_cursor_style_patch(patch_text: str) -> list[_CursorPatchOperation]:
             i += 1
             continue
 
-        def _find_subsequence(haystack: list[str], needle: list[str]) -> Optional[int]:
+        def _find_subsequence(haystack: list[str], needle: list[str]) -> int | None:
             if not needle:
                 return None
             for start in range(0, len(haystack) - len(needle) + 1):
@@ -971,7 +968,7 @@ def _parse_cursor_style_patch(patch_text: str) -> list[_CursorPatchOperation]:
 
             file_lines = _read_text(full_path).splitlines()
             i += 1
-            move_to: Optional[str] = None
+            move_to: str | None = None
             if i < len(raw_lines) and raw_lines[i].startswith("*** Move to: "):
                 move_to = _validate_rel_path(raw_lines[i].removeprefix("*** Move to: ").strip())
                 i += 1
@@ -1003,8 +1000,8 @@ def _parse_cursor_style_patch(patch_text: str) -> list[_CursorPatchOperation]:
                     hunk_lines.append(hl)
                     i += 1
 
-                old_seq = [l[1:] for l in hunk_lines if l[0] in {" ", "-"}]
-                new_seq = [l[1:] for l in hunk_lines if l[0] in {" ", "+"}]
+                old_seq = [line[1:] for line in hunk_lines if line[0] in {" ", "-"}]
+                new_seq = [line[1:] for line in hunk_lines if line[0] in {" ", "+"}]
                 if not old_seq and not new_seq:
                     continue
 
@@ -1043,7 +1040,7 @@ def _parse_cursor_style_patch(patch_text: str) -> list[_CursorPatchOperation]:
     return operations
 
 
-def _apply_cursor_style_patch(patch_text: str) -> List[str]:
+def _apply_cursor_style_patch(patch_text: str) -> list[str]:
     """Apply Cursor-style patch format transactionally.
 
     This format is sometimes returned by LLMs even when asked for `git apply`

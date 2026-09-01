@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Quick setup script for development environment."""
 
-import os
 import subprocess
 import sys
 from pathlib import Path

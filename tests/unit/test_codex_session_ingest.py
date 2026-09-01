@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 import pytest
@@ -188,10 +189,10 @@ def test_parse_verify_query_accepts_known_streams_and_rejects_bad_input() -> Non
     assert parsed.stream == "semantic"
     assert parsed.text == "why did the github action fail"
 
-    with pytest.raises(Exception):
+    with pytest.raises(argparse.ArgumentTypeError):
         parse_verify_query("wrongprefix:hello")
 
-    with pytest.raises(Exception):
+    with pytest.raises(argparse.ArgumentTypeError):
         parse_verify_query("missing separator")
 
 

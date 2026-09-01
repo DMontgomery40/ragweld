@@ -506,7 +506,7 @@ test.describe('Retrieval graph-leg readiness', () => {
     await openGraphLeg(page, baseURL, NO_ENTITY_CORPUS);
     const readiness = page.getByTestId('retrieval-graph-readiness');
     await expect(readiness).toContainText('no entity graph');
-    await expect(readiness).toContainText('entity expansion cannot contribute');
+    await expect(readiness).toContainText('relationship traversal cannot contribute');
     await expect(readiness).toContainText(String(stats.total_chunks).replace(/\B(?=(\d{3})+(?!\d))/g, ','));
   });
 

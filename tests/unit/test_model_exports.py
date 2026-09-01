@@ -111,14 +111,18 @@ class TestTypesMatchBoundaryAggregate:
 
     def test_types_are_same_class(self) -> None:
         """Verify re-exported types are the exact same boundary class."""
-        from server.models.tribrid_config_model import (
-            ChunkMatch as LawChunkMatch,
-            Entity as LawEntity,
-            EvalDatasetItem as LawEvalDatasetItem,
-        )
         from server.models.eval import EvalDatasetItem
         from server.models.graph import Entity
         from server.models.retrieval import ChunkMatch
+        from server.models.tribrid_config_model import (
+            ChunkMatch as LawChunkMatch,
+        )
+        from server.models.tribrid_config_model import (
+            Entity as LawEntity,
+        )
+        from server.models.tribrid_config_model import (
+            EvalDatasetItem as LawEvalDatasetItem,
+        )
 
         # Should be exact same class, not copies
         assert ChunkMatch is LawChunkMatch

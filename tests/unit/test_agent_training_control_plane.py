@@ -7,8 +7,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from server.models.tribrid_config_model import AgentTrainRun, TriBridConfig
 from server.api.agent import _resume_mlflow_tracking
+from server.models.tribrid_config_model import AgentTrainRun, TriBridConfig
 from server.training.control_plane import (
     build_agent_control_plane_status,
     build_agent_run_links,

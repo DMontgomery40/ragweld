@@ -194,7 +194,7 @@ def main() -> int:
                 "definition": parsed.definition_html,
                 "category": category,
                 "related": related,
-                "links": [{"text": l.text, "href": l.href} for l in parsed.links],
+                "links": [{"text": link.text, "href": link.href} for link in parsed.links],
                 "badges": [{"text": b.text, "class": b.class_name} for b in parsed.badges],
             }
 

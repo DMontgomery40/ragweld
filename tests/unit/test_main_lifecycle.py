@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import pytest
 import asyncio
+
+import pytest
 
 from server.main import _enter_lifecycle_cm
 

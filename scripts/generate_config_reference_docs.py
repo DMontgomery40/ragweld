@@ -89,7 +89,7 @@ def _literal_values(tp: Any) -> list[str]:
     return []
 
 
-def _is_model_type(tp: Any) -> Optional[type[BaseModel]]:
+def _is_model_type(tp: Any) -> type[BaseModel] | None:
     """Return the BaseModel subclass if `tp` is (or wraps) one, else None."""
 
     if tp is None:
@@ -141,12 +141,12 @@ def _constraints_str(field: Any) -> str:
         # String constraints (MinLen/MaxLen, regex/pattern)
         if cls_name in {"MinLen", "MaxLen"}:
             if hasattr(m, "min_length"):
-                parts.append(f"min_length={getattr(m, 'min_length')}")
+                parts.append(f"min_length={m.min_length}")
             if hasattr(m, "max_length"):
-                parts.append(f"max_length={getattr(m, 'max_length')}")
+                parts.append(f"max_length={m.max_length}")
 
-        if hasattr(m, "pattern") and getattr(m, "pattern"):
-            parts.append(f"pattern={getattr(m, 'pattern')}")
+        if hasattr(m, "pattern") and m.pattern:
+            parts.append(f"pattern={m.pattern}")
 
     # Literal allowed values
     lit = _literal_values(getattr(field, "annotation", None))
@@ -211,7 +211,7 @@ def load_glossary() -> dict[str, GlossaryTerm]:
     return out
 
 
-def _attr_chain(node: ast.AST) -> Optional[list[str]]:
+def _attr_chain(node: ast.AST) -> list[str] | None:
     # self.foo.bar -> ["self", "foo", "bar"]
     if isinstance(node, ast.Name):
         return [node.id]
@@ -229,7 +229,7 @@ def load_env_key_mapping() -> dict[str, list[str]]:
     tree = ast.parse(CONFIG_MODEL_PATH.read_text(encoding="utf-8"))
     path_to_keys: dict[str, list[str]] = {}
 
-    class_node: Optional[ast.ClassDef] = None
+    class_node: ast.ClassDef | None = None
     for n in tree.body:
         if isinstance(n, ast.ClassDef) and n.name == "TriBridConfig":
             class_node = n
@@ -238,7 +238,7 @@ def load_env_key_mapping() -> dict[str, list[str]]:
     if class_node is None:
         return {}
 
-    fn: Optional[ast.FunctionDef] = None
+    fn: ast.FunctionDef | None = None
     for n in class_node.body:
         if isinstance(n, ast.FunctionDef) and n.name == "to_flat_dict":
             fn = n
@@ -247,7 +247,7 @@ def load_env_key_mapping() -> dict[str, list[str]]:
     if fn is None:
         return {}
 
-    dict_node: Optional[ast.Dict] = None
+    dict_node: ast.Dict | None = None
     for n in ast.walk(fn):
         if isinstance(n, ast.Return) and isinstance(n.value, ast.Dict):
             dict_node = n.value
@@ -256,7 +256,7 @@ def load_env_key_mapping() -> dict[str, list[str]]:
     if dict_node is None:
         return {}
 
-    for k_node, v_node in zip(dict_node.keys, dict_node.values):
+    for k_node, v_node in zip(dict_node.keys, dict_node.values, strict=True):
         if not isinstance(k_node, ast.Constant) or not isinstance(k_node.value, str):
             continue
         key = k_node.value.strip()
@@ -535,7 +535,7 @@ def main() -> None:
     env_map = load_env_key_mapping()
 
     # Import here so script can be imported without server deps in tooling.
-    from server.models.tribrid_config_model import TriBridConfig  # noqa: WPS433
+    from server.models.tribrid_config_model import TriBridConfig
 
     root = TriBridConfig()
     sections: list[tuple[str, type[BaseModel]]] = []
@@ -568,4 +568,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

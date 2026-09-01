@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 AUTOMATION_BRANCH_PREFIXES = (
@@ -47,7 +47,7 @@ def _current_branch(cwd: Path) -> str:
 def _log(payload: dict[str, object], cwd: Path | None, repo_root: Path | None, branch: str) -> None:
     log_dir = Path.home() / ".codex" / "log"
     log_dir.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     with (log_dir / "blocking-stop-hook.log").open("a", encoding="utf-8") as handle:
         handle.write(
             f"{ts}\tcwd={cwd or ''}\trepo_root={repo_root or ''}\tbranch={branch}\t"

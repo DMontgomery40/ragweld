@@ -282,4 +282,55 @@ The CRITICAL stats/config blast radius was reported before mutation. Containment
 
 ## Task 8 - Full verification, deployment, reindex, browser acceptance
 
-Status: pending
+Status: in progress
+
+### Frozen requirement/evidence matrix
+
+This table is the completion authority for Task 8. `Pending` may become `Proves` only with the named fresh output; no passing lower-level substitute closes a browser or deployment row.
+
+| Requirement | Exact required proof | State |
+|---|---|---|
+| Neo4j GraphRAG 1.19 source contract | Task 1 PASS plus full-gate installed-version/import contract (`test_neo4j_graphrag_119_contract.py`) | Proves; fresh full gate passed |
+| One external semantic/code policy and truthful defaults | Task 2 PASS, full `test_graph_policy.py`/config/API gate, visible NASA/Epstein semantic badges and code badge | Automated proves; live pending |
+| Recall exclusion | Policy/API tests plus live Recall UI showing excluded graph policy with no graph start path | Automated proves; live pending |
+| Reviewed per-corpus schema proposal and persistence | Task 3 PASS, live NASA and Epstein visible generate/expand/approve dialogs, schema hash in run metadata and after reload | Automated proves; live pending |
+| Correct official lexical names | Full live GraphRAG/store query: `FROM_DOCUMENT`, `NEXT_CHUNK`, `FROM_CHUNK`; zero `IN_CHUNK` | Automated proves; live pending |
+| Official Pipeline and scoped writer | Task 4 PASS, full gate, promoted per-corpus graph metadata/store scoping | Proves; fresh live/batched gate passed |
+| Exact-match scoped entity resolution | Task 5 PASS, live run resolution telemetry and zero duplicate groups/cross-generation edges | Automated proves; live pending |
+| Fail-closed promotion and RED matrix | Task 5 mutation matrix plus Task 8 visible temporary-corpus refusal, operator hint, no promoted generation/completed badge after reload | Automated proves; visible negative pending |
+| Qdrant-seeded traversal and no double credit | Task 6 PASS, retained-generation collision test, live graph search debug fields/API equality and no `fusion_graph_entity_hits` | Automated proves; live pending |
+| GDS 2.13 deployment | Task 7 PASS, deployed `gds.version()`=`2.13.x`, Neo4j/APOC/GDS readiness, deployment marker | Isolated proves; deployed pending |
+| Weighted deterministic Leiden, including code | Task 7 semantic/code/failure live tests plus nonzero NASA/Epstein/code `communityPath`/`communityId`, counts, derived API/UI after reload | Isolated proves; deployed pending |
+| Dead-surface replacement | Repo search, live Neo4j zero obsolete ontology/vector/embedding state, config/generated UI absence | Source proves; live cleanup pending |
+| Per-task and final DeepSeek reviews | Recorded PASS for Tasks 1-7 plus final complete spec-to-main integration PASS after full gate | Tasks 1-7 prove; final pending |
+| Full LXC quality gate | Exact Task 8 surfaces: dependency sync, generators, docs ownership, Ruff, mypy, complete 1,989-test collection, TS/build, headed policy/explorer | Proves predeploy through bounded batches; live GDS browser row deferred to postdeploy |
+| Push/deploy parity | Mac `HEAD`, `origin/main`, LXC `HEAD`, deployment marker and serving runtime hash identical; clean one-worktree state | Pending |
+| NASA visible rebuild and drive | Screenshot/click ledger: visible schema review/approve/cost/run telemetry/reload, three node types, two neighborhoods, all controls, community, graph search/debug | Pending |
+| Epstein visible rebuild and drive | Same complete screenshot/click/search/debug ledger with flight/communication question | Pending |
+| `ragweld_code` visible rebuild and drive | Visible code policy/AST types/weights/run telemetry, same full Explorer/search/reload ledger | Pending |
+| Deferred Recall Intelligence Graph | Spec section 15 is the owned enterprise RBAC/Kubernetes/GCP roadmap phase and explicitly covers needs/misses/transitions, prompt/cache opportunities, role/team aggregates, tenant isolation, consent, de-identification, retention/deletion, audit, invalidation, anti-surveillance | Proves; roadmap audit complete |
+| Final completion audit | Every row above classified `Proves`, with run ids, store counts, screenshot paths/timestamps, hashes, and no active/staged work | Pending |
+
+### Predeployment full-gate evidence
+
+- Static/type/docs GREEN: `uv sync --extra dev`; TypeScript generation and validation for 238 registered public models; banned-pattern and docs-ownership checks; repo-wide Ruff over `server tests scripts`; and mypy over 167 server files all passed on LXC100.
+- The first monolithic `pytest -q --no-cov -p no:cacheprovider` attempt was terminated at roughly 42% after the worker retained about 3.6 GiB, LXC swap reached 6.6/8 GiB, and host load exceeded 600. Its failures were therefore treated as contaminated leads, not verdicts. The exact 1,989-item collection was rerun in deterministic file batches with the same flags, production Postgres/Qdrant/LiteLLM/Docling, a disposable Neo4j 5.26.20/GDS 2.13.7 lane, and `RAGWELD_LIVE_GATEWAY=1`.
+- Python GREEN: 1,988 passed and one explicit platform skip (`test_mlx_lora_injection.py`: MLX native imports are not usable on Linux). No gateway, Postgres, Qdrant, Neo4j, GDS, or Docling test skipped. Unit groups were 975 pass + one rerun overlay Git-safety pass + 584 pass; API groups were 240 + 110; integration groups were 11 + 20 + 14 + the two promoted-lane tests + 31. The 10m23s promoted-lane test crossed schema-approved semantic indexing, stale-fence takeover, seven generation transitions, mixed retention, post-commit cancellation, MCP/search/chat metrics, tombstone repair, and deletion.
+- Root causes repaired from the first full attempt: index-start persisted-state validation now precedes schema approval and is covered across POST plus five readers; the viewer no longer asks a disabled graph leg for hits while the deterministic generation-collision test carries exact Docling page/region provenance through Qdrant -> Neo4j -> Postgres -> API; promoted-lane semantic policy persists a fixed reviewed schema over explicit facts; and the Leiden failure-injection constraint uses a UUID-only label rather than the global `__Entity__` label. Exact live reruns passed.
+- Frontend GREEN: TypeScript lint and the Vite production build passed. Headed Playwright, with no route interception, produced nine immediate passes, one expected predeploy skip for the not-yet-reindexed GDS corpus, and one truthful-readiness failure. The drive fixed stale `entity expansion` wording and added the live 1,315 indexed-chunk count to the no-entity-graph readiness card; the exact headed regression then passed in 2.3s. The remaining GDS-corpus test is required again after deployment/reindex.
+- Replacement audit GREEN in executable surfaces: no production writer/query hit remains for `IN_CHUNK`, `fusion_graph_entity_hits`, `IN_COMMUNITY`, persisted `Community` nodes, NetworkX/Louvain community code, Neo4j vector search, or heuristic semantic-KG switches. `config_store.py` retains only the two intentional removed-key migration strips (`chunk_seed_overfetch_multiplier`, `chunk_vector_index_name`).
+- Recall roadmap audit GREEN: approved spec section 15 remains the owned deferred enterprise phase and explicitly contains repeated needs, misses, exploration transitions, prompt/cache opportunities, cohort-bounded role/team aggregates, tenant/role visibility, consent/notice, de-identification, retention/deletion, audit logs, cache invalidation, and the anti-surveillance constraint. No Recall graph implementation is smuggled into this slice.
+
+### Final DeepSeek integration review loop
+
+- Complete-diff attempt `gen-1788231861-cyKR3PGnBtlHHEUANg3Z` consumed 999,731 prompt + 12,001 completion tokens (1,011,732 total, `$0.08284047436`) entirely as hidden reasoning and emitted no content. It is rejected as a non-review.
+- The first larger retry `gen-1788232010-c7NHqJhDmGUkwnXCbEaK` returned an upstream connect timeout with zero usage/cost. It is rejected as a non-review.
+- Complete-diff retry `gen-1788232138-HGjesOyVjNDQmQlJNhur` consumed 999,745 prompt + 24,000 completion tokens (1,023,745 total, `$0.1969525`) entirely as hidden reasoning and emitted no content. It is rejected as a non-review.
+- The bounded final-integration packet preserved the complete inventory, Tasks 1-7 PASS ledger, all material production/deployment/API/UI seams, and the complete Task 8 diff while excluding lock/generated/mechanical lint noise. Response `gen-1788232718-j1jfghiyQMcDW0VQYZuu` resolved to `deepseek.deepseek-v4-flash`, used 234,470 prompt + 1,707 completion tokens (236,177 total; 1,344 reasoning), and cost `$0.03330376`.
+- Verdict: **FAIL**, with five P1 completion blockers and no implementation defect: push/deploy parity, NASA visible rebuild, Epstein visible rebuild, `ragweld_code` visible rebuild, and postdeploy GDS-community browser acceptance remain pending. The reviewer explicitly concluded: “All other integration checks ... pass. The plan's implementation is correct; these remaining operational steps are required to declare full integration successful.”
+- Resolution: commit/push/deploy the exact reviewed candidate, complete those five operational rows with store/browser evidence, then resubmit the completed integration packet. No code change is indicated by this verdict.
+
+### Final precommit GitNexus scope
+
+- Task 8 uncommitted range: HIGH risk across 55 files, 99 indexed symbols, eight affected flows. The named flows are `start_index` persisted/config resolution, mechanical docs automation helpers, and `RetrievalSubtab` config/readiness loading.
+- Complete approved-plan range from `e38cb6ba`: CRITICAL risk across 126 files, 637 indexed symbols, and 38 affected flows. The named paths are the expected proposal/estimate/status/start, search/benchmark/eval fusion, Postgres schema metadata, and Graph Explorer/config consumers already bounded by Tasks 1-7 reviews and the fresh full gate.

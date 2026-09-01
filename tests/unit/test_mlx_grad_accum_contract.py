@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from server.training.mlx_qwen3_trainer import (
-    _orthogonalize_direction_dict,
     _iter_trainable_named_params,
+    _orthogonalize_direction_dict,
     accumulate_grads,
     average_grads,
 )

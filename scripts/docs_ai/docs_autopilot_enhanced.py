@@ -15,17 +15,16 @@ Integration stance:
 
 from __future__ import annotations
 
+import json
 import os
 import re
-import json
-import subprocess
 import shlex
-from pathlib import Path
-from datetime import datetime
-from typing import List, Dict, Optional, Tuple, Any
-import requests
+import subprocess
 from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
 
+import requests
 
 _MERMAID_FENCE_RE = re.compile(r"```mermaid\s*\n(?P<code>[\s\S]*?)\n```", re.MULTILINE)
 
@@ -95,7 +94,7 @@ def _normalize_mermaid_v11_code(code: str) -> str:
     return fixed
 
 
-def normalize_mermaid_v11_markdown(markdown: str) -> Tuple[str, int]:
+def normalize_mermaid_v11_markdown(markdown: str) -> tuple[str, int]:
     """Normalize Mermaid blocks in markdown. Returns (updated_markdown, blocks_changed)."""
 
     blocks_changed = 0
@@ -127,16 +126,16 @@ class DocumentationContext:
     glossary_json: str = ""                  # data/glossary.json - tooltip definitions
 
     # Backend modules
-    api_endpoints: Dict[str, str] = field(default_factory=dict)      # server/api/*.py
-    retrieval_modules: Dict[str, str] = field(default_factory=dict)  # server/retrieval/*.py
-    db_modules: Dict[str, str] = field(default_factory=dict)         # server/db/*.py
-    indexing_modules: Dict[str, str] = field(default_factory=dict)   # server/indexing/*.py
-    services_modules: Dict[str, str] = field(default_factory=dict)   # server/services/*.py
+    api_endpoints: dict[str, str] = field(default_factory=dict)      # server/api/*.py
+    retrieval_modules: dict[str, str] = field(default_factory=dict)  # server/retrieval/*.py
+    db_modules: dict[str, str] = field(default_factory=dict)         # server/db/*.py
+    indexing_modules: dict[str, str] = field(default_factory=dict)   # server/indexing/*.py
+    services_modules: dict[str, str] = field(default_factory=dict)   # server/services/*.py
 
     # Frontend modules
-    web_components: List[str] = field(default_factory=list)  # web/src/components/**/*.tsx
-    stores: Dict[str, str] = field(default_factory=dict)     # web/src/stores/*.ts
-    hooks: Dict[str, str] = field(default_factory=dict)      # web/src/hooks/*.ts
+    web_components: list[str] = field(default_factory=list)  # web/src/components/**/*.tsx
+    stores: dict[str, str] = field(default_factory=dict)     # web/src/stores/*.ts
+    hooks: dict[str, str] = field(default_factory=dict)      # web/src/hooks/*.ts
 
     # Configuration and environment
     docker_compose: str = ""                 # docker-compose.yml
@@ -144,11 +143,11 @@ class DocumentationContext:
 
     # Documentation
     readme: str = ""                         # README.md
-    existing_docs: Dict[str, str] = field(default_factory=dict)  # mkdocs/docs/**/*.md
+    existing_docs: dict[str, str] = field(default_factory=dict)  # mkdocs/docs/**/*.md
 
     # Git info
-    recent_changes: List[str] = field(default_factory=list)
-    all_files: List[str] = field(default_factory=list)
+    recent_changes: list[str] = field(default_factory=list)
+    all_files: list[str] = field(default_factory=list)
 
 
 class EnhancedDocsAutopilot:
@@ -293,7 +292,7 @@ class EnhancedDocsAutopilot:
             all_files=all_files,
         )
 
-    def _read_file(self, path: Path, max_chars: Optional[int] = None) -> str:
+    def _read_file(self, path: Path, max_chars: int | None = None) -> str:
         """Read file safely (optionally truncated)."""
         try:
             content = path.read_text(encoding="utf-8")
@@ -342,7 +341,7 @@ class EnhancedDocsAutopilot:
                 sanitized.append(line)
         return '\n'.join(sanitized)
 
-    def _analyze_directory(self, dir_path: Path, pattern: str) -> Dict[str, str]:
+    def _analyze_directory(self, dir_path: Path, pattern: str) -> dict[str, str]:
         """Analyze all files in a directory matching pattern"""
         results = {}
 
@@ -390,7 +389,7 @@ class EnhancedDocsAutopilot:
 
         return '\n'.join(lines) if lines else content
 
-    def _list_components(self, components_dir: Path) -> List[str]:
+    def _list_components(self, components_dir: Path) -> list[str]:
         """List all React components"""
         components = []
 
@@ -404,7 +403,7 @@ class EnhancedDocsAutopilot:
 
         return components[:50]  # Limit to avoid overwhelming context
 
-    def _get_git_info(self, base_ref: str = None) -> Tuple[List[str], List[str]]:
+    def _get_git_info(self, base_ref: str = None) -> tuple[list[str], list[str]]:
         """Get list of changed files and all files"""
         recent_changes = []
         all_files = []
@@ -437,7 +436,7 @@ class EnhancedDocsAutopilot:
 
         return recent_changes, all_files
 
-    def _analyze_existing_docs(self) -> Dict[str, str]:
+    def _analyze_existing_docs(self) -> dict[str, str]:
         """Analyze existing documentation structure"""
         docs = {}
 
@@ -451,7 +450,7 @@ class EnhancedDocsAutopilot:
 
         return docs
 
-    def generate_documentation_with_llm(self, context: DocumentationContext) -> Dict[str, str]:
+    def generate_documentation_with_llm(self, context: DocumentationContext) -> dict[str, str]:
         """Generate documentation using OpenAI GPT-4"""
 
         api_key = (self.openai_api_key or "").strip().strip('"').strip("'")
@@ -646,6 +645,7 @@ class EnhancedDocsAutopilot:
         """Call OpenAI Responses API with the prompts, with basic 429 backoff and CI-safe soft-fail."""
 
         import time
+
         from requests import HTTPError
 
         url = "https://api.openai.com/v1/responses"
@@ -662,7 +662,7 @@ class EnhancedDocsAutopilot:
         if fallback_model and not fallback_model.startswith("gpt-5"):
             raise ValueError(f"OPENAI_FALLBACK_MODEL must be GPT-5 (got: {fallback_model})")
 
-        def build_payload(model: str) -> Dict[str, Any]:
+        def build_payload(model: str) -> dict[str, Any]:
             if not model.startswith("gpt-5"):
                 raise ValueError(f"Model must be GPT-5 (got: {model})")
             base = {
@@ -678,7 +678,7 @@ class EnhancedDocsAutopilot:
             base["max_output_tokens"] = int(os.getenv("OPENAI_MAX_OUTPUT_TOKENS", "32000"))
             return base
 
-        def post_with_retries(model: str, attempts: int = 4, base_delay: float = 5.0) -> Optional[str]:
+        def post_with_retries(model: str, attempts: int = 4, base_delay: float = 5.0) -> str | None:
             print(f"Using OpenAI model: {model}")
             payload = build_payload(model)
             for i in range(attempts):
@@ -740,7 +740,7 @@ class EnhancedDocsAutopilot:
                         raise RuntimeError(
                             f"OpenAI API auth failed ({status}). "
                             f"{detail or 'Check OPENAI_API_KEY (and that it is a real, unrevoked key).'}"
-                        )
+                        ) from he
 
                     if detail:
                         print(f"HTTP error from OpenAI ({status}): {detail}")
@@ -770,7 +770,7 @@ class EnhancedDocsAutopilot:
 
         return resp_text
 
-    def _parse_llm_response(self, response: str) -> Dict[str, str]:
+    def _parse_llm_response(self, response: str) -> dict[str, str]:
         """Parse the LLM response to extract documentation updates"""
         if not response:
             print("  ✗ Empty response")
@@ -840,7 +840,7 @@ class EnhancedDocsAutopilot:
 
         return result
 
-    def update_mkdocs_config(self, docs_updates: Dict[str, str]) -> dict:
+    def update_mkdocs_config(self, docs_updates: dict[str, str]) -> dict:
         """Update mkdocs.yml configuration with enhanced features"""
 
         # Enhanced configuration for ragweld
@@ -973,7 +973,7 @@ class EnhancedDocsAutopilot:
 
         return config
 
-    def _generate_navigation(self, docs_updates: Dict[str, str]) -> list:
+    def _generate_navigation(self, docs_updates: dict[str, str]) -> list:
         """Generate navigation structure based on documentation
 
         This creates a ragweld-specific navigation structure.
@@ -1069,7 +1069,7 @@ class EnhancedDocsAutopilot:
         """Check if a documentation file exists"""
         return (self.docs_dir / path).exists()
 
-    def write_documentation_files(self, docs_updates: Dict[str, str]) -> None:
+    def write_documentation_files(self, docs_updates: dict[str, str]) -> None:
         """Write documentation files to disk"""
 
         self.docs_dir.mkdir(parents=True, exist_ok=True)
@@ -1090,7 +1090,7 @@ class EnhancedDocsAutopilot:
                 print(f"    ↳ Mermaid normalized: {blocks_changed} block(s)")
             print(f"  ✅ Wrote: {file_path}")
 
-    def normalize_existing_mermaid(self) -> Tuple[int, int]:
+    def normalize_existing_mermaid(self) -> tuple[int, int]:
         """Normalize Mermaid blocks across existing mkdocs/docs markdown files."""
 
         if not self.docs_dir.exists():
@@ -1125,7 +1125,7 @@ class EnhancedDocsAutopilot:
         with open(mkdocs_path, 'w') as f:
             yaml.dump(config, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
 
-        print(f"  ✅ Updated: mkdocs.yml")
+        print("  ✅ Updated: mkdocs.yml")
 
     def create_github_workflow(self) -> None:
         """Create enhanced GitHub workflow for documentation automation"""

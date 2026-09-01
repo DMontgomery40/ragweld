@@ -137,6 +137,8 @@ module = [
     "mlx_embeddings.*",
     "mlx_lm",
     "mlx_lm.*",
+    "neo4j_graphrag",
+    "neo4j_graphrag.*",
     "sentence_transformers",
     "sentence_transformers.*",
     "pypdfium2",

@@ -3,11 +3,11 @@
 import pytest
 
 from server.models.retrieval import (
+    AnswerRequest,
+    AnswerResponse,
     ChunkMatch,
     SearchRequest,
     SearchResponse,
-    AnswerRequest,
-    AnswerResponse,
 )
 
 

@@ -3,7 +3,6 @@ import pytest
 from server.chat.retrieval_gate import classify_for_recall
 from server.models.chat_config import RecallGateConfig, RecallIntensity
 
-
 config = RecallGateConfig()
 
 

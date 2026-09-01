@@ -2,7 +2,7 @@
 
 import pytest
 
-from server.models.graph import Entity, Relationship, Community
+from server.models.graph import Community, Entity, Relationship
 
 
 @pytest.mark.integration

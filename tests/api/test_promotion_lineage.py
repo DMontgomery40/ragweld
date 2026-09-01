@@ -10,13 +10,13 @@ import pytest
 from httpx import AsyncClient
 
 from server.lineage import load_asset
-from server.training.artifact_store import resolve_active_artifact_dir
 from server.models.tribrid_config_model import (
     AgentTrainRun,
     CorpusEvalProfile,
     RerankerTrainRun,
     TriBridConfig,
 )
+from server.training.artifact_store import resolve_active_artifact_dir
 
 pytestmark = pytest.mark.requires_postgres
 

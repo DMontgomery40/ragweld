@@ -15,7 +15,6 @@ import re
 import sys
 from pathlib import Path
 
-
 REQUIRED_TERM_FIELDS = {"term", "key", "definition", "category", "related"}
 
 

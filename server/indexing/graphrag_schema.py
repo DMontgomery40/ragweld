@@ -6,13 +6,12 @@ import re
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 from neo4j_graphrag.components.schema import GraphSchema, SchemaFromTextExtractor
 from neo4j_graphrag.llm import OpenAILLM
 
 from server.models.index import Chunk, GraphSchemaProposal, GraphSchemaSample
-
 
 _GRAPH_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 _GENERIC_NODE_LABELS = {"OBJECT"}
@@ -44,15 +43,18 @@ def select_schema_chunks(
 
 
 def canonical_schema_dict(schema: GraphSchema) -> dict[str, Any]:
-    return GraphSchema(
-        node_types=schema.node_types,
-        relationship_types=schema.relationship_types,
-        patterns=schema.patterns,
-        constraints=schema.constraints,
-        additional_node_types=False,
-        additional_relationship_types=False,
-        additional_patterns=False,
-    ).model_dump(mode="json")
+    return cast(
+        dict[str, Any],
+        GraphSchema(
+            node_types=schema.node_types,
+            relationship_types=schema.relationship_types,
+            patterns=schema.patterns,
+            constraints=schema.constraints,
+            additional_node_types=False,
+            additional_relationship_types=False,
+            additional_patterns=False,
+        ).model_dump(mode="json"),
+    )
 
 
 def graph_schema_hash(schema_dict: Mapping[str, Any]) -> str:

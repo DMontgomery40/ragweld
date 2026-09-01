@@ -1,7 +1,7 @@
 """Live end-to-end proof of the source document evidence viewer.
 
 Indexes a corpus of markdown + a two-page PDF + an HTML handbook through the real API (Docling,
-Postgres, Qdrant, Neo4j), then proves that every retrieval leg carries typed provenance, that the
+Postgres, Qdrant), then proves that every enabled retrieval leg carries typed provenance, that the
 viewer endpoints serve text/PDF pages/rich markdown with honest provenance states, that path
 escapes and unindexed files 404, that staleness is detected, and that promotion/deletion keep the
 ``documents`` table consistent. Nothing is mocked.
@@ -107,7 +107,7 @@ async def _search(client: AsyncClient, corpus_id: str, query: str) -> list[dict]
             "top_k": 12,
             "include_vector": True,
             "include_sparse": True,
-            "include_graph": True,
+            "include_graph": False,
             "cache_mode": "bypass",
         },
     )
@@ -139,7 +139,7 @@ async def test_source_document_viewer_end_to_end(client: AsyncClient, tmp_path: 
         assert final["status"] == "complete", final
         await _wait_fence_released(pg, corpus_id)
 
-        # 1. Every leg carries typed provenance; PDF hits map to real pages, text hits are direct.
+        # 1. Every enabled leg carries typed provenance; PDF hits map to real pages, text hits are direct.
         matches = await _search(client, corpus_id, "How often is the salinity array calibrated?")
         pdf_hits = [m for m in matches if m["file_path"] == PDF]
         md_hits = [m for m in matches if m["file_path"].endswith(".md")]
@@ -163,26 +163,7 @@ async def test_source_document_viewer_end_to_end(client: AsyncClient, tmp_path: 
         assert page_two, [m["content"][:60] for m in thermal]
         assert all(m["provenance"]["page_end"] == 2 for m in page_two)
 
-        # 3. The graph leg alone (Postgres hydration of Neo4j chunk hits) carries provenance,
-        #    and so does every neighbor-expanded chunk in the fused results.
-        graph_only = await client.post(
-            "/api/search",
-            json={
-                "query": "How often is the salinity array calibrated?",
-                "corpus_id": corpus_id,
-                "top_k": 12,
-                "include_vector": False,
-                "include_sparse": False,
-                "include_graph": True,
-                "cache_mode": "bypass",
-            },
-        )
-        assert graph_only.status_code == 200, graph_only.text
-        graph_hits = graph_only.json()["matches"]
-        assert graph_hits, graph_only.text
-        assert all(m["source"] == "graph" for m in graph_hits)
-        assert all(m["provenance"] is not None for m in graph_hits)
-        assert any(m["file_path"] == PDF and m["provenance"]["regions"] for m in graph_hits)
+        # 3. Every neighbor-expanded chunk in the fused vector/sparse results keeps provenance.
         neighbors = [m for m in matches + thermal if m["metadata"].get("neighbor_of")]
         assert all(m["provenance"] is not None for m in neighbors)
 

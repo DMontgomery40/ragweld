@@ -15,7 +15,6 @@ import argparse
 import os
 import sys
 from pathlib import Path
-from typing import Optional
 
 try:
     from openai import OpenAI
@@ -470,7 +469,7 @@ class DocBootstrapper:
                 contents.append(f"=== FILE: {file_path} ===\nFile not found\n")
         return "\n".join(contents)
 
-    def generate_page(self, page_key: str, dry_run: bool = False) -> Optional[str]:
+    def generate_page(self, page_key: str, dry_run: bool = False) -> str | None:
         """Generate a single documentation page.
 
         Args:
@@ -508,7 +507,7 @@ INSTRUCTIONS:
             print(f"Source files: {', '.join(page_config['source_files'])}")
             print(f"Model: {self.model}")
             print(f"Max tokens: {self.max_tokens}")
-            print(f"\nPrompt preview (first 500 chars):")
+            print("\nPrompt preview (first 500 chars):")
             print(user_prompt[:500] + "...")
             return None
 
@@ -521,7 +520,7 @@ INSTRUCTIONS:
         last_issues: list[str] = []
         issues: list[str] = []
 
-        for attempt in range(1, self.max_attempts + 1):
+        for _attempt in range(1, self.max_attempts + 1):
             attempt_prompt = user_prompt
             if last_issues:
                 attempt_prompt = (

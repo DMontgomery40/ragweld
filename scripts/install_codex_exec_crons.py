@@ -236,7 +236,7 @@ def render_cron_lines(
             automation_id=lane.automation_id,
         )
         lines.append(
-            (
+
                 f"{schedule.expression} "
                 f"PATH={DEFAULT_CRON_PATH} "
                 f"HOME={resolved_home} "
@@ -245,7 +245,7 @@ def render_cron_lines(
                 f"{_quote_shell_arg(script_path)} "
                 f"{_quote_shell_arg(lane.automation_id)} "
                 f">> {_quote_shell_arg(log_dir / lane.log_name)} 2>&1"
-            )
+
         )
     return lines
 

@@ -4,9 +4,9 @@
 from __future__ import annotations
 
 import re
-import sys
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable, get_args, get_origin
+from typing import Any, get_args, get_origin
 
 REQUIRED_SECTIONS: tuple[str, ...] = (
     "retrieval",

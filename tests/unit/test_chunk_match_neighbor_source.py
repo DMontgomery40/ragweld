@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from server.models.tribrid_config_model import ChunkMatch
 
 
 def test_chunk_match_rejects_neighbor_source() -> None:
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         ChunkMatch(
             chunk_id="c1",
             content="hello",

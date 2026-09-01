@@ -4,7 +4,7 @@
 import argparse
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 
@@ -37,7 +37,6 @@ def create_eval_dataset(
     dataset = []
     for file_path in sampled_files:
         relative_path = file_path.relative_to(repo)
-        content = file_path.read_text(errors="ignore")[:500]
 
         # Generate simple questions based on file content
         entry = {
@@ -46,7 +45,7 @@ def create_eval_dataset(
             "expected_chunks": [str(relative_path)],
             "expected_answer": None,
             "tags": [file_path.suffix.lstrip(".")],
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
         }
         dataset.append(entry)
 

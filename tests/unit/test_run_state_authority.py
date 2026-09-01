@@ -15,8 +15,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from server.api import agent
-from server.api import reranker
+from server.api import agent, reranker
 from server.models.tribrid_config_model import (
     AgentTrainRun,
     CorpusEvalProfile,

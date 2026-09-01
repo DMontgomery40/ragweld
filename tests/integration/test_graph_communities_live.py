@@ -247,6 +247,7 @@ async def test_gds_leiden_communities_are_scoped_stable_and_feed_the_subgraph(cl
         # uniqueness constraint exists. The named in-memory projection must still
         # be removed, and a clean retry must restore the derived scalar property.
         constraint_name = f"task7_community_id_unique_{uuid4().hex}"
+        failure_label = f"Task7CommunityFailure{uuid4().hex}"
         failure_driver = GraphDatabase.driver(
             os.environ.get("NEO4J_URI", "bolt://127.0.0.1:7687"),
             auth=(
@@ -257,14 +258,15 @@ async def test_gds_leiden_communities_are_scoped_stable_and_feed_the_subgraph(cl
         try:
             await asyncio.to_thread(
                 failure_driver.execute_query,
-                "MATCH (e:__Entity__ {repo_id: $repo_id}) REMOVE e.communityId",
+                f"MATCH (e:__Entity__ {{repo_id: $repo_id}}) "
+                f"REMOVE e.communityId SET e:{failure_label}",
                 parameters_={"repo_id": staging},
                 database_="neo4j",
             )
             await asyncio.to_thread(
                 failure_driver.execute_query,
                 f"CREATE CONSTRAINT {constraint_name} IF NOT EXISTS "
-                "FOR (e:__Entity__) REQUIRE e.communityId IS UNIQUE",
+                f"FOR (e:{failure_label}) REQUIRE e.communityId IS UNIQUE",
                 database_="neo4j",
             )
             with pytest.raises(Exception, match="Constraint|constraint|unique"):
@@ -282,6 +284,12 @@ async def test_gds_leiden_communities_are_scoped_stable_and_feed_the_subgraph(cl
             await asyncio.to_thread(
                 failure_driver.execute_query,
                 f"DROP CONSTRAINT {constraint_name} IF EXISTS",
+                database_="neo4j",
+            )
+            await asyncio.to_thread(
+                failure_driver.execute_query,
+                f"MATCH (e:{failure_label} {{repo_id: $repo_id}}) REMOVE e:{failure_label}",
+                parameters_={"repo_id": staging},
                 database_="neo4j",
             )
             await asyncio.to_thread(failure_driver.close)

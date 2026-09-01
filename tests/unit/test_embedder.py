@@ -1,7 +1,8 @@
 """Tests for the embedder module."""
 
-import pytest
 from unittest.mock import AsyncMock, patch
+
+import pytest
 
 from server.indexing.embedder import Embedder, configure_postgres_embedding_cache_backend
 from server.models.index import Chunk
@@ -134,9 +135,9 @@ async def test_embed_chunks_accepts_contextual_override_texts() -> None:
 
 
 def test_embedder_provider_methods_live_on_class() -> None:
-    assert callable(getattr(Embedder, "_embed_openai"))
-    assert callable(getattr(Embedder, "_embed_mlx_embeddings"))
-    assert callable(getattr(Embedder, "_embed_local_sentence_transformers"))
+    assert callable(Embedder._embed_openai)
+    assert callable(Embedder._embed_mlx_embeddings)
+    assert callable(Embedder._embed_local_sentence_transformers)
 
 
 def test_configure_postgres_embedding_cache_backend_clears_stale_backend_when_postgres_lacks_cache_api() -> None:

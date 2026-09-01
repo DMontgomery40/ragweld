@@ -756,9 +756,10 @@ export function RetrievalSubtab() {
                     >
                       {(graphReadiness.total_entities ?? 0) === 0 ? (
                         <>
-                          <strong>This corpus has no entity graph.</strong> Qdrant can still identify dense seed chunks,
-                          but relationship traversal cannot contribute. Enable graph indexing in RAG &gt; Indexing,
-                          confirm the derived corpus policy, and re-index to populate it.
+                          <strong>This corpus has no entity graph.</strong> Qdrant can still identify dense seed chunks
+                          across {(graphReadiness.total_chunks ?? 0).toLocaleString()} indexed chunks, but relationship
+                          traversal cannot contribute. Enable graph indexing in RAG &gt; Indexing, confirm the derived
+                          corpus policy, and re-index to populate it.
                         </>
                       ) : (
                         <>

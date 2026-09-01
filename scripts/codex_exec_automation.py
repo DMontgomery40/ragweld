@@ -9,7 +9,7 @@ import os
 import subprocess
 import sys
 import tomllib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 HOME = Path.home()
@@ -94,7 +94,7 @@ def _planned_run_dir(repo_root: Path, automation_id: str, *, timestamp_utc: str)
 
 
 def _move_stale_worktree_root(worktree_root: Path) -> Path:
-    timestamp_utc = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    timestamp_utc = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     backup_root = worktree_root.with_name(f"{worktree_root.name}.stale-{timestamp_utc}")
     suffix = 0
     candidate = backup_root
@@ -159,7 +159,7 @@ def _ensure_worktree(repo_root: Path, automation_id: str) -> Path:
 
 
 def _prepare_run_dir(repo_root: Path, automation_id: str) -> tuple[Path, str]:
-    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     run_dir = _planned_run_dir(repo_root, automation_id, timestamp_utc=ts)
     run_dir.mkdir(parents=True, exist_ok=True)
     return run_dir, ts
@@ -202,7 +202,7 @@ def main() -> int:
         raise ValueError("automation is missing prompt text")
 
     repo_root = _repo_root(automation)
-    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     worktree_root = _planned_worktree_root(args.automation_id)
     planned_run_dir = _planned_run_dir(repo_root, args.automation_id, timestamp_utc=ts)
     events_path = planned_run_dir / "events.jsonl"

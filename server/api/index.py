@@ -4619,6 +4619,10 @@ async def start_index(request: IndexRequest, http_request: Request) -> IndexStat
     # Durable per-corpus run fence (compare-and-set on the corpus row): a second
     # worker or process cannot build and retire against the same corpus.
     corpus, cfg = await load_corpus_and_scoped_config(request.repo_id)
+    # Persisted state is the first run precondition.  Validate it before policy
+    # approvals so a malformed manifest/fence/backlog keeps the single typed
+    # repair path used by every status reader, and never acquires a new fence.
+    await _read_index_state(request.repo_id, cfg)
     override_actor = str(http_request.headers.get("Remote-User") or "").strip() or None
     requested_policy = resolve_graph_policy(
         internal=bool(((corpus or {}).get("meta") or {}).get("system_kind")),

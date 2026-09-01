@@ -15,7 +15,11 @@ import pytest
 from httpx import AsyncClient
 
 from server.models.tribrid_config_model import TriBridConfig
-from server.observability.alert_rules import MalformedRulesPayload, build_alert_rules, parse_rules_payload
+from server.observability.alert_rules import (
+    MalformedRulesPayload,
+    build_alert_rules,
+    parse_rules_payload,
+)
 
 _LIVE_PROMETHEUS = os.environ.get("PROMETHEUS_BASE_URL", "http://127.0.0.1:59090")
 

@@ -1,9 +1,10 @@
 """Integration tests for the indexing pipeline."""
 
-import pytest
 from datetime import datetime
 
-from server.models.index import Chunk, IndexRequest, IndexStatus, IndexStats
+import pytest
+
+from server.models.index import Chunk, IndexRequest, IndexStats, IndexStatus
 
 
 @pytest.mark.integration

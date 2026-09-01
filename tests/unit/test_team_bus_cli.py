@@ -5,7 +5,6 @@ from server.team_bus.models import MessageType, TeamMessage
 from server.team_bus.relay import TeamRelay
 from server.team_bus.store import TeamStore
 
-
 ROOT = Path(__file__).resolve().parents[2]
 
 

@@ -5,7 +5,12 @@ from pathlib import Path
 
 from server.api import agent as agent_api
 from server.api import reranker as reranker_api
-from server.models.tribrid_config_model import AgentTrainRun, CorpusEvalProfile, RerankerTrainRun, TriBridConfig
+from server.models.tribrid_config_model import (
+    AgentTrainRun,
+    CorpusEvalProfile,
+    RerankerTrainRun,
+    TriBridConfig,
+)
 
 
 def _profile(corpus_id: str) -> CorpusEvalProfile:
