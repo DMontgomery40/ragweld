@@ -4139,24 +4139,33 @@ async def build_proposal_from_corpus(
             entries[round(index * (len(entries) - 1) / 11)] for index in range(12)
         ]
     chunker = Chunker(cfg.chunking, cfg.tokenization)
-    await asyncio.to_thread(warm_sampler, chunker)
     candidates: list[Chunk] = []
+    sampler_warmed = False
     for relative, absolute in entries:
-        extracted = await asyncio.to_thread(
-            extract_text_for_path,
+        text = await asyncio.to_thread(
+            _extract_schema_sample_text_for_path,
             absolute,
-            parquet_max_rows=int(cfg.indexing.parquet_extract_max_rows),
-            parquet_max_chars=int(cfg.indexing.parquet_extract_max_chars),
-            parquet_max_cell_chars=int(cfg.indexing.parquet_extract_max_cell_chars),
-            parquet_text_columns_only=bool(cfg.indexing.parquet_extract_text_columns_only),
-            parquet_include_column_names=bool(cfg.indexing.parquet_extract_include_column_names),
+            cfg,
         )
-        if extracted is None or not str(extracted.text or "").strip():
+        if not text.strip():
             continue
+        if not sampler_warmed:
+            await asyncio.to_thread(warm_sampler, chunker)
+            sampler_warmed = True
         candidates.extend(
-            await asyncio.to_thread(chunker.chunk_file, str(relative), extracted.text)
+            await asyncio.to_thread(chunker.chunk_file, str(relative), text)
         )
     sampled = select_schema_chunks(candidates, corpus_id=corpus_id)
+    if not sampled:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Graph schema proposal sampling found no embedded PDF text or other "
+                "indexable text. Provide a text-bearing source before schema review; "
+                "whole-document OCR remains an indexing operation, not a synchronous "
+                "proposal request."
+            ),
+        )
     route = _resolve_semantic_kg_route(cfg)
     return await derive_graph_schema_proposal(
         corpus_id=corpus_id,
@@ -4167,6 +4176,73 @@ async def build_proposal_from_corpus(
         route_api_key=str(route.api_key or "").strip(),
         input_fingerprint=fingerprint,
     )
+
+
+def _extract_schema_sample_text_for_path(path: Path, cfg: TriBridConfig) -> str:
+    """Bound PDF proposal work to nine positionally representative pages.
+
+    A schema proposal needs representative domain text, not a complete document
+    conversion.  Running whole-document Docling conversion behind this synchronous
+    HTTP boundary exceeded the public proxy window on the 359-page Apollo report.
+    Text-bearing PDFs therefore use the same fast pdfium substrate as the estimator,
+    but keep explicit page markers so sampled positions remain reviewable.  Image-only
+    or unreadable PDFs return no sample so the caller can refuse synchronously instead
+    of starting unbounded whole-document OCR behind the public request.
+    """
+    if path.suffix.lower() == ".pdf":
+        try:
+            import pypdfium2 as pdfium
+            from docling.utils.locks import pypdfium2_lock
+
+            with pypdfium2_lock:
+                document = pdfium.PdfDocument(str(path))
+                try:
+                    page_count = len(document)
+                    if page_count <= 12:
+                        indexes = list(range(page_count))
+                    else:
+                        last = page_count - 1
+                        indexes = sorted(
+                            {
+                                0,
+                                1,
+                                2,
+                                max(0, last // 2 - 1),
+                                last // 2,
+                                min(last, last // 2 + 1),
+                                last - 2,
+                                last - 1,
+                                last,
+                            }
+                        )
+                    parts: list[str] = []
+                    for index in indexes:
+                        page = document[index]
+                        try:
+                            text_page = page.get_textpage()
+                            try:
+                                text = str(text_page.get_text_range() or "").strip()
+                            finally:
+                                text_page.close()
+                        finally:
+                            page.close()
+                        if text:
+                            parts.append(f"# {path.name} page {index + 1}\n\n{text}")
+                    return "\n\n".join(parts)
+                finally:
+                    document.close()
+        except Exception:
+            return ""
+
+    extracted = extract_text_for_path(
+        path,
+        parquet_max_rows=int(cfg.indexing.parquet_extract_max_rows),
+        parquet_max_chars=int(cfg.indexing.parquet_extract_max_chars),
+        parquet_max_cell_chars=int(cfg.indexing.parquet_extract_max_cell_chars),
+        parquet_text_columns_only=bool(cfg.indexing.parquet_extract_text_columns_only),
+        parquet_include_column_names=bool(cfg.indexing.parquet_extract_include_column_names),
+    )
+    return str(extracted.text or "") if extracted is not None else ""
 
 
 @router.post(

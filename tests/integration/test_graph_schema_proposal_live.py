@@ -18,6 +18,46 @@ _APOLLO_SOURCE = Path("/srv/ragweld/corpora/nasa-apollo-11/A11_MissionReport.pdf
 _MODEL = os.environ.get("GRAPH_E2E_KG_MODEL", "deepseek.deepseek-v4-flash")
 
 
+async def test_real_full_apollo_pdf_schema_proposal_fits_the_public_edge_window(
+    client: AsyncClient,
+) -> None:
+    """The production PDF path must return before the public proxy closes the request."""
+    if not _APOLLO_SOURCE.is_file():
+        pytest.skip(f"Apollo source is unavailable on this runtime: {_APOLLO_SOURCE}")
+
+    corpus_id = f"apollo-full-schema-{uuid.uuid4().hex[:8]}"
+    created = await client.post(
+        "/api/corpora",
+        json={"corpus_id": corpus_id, "name": corpus_id, "path": str(_APOLLO_SOURCE.parent)},
+    )
+    assert created.status_code in (200, 201), created.text
+    try:
+        configured = await client.patch(
+            f"/api/config/graph_indexing?corpus_id={corpus_id}",
+            json={
+                "enabled": True,
+                "build_code_graph": False,
+                "semantic_kg_llm_model": _MODEL,
+            },
+        )
+        assert configured.status_code == 200, configured.text
+
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        async with asyncio.timeout(90):
+            response = await client.post(
+                f"/api/index/{corpus_id}/graph-schema/proposal",
+                json={"force_refresh": False},
+            )
+        elapsed = loop.time() - started
+
+        assert response.status_code == 200, response.text
+        assert elapsed < 90
+        assert response.json()["sample"]["chunk_ids"]
+    finally:
+        await client.delete(f"/api/corpora/{corpus_id}")
+
+
 async def test_real_apollo_schema_proposal_persists_reuses_and_invalidates_approval(
     client: AsyncClient, tmp_path: Path
 ) -> None:
