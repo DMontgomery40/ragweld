@@ -862,3 +862,69 @@ async def test_schema_labelled_semantic_graph_keeps_types_and_edges_in_every_exp
                 pass
         await neo.disconnect()
         await client.delete(f"/api/corpora/{active}")
+
+
+async def test_scoped_writer_survives_a_repeated_node_id_inside_one_chunk(
+    client: AsyncClient,
+) -> None:
+    """Task 8 drive defect D12 against a live Neo4j: the official writer CREATEs one node per
+    row, and a model response that repeats a node id inside one chunk aborted the Epstein run
+    on the store's ``(repo_id, entity_id)`` uniqueness constraint after 3,113 successful chunks.
+    The scoped writer must fold the duplicate before writing and the graph must still promote.
+    """
+    active = f"graph-dup-{uuid4().hex[:8]}"
+    run_id = uuid4().hex
+    staging = f"__staging__{active}__{run_id}"
+    neo = Neo4jClient(
+        os.environ.get("NEO4J_URI", "bolt://127.0.0.1:7687"),
+        os.environ.get("NEO4J_USER", "neo4j"),
+        os.environ.get("NEO4J_PASSWORD", "password"),
+    )
+    await neo.connect()
+    try:
+        chunk = Chunk(
+            chunk_id="email-1",
+            content="Ada wrote to Babbage from London.",
+            file_path="email-1.txt",
+            start_line=1,
+            end_line=3,
+            token_count=6,
+            embedding=[0.2, 0.1],
+        )
+        _lexical, lexical_cfg = await write_lexical_graph_with_graphrag(
+            repo_id=staging, run_id=run_id, file_path="email-1.txt", chunks=[chunk]
+        )
+        await _write_graph(
+            staging,
+            run_id,
+            Neo4jGraph(
+                nodes=[
+                    _schema_entity("email-1:0", "Ada", "Person"),
+                    _schema_entity("email-1:1", "Babbage", "Person"),
+                    _schema_entity("email-1:0", "Ada", "Person"),
+                    _schema_entity("email-1:0", "London", "Place"),
+                ],
+                relationships=[_rel("email-1:0", "email-1:1", relationship_type="WROTE_TO")],
+            ),
+            lexical_cfg,
+        )
+        rows = await neo.execute_cypher(
+            """
+            MATCH (e:__Entity__ {repo_id: $repo_id})
+            OPTIONAL MATCH (e)-[r:WROTE_TO]->(t:__Entity__ {repo_id: $repo_id})
+            RETURN e.entity_id AS entity_id, e.name AS name, collect(t.entity_id) AS targets
+            ORDER BY entity_id
+            """,
+            {"repo_id": staging},
+        )
+        assert [(row["entity_id"], row["name"], row["targets"]) for row in rows] == [
+            ("email-1:0", "Ada", ["email-1:1"]),
+            ("email-1:0#2", "London", []),
+            ("email-1:1", "Babbage", []),
+        ]
+    finally:
+        try:
+            await neo.delete_graph(staging)
+        except Exception:
+            pass
+        await neo.disconnect()

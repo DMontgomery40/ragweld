@@ -12,6 +12,7 @@ from server.indexing.graphrag_pipeline import (
     RESERVED_SCOPE_KEYS,
     GraphScopeCollisionError,
     build_semantic_pipeline,
+    fold_duplicate_node_ids,
     require_run_id,
     require_staging_graph_id,
     resolution_property_for_policy,
@@ -186,3 +187,46 @@ def test_semantic_extraction_llm_refuses_a_zero_timeout_or_blank_effort(
             llm_timeout_s=timeout_s,
             reasoning_effort=effort,
         )
+
+
+def test_duplicate_extracted_node_ids_are_folded_before_the_official_writer() -> None:
+    """Task 8 drive defect D12: the official 1.19 writer CREATEs one node per extracted row,
+    so a model response that repeats a node id inside one chunk yields two rows with the same
+    chunk-prefixed ``entity_id``; the store's uniqueness constraint then aborted a 2 h Epstein
+    run at 99.7 % coverage. Duplicates of the same label fold into the first occurrence
+    (properties merged, first value wins); a duplicate with a different label keeps a
+    deterministic ordinal suffix so nothing is silently dropped. Relationships keep
+    pointing at the first occurrence.
+    """
+    graph = Neo4jGraph(
+        nodes=[
+            Neo4jNode(id="chunk-1:0", label="Person", properties={"name": "Ada"}),
+            Neo4jNode(id="chunk-1:1", label="Person", properties={"name": "Babbage"}),
+            Neo4jNode(id="chunk-1:0", label="Person", properties={"name": "Ada", "role": "author"}),
+            Neo4jNode(id="chunk-1:0", label="Place", properties={"name": "London"}),
+        ],
+        relationships=[
+            Neo4jRelationship(start_node_id="chunk-1:0", end_node_id="chunk-1:1", type="WROTE_TO"),
+        ],
+    )
+    folded, report = fold_duplicate_node_ids(graph)
+    assert [(n.id, n.label) for n in folded.nodes] == [
+        ("chunk-1:0", "Person"),
+        ("chunk-1:1", "Person"),
+        ("chunk-1:0#2", "Place"),
+    ]
+    assert folded.nodes[0].properties == {"name": "Ada", "role": "author"}
+    assert [(r.start_node_id, r.end_node_id, r.type) for r in folded.relationships] == [
+        ("chunk-1:0", "chunk-1:1", "WROTE_TO")
+    ]
+    assert report == {"folded_same_label": 1, "rekeyed_other_label": 1}
+
+
+def test_unique_extracted_node_ids_pass_through_unchanged() -> None:
+    graph = Neo4jGraph(
+        nodes=[Neo4jNode(id="c:0", label="Person", properties={"name": "Ada"})],
+        relationships=[],
+    )
+    folded, report = fold_duplicate_node_ids(graph)
+    assert folded == graph
+    assert report == {"folded_same_label": 0, "rekeyed_other_label": 0}

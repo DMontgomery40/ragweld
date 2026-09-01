@@ -292,19 +292,19 @@ This table is the completion authority for Task 8. `Pending` may become `Proves`
 |---|---|---|
 | Neo4j GraphRAG 1.19 source contract | Task 1 PASS plus full-gate installed-version/import contract (`test_neo4j_graphrag_119_contract.py`) | Proves; fresh full gate passed |
 | One external semantic/code policy and truthful defaults | Task 2 PASS, full `test_graph_policy.py`/config/API gate, visible NASA/Epstein semantic badges and code badge | Automated proves; live pending |
-| Recall exclusion | Policy/API tests plus live Recall UI showing excluded graph policy with no graph start path | Automated proves; live pending |
+| Recall exclusion | Policy/API tests plus live Recall UI showing excluded graph policy with no graph start path | Proves: live Indexing page for `recall_default` shows "Excluded internal corpus", graph toggle disabled, no semantic settings or Generate control (2026-09-01 20:18 UTC, `2026-09-01-recall-01-excluded-policy.jpg`) |
 | Reviewed per-corpus schema proposal and persistence | Task 3 PASS, live NASA and Epstein visible generate/expand/approve dialogs, schema hash in run metadata and after reload | Automated proves; live pending |
 | Correct official lexical names | Full live GraphRAG/store query: `FROM_DOCUMENT`, `NEXT_CHUNK`, `FROM_CHUNK`; zero `IN_CHUNK` | Automated proves; live pending |
 | Official Pipeline and scoped writer | Task 4 PASS, full gate, promoted per-corpus graph metadata/store scoping | Proves; fresh live/batched gate passed |
 | Exact-match scoped entity resolution | Task 5 PASS, live run resolution telemetry and zero duplicate groups/cross-generation edges | Automated proves; live pending |
 | Fail-closed promotion and RED matrix | Task 5 mutation matrix plus Task 8 visible temporary-corpus refusal, operator hint, no promoted generation/completed badge after reload | Automated proves; visible negative pending |
 | Qdrant-seeded traversal and no double credit | Task 6 PASS, retained-generation collision test, live graph search debug fields/API equality and no `fusion_graph_entity_hits` | Automated proves; live pending |
-| GDS 2.13 deployment | Task 7 PASS, deployed `gds.version()`=`2.13.x`, Neo4j/APOC/GDS readiness, deployment marker | Isolated proves; deployed pending |
+| GDS 2.13 deployment | Task 7 PASS, deployed `gds.version()`=`2.13.x`, Neo4j/APOC/GDS readiness, deployment marker | Proves: `/api/ready` true with Neo4j 5.26.20 + GDS 2.13.7 on every deploy (8a4d20c9, c8df2373, b452d435); NASA 215, code 479, negative-fixture 3 Leiden communities written live |
 | Weighted deterministic Leiden, including code | Task 7 semantic/code/failure live tests plus nonzero NASA/Epstein/code `communityPath`/`communityId`, counts, derived API/UI after reload | Isolated proves; deployed pending |
-| Dead-surface replacement | Repo search, live Neo4j zero obsolete ontology/vector/embedding state, config/generated UI absence | Source proves; live cleanup pending |
+| Dead-surface replacement | Repo search, live Neo4j zero obsolete ontology/vector/embedding state, config/generated UI absence | Proves: repo audit 2026-09-01 (no `IN_CHUNK` writer, `graph_entity_hits`, `IN_COMMUNITY`, `Community` nodes, NetworkX/Louvain; removed config names only in migration strip lists); live store: 0 `Community` nodes, 0 `IN_COMMUNITY`/`IN_CHUNK` edges, 0 chunk embeddings, 0 cross-generation edges, 0 leftover GDS projections; regenerated contract bundle no longer carries `semantic_kg_allowed_entity_types` |
 | Per-task and final DeepSeek reviews | Recorded PASS for Tasks 1-7 plus final complete spec-to-main integration PASS after full gate | Tasks 1-7 prove; final pending |
 | Full LXC quality gate | Exact Task 8 surfaces: dependency sync, generators, docs ownership, Ruff, mypy, complete 1,989-test collection, TS/build, headed policy/explorer | Proves predeploy through bounded batches; live GDS browser row deferred to postdeploy |
-| Push/deploy parity | Mac `HEAD`, `origin/main`, LXC `HEAD`, deployment marker and serving runtime hash identical; clean one-worktree state | Pending |
+| Push/deploy parity | Mac `HEAD`, `origin/main`, LXC `HEAD`, deployment marker and serving runtime hash identical; clean one-worktree state | Proves for 8a4d20c9, c8df2373 and b452d435 (all four hashes identical at each deploy, `/api/ready` true); the five later commits (0f79a7c3, 17f208b9, f1b613db, 27e28df6, 6d59e05e) are pushed and await the post-Epstein deploy |
 | NASA visible rebuild and drive | Screenshot/click ledger: visible schema review/approve/cost/run telemetry/reload, three node types, two neighborhoods, all controls, community, graph search/debug | Pending |
 | Epstein visible rebuild and drive | Same complete screenshot/click/search/debug ledger with flight/communication question | Pending |
 | `ragweld_code` visible rebuild and drive | Visible code policy/AST types/weights/run telemetry, same full Explorer/search/reload ledger | Pending |
@@ -463,6 +463,30 @@ everything below live in `output/task8-graphrag-acceptance/click-ledger-2026-09-
   rather than coerced; the unit test pins the identity property at index 0; `fulltext` and `full_text` both
   blocked). detect-changes: CRITICAL, 8 files / 14 symbols / 282 affected because the schema validator gates every
   index-start flow (intended containment).
+
+- **D12 (fixed):** the Epstein force rebuild `eba9b356…` (3,123 chunks, Luna extraction) died at progress
+  0.9985 after 2 h 07 min with `Neo.ClientError.Schema.ConstraintValidationFailed … __Entity__ repo_id=…,
+  entity_id='HOUSE_OVERSIGHT_030209__msg_001__row_002631.txt:12-15:4800:0'`. Extraction telemetry: 3,113
+  succeeded, 10 failed (all ten = the chunks of that one file), 8,992 entities, 4,670 relationships; 1,996
+  distinct files, none processed twice; the file's ten chunk ids are unique in Postgres. Cause: the official
+  1.19 writer (`neo4j_queries.upsert_node_query`) is `UNWIND $rows AS row CREATE (n:__KGBuilder__
+  {__tmp_internal_id: row.id})`, one node per extracted row, and the extractor prefixes every model node id
+  with the chunk id, so a response that repeats a node id inside one chunk yields two rows with the same
+  stamped `entity_id` and the store's `rw_entity_repo_entity` uniqueness constraint aborts the run
+  (`extraction_failure`, staged generation reclaimed). Fix: `fold_duplicate_node_ids` in
+  `server/indexing/graphrag_pipeline.py`, called by `ScopedNeo4jWriter.run` before scope stamping;
+  same-label duplicates fold into the first occurrence (properties merged, first value wins), a duplicate with
+  a different label is re-keyed with a deterministic ordinal suffix (`…:0#2`), relationships keep the ids the
+  model wrote, and the counts are logged. RED: `ImportError` (unit) and, before the fold, the live writer path
+  raised the same constraint error; GREEN on LXC100: 39 tests (`test_graphrag_pipeline.py`,
+  `test_graphrag_schema.py`, `test_graph_communities_live.py` incl. the new
+  `test_scoped_writer_survives_a_repeated_node_id_inside_one_chunk` through the real writer and a live Neo4j,
+  `test_graph_resolution_isolation_live.py`), ruff, mypy. DeepSeek V4 Flash review
+  `gen-1788298743-sSyYImO8re6zBva9SU5J` (9,529 prompt + 1,517 completion = 11,046 tokens, `$0.00252`):
+  **PASS**, three P3 notes (the live test proves the fixed path rather than the pre-fix failure; a warning, not
+  a typed error, because the run continues; formatting noise, which was removed before commit so the diff is
+  165 added lines and no deletions). detect-changes (stale index, hunks mapped by line): low, 6 files, no
+  affected flows. Run record: `output/task8-graphrag-acceptance/2026-09-01-epstein-run-eba9b356-error.json`.
 
 ### Final precommit GitNexus scope
 

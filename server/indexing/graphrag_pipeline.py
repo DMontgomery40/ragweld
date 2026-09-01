@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
@@ -21,6 +22,7 @@ from neo4j_graphrag.components.types import (
     DocumentInfo,
     LexicalGraphConfig,
     Neo4jGraph,
+    Neo4jNode,
     Neo4jRelationship,
     TextChunk,
     TextChunks,
@@ -34,6 +36,8 @@ from server.models.index import Chunk, GraphResolutionTelemetry
 from server.models.tribrid_config_model import TriBridConfig
 
 ResultT = TypeVar("ResultT")
+
+logger = logging.getLogger(__name__)
 
 RESERVED_SCOPE_KEYS = frozenset({"repo_id", "run_id", "graphJoinId"})
 _RUN_ID_RE = re.compile(r"^[0-9a-f]{32}$")
@@ -249,6 +253,48 @@ async def resolve_staged_entities(
     )
 
 
+def fold_duplicate_node_ids(graph: Neo4jGraph) -> tuple[Neo4jGraph, dict[str, int]]:
+    """Make extracted node ids unique before the official writer sees them.
+
+    The 1.19 writer ``CREATE``s one node per row, so a model response that repeats a
+    node id inside one chunk yields two rows with the same chunk-prefixed ``entity_id``
+    and the store's uniqueness constraint aborts the run (Task 8 drive defect D12: the
+    Epstein rebuild died after 3,113 of 3,123 chunks). Duplicates with the same label
+    fold into the first occurrence (properties merged, first value wins); a duplicate
+    with a different label keeps a deterministic ordinal suffix so nothing is dropped.
+    Relationships keep the ids the model wrote, i.e. they attach to the first
+    occurrence.
+    """
+    kept: list[Neo4jNode] = []
+    position: dict[str, int] = {}
+    ordinal: dict[str, int] = {}
+    folded = 0
+    rekeyed = 0
+    for node in graph.nodes:
+        index = position.get(node.id)
+        if index is None:
+            position[node.id] = len(kept)
+            kept.append(node)
+            continue
+        first = kept[index]
+        if first.label == node.label:
+            merged = dict(node.properties or {})
+            merged.update(first.properties or {})
+            kept[index] = first.model_copy(update={"properties": merged})
+            folded += 1
+            continue
+        ordinal[node.id] = ordinal.get(node.id, 1) + 1
+        kept.append(node.model_copy(update={"id": f"{node.id}#{ordinal[node.id]}"}))
+        rekeyed += 1
+    if not folded and not rekeyed:
+        return graph, {"folded_same_label": 0, "rekeyed_other_label": 0}
+    return (
+        Neo4jGraph(nodes=kept, relationships=list(graph.relationships)),
+        {"folded_same_label": folded, "rekeyed_other_label": rekeyed},
+    )
+
+
+
 class ScopedNeo4jWriter(Neo4jWriter):
     def __init__(self, *args: Any, repo_id: str, run_id: str, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
@@ -265,6 +311,14 @@ class ScopedNeo4jWriter(Neo4jWriter):
         # method's validate_call normally restores the model; this override owns
         # the boundary and must do so before inspecting or stamping properties.
         graph = Neo4jGraph.model_validate(graph)
+        graph, duplicate_ids = fold_duplicate_node_ids(graph)
+        if duplicate_ids["folded_same_label"] or duplicate_ids["rekeyed_other_label"]:
+            logger.warning(
+                "GraphRAG extraction repeated node ids for %s: folded=%d rekeyed=%d",
+                self.repo_id,
+                duplicate_ids["folded_same_label"],
+                duplicate_ids["rekeyed_other_label"],
+            )
         lexical_graph_config = lexical_graph_config or LexicalGraphConfig()
         validate_no_reserved_scope_keys(graph, RESERVED_SCOPE_KEYS)
         stamp_graph_scope(
@@ -541,6 +595,7 @@ __all__ = [
     "lexical_graph_config",
     "require_run_id",
     "require_staging_graph_id",
+    "fold_duplicate_node_ids",
     "resolution_property_for_policy",
     "resolve_staged_entities",
     "semantic_extraction_llm",
