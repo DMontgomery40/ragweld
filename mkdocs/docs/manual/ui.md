@@ -117,6 +117,7 @@ A handful of chat behaviors changed so the thread never lies to you:
 - **Export works and confirms.** Export downloads a JSON file reliably and shows a toast with the filename; an empty chat says "Nothing to export yet".
 - **One prompt system.** Exactly one of the four state prompts (Direct / RAG / Recall / RAG+Recall) is sent, chosen by whether RAG and/or Recall context is present; the legacy base+suffix fallback composition is gone. Set them in **Chat → Settings**.
 - **One markdown renderer.** Assistant answers (and onboarding answers) render through a single GFM renderer — tables, bold, inline code, fenced code with syntax highlighting, and nested lists all render, and wide content wraps inside the pane instead of growing it sideways.
+- **The debug footer discloses the graph leg.** When a message's retrieval ran the graph leg, its debug footer shows the leg's own counters — `graph_enabled`, `graph_qdrant_seed_chunks`, `graph_relationship_expansion_hits`, `graph_hydrated_chunks` — read straight from the chat debug contract (`ChatDebugInfo`), and never the retired entity-hit figure. See [Chat models](../api_models_chat.md).
 
 ### Top-bar health pill: the /api/ready breakdown in one click
 

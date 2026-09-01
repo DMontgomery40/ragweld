@@ -39,7 +39,10 @@
 |-------|------------|
 | `ChatRequest` | `message`, `corpus_id`, `sources`, `top_k`, `include_vector/sparse/graph`, `stream`, `web_enabled` |
 | `ChatResponse` | `message`, `sources`, `tokens_used`, `debug`, `conversation_id`, `web_grounding` |
-| `ChatDebugInfo` | `fusion_method`, `rrf_k`, per-leg weights, confidence thresholds, graph leg counts (`graph_qdrant_seed_chunks`, `graph_resolved_entities`, `graph_relationship_expansion_hits`, `graph_community_expansion_hits`, `graph_hydrated_chunks`) |
+| `ChatDebugInfo` | `fusion_method`, `rrf_k`, per-leg weights, confidence thresholds, `graph_enabled`, graph leg counts (`graph_qdrant_seed_chunks`, `graph_resolved_entities`, `graph_relationship_expansion_hits`, `graph_community_expansion_hits`, `graph_hydrated_chunks`) |
+
+!!! note "Graph counters in the chat debug footer"
+    The dev/debug footer under an assistant message renders the message's own `ChatDebugInfo`. When that message's retrieval included the graph leg, it now discloses the leg's own accounting verbatim — `graph_enabled`, `graph_qdrant_seed_chunks` (the dense Qdrant seeds that fed the traversal), `graph_relationship_expansion_hits` (relationship-expansion hits), and `graph_hydrated_chunks` (chunks hydrated back from Postgres). The line renders only when `graph_enabled` is a boolean on the message, and the retired `graph_entity_hits` figure is never shown. Note that traversal credits only **non-seed** chunks: a search whose seed set already spans the whole corpus can legitimately report zero hydrated chunks beyond its seeds.
 
 ```mermaid
 flowchart LR
