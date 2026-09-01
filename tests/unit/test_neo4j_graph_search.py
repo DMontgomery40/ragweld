@@ -200,3 +200,33 @@ async def test_neighbourhood_keeps_schema_labels_and_schema_edges() -> None:
         # The walk stays on entity nodes of this generation: a 2-hop path must not
         # cross a Chunk node and report co-mentioned entities as neighbours.
         assert "ALL(x IN nodes(p) WHERE x:__Entity__ AND x.repo_id = $repo_id)" in query
+
+
+@pytest.mark.asyncio
+async def test_an_entity_without_a_stored_name_is_not_reported_as_the_string_none() -> None:
+    """Task 8 drive defect D4: generations built from a schema without a ``name`` identity
+    property hold anonymous entities; the wire contract must carry an empty name, never the
+    text "None" that ``str(None)`` produced for the promoted NASA generation.
+    """
+    client = Neo4jClient(uri="bolt://fake", user="neo4j", password="test")
+    records = [
+        {
+            "entities": [
+                {
+                    "entity_id": "A11_MissionReport.pdf:1-103:0:1",
+                    "name": None,
+                    "entity_type": "Tank",
+                    "file_path": None,
+                    "description": None,
+                    "properties_json": json.dumps({"pressure": 50.0}),
+                }
+            ],
+            "relationships": [],
+        }
+    ]
+    client._driver = _FakeDriver(records, neighbour_count=0)  # type: ignore[assignment]
+    out = await client.get_entity_neighbors(
+        repo_id="__staging__nasa-apollo-11__run", entity_id="A11_MissionReport.pdf:1-103:0:1", max_hops=1, limit=10
+    )
+    assert out is not None
+    assert out.entities[0].name == ""

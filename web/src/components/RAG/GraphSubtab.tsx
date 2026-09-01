@@ -66,7 +66,9 @@ function schemaLabelColor(label: string): string {
 }
 
 function formatEntityLabel(e: Entity): string {
-  const name = String(e.name || '').trim();
+  // Generations approved before the identity rule can hold anonymous entities; show
+  // the stable entity id rather than an empty label.
+  const name = String(e.name || '').trim() || String(e.entity_id || '').trim();
   const type = String(e.entity_type || '').trim();
   return type ? `${name} (${type})` : name;
 }

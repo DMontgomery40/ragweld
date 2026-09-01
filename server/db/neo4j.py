@@ -1052,7 +1052,7 @@ def _entity_from_record(record: Any) -> Entity:
     props = _entity_properties_from_mapping(record)
     return Entity(
         entity_id=str(record["entity_id"]),
-        name=str(record["name"]),
+        name=str(record.get("name") or ""),
         entity_type=str(record["entity_type"] or ""),
         file_path=str(record["file_path"]) if record.get("file_path") is not None else None,
         description=str(record["description"]) if record.get("description") is not None else None,
@@ -1064,7 +1064,7 @@ def _entity_from_mapping(mapping: dict[str, Any]) -> Entity:
     props = _entity_properties_from_mapping(mapping)
     return Entity(
         entity_id=str(mapping["entity_id"]),
-        name=str(mapping["name"]),
+        name=str(mapping.get("name") or ""),
         entity_type=str(mapping["entity_type"] or ""),
         file_path=str(mapping["file_path"]) if mapping.get("file_path") is not None else None,
         description=str(mapping["description"]) if mapping.get("description") is not None else None,

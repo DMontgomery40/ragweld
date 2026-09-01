@@ -6,9 +6,17 @@ import re
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Any
 
-from neo4j_graphrag.components.schema import GraphSchema, SchemaFromTextExtractor
+from neo4j_graphrag.components.schema import (
+    ConstraintType,
+    GraphConstraintType,
+    GraphSchema,
+    NodeType,
+    PropertyType,
+    RelationshipType,
+    SchemaFromTextExtractor,
+)
 from neo4j_graphrag.llm import OpenAILLM
 
 from server.models.index import Chunk, GraphSchemaProposal, GraphSchemaSample
@@ -16,6 +24,28 @@ from server.models.index import Chunk, GraphSchemaProposal, GraphSchemaSample
 _GRAPH_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 _GENERIC_NODE_LABELS = {"OBJECT"}
 _GENERIC_RELATIONSHIP_LABELS = {"RELATED_TO", "ASSOCIATED_WITH"}
+# Every extracted entity needs an identity: the official exact-match resolver merges on
+# this property and skips nodes where it is null, and the explorer names nodes by it.
+IDENTITY_PROPERTY = "name"
+# Document text lives in the chunk store, never on a graph node or edge. A property that
+# asks the extractor to copy the source text back makes the structured-output stream
+# carry whole documents, which provider moderation cuts mid-JSON (Task 8 drive, D3).
+DOCUMENT_TEXT_PROPERTIES = frozenset(
+    {
+        "body",
+        "content",
+        "text",
+        "full_text",
+        "fulltext",
+        "raw",
+        "raw_text",
+        "html",
+        "message",
+        "message_body",
+        "email_body",
+        "transcript",
+    }
+)
 
 
 def select_schema_chunks(
@@ -42,19 +72,84 @@ def select_schema_chunks(
     return selected
 
 
-def canonical_schema_dict(schema: GraphSchema) -> dict[str, Any]:
-    return cast(
-        dict[str, Any],
-        GraphSchema(
-            node_types=schema.node_types,
-            relationship_types=schema.relationship_types,
-            patterns=schema.patterns,
-            constraints=schema.constraints,
-            additional_node_types=False,
-            additional_relationship_types=False,
-            additional_patterns=False,
-        ).model_dump(mode="json"),
+def _is_document_text(name: str) -> bool:
+    return name.strip().lower() in DOCUMENT_TEXT_PROPERTIES
+
+
+def _keeps_attributes(properties: Sequence[PropertyType]) -> list[PropertyType]:
+    return [prop for prop in properties if not _is_document_text(prop.name)]
+
+
+def normalize_domain_schema(schema: GraphSchema) -> GraphSchema:
+    """Apply the domain rules the proposer cannot be trusted to follow.
+
+    1. Every node type carries the ``name`` identity property, and a mandatory
+       (EXISTENCE or KEY) constraint on it, so the official pruner drops an extraction
+       that omits the name instead of writing an anonymous node.
+    2. No node or relationship type carries a document-text property, and no
+       constraint references one.
+    Deterministic and idempotent: normalizing a normalized schema is a no-op, so the
+    schema hash the operator approves is the hash of exactly this shape.
+    """
+    node_types: list[NodeType] = []
+    for node in schema.node_types:
+        properties = _keeps_attributes(node.properties)
+        if not any(prop.name == IDENTITY_PROPERTY for prop in properties):
+            properties.insert(
+                0,
+                PropertyType(
+                    name=IDENTITY_PROPERTY,
+                    type="STRING",
+                    description="Canonical entity name; identity for exact-match resolution and display",
+                ),
+            )
+        node_types.append(node.model_copy(update={"properties": properties}))
+    relationship_types: list[RelationshipType] = [
+        relationship.model_copy(update={"properties": _keeps_attributes(relationship.properties)})
+        for relationship in schema.relationship_types
+    ]
+    constraints: list[ConstraintType] = [
+        constraint
+        for constraint in schema.constraints
+        if not any(_is_document_text(name) for name in constraint.property_names)
+    ]
+    mandatory_on_name = {
+        constraint.node_type
+        for constraint in constraints
+        if constraint.node_type
+        and constraint.type in (GraphConstraintType.EXISTENCE, GraphConstraintType.KEY)
+        and tuple(constraint.property_names) == (IDENTITY_PROPERTY,)
+    }
+    for node in node_types:
+        if node.label not in mandatory_on_name:
+            constraints.append(
+                ConstraintType(
+                    type=GraphConstraintType.EXISTENCE,
+                    node_type=node.label,
+                    property_names=(IDENTITY_PROPERTY,),
+                )
+            )
+    return GraphSchema(
+        node_types=tuple(node_types),
+        relationship_types=tuple(relationship_types),
+        patterns=schema.patterns,
+        constraints=tuple(constraints),
+        additional_node_types=False,
+        additional_relationship_types=False,
+        additional_patterns=False,
     )
+
+
+def canonical_schema_dict(schema: GraphSchema) -> dict[str, Any]:
+    return GraphSchema(
+        node_types=schema.node_types,
+        relationship_types=schema.relationship_types,
+        patterns=schema.patterns,
+        constraints=schema.constraints,
+        additional_node_types=False,
+        additional_relationship_types=False,
+        additional_patterns=False,
+    ).model_dump(mode="json")
 
 
 def graph_schema_hash(schema_dict: Mapping[str, Any]) -> str:
@@ -90,6 +185,29 @@ def validate_domain_schema(schema_dict: Mapping[str, Any]) -> None:
             raise ValueError(f"invalid Neo4j relationship label: {label}")
     if schema.additional_node_types or schema.additional_relationship_types or schema.additional_patterns:
         raise ValueError("graph schema must be closed to additional nodes, relationships, and patterns")
+    for node in schema.node_types:
+        identity = [prop for prop in node.properties if prop.name == IDENTITY_PROPERTY]
+        if not identity or identity[0].type != "STRING":
+            raise ValueError(
+                f"node type {node.label} lacks the STRING identity property '{IDENTITY_PROPERTY}'"
+            )
+        if not (
+            schema.mandatory_property_names_for_node(node.label) & {IDENTITY_PROPERTY}
+        ):
+            raise ValueError(
+                f"node type {node.label} has no mandatory constraint on its identity property '{IDENTITY_PROPERTY}'"
+            )
+        for prop in node.properties:
+            if _is_document_text(prop.name):
+                raise ValueError(
+                    f"node type {node.label} carries document text property '{prop.name}'; the chunk store owns text"
+                )
+    for relationship in schema.relationship_types:
+        for prop in relationship.properties:
+            if _is_document_text(prop.name):
+                raise ValueError(
+                    f"relationship type {relationship.label} carries document text property '{prop.name}'; the chunk store owns text"
+                )
 
 
 async def derive_graph_schema_proposal(
@@ -116,7 +234,7 @@ async def derive_graph_schema_proposal(
         base_url=route_base_url,
     )
     extracted = await SchemaFromTextExtractor(llm=llm, use_structured_output=True).run(text)
-    schema = canonical_schema_dict(extracted)
+    schema = canonical_schema_dict(normalize_domain_schema(extracted))
     validate_domain_schema(schema)
     return GraphSchemaProposal(
         corpus_id=corpus_id,
