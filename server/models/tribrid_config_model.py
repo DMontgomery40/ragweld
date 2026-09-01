@@ -2762,11 +2762,15 @@ class RecallStatusResponse(BaseModel):
 
 
 class Entity(BaseModel):
-    """Knowledge graph node representing a code entity."""
-    entity_id: str = Field(description="Unique identifier")
-    name: str = Field(description="Entity name (function name, class name, etc)")
-    entity_type: Literal["function", "class", "module", "variable", "concept", "person", "org", "location", "event"] = Field(
-        description="Type of entity"
+    """Knowledge graph node of one corpus generation (code AST entity or schema entity)."""
+    entity_id: str = Field(description="Unique identifier within the corpus generation")
+    name: str = Field(description="Entity name (function name, class name, extracted entity name)")
+    entity_type: str = Field(
+        min_length=1,
+        description=(
+            "Entity kind as stored on the node: the AST kind for code graphs "
+            "(function, class, module) or the approved schema node label for semantic graphs"
+        ),
     )
     file_path: str | None = Field(default=None, description="File where entity is defined")
     description: str | None = Field(default=None, description="AI-generated description")
@@ -2774,28 +2778,16 @@ class Entity(BaseModel):
 
 
 class Relationship(BaseModel):
-    """Knowledge graph edge connecting two entities."""
+    """Knowledge graph edge connecting two entities of one corpus generation."""
     source_id: str = Field(description="Source entity ID")
     target_id: str = Field(description="Target entity ID")
-    relation_type: Literal[
-        "calls",
-        "imports",
-        "inherits",
-        "contains",
-        "associated_with",
-        "met_with",
-        "communicated_with",
-        "works_for",
-        "member_of",
-        "founded",
-        "owns",
-        "funded",
-        "participated_in",
-        "located_in",
-        "references",
-        "related_to",
-    ] = Field(
-        description="Type of relationship"
+    relation_type: str = Field(
+        min_length=1,
+        description=(
+            "Relationship type as stored on the edge: the AST edge kind for code graphs "
+            "(calls, imports, inherits, contains) or the approved schema relationship type "
+            "for semantic graphs"
+        ),
     )
     weight: float = Field(default=1.0, ge=0.0, le=1.0, description="Relationship strength")
     properties: dict[str, Any] = Field(default_factory=dict, description="Additional properties")

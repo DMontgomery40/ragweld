@@ -866,14 +866,14 @@ export interface EnrichmentConfig {
   enrich_timeout?: number; // default: 30
 }
 
-/** Knowledge graph node representing a code entity. */
+/** Knowledge graph node of one corpus generation (code AST entity or schema entity). */
 export interface Entity {
-  /** Unique identifier */
+  /** Unique identifier within the corpus generation */
   entity_id: string;
-  /** Entity name (function name, class name, etc) */
+  /** Entity name (function name, class name, extracted entity name) */
   name: string;
-  /** Type of entity */
-  entity_type: "function" | "class" | "module" | "variable" | "concept" | "person" | "org" | "location" | "event";
+  /** Entity kind as stored on the node: the AST kind for code graphs (function, class, module) or the approved schema node label for semantic graphs */
+  entity_type: string;
   /** File where entity is defined */
   file_path?: string | null; // default: None
   /** AI-generated description */
@@ -2206,14 +2206,14 @@ export interface RecallSignals {
   rag_corpora_active: boolean;
 }
 
-/** Knowledge graph edge connecting two entities. */
+/** Knowledge graph edge connecting two entities of one corpus generation. */
 export interface Relationship {
   /** Source entity ID */
   source_id: string;
   /** Target entity ID */
   target_id: string;
-  /** Type of relationship */
-  relation_type: "calls" | "imports" | "inherits" | "contains" | "associated_with" | "met_with" | "communicated_with" | "works_for" | "member_of" | "founded" | "owns" | "funded" | "participated_in" | "located_in" | "references" | "related_to";
+  /** Relationship type as stored on the edge: the AST edge kind for code graphs (calls, imports, inherits, contains) or the approved schema relationship type for semantic graphs */
+  relation_type: string;
   /** Relationship strength */
   weight?: number; // default: 1.0
   /** Additional properties */

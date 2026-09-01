@@ -209,23 +209,29 @@ class TestEntity:
         )
         assert entity.entity_type == "class"
 
-    def test_entity_invalid_type(self) -> None:
-        """Test Entity rejects invalid type."""
+    def test_entity_rejects_empty_type(self) -> None:
+        """An entity kind is mandatory: an empty label would hide the graph shape."""
         with pytest.raises(ValidationError) as exc_info:
             Entity(
                 entity_id="ent_003",
-                name="InvalidType",
-                entity_type="invalid",  # type: ignore
+                name="Unlabelled",
+                entity_type="",
             )
         assert "entity_type" in str(exc_info.value)
 
-    def test_entity_all_types(self) -> None:
-        """Test all valid entity types."""
-        for etype in ["function", "class", "module", "variable", "concept"]:
+    def test_entity_keeps_ast_kinds_and_approved_schema_labels(self) -> None:
+        """Task 8 drive defect D1: the contract carries the real node label.
+
+        Code graphs use AST kinds; semantic graphs use the operator-approved schema
+        labels (``Tank``, ``LaunchSite`` ...). Collapsing unknown labels to ``concept``
+        made every semantic entity render as "(concept)" while the store carried the
+        schema label.
+        """
+        for etype in ["function", "class", "module", "Tank", "LaunchSite", "PressureTransducerAssembly", "Person"]:
             entity = Entity(
                 entity_id=f"ent_{etype}",
                 name=f"Test{etype}",
-                entity_type=etype,  # type: ignore
+                entity_type=etype,
             )
             assert entity.entity_type == etype
 
@@ -253,32 +259,25 @@ class TestRelationship:
         )
         assert rel.weight == 0.8
 
-    def test_relationship_all_types(self) -> None:
-        """Test all valid relationship types."""
-        for rtype in [
-            "calls",
-            "imports",
-            "inherits",
-            "contains",
-            "associated_with",
-            "met_with",
-            "communicated_with",
-            "works_for",
-            "member_of",
-            "founded",
-            "owns",
-            "funded",
-            "participated_in",
-            "located_in",
-            "references",
-            "related_to",
-        ]:
+    def test_relationship_keeps_ast_kinds_and_approved_schema_types(self) -> None:
+        """Task 8 drive defect D1: schema relationship types are first-class.
+
+        The approved per-corpus schema defines the relationship vocabulary
+        (``CONTAINS``, ``LOCATED_AT``, ``SENT`` ...); a fixed allowlist dropped every
+        edge of a semantic generation from the explorer views.
+        """
+        for rtype in ["calls", "imports", "inherits", "contains", "CONTAINS", "LOCATED_AT", "SENT", "RECEIVED_BY"]:
             rel = Relationship(
                 source_id="src",
                 target_id="tgt",
-                relation_type=rtype,  # type: ignore
+                relation_type=rtype,
             )
             assert rel.relation_type == rtype
+
+    def test_relationship_rejects_empty_type(self) -> None:
+        with pytest.raises(ValidationError) as exc_info:
+            Relationship(source_id="src", target_id="tgt", relation_type="")
+        assert "relation_type" in str(exc_info.value)
 
 
 class TestCommunity:

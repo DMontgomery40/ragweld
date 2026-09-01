@@ -133,3 +133,70 @@ async def test_get_entity_neighbors_inlines_hops_and_parses_response() -> None:
     assert session.last_params.get("repo_id") == "test-corpus"
     assert session.last_params.get("entity_id") == "e1"
     assert "max_hops" not in session.last_params
+
+
+@pytest.mark.asyncio
+async def test_neighbourhood_keeps_schema_labels_and_schema_edges() -> None:
+    """Task 8 drive defect D1 (2026-09-01, NASA Apollo 11 corpus).
+
+    The official GraphRAG pipeline labels entities with the approved schema
+    (``LaunchSite``, ``Tank``) and relates them with the approved relationship
+    types (``LOCATED_AT``). The client used to coerce any label outside the AST
+    vocabulary to ``concept`` and to drop any edge outside a fixed allowlist, so
+    the explorer showed "Apollo 11 Launch Site (concept)" with "1 nodes • 0 edges"
+    while the store held 1,938 edges. The neighbourhood must (a) keep the stored
+    kind verbatim, (b) keep the schema edge, and (c) confine the walk to entity
+    nodes of the generation instead of enumerating edge types.
+    """
+    client = Neo4jClient(uri="bolt://fake", user="neo4j", password="test")
+    records = [
+        {
+            "entities": [
+                {
+                    "entity_id": "A11_MissionReport.pdf:4472-4488:462000:2",
+                    "name": "Apollo 11 Launch Site",
+                    "entity_type": "LaunchSite",
+                    "file_path": None,
+                    "description": None,
+                    "properties_json": json.dumps({"location": "Cape Canaveral"}),
+                },
+                {
+                    "entity_id": "A11_MissionReport.pdf:4472-4488:462000:1",
+                    "name": "LOX tank",
+                    "entity_type": "Tank",
+                    "file_path": None,
+                    "description": None,
+                    "properties_json": json.dumps({"pressure": 42.0}),
+                },
+            ],
+            "relationships": [
+                {
+                    "source_id": "A11_MissionReport.pdf:4472-4488:462000:1",
+                    "target_id": "A11_MissionReport.pdf:4472-4488:462000:2",
+                    "relation_type": "LOCATED_AT",
+                    "weight": 1.0,
+                    "properties_json": json.dumps({}),
+                }
+            ],
+        }
+    ]
+    client._driver = _FakeDriver(records, neighbour_count=1)  # type: ignore[assignment]
+
+    out = await client.get_entity_neighbors(
+        repo_id="__staging__nasa-apollo-11__run",
+        entity_id="A11_MissionReport.pdf:4472-4488:462000:2",
+        max_hops=2,
+        limit=200,
+    )
+    assert out is not None
+    assert {e.entity_type for e in out.entities} == {"LaunchSite", "Tank"}
+    assert [r.relation_type for r in out.relationships] == ["LOCATED_AT"]
+
+    session = client._driver.session_obj  # type: ignore[union-attr]
+    for query, params in ((session.last_query, session.last_params), (session.count_query, session.count_params)):
+        assert query is not None and params is not None
+        assert "allowed_rels" not in params, "edge types are not enumerated; the schema owns them"
+        assert "$allowed_rels" not in query
+        # The walk stays on entity nodes of this generation: a 2-hop path must not
+        # cross a Chunk node and report co-mentioned entities as neighbours.
+        assert "ALL(x IN nodes(p) WHERE x:__Entity__ AND x.repo_id = $repo_id)" in query

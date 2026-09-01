@@ -666,3 +666,199 @@ async def test_neighbors_never_return_the_centre_twice_on_a_cyclic_graph(
                 pass
         await neo.disconnect()
         await client.delete(f"/api/corpora/{active}")
+
+
+def _schema_entity(entity_id: str, name: str, label: str, **props: object) -> Neo4jNode:
+    """An entity written by the official pipeline: label = approved schema node type."""
+    return Neo4jNode(
+        id=entity_id,
+        label=label,
+        properties={"entity_id": entity_id, "name": name, "entity_type": label, **props},
+    )
+
+
+async def test_schema_labelled_semantic_graph_keeps_types_and_edges_in_every_explorer_view(
+    client: AsyncClient,
+) -> None:
+    """Task 8 drive defect D1 (2026-09-01) against a live Neo4j.
+
+    The promoted NASA generation carried 2,112 schema-labelled entities
+    (``Tank``/``PressureTransducerAssembly``/``LaunchSite``) and 1,938
+    ``CONTAINS``/``LOCATED_AT`` edges, yet every explorer view listed the entities as
+    "(concept)" and drew "0 edges": the client coerced labels outside the AST
+    vocabulary and filtered edges through a fixed type allowlist. The approved
+    schema owns both vocabularies, so every view must return the stored kind and
+    the schema edges verbatim, while a walk still never crosses a Chunk node.
+    """
+    active = f"graph-schema-{uuid4().hex[:8]}"
+    run_id = uuid4().hex
+    staging = f"__staging__{active}__{run_id}"
+    neo = Neo4jClient(
+        os.environ.get("NEO4J_URI", "bolt://127.0.0.1:7687"),
+        os.environ.get("NEO4J_USER", "neo4j"),
+        os.environ.get("NEO4J_PASSWORD", "password"),
+    )
+    created = await client.post(
+        "/api/corpora", json={"corpus_id": active, "name": active, "path": os.path.abspath(_CORPUS_PATH)}
+    )
+    assert created.status_code in (200, 201), created.text
+
+    launch_site = "A11:1-3:1"
+    lox_tank = "A11:1-3:2"
+    fuel_tank = "A11:4-6:1"
+    transducer = "A11:4-6:2"
+    orphan = "A11:7-9:1"
+
+    await neo.connect()
+    try:
+        chunk = Chunk(
+            chunk_id="apollo-1",
+            content="Launch Complex 39A LOX tank pressure transducer assembly",
+            file_path="A11_MissionReport.md",
+            start_line=1,
+            end_line=9,
+            token_count=8,
+            embedding=[0.2, 0.1],
+        )
+        _lexical, lexical_cfg = await write_lexical_graph_with_graphrag(
+            repo_id=staging, run_id=run_id, file_path="A11_MissionReport.md", chunks=[chunk]
+        )
+        await _write_graph(
+            staging,
+            run_id,
+            Neo4jGraph(
+                nodes=[
+                    _schema_entity(launch_site, "Launch Complex 39A", "LaunchSite", location="Cape Canaveral"),
+                    _schema_entity(lox_tank, "LOX tank", "Tank", pressure=42.0),
+                    _schema_entity(fuel_tank, "Fuel tank", "Tank", pressure=38.5),
+                    _schema_entity(transducer, "PTA-7", "PressureTransducerAssembly", type="strain gauge"),
+                    _schema_entity(orphan, "PTA-orphan", "PressureTransducerAssembly", type="capacitive"),
+                ],
+                relationships=[
+                    _rel(transducer, lox_tank, relationship_type="CONTAINS"),
+                    _rel(lox_tank, launch_site, relationship_type="LOCATED_AT"),
+                    _rel(fuel_tank, launch_site, relationship_type="LOCATED_AT"),
+                ],
+            ),
+            lexical_cfg,
+        )
+        # Provenance edges make the LOX tank and the orphan co-mentioned in ONE chunk. A
+        # walk that enumerated edge types used to stop at the allowlist; a walk without
+        # any node constraint would cross the Chunk and report the orphan as a neighbour.
+        driver = GraphDatabase.driver(
+            os.environ.get("NEO4J_URI", "bolt://127.0.0.1:7687"),
+            auth=(
+                os.environ.get("NEO4J_USER", "neo4j"),
+                os.environ.get("NEO4J_PASSWORD", "password"),
+            ),
+        )
+        try:
+            await asyncio.to_thread(
+                driver.execute_query,
+                "MATCH (c:Chunk {repo_id: $repo_id}) WITH c LIMIT 1 "
+                "MATCH (e:__Entity__ {repo_id: $repo_id}) WHERE e.entity_id IN $ids "
+                "CREATE (e)-[:FROM_CHUNK {repo_id: $repo_id}]->(c)",
+                parameters_={"repo_id": staging, "ids": [lox_tank, orphan]},
+                database_="neo4j",
+            )
+            telemetry = await detect_leiden_communities(
+                driver=driver, neo4j_database="neo4j", repo_id=staging
+            )
+        finally:
+            await asyncio.to_thread(driver.close)
+        assert telemetry.nodes_written == 5
+
+        pg = PostgresClient(require_env("POSTGRES_DSN"))
+        await pg.connect()
+        try:
+            await pg.set_generation(
+                active, build_generation(run_id=run_id, qdrant_collection=None, graph_repo_id=staging)
+            )
+        finally:
+            await pg.disconnect()
+
+        schema_edges = {
+            (transducer, lox_tank, "CONTAINS"),
+            (lox_tank, launch_site, "LOCATED_AT"),
+            (fuel_tank, launch_site, "LOCATED_AT"),
+        }
+
+        listed = await client.get(f"/api/graph/{active}/entities", params={"limit": 200})
+        assert listed.status_code == 200, listed.text
+        assert {e["entity_id"]: e["entity_type"] for e in listed.json()} == {
+            launch_site: "LaunchSite",
+            lox_tank: "Tank",
+            fuel_tank: "Tank",
+            transducer: "PressureTransducerAssembly",
+            orphan: "PressureTransducerAssembly",
+        }
+        typed = await client.get(f"/api/graph/{active}/entities", params={"entity_type": "Tank", "limit": 200})
+        assert typed.status_code == 200, typed.text
+        assert {e["entity_id"] for e in typed.json()} == {lox_tank, fuel_tank}
+
+        stats = await client.get(f"/api/graph/{active}/stats")
+        assert stats.status_code == 200, stats.text
+        assert stats.json()["entity_breakdown"] == {"Tank": 2, "PressureTransducerAssembly": 2, "LaunchSite": 1}
+        assert stats.json()["relationship_breakdown"] == {"CONTAINS": 1, "LOCATED_AT": 2}
+
+        whole = await client.get(f"/api/graph/{active}/subgraph", params={"limit": 50})
+        assert whole.status_code == 200, whole.text
+        payload = whole.json()
+        assert {(r["source_id"], r["target_id"], r["relation_type"]) for r in payload["relationships"]} == schema_edges
+        assert {e["entity_type"] for e in payload["entities"]} == {"LaunchSite", "Tank", "PressureTransducerAssembly"}
+        # Degree ranking counts schema edges: the launch site (2) and LOX tank (2) lead.
+        capped = await client.get(f"/api/graph/{active}/subgraph", params={"limit": 2})
+        assert capped.status_code == 200, capped.text
+        assert {e["entity_id"] for e in capped.json()["entities"]} == {launch_site, lox_tank}
+        assert [(r["source_id"], r["target_id"]) for r in capped.json()["relationships"]] == [(lox_tank, launch_site)]
+
+        neighbours = await client.get(
+            f"/api/graph/{active}/entity/neighbors",
+            params={"entity_id": launch_site, "max_hops": 2, "limit": 200},
+        )
+        assert neighbours.status_code == 200, neighbours.text
+        neighbourhood = neighbours.json()
+        # Two hops reach the transducer through the LOX tank; the orphan is reachable
+        # only through the shared Chunk and must stay out.
+        assert {e["entity_id"] for e in neighbourhood["entities"]} == {launch_site, lox_tank, fuel_tank, transducer}
+        assert {e["entity_id"]: e["entity_type"] for e in neighbourhood["entities"]}[launch_site] == "LaunchSite"
+        assert {(r["source_id"], r["target_id"], r["relation_type"]) for r in neighbourhood["relationships"]} == schema_edges
+        assert neighbourhood["total_matched"] == 4
+
+        one_hop = await client.get(
+            f"/api/graph/{active}/entity/neighbors",
+            params={"entity_id": lox_tank, "max_hops": 1, "limit": 200},
+        )
+        assert one_hop.status_code == 200, one_hop.text
+        assert {e["entity_id"] for e in one_hop.json()["entities"]} == {lox_tank, transducer, launch_site}
+
+        outgoing = await client.get(f"/api/graph/{active}/entity/relationships", params={"entity_id": lox_tank})
+        assert outgoing.status_code == 200, outgoing.text
+        assert [(r["target_id"], r["relation_type"]) for r in outgoing.json()] == [(launch_site, "LOCATED_AT")]
+
+        communities = await client.get(f"/api/graph/{active}/communities")
+        assert communities.status_code == 200, communities.text
+        listed_communities = communities.json()
+        assert sorted(m for c in listed_communities for m in c["member_ids"]) == sorted(
+            [launch_site, lox_tank, fuel_tank, transducer, orphan]
+        )
+        home = next(c for c in listed_communities if lox_tank in c["member_ids"])
+        # The hub of a community is its best-connected member by SCHEMA edges, so the
+        # LOX tank (degree 2) or the launch site (degree 2) names it - never the orphan.
+        assert home["name"] in {"LOX tank", "Launch Complex 39A"}, home
+        community_sub = await client.get(
+            f"/api/graph/{active}/community/{home['community_id']}/subgraph", params={"limit": 50}
+        )
+        assert community_sub.status_code == 200, community_sub.text
+        members = set(home["member_ids"])
+        expected_member_edges = {edge for edge in schema_edges if edge[0] in members and edge[1] in members}
+        assert {(r["source_id"], r["target_id"], r["relation_type"]) for r in community_sub.json()["relationships"]} == expected_member_edges
+        assert expected_member_edges, "Leiden kept the LOX tank with at least one schema neighbour"
+    finally:
+        for repo_id in (active, staging):
+            try:
+                await neo.delete_graph(repo_id)
+            except Exception:
+                pass
+        await neo.disconnect()
+        await client.delete(f"/api/corpora/{active}")

@@ -6,50 +6,11 @@ import os
 import re
 import time
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any
 
 from neo4j import AsyncDriver, AsyncGraphDatabase
 
 from server.models.graph import Community, Entity, GraphNeighborsResponse, GraphStats, Relationship
-
-EntityType = Literal[
-    "function", "class", "module", "variable", "concept", "person", "org", "location", "event"
-]
-RelationshipType = Literal[
-    "calls",
-    "imports",
-    "inherits",
-    "contains",
-    "associated_with",
-    "met_with",
-    "communicated_with",
-    "works_for",
-    "member_of",
-    "founded",
-    "owns",
-    "funded",
-    "participated_in",
-    "located_in",
-    "references",
-    "related_to",
-]
-
-CODE_RELATION_TYPES: set[str] = {"calls", "imports", "inherits", "contains"}
-SEMANTIC_RELATION_TYPES: set[str] = {
-    "associated_with",
-    "met_with",
-    "communicated_with",
-    "works_for",
-    "member_of",
-    "founded",
-    "owns",
-    "funded",
-    "participated_in",
-    "located_in",
-    "references",
-    "related_to",
-}
-ALL_RELATION_TYPES: set[str] = CODE_RELATION_TYPES | SEMANTIC_RELATION_TYPES
 
 _BATCH_SIZE_DEFAULT = 500
 _DEFAULT_REPO_SCOPED_NODE_LABELS: tuple[str, ...] = ("Document", "Chunk", "__Entity__")
@@ -258,16 +219,12 @@ class Neo4jClient:
             )
             records = await res.data()
         out: list[Relationship] = []
-        allowed: set[str] = set(ALL_RELATION_TYPES)
         for r in records:
-            rel_type = str(r.get("relation_type") or "")
-            if rel_type not in allowed:
-                continue
             out.append(
                 Relationship(
                     source_id=str(r["source_id"]),
                     target_id=str(r["target_id"]),
-                    relation_type=cast(RelationshipType, rel_type),
+                    relation_type=str(r.get("relation_type") or ""),
                     weight=float(r.get("weight") or 1.0),
                     properties=_relationship_properties_from_mapping(r),
                 )
@@ -294,14 +251,17 @@ class Neo4jClient:
         lim = int(max(0, limit or 0))
         lim = min(lim, 2000)
 
-        allowed_rels = sorted(ALL_RELATION_TYPES)
         driver = self._require_driver()
 
+        # The approved schema owns the edge vocabulary, so edges are never filtered by
+        # type. The walk is confined to entity nodes of this generation instead: a
+        # path that crossed a Chunk node would report co-mentioned entities as
+        # neighbours (Task 8 drive defect D1).
         cypher = f"""
         MATCH (center:__Entity__ {{repo_id: $repo_id, entity_id: $entity_id}})
 
-        OPTIONAL MATCH p = (center)-[rels*1..{hops}]-(n:__Entity__ {{repo_id: $repo_id}})
-        WHERE ALL(r IN rels WHERE type(r) IN $allowed_rels) AND n <> center
+        OPTIONAL MATCH p = (center)-[*1..{hops}]-(n:__Entity__ {{repo_id: $repo_id}})
+        WHERE ALL(x IN nodes(p) WHERE x:__Entity__ AND x.repo_id = $repo_id) AND n <> center
         WITH center, n, min(length(p)) AS min_hops
         ORDER BY min_hops ASC, n.name ASC
         LIMIT $limit
@@ -310,8 +270,8 @@ class Neo4jClient:
         WITH neighbors + [center] AS nodes
 
         UNWIND nodes AS a
-        OPTIONAL MATCH (a)-[r]-(b)
-        WHERE b IN nodes AND type(r) IN $allowed_rels
+        OPTIONAL MATCH (a)-[r]-(b:__Entity__)
+        WHERE b IN nodes
         WITH nodes, [x IN collect(DISTINCT r) WHERE x IS NOT NULL] AS rels
 
         RETURN
@@ -341,7 +301,6 @@ class Neo4jClient:
                 cypher,
                 repo_id=repo_id,
                 entity_id=entity_id,
-                allowed_rels=allowed_rels,
                 limit=lim,
             )
             records = await res.data()
@@ -359,21 +318,18 @@ class Neo4jClient:
                     entities.append(_entity_from_mapping(item))
 
         rels: list[Relationship] = []
-        allowed: set[str] = set(ALL_RELATION_TYPES)
         if isinstance(relationships_raw, list):
             for r in relationships_raw:
                 if not isinstance(r, dict):
                     continue
                 rel_type = str(r.get("relation_type") or "")
-                if rel_type not in allowed:
-                    continue
                 raw_weight = float(r.get("weight") or 1.0)
                 weight = max(0.0, min(1.0, raw_weight))
                 rels.append(
                     Relationship(
                         source_id=str(r.get("source_id") or ""),
                         target_id=str(r.get("target_id") or ""),
-                        relation_type=cast(RelationshipType, rel_type),
+                        relation_type=rel_type,
                         weight=weight,
                         properties=_relationship_properties_from_mapping(r),
                     )
@@ -409,17 +365,16 @@ class Neo4jClient:
         luck, not correctness - while the entity list carried a real duplicate row (N-02).
         """
         hops = min(max(1, int(max_hops or 1)), 5)
-        allowed_rels = sorted(ALL_RELATION_TYPES)
         driver = self._require_driver()
         cypher = f"""
         MATCH (center:__Entity__ {{repo_id: $repo_id, entity_id: $entity_id}})
-        OPTIONAL MATCH (center)-[rels*1..{hops}]-(n:__Entity__ {{repo_id: $repo_id}})
-        WHERE ALL(r IN rels WHERE type(r) IN $allowed_rels) AND n <> center
+        OPTIONAL MATCH p = (center)-[*1..{hops}]-(n:__Entity__ {{repo_id: $repo_id}})
+        WHERE ALL(x IN nodes(p) WHERE x:__Entity__ AND x.repo_id = $repo_id) AND n <> center
         RETURN count(DISTINCT n) AS neighbours;
         """
         async with driver.session(database=self.database) as session:
             res = await session.run(
-                cypher, repo_id=repo_id, entity_id=entity_id, allowed_rels=allowed_rels
+                cypher, repo_id=repo_id, entity_id=entity_id
             )
             rec = await res.single()
         if rec is None:
@@ -456,7 +411,6 @@ class Neo4jClient:
         MATCH (e:__Entity__ {repo_id: $repo_id})
         WHERE toString(e.communityId) = $community_id
         OPTIONAL MATCH (e)-[degree_rel]-(other:__Entity__ {repo_id: $repo_id})
-        WHERE type(degree_rel) IN $allowed_rels
         WITH e, count(DISTINCT degree_rel) AS degree
         RETURN e.entity_id AS entity_id,
                e.name AS name,
@@ -472,7 +426,6 @@ class Neo4jClient:
                 query,
                 repo_id=repo_id,
                 community_id=community_id,
-                allowed_rels=sorted(ALL_RELATION_TYPES),
                 limit=lim,
             )
             records = await res.data()
@@ -496,14 +449,12 @@ class Neo4jClient:
         if not community_id.strip() or lim <= 0:
             return None
 
-        allowed_rels = sorted(ALL_RELATION_TYPES)
         driver = self._require_driver()
 
         cypher = """
         MATCH (e:__Entity__ {repo_id: $repo_id})
         WHERE toString(e.communityId) = $community_id
         OPTIONAL MATCH (e)-[degree_rel]-(other:__Entity__ {repo_id: $repo_id})
-        WHERE type(degree_rel) IN $allowed_rels
         WITH e, count(DISTINCT degree_rel) AS degree
         ORDER BY degree DESC, e.name ASC, e.entity_id ASC
         LIMIT $limit
@@ -511,7 +462,7 @@ class Neo4jClient:
         WITH collect(e) AS nodes
         UNWIND nodes AS a
         OPTIONAL MATCH (a)-[r]-(b:__Entity__ {repo_id: $repo_id})
-        WHERE b IN nodes AND type(r) IN $allowed_rels
+        WHERE b IN nodes
         WITH nodes, [x IN collect(DISTINCT r) WHERE x IS NOT NULL] AS rels
 
         RETURN
@@ -541,7 +492,6 @@ class Neo4jClient:
                 cypher,
                 repo_id=repo_id,
                 community_id=community_id,
-                allowed_rels=allowed_rels,
                 limit=lim,
             )
             records = await res.data()
@@ -559,21 +509,18 @@ class Neo4jClient:
                     entities.append(_entity_from_mapping(item))
 
         rels: list[Relationship] = []
-        allowed: set[str] = set(ALL_RELATION_TYPES)
         if isinstance(relationships_raw, list):
             for r in relationships_raw:
                 if not isinstance(r, dict):
                     continue
                 rel_type = str(r.get("relation_type") or "")
-                if rel_type not in allowed:
-                    continue
                 raw_weight = float(r.get("weight") or 1.0)
                 weight = max(0.0, min(1.0, raw_weight))
                 rels.append(
                     Relationship(
                         source_id=str(r.get("source_id") or ""),
                         target_id=str(r.get("target_id") or ""),
-                        relation_type=cast(RelationshipType, rel_type),
+                        relation_type=rel_type,
                         weight=weight,
                         properties=_relationship_properties_from_mapping(r),
                     )
@@ -611,14 +558,12 @@ class Neo4jClient:
                 entities=[], relationships=[], total_matched=total, limit=lim
             )
 
-        allowed_rels = sorted(ALL_RELATION_TYPES)
         driver = self._require_driver()
         match_filter = f" AND {ENTITY_NAME_MATCH_CLAUSE.format(var='e')}" if q else ""
         cypher = f"""
         MATCH (e:__Entity__)
         WHERE e.repo_id = $repo_id{match_filter}
         OPTIONAL MATCH (e)-[r]-(:__Entity__ {{repo_id: $repo_id}})
-        WHERE type(r) IN $allowed_rels
         WITH e, count(r) AS degree
         ORDER BY degree DESC, e.name ASC, e.entity_id ASC
         LIMIT $limit
@@ -626,7 +571,7 @@ class Neo4jClient:
         WITH collect(e) AS nodes
         UNWIND nodes AS a
         OPTIONAL MATCH (a)-[r]-(b:__Entity__ {{repo_id: $repo_id}})
-        WHERE b IN nodes AND type(r) IN $allowed_rels
+        WHERE b IN nodes
         WITH nodes, [x IN collect(DISTINCT r) WHERE x IS NOT NULL] AS rels
 
         RETURN
@@ -650,7 +595,7 @@ class Neo4jClient:
             }}
           ] AS relationships;
         """
-        params: dict[str, Any] = {"repo_id": repo_id, "allowed_rels": allowed_rels, "limit": lim}
+        params: dict[str, Any] = {"repo_id": repo_id, "limit": lim}
         if q:
             params["q"] = q
         async with driver.session(database=self.database) as session:
@@ -667,19 +612,16 @@ class Neo4jClient:
             if isinstance(item, dict)
         ]
         rels: list[Relationship] = []
-        allowed: set[str] = set(ALL_RELATION_TYPES)
         for r in rec.get("relationships") or []:
             if not isinstance(r, dict):
                 continue
             rel_type = str(r.get("relation_type") or "")
-            if rel_type not in allowed:
-                continue
             weight = max(0.0, min(1.0, float(r.get("weight") or 1.0)))
             rels.append(
                 Relationship(
                     source_id=str(r.get("source_id") or ""),
                     target_id=str(r.get("target_id") or ""),
-                    relation_type=cast(RelationshipType, rel_type),
+                    relation_type=rel_type,
                     weight=weight,
                     properties=_relationship_properties_from_mapping(r),
                 )
@@ -712,7 +654,6 @@ class Neo4jClient:
         MATCH (e:__Entity__ {repo_id: $repo_id})
         WHERE e.communityId IS NOT NULL AND e.communityPath IS NOT NULL
         OPTIONAL MATCH (e)-[degree_rel]-(other:__Entity__ {repo_id: $repo_id})
-        WHERE type(degree_rel) IN $allowed_rels
         WITH e,
              count(DISTINCT degree_rel) AS degree,
              toString(e.communityId) AS community_id,
@@ -732,7 +673,6 @@ class Neo4jClient:
                 query,
                 repo_id=repo_id,
                 level=int(level) if level is not None else None,
-                allowed_rels=sorted(ALL_RELATION_TYPES),
             )
             records = await res.data()
 
@@ -1113,7 +1053,7 @@ def _entity_from_record(record: Any) -> Entity:
     return Entity(
         entity_id=str(record["entity_id"]),
         name=str(record["name"]),
-        entity_type=_coerce_entity_type(str(record["entity_type"])),
+        entity_type=str(record["entity_type"] or ""),
         file_path=str(record["file_path"]) if record.get("file_path") is not None else None,
         description=str(record["description"]) if record.get("description") is not None else None,
         properties=props,
@@ -1125,7 +1065,7 @@ def _entity_from_mapping(mapping: dict[str, Any]) -> Entity:
     return Entity(
         entity_id=str(mapping["entity_id"]),
         name=str(mapping["name"]),
-        entity_type=_coerce_entity_type(str(mapping["entity_type"])),
+        entity_type=str(mapping["entity_type"] or ""),
         file_path=str(mapping["file_path"]) if mapping.get("file_path") is not None else None,
         description=str(mapping["description"]) if mapping.get("description") is not None else None,
         properties=props,
@@ -1170,23 +1110,6 @@ def _entity_properties_from_mapping(mapping: dict[str, Any]) -> dict[str, Any]:
             return {}
         return parsed if isinstance(parsed, dict) else {}
     return {}
-
-
-def _coerce_entity_type(value: str) -> EntityType:
-    allowed: set[str] = {
-        "function",
-        "class",
-        "module",
-        "variable",
-        "concept",
-        "person",
-        "org",
-        "location",
-        "event",
-    }
-    if value in allowed:
-        return cast(EntityType, value)
-    return "concept"
 
 
 def _sanitize_database_name(name: str) -> str:

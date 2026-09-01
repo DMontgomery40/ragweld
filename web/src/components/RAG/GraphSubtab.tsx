@@ -52,6 +52,19 @@ function GraphLegend({
   );
 }
 
+// Approved-schema node labels (Tank, LaunchSite, Person, ...) are corpus-specific, so
+// they get a stable colour from a fixed palette keyed by the label text instead of
+// the single grey the AST-only switch used to fall back to (Task 8 drive defect D1).
+const SCHEMA_LABEL_PALETTE = ['#f472b6', '#38bdf8', '#fb923c', '#a3e635', '#c084fc', '#2dd4bf', '#facc15', '#f87171'];
+
+function schemaLabelColor(label: string): string {
+  const text = String(label || '').trim();
+  if (!text) return '#9fb1c7';
+  let hash = 0;
+  for (let i = 0; i < text.length; i += 1) hash = (hash * 31 + text.charCodeAt(i)) >>> 0;
+  return SCHEMA_LABEL_PALETTE[hash % SCHEMA_LABEL_PALETTE.length];
+}
+
 function formatEntityLabel(e: Entity): string {
   const name = String(e.name || '').trim();
   const type = String(e.entity_type || '').trim();
@@ -581,7 +594,7 @@ export function GraphSubtab() {
       case 'event':
         return '#eab308';
       default:
-        return '#9fb1c7';
+        return schemaLabelColor(e.entity_type);
     }
   };
 
