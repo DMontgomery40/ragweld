@@ -42,6 +42,8 @@
 
     Neighbourhood and community walks are confined to `__Entity__` nodes of the current generation (`server/db/neo4j.py`): a 2-hop path can never cross a `Chunk` node, so entities that merely share a source chunk are not reported as neighbours.
 
+    Entity **provenance files** are derived, not assumed. Code entities store the file that defines them on the node; semantic entities carry no `file_path` of their own — the GraphRAG extractor links them to their source chunk with `FROM_CHUNK` and never copies the file onto the node — so every entity read view (detail, entity list, subgraph, neighbours, community members) resolves the file through the `FROM_CHUNK` provenance chunk (`entity_source_file_expr` in `server/db/neo4j.py`). An entity without provenance reads back `file_path: null` rather than a fabricated path; a semantic entity now reads back the file of the chunk it was extracted from, where every view previously reported `null` ("File: —" in the explorer).
+
 | Route | Method | Description |
 |-------|--------|-------------|
 | `/graph/{corpus_id}/entities` | GET | List entities |

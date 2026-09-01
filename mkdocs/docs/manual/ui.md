@@ -78,6 +78,8 @@ Entity and relationship types are whatever the graph actually stores: AST kinds 
 
 Entity names come from the graph too: an entity stored without a `name` — possible only on generations approved before the proposal's `name` identity rule — is labelled with its stable entity id instead of an empty name, and it reads back over the API as an empty string, never the text `None`. Newer generations always carry a name; see the [Indexing pipeline](../indexing.md).
 
+The entity details panel now shows what the graph actually extracted: a **Properties** chip row listing every stored schema or AST property (`qualname`, `kind`, `start_line`, `pressure`, `ullage`, …), with derived community membership shown separately — `Community: <id>` plus its path when Leiden produced a multi-level partition — because `communityId`/`communityPath` are written at index time by the community pass, not extracted, so they are never presented as extracted properties. An entity with nothing stored says "none extracted". The **File** line is provenance-backed for semantic entities too: a semantic entity stores no file of its own, so the view reports the file of the chunk it was extracted from (`FROM_CHUNK`), and an entity without provenance reads `File: —` honestly rather than guessing. These behaviors are pinned end to end in `web/tests/e2e/exhaustive/graph_explorer.spec.ts`; see [Graph API](../api_graph.md).
+
 ### Recall gating and memory policy controls
 
 ![Recall gating controls in chat settings](../assets/images/recall-gating.png)
