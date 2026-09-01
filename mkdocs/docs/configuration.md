@@ -1,3 +1,4 @@
+```markdown
 # Configuration
 
 <div class="grid chunk_summaries" markdown>
@@ -67,7 +68,7 @@ flowchart TB
 | fusion | `method`, `vector_weight`, `sparse_weight`, `graph_weight`, `rrf_k`, `normalize_scores` | How legs combine into a single ranking |
 | vector_search | `enabled`, `top_k`, `similarity_threshold` | Dense (Qdrant) candidate size |
 | sparse_search | `enabled`, `top_k`, `bm25_k1`, `bm25_b` | Sparse (Qdrant BM25) candidate size and scoring |
-| graph_search | `enabled`, `mode`, `max_hops`, `top_k`, `chunk_neighbor_window`, `chunk_entity_expansion_*` | Neo4j traversal behavior |
+| graph_search | `enabled`, `max_hops`, `top_k`, `chunk_neighbor_window`, `include_communities` | Qdrant-seeded Neo4j traversal behavior |
 | embedding | `embedding_type`, `embedding_model`, `embedding_dim`, `embedding_batch_size` | Embedding provider + dimensions |
 | chunking | `chunking_strategy`, `chunk_size`, `chunk_overlap`, `max_chunk_tokens`, `preserve_imports` | Index quality and performance |
 | reranking | `reranker_mode`, `reranker_*`, `tribrid_reranker_*` | Cloud/learning reranker stage tuning |
@@ -82,6 +83,9 @@ flowchart TB
 
 !!! note "Removed: the legacy base+suffix chat prompt composition"
     `chat.system_prompt_base`, `chat.system_prompt_rag_suffix`, and `chat.system_prompt_recall_suffix` are gone from `ChatConfig`. Exactly one of the four state prompts (`system_prompt_direct`, `system_prompt_rag`, `system_prompt_recall`, `system_prompt_rag_and_recall`) is selected per message by whether RAG and/or Recall context is present, so the legacy base+suffix path was a second, conflicting instruction surface behind the live one. `GET /api/prompts` lists only the four state prompts, and a persisted config that still carries the removed keys loads cleanly — the config-store upgrade path strips them (`server/services/config_store.py`), as does the flat loader (`server/config.py`). If you customized a suffix, move that text into the state prompt whose behavior you want it to affect.
+
+!!! note "Removed: graph mode and Neo4j chunk-vector knobs"
+    `graph_search.mode`, `graph_search.chunk_seed_overfetch_multiplier`, `graph_search.chunk_entity_expansion_enabled`, `graph_search.chunk_entity_expansion_weight`, `graph_indexing.store_chunk_embeddings`, `graph_indexing.chunk_vector_index_name`, `graph_indexing.chunk_embedding_property`, `graph_indexing.vector_similarity_function`, `graph_indexing.wait_vector_index_online`, `graph_indexing.vector_index_online_timeout_s`, and `graph_storage.community_algorithm` are gone from the config model. The graph leg is now one pipeline — dense Qdrant seeds joined to generation-scoped Neo4j entities through `FROM_CHUNK`, expanded through relationships, `NEXT_CHUNK` neighbors, and GDS Leiden communities — so the chunk/entity toggle and its blend knobs have nothing left to control. A saved config that still carries the old keys loads cleanly; the config-store upgrade path strips them (`server/services/config_store.py`).
 
 ### Fusion Configuration
 
@@ -101,13 +105,11 @@ flowchart TB
 
 | Field | Type | Constraints | Description |
 |------|------|-------------|-------------|
-| `graph_search.enabled` | bool | — | Enable Neo4j traversal in retrieval |
-| `graph_search.mode` | Literal["chunk","entity"] | — | Chunk-graph with vector seeds vs legacy entity graph |
-| `graph_search.max_hops` | int | 1–5 | Traversal depth from seeds |
-| `graph_search.top_k` | int | 5–100 | Number of graph hits before fusion |
-| `graph_search.chunk_neighbor_window` | int | 0–10 | Include neighboring chunks as context (chunk mode) |
-| `graph_search.chunk_entity_expansion_enabled` | bool | — | Expand via entities linked to chunks |
-| `graph_search.chunk_entity_expansion_weight` | float | 0.0–1.0 | Blending of expansion vs seed |
+| `graph_search.enabled` | bool | — | Enable the graph leg (Qdrant-seeded Neo4j traversal) in retrieval |
+| `graph_search.max_hops` | int | 1–5 | Traversal depth from seed entities |
+| `graph_search.top_k` | int | 5–100 | Qdrant seed Top-K for the graph leg |
+| `graph_search.chunk_neighbor_window` | int | 0–10 | Include up to N adjacent `NEXT_CHUNK` chunks around relationship hits |
+| `graph_search.include_communities` | bool | — | Include community expansion (GDS Leiden communities written at index time) |
 
 ### Retrieval and Confidence Gates
 
@@ -258,3 +260,4 @@ The end-to-end behavior is proven against a live stack in `web/tests/e2e/exhaust
 
 !!! tip "If you're not sure"
     Add numeric controls as `<NumberField configPath="section.field" ... />` with min/max matching the Pydantic field. A bound the model does not have fails the bounds test above at build time, instead of surfacing later as an unattributed `422` in production. If a value must be clearable/nullable, do not use `NumberField` — clamp inline and document why, like the Chat Top-K control does.
+

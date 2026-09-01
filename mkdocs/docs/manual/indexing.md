@@ -47,6 +47,9 @@ Indexing turns a folder into a set of **retrieval primitives**:
 !!! note "Corpora indexed before provenance capture"
     Chunks from older runs report `provenance` as not captured, and rich documents (docx/pptx/xlsx/html) show a "not captured" state in the [source document viewer](source_viewer.md) until you re-index.
 
+!!! note "Graph indexing is policy-derived"
+    There is no separate semantic-KG toggle. With graph indexing enabled, external document corpora run semantic entity extraction and code corpora can select the AST policy (`graph_indexing.build_code_graph`); runtime-managed corpora (Recall, Codex sessions) are excluded. A semantic run also requires a reviewed graph schema — **RAG → Indexing** walks you through generate → review → approve, and the API refuses a run without the approved hash. See the [Indexing pipeline](../indexing.md).
+
 ```mermaid
 flowchart LR
   A["Folder"] --> L["Load"]

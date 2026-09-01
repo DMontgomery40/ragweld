@@ -1,3 +1,4 @@
+```markdown
 
 # Indexing Pipeline
 
@@ -126,10 +127,43 @@ async function reindex(path: string) {
 | Field | Default | Meaning |
 |-------|---------|---------|
 | `graph_indexing.enabled` | true | Enable graph building during indexing |
-| `graph_indexing.build_lexical_graph` | true | Add Chunk/NEXT_CHUNK structure |
-| `graph_indexing.build_code_graph` | false | AST code graph: module/class/function entities with contains/inherits/imports/calls edges (Python, TypeScript, JavaScript) |
-| `graph_indexing.store_chunk_embeddings` | true | Store chunk vectors for Neo4j vector search |
-| `graph_indexing.semantic_kg_enabled` | false | Extract concept relations (heuristic or LLM) |
+| `graph_indexing.build_lexical_graph` | true | Build the lexical Document/Chunk graph per file |
+| `graph_indexing.build_code_graph` | false | Select the AST code-graph policy for a code corpus |
+| `graph_indexing.semantic_kg_max_chunks` | 40000 | Chunk ceiling for a semantic run; exceeding it fails the run instead of slicing a partial graph |
+| `graph_indexing.semantic_kg_llm_model` | "" | Optional LiteLLM alias for GraphRAG semantic extraction; empty uses the gateway default |
+| `graph_indexing.semantic_kg_reasoning_effort` | medium | Reasoning effort for Responses-compatible extraction models |
+| `graph_indexing.semantic_kg_llm_timeout_s` | 90 | Per-chunk extraction timeout (seconds) |
+
+### Derived graph policy: one decision per corpus
+
+There is no separate semantic-KG toggle. `server/indexing/graph_policy.py` derives exactly one policy per run:
+
+| Policy | When | What indexing does |
+|---|---|---|
+| `semantic` | external corpus, `graph_indexing.enabled`, `build_code_graph` off | Official Neo4j GraphRAG LLM extraction (structured output against a closed-world schema) per file, plus the lexical graph |
+| `code` | external corpus, enabled, `build_code_graph` on | AST entities plus the lexical graph per file, written through the same scoped GraphRAG writer |
+| `off` | `graph_indexing.enabled` false | No Neo4j work; the manifest records no graph id and the graph leg truthfully returns nothing |
+| `excluded` | runtime-managed internal corpora (Recall, Codex sessions) | Never graph-indexed, regardless of config |
+
+The UI shows the derived policy as a badge in **RAG → Indexing** and **RAG → Retrieval**, and internal corpora cannot flip the toggle.
+
+### Schema proposal and approval (semantic policy)
+
+A semantic run cannot start without a reviewed graph schema:
+
+1. **Propose** — `POST /api/index/{corpus_id}/graph-schema/proposal` deterministically samples documents (first/middle/last chunk per document), asks the extraction alias for a closed-world `GraphSchema`, rejects generic catch-all labels such as `OBJECT` or `RELATED_TO`, and persists a `GraphSchemaProposal` keyed by a canonical schema hash plus a source-inventory fingerprint.
+2. **Review** — the **RAG → Indexing** proposal card shows node types, relationship types, patterns, constraints, the sampled chunk ids with SHA-256 hashes, the model alias, the GraphRAG version (`1.19.0`), and a bulk-cost estimate.
+3. **Approve** — starting the run sends `approved_graph_schema_hash`; the server refuses with `409 graph_schema_approval_required` when the hash is missing, or when any corpus file or extraction setting changed since the review (the fingerprint no longer matches).
+
+The approved hash, schema payload, extraction telemetry, entity-resolution counts, community telemetry, and any override are persisted on the generation manifest (`GraphGenerationMetadata`), so every promoted graph is auditable.
+
+### Promotion invariants, communities, and the audited sparse override
+
+Before the commit, the staged graph must pass every invariant in `server/indexing/graph_invariants.py`: exact chunk count, complete extraction (no failed or truncated chunks), nonzero entities and semantic relationships, `FROM_CHUNK` provenance links into the staged chunks, no cross-generation nodes or relationships, and no unresolved duplicate entity names. A refusal is a typed failure (`GraphPromotionRefusedError`) with codes such as `zero_entities`, `extraction_failure`, or `cross_generation_node`; the previous generation stays active and the run record replays the failure codes.
+
+When `graph_storage.include_communities` is on and the staged graph passes, ragweld projects the staged entities into Neo4j Graph Data Science and runs deterministic Leiden (`server/graph/communities.py`, GDS 2.13), writing `communityId`/`communityPath` onto every entity. The Compose stack ships the GDS plugin, and `/api/ready` refuses Neo4j readiness without GDS 2.13 when graph indexing and communities are enabled.
+
+One deliberate exception: when a fully successful approved extraction found no graph at all, an authenticated operator (the `Remote-User` header behind the auth proxy) may retry with `graph_empty_override_reason` (at least 20 visible characters). The override promotes only the chunk/vector generation — the empty graph is deleted and omitted from the manifest, so graph retrieval can never present it — and the actor, reason, timestamp, and telemetry are persisted on the manifest.
 
 ### AST code graph (`build_code_graph`)
 
@@ -137,7 +171,7 @@ When `graph_indexing.build_code_graph=true`, indexing additionally runs a tree-s
 
 - one **module** entity per file, plus **class** and **function**/**method** entities carrying qualname, line range, and first-line signature
 - `contains`, `inherits`, `imports`, and `calls` relationships, weighted by the `graph_indexing.ast_*_weight` fields
-- each entity anchored to the chunk that defines it through the same lexical chunk relationship, so `graph_search.mode=chunk` retrieval can expand a hit to its callers, callees, base classes, and importing modules
+- each entity anchored to the chunk that defines it through the same `FROM_CHUNK` lexical chunk relationship, so graph retrieval can expand a hit to its callers, callees, base classes, and importing modules
 
 Entity ids are corpus-relative: a module is its `file_path` and a symbol is `file_path::qualname`; uniqueness in Neo4j is scoped by the corpus id, so a staging id never leaks into an entity id. Relationships whose target is defined in another file are **deferred**: the per-file pass writes only that file's entities and intra-file edges, and the cross-file edges (`imports`, plus cross-file `inherits` and `calls`) are written once after every file of the run is in Neo4j, through a relationship-only upsert that `MATCH`es both endpoints. No placeholder node is ever created for a target — a call to an imported class is a call to the existing `class` node, not to a guessed `function` node (the earlier shape collided with the Neo4j uniqueness constraint on entity ids and failed the run). Resolution is conservative: a name that cannot be tied to a definition inside the corpus, or an import that does not resolve to a corpus file, produces no edge and is counted as unresolved rather than guessed.
 
@@ -158,7 +192,7 @@ flowchart LR
 ??? note "Why deferred edges instead of placeholder nodes"
     Placeholder nodes forced a guessed label for cross-file targets — for example, calling an imported class created a `function` node. When the defining file later wrote the real `class` entity with the same id, the two labels violated the Neo4j uniqueness constraint on entity ids and failed the index run. Deferring the edge until every file has been upserted means both endpoints always exist under their real labels, and index order across files no longer matters.
 
-For engineers: the deferred write runs under the `neo4j_upsert_code_graph_edges` Prometheus stage label in `server/api/index.py`, immediately after the file loop and before semantic-KG community detection.
+For engineers: the deferred write runs under the `neo4j_write_code_deferred` Prometheus stage label in `server/api/index.py`, immediately after the file loop.
 
 !!! warning "Re-index after enabling"
     The code graph is built during indexing. Toggling `build_code_graph` only affects new runs, so enable it per code corpus and re-index. It is off by default because it only pays for code corpora.

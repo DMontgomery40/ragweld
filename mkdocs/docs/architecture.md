@@ -1,3 +1,4 @@
+```markdown
 # Architecture
 
 <div class="grid chunk_summaries" markdown>
@@ -45,46 +46,62 @@
 [API](api.md){ .md-button }
 
 !!! tip "Concurrency"
-    TriBridRAG parallelizes retrievers with async I/O. Size DB connection pools to match concurrency and avoid I/O starvation.
+    ragweld parallelizes retrievers with async I/O. Size DB connection pools to match concurrency and avoid I/O starvation.
 
 !!! note "Failure Isolation"
     Each retriever is wrapped so failures degrade that leg only. Fusion runs on the subset that succeeded; fused results keep provenance in `ChunkMatch.source`.
 
 !!! warning "Graph Availability"
-    If Neo4j is temporarily unavailable, retrieval continues with vector + sparse. Test fallback behavior in your deployment.
+    When the graph leg is requested and Neo4j (or the Qdrant seed store) is unavailable, the request fails with a typed dependency error rather than silently returning partial results. Disable the leg per request (`include_graph=false`) if you need vector+sparse-only behavior during an outage.
 
 ## System Diagram
 
 ```mermaid
 flowchart LR
-    subgraph API
-      FAPI["FastAPI"]
+    subgraph API["FastAPI"]
+      FAPI["Search / Chat / Answer routes"]
+      CACHE["Semantic cache\n(server/retrieval/cache.py)"]
     end
 
-    FAPI --> V["VectorRetriever"]
-    FAPI --> S["SparseRetriever"]
-    FAPI --> G["GraphRetriever"]
+    subgraph Legs["Three retrieval legs"]
+      V["Vector leg\n(Qdrant dense generation)"]
+      S["Sparse leg\n(Qdrant BM25 sparse generation)"]
+      G["Graph leg\n(Qdrant seeds joined to Neo4j)"]
+    end
+
+    FAPI --> CACHE
+    CACHE --> EMB["Query embedder"]
+    EMB --> V
+    EMB --> G
+    CACHE --> S
 
     V --> FU["Fusion"]
     S --> FU
     G --> FU
 
-    FU --> RR["Reranker\n(optional)"]
-    RR --> RES["Results"]
-    FU --> RES
+    FU --> BOOST["Scoring boosts +\ndedup / MMR"]
+    BOOST --> RR["Reranker\n(optional)"]
+    RR --> CONF["Confidence gate\n(conf_top1 / conf_avg5)"]
+    FU --> CONF
+    CONF --> HYD["Hydration\n(lazy / eager)"]
+    HYD --> RES["Results"]
 
-    V <--> PG["PostgreSQL\n(pgvector+FTS)"]
-    S <--> PG
-    G <--> NEO["Neo4j\nGraph"]
+    V <--> QD["Qdrant\n(dense + sparse)"]
+    S <--> QD
+    G <--> QD
+    G <--> NEO["Neo4j\n(entities + FROM_CHUNK)"]
+    HYD <--> PG["Postgres\n(chunk rows)"]
 ```
+
+The authoritative, code-generated version of this pipeline — every leg, weight, gate and default — lives on the generated [retrieval pipeline reference](reference/architecture/retrieval-pipeline.md).
 
 ## Layer Responsibilities
 
 | Layer | Module | Responsibilities | Representative Config |
 |------|--------|------------------|-----------------------|
-| Vector | `server/retrieval/vector.py` | Dense search via pgvector | `vector_search.enabled`, `vector_search.top_k`, `embedding.*` |
-| Sparse | `server/retrieval/sparse.py` | FTS/BM25 over chunks | `sparse_search.enabled`, `sparse_search.top_k`, `indexing.bm25_*` |
-| Graph | `server/retrieval/graph.py` | Entity traversal, context expansion | `graph_search.enabled`, `graph_search.max_hops`, `graph_storage.*` |
+| Vector | `server/retrieval/qdrant_store.py` | Dense search over the corpus Qdrant generation | `vector_search.enabled`, `vector_search.top_k`, `embedding.*` |
+| Sparse | `server/retrieval/qdrant_store.py` | IDF-modified BM25 sparse vectors (fastembed `Qdrant/bm25`) | `sparse_search.enabled`, `sparse_search.top_k`, `indexing.bm25_*` |
+| Graph | `server/retrieval/graphrag_retriever.py` | Qdrant-seeded, generation-scoped Neo4j traversal over `FROM_CHUNK` entities and `NEXT_CHUNK` neighbors | `graph_search.enabled`, `graph_search.max_hops`, `graph_search.top_k`, `graph_storage.*` |
 | Fusion | `server/retrieval/fusion.py` | Merge lists and scores | `fusion.method`, `fusion.rrf_k`, `fusion.*_weight` |
 | Reranker | `server/retrieval/rerank.py` | Cloud/learning reranker scoring | `reranking.reranker_mode`, `reranking.*` |
 
@@ -157,3 +174,4 @@ flowchart TB
 ??? note "Implementation Notes"
     - All configurable fields (weights, top_k, thresholds) live in `TriBridConfig`. Frontend sliders and toggles must map 1:1 to these fields via `generated.ts`.
     - DB clients: `server/db/postgres.py` (pgvector + FTS) and `server/db/neo4j.py` (graph). Keep pools separate to avoid head-of-line blocking.
+

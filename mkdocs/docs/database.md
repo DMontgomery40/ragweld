@@ -1,4 +1,5 @@
-# Storage: PostgreSQL (pgvector + FTS) and Neo4j
+```markdown
+# Storage: PostgreSQL (chunk rows + manifests) and Neo4j
 
 <div class="grid chunk_summaries" markdown>
 
@@ -6,19 +7,19 @@
 
     ---
 
-    Single source for chunks, embeddings, and FTS.
+    Chunk rows with provenance, chunk summaries, caches, and the generation manifest.
 
--   :material-vector-polyline:{ .lg .middle } **pgvector**
+-   :material-vector-polyline:{ .lg .middle } **Qdrant**
 
     ---
 
-    High-dimensional vector similarity for dense retrieval.
+    Per-corpus Qdrant generations hold the dense and sparse chunk vectors both retrieval legs query.
 
 -   :material-graph:{ .lg .middle } **Neo4j**
 
     ---
 
-    Entity/relationship graph and optional vector index on chunks.
+    Generation-scoped entities and relationships linked to chunks (`FROM_CHUNK`), plus GDS Leiden communities.
 
 </div>
 
@@ -37,24 +38,27 @@
 
 ## PostgreSQL Client Responsibilities
 
-- Upsert chunk rows with metadata and content
-- Upsert embeddings for pgvector similarity
-- Maintain FTS (tsvector) index
-- Execute vector and sparse searches with corpus scope
+- Upsert chunk rows with metadata, content, and provenance
+- Store the generation manifest (Qdrant collection + Neo4j graph id) and the dense/sparse contracts
+- Serve chunk hydration for every retrieval leg
 
 ## Neo4j Client Responsibilities
 
-- Ensure database exists (per mode)
-- Ensure vector index on Chunk nodes when enabled
-- Upsert entities and relationships
-- Expand from seed hits to related chunks
+- Resolve the corpus database (per mode)
+- Store generation-scoped entities, relationships, and `FROM_CHUNK` chunk links
+- Derive GDS Leiden communities at index time when `graph_storage.include_communities` is on
+- Serve entity traversal seeded from the manifest's Qdrant generation
+
+*Concept diagram (where each artifact lives only — the retrieval flow is on the [generated retrieval-pipeline page](reference/architecture/retrieval-pipeline.md)):*
 
 ```mermaid
 flowchart LR
-    CH["Chunks"] --> PG["PostgreSQL"]
-    EMB["Embeddings"] --> PG
+    CH["Chunks + provenance"] --> PG["PostgreSQL"]
+    MAN["Generation manifest"] --> PG
+    VEC["Dense + sparse vectors"] --> QD["Qdrant"]
     ENT["Entities"] --> NEO["Neo4j"]
     REL["Relationships"] --> NEO
+    COM["GDS Leiden communities"] --> NEO
 ```
 
 ### Configuration Hooks
@@ -64,7 +68,7 @@ flowchart LR
 | indexing | `postgres_url` | DSN for Postgres |
 | graph_storage | `neo4j_uri`, `neo4j_user`, `neo4j_password` | Neo4j connectivity |
 | graph_storage | `neo4j_database_mode`, `neo4j_database_prefix` | DB isolation strategy |
-| graph_indexing | `store_chunk_embeddings`, `chunk_vector_index_name` | Neo4j vector search on chunks |
+| graph_indexing | `enabled`, `build_code_graph` | Derived graph policy selection |
 
 === "Python"
 ```python
@@ -86,5 +90,6 @@ curl -sS http://localhost:8000/ready | jq .
 
 1. Uses prefix + sanitized corpus id in per_corpus mode
 
-??? info "Vector Similarity"
-    Set `graph_indexing.vector_similarity_function` to `cosine` or `euclidean` based on your embedding model norms.
+??? info "Qdrant vectors"
+    Dense and sparse vectors live in per-corpus Qdrant generations; the corpus manifest names the physical collection and the contracts they were built under.
+

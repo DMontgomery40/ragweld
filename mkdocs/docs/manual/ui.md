@@ -72,7 +72,7 @@ This is the core operator loop: ask, inspect sources, adjust retrieval settings,
 
 ![Graph explorer with entity table and relationships](../assets/images/graph-explorer.png)
 
-The graph view is where you validate entity extraction quality and relationship coverage.
+The graph view is where you validate entity extraction quality and relationship coverage. Communities are GDS Leiden partitions derived at index time — re-index the corpus to refresh them.
 
 ### Recall gating and memory policy controls
 

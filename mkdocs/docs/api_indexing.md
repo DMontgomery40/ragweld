@@ -61,6 +61,9 @@
 !!! note "Run event logs are pages, not bare lists"
     `GET /api/index/{corpus_id}/runs/{run_id}/events` now answers `IndexRunEventPage`: `events` (the most recent `limit`, oldest first), `total` (everything the run recorded) and `first_index` (where this slice starts). A client that asked for `?limit=500` of a 1,284-event run can now say so, instead of printing its own cap as a fact about the run.
 
+!!! note "Semantic runs need an approved graph schema"
+    When the derived graph policy is `semantic` (external corpus, `graph_indexing.enabled`, AST policy off), `POST /api/index` requires `approved_graph_schema_hash` — the exact hash from a reviewed proposal (`POST /api/index/{corpus_id}/graph-schema/proposal`). A missing hash, or a corpus change since the review, answers `409 graph_schema_approval_required` before any run fence is taken. An authenticated operator may also retry a refused entity-sparse run with `graph_empty_override_reason`; the override promotes chunks and vectors only. See [Indexing a corpus](manual/indexing.md) and [Indexing pipeline](indexing.md).
+
 ```mermaid
 flowchart LR
     Start["POST /api/index"] --> Worker["Indexer"]

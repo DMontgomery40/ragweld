@@ -19,7 +19,7 @@
 
     ---
 
-    Build lexical graph, store chunk embeddings, and (optionally) semantic KG.
+    Build the lexical graph, run semantic or AST extraction, resolve entities, and derive GDS Leiden communities at index time.
 
 </div>
 
@@ -28,13 +28,13 @@
 [API](../api.md){ .md-button }
 
 !!! tip "Chunk Mode"
-    The `graph_search.mode="chunk"` blends lexical adjacency with entity expansion for practical cross-file context.
+    There is no chunk/entity mode switch. Every enabled corpus uses the same Qdrant-seeded Neo4j traversal; the per-corpus choice is the derived graph policy (`semantic`, `code`, `off`, or `excluded`) shown as a badge in RAG → Indexing.
 
 !!! note "Per-Corpus Database"
     Use `graph_storage.neo4j_database_mode="per_corpus"` (Neo4j Enterprise) for hard isolation.
 
-!!! warning "Vector Index"
-    If you store chunk embeddings in Neo4j, ensure the vector index comes ONLINE before serving traffic.
+!!! note "Generation-scoped by construction"
+    Both stores are read through the manifest: dense seeds come from the physical Qdrant collection it names, and traversal runs only against the Neo4j graph id in the same manifest. Chunks join to entities through a generation-qualified `graph_join_id` payload, so a superseded generation can never leak entities into a live search.
 
 ## Search Configuration (Selected)
 
@@ -42,9 +42,9 @@
 |-------|---------|-------------|
 | `graph_search.enabled` | true | Enable graph leg |
 | `graph_search.max_hops` | 2 | Traversal depth |
-| `graph_search.top_k` | 30 | Hits from traversal |
-| `graph_search.chunk_neighbor_window` | 1 | Include adjacent chunks |
-| `graph_search.chunk_entity_expansion_enabled` | true | Expand via entity links |
+| `graph_search.top_k` | 30 | Qdrant seed Top-K |
+| `graph_search.chunk_neighbor_window` | 1 | Include adjacent `NEXT_CHUNK` chunks around relationship hits |
+| `graph_search.include_communities` | true | Include community expansion (GDS Leiden) |
 
 ## Storage Configuration (Selected)
 
@@ -54,49 +54,60 @@
 | `graph_storage.neo4j_user` | `neo4j` | Username |
 | `graph_storage.neo4j_password` | — | Password |
 | `graph_storage.max_hops` | 2 | Default traversal bound |
-| `graph_indexing.store_chunk_embeddings` | true | Store chunk vectors on nodes |
-| `graph_indexing.chunk_vector_index_name` | `tribrid_chunk_embeddings` | Vector index name |
+| `graph_indexing.build_code_graph` | false | Select the AST code-graph policy for a code corpus |
 
 ### Code graph artifacts
 
-The AST code graph written by `graph_indexing.build_code_graph` lands in the same Neo4j lane as the lexical graph and the semantic KG. In `chunk` mode, entity expansion can follow the chunk links into `calls`, `inherits`, and `imports` edges, so a seed chunk hit can reach its callers, base classes, and importing modules. See the [Indexing pipeline](../indexing.md) for build details and the [`graph_indexing` config reference](../reference/config/graph_indexing.md) for edge weights and timeouts.
+The AST code graph written by `graph_indexing.build_code_graph` lands in the same Neo4j lane as the lexical graph. `contains`, `inherits`, `imports`, and `calls` edges link module/class/function entities, each anchored to its defining chunk through `FROM_CHUNK`, so a seed chunk hit can reach its callers, base classes, and importing modules. See the [Indexing pipeline](../indexing.md) for build details and the [`graph_indexing` config reference](../reference/config/graph_indexing.md) for edge weights and timeouts.
 
 Cross-file edges are held back during the per-file pass and written in one relationship-only upsert after the run's last file (`server/api/index.py`), so both endpoints always exist in Neo4j under their real labels when the edge lands — a call to an imported class resolves to the `class` node, never to a guessed label. Entity ids are corpus-relative (`file_path` for modules, `file_path::qualname` for symbols), with uniqueness scoped by corpus.
 
-The entity inspection endpoints handle these ids directly: `/graph/{corpus_id}/entity/{entity_id}` matches `{entity_id}` as a full path segment, so ids containing `/` (for example `server/services/traces.py::TraceStore.add_event`) can be fetched without encoding the slashes. See [Graph API](../api_graph.md).
+The entity inspection endpoints take the id as a query parameter (`/graph/{corpus_id}/entity?entity_id=...`), so ids containing `/` and `::` (for example `server/services/traces.py::TraceStore.add_event`) need no path encoding. See [Graph API](../api_graph.md).
+
+After a successful index, ragweld also runs deterministic GDS Leiden community detection over the staged entities (`server/graph/communities.py`, GDS 2.13) and writes `communityId`/`communityPath` onto every entity, powering the community views here and community expansion in retrieval.
 
 !!! tip "If you're not sure"
     Leave `build_code_graph` off for prose-heavy corpora and turn it on for code corpora where structural questions ("who calls this?", "what inherits from this?") matter. It is built during indexing, so plan a re-index after enabling.
 
+*Concept diagram (the graph leg only — the full fused pipeline is on the [generated retrieval-pipeline page](../reference/architecture/retrieval-pipeline.md)):*
+
 ```mermaid
 flowchart LR
-    Seed["Seed Chunks"] --> Walk["Traversal (max_hops)"]
-    Walk --> Neigh["Neighbors"]
-    Neigh --> Return["Ranked Chunk IDs"]
+    Q["Query embedding"] --> SEED["Dense seeds\n(manifest Qdrant generation)"]
+    SEED --> JOIN["graphJoinId join\n(Neo4j Chunk nodes)"]
+    JOIN --> ENT["FROM_CHUNK entities"]
+    ENT --> WALK["Entity relationship walk\n(graph_search.max_hops)"]
+    WALK --> REL["Related chunks\nvia FROM_CHUNK"]
+    JOIN --> NB["NEXT_CHUNK neighbors\n(chunk_neighbor_window)"]
+    REL --> HYD["Postgres hydration"]
+    NB --> HYD
+    HYD --> OUT["Graph leg results"]
+    ENT --> COM["GDS Leiden communities\n(include_communities)"]
+    COM --> OUT
 ```
 
 === "Python"
 ```python
 import httpx
-base = "http://localhost:8000"
+base = "http://127.0.0.1:58012/api"
 entities = httpx.get(f"{base}/graph/tribrid/entities").json()
 first = entities[0]
-rels = httpx.get(f"{base}/graph/tribrid/entity/{first['entity_id']}/neighbors").json()
-print(first['name'], len(rels.get('relationships', [])))
+rels = httpx.get(f"{base}/graph/tribrid/entity/neighbors", params={"entity_id": first["entity_id"]}).json()
+print(first["name"], len(rels.get("relationships", [])))
 ```
 
 === "curl"
 ```bash
-BASE=http://localhost:8000
+BASE=http://127.0.0.1:58012/api
 curl -sS "$BASE/graph/tribrid/entities" | jq '.[0]'
 ```
 
 === "TypeScript"
 ```typescript
 async function neighbors(corpus: string) {
-  const ents = await (await fetch(`/graph/${corpus}/entities`)).json();
+  const ents = await (await fetch(`/api/graph/${corpus}/entities`)).json();
   const id = ents[0].entity_id;
-  const rels = await (await fetch(`/graph/${corpus}/entity/${id}/neighbors`)).json();
+  const rels = await (await fetch(`/api/graph/${corpus}/entity/neighbors?entity_id=${encodeURIComponent(id)}`)).json();
   console.log(id, rels.relationships.length);
 }
 ```

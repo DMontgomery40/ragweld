@@ -24,9 +24,9 @@ flowchart LR
     root --> n_chunking
     n_indexing["indexing\n20 fields"]
     root --> n_indexing
-    n_graph_storage["graph_storage\n12 fields"]
+    n_graph_storage["graph_storage\n11 fields"]
     root --> n_graph_storage
-    n_graph_indexing["graph_indexing\n28 fields"]
+    n_graph_indexing["graph_indexing\n11 fields"]
     root --> n_graph_indexing
     n_qdrant["qdrant\n1 fields"]
     root --> n_qdrant
@@ -36,7 +36,7 @@ flowchart LR
     root --> n_vector_search
     n_sparse_search["sparse_search\n4 fields"]
     root --> n_sparse_search
-    n_graph_search["graph_search\n9 fields"]
+    n_graph_search["graph_search\n5 fields"]
     root --> n_graph_search
     n_reranking["reranking\n12 fields"]
     root --> n_reranking
@@ -82,13 +82,13 @@ flowchart LR
 | `tokenization` | 7 | Tokenizer configuration used for token-aware chunking and budgeting. | [tokenization](../config/tokenization.md) |
 | `chunking` | 18 | Chunking configuration for documents and code. | [chunking](../config/chunking.md) |
 | `indexing` | 20 | Indexing and vector storage configuration. | [indexing](../config/indexing.md) |
-| `graph_storage` | 12 | Configuration for Neo4j graph storage and traversal. | [graph_storage](../config/graph_storage.md) |
-| `graph_indexing` | 28 | Configuration for building/persisting graph data during indexing. | [graph_indexing](../config/graph_indexing.md) |
+| `graph_storage` | 11 | Configuration for Neo4j graph storage and traversal. | [graph_storage](../config/graph_storage.md) |
+| `graph_indexing` | 11 | Configuration for building/persisting graph data during indexing. | [graph_indexing](../config/graph_indexing.md) |
 | `qdrant` | 1 | Qdrant vector-store connection for the canonical dense + sparse retrieval lane. | [qdrant](../config/qdrant.md) |
 | `fusion` | 6 | Configuration for tri-brid fusion of vector + sparse + graph results. | [fusion](../config/fusion.md) |
 | `vector_search` | 3 | Configuration for the vector (dense) leg served by Qdrant. | [vector_search](../config/vector_search.md) |
 | `sparse_search` | 4 | Configuration for the sparse (IDF-modified BM25 sparse vectors in Qdrant) leg. | [sparse_search](../config/sparse_search.md) |
-| `graph_search` | 9 | Configuration for graph-based search using Neo4j. | [graph_search](../config/graph_search.md) |
+| `graph_search` | 5 | Configuration for graph-based search using Neo4j. | [graph_search](../config/graph_search.md) |
 | `reranking` | 12 | Reranking configuration for result refinement. | [reranking](../config/reranking.md) |
 | `generation` | 10 | LLM generation configuration. | [generation](../config/generation.md) |
 | `enrichment` | 6 | Code enrichment and chunk_summary generation configuration. | [enrichment](../config/enrichment.md) |

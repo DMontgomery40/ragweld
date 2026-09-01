@@ -26,8 +26,8 @@
 [Configuration](configuration.md){ .md-button }
 [API](api.md){ .md-button }
 
-!!! tip "Chunk mode"
-    Prefer `graph_search.mode=chunk` to blend Neo4j vector search on chunk nodes with traversal.
+!!! tip "One graph pipeline"
+    Graph retrieval is a single Qdrant-seeded Neo4j traversal — there is no chunk/entity mode switch. See [Graph retrieval](retrieval/graph.md).
 
 !!! note "Database isolation"
     Use `graph_storage.neo4j_database_mode` with `per_corpus` (Enterprise) to avoid cross-corpus filters.
@@ -96,4 +96,4 @@ console.log(ents.length)
 ```
 
 ??? info "Communities"
-    When enabled, community detection summarizes clusters and exposes `Community` objects with members and level.
+    Communities are GDS Leiden partitions written at index time (`communityId`/`communityPath` on entities) and served as `Community` objects with members and level. Re-index to derive them from the current graph.

@@ -26,7 +26,7 @@
 [Config API & workflow](../../configuration.md){ .md-button }
 [Glossary](../../glossary.md){ .md-button }
 
-**Total parameters**: 12
+**Total parameters**: 11
 
 ??? info "Group index"
     - `(root)`
@@ -35,7 +35,6 @@
 
 | JSON key | Env key(s) | Type | Default | Constraints | Summary |
 |---------|------------|------|---------|-------------|---------|
-| `graph_storage.community_algorithm` | `GRAPH_COMMUNITY_ALGORITHM` | `Literal["louvain", "label_propagation"]` | `"louvain"` | allowed="louvain", "label_propagation" | Community detection algorithm |
 | `graph_storage.entity_types` | — | `list[str]` | `["function", "class", "module", "variable", "import"]` | — | Entity types to extract and store in graph |
 | `graph_storage.graph_search_top_k` | `GRAPH_SEARCH_TOP_K` | `int` | `30` | ≥ 5, ≤ 100 | Number of results from graph traversal |
 | `graph_storage.include_communities` | `GRAPH_INCLUDE_COMMUNITIES` | `bool` | `true` | — | Include community detection in graph analysis |

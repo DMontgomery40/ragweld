@@ -20,12 +20,12 @@ flowchart TB
     embed["Embedder (server/indexing/embedder.py)\nembedding_backend=deterministic\nembedding_type=openai\nembedding_model=text-embedding-3-large\nembedding_dim=3072"]
     dense["Dense leg -> Qdrant dense generation\nenabled=True\ntop_k=50\nmin_score_vector=0.0"]
     sparse["Sparse leg -> Qdrant sparse generation (BM25)\nenabled=True\ntop_k=50\nbm25_k1=1.2\nbm25_b=0.4\nmin_score_sparse=0.0"]
-    graph["Graph leg -> Neo4j (Document/Chunk lexical graph)\nenabled=True\nmode=chunk\nmax_hops=2\ntop_k=30\nchunk_neighbor_window=1\ninclude_communities=True\nmin_score_graph=0.0"]
+    graph["Graph leg -> Neo4j (Document/Chunk lexical graph)\nenabled=True\nmax_hops=2\ntop_k=30\nchunk_neighbor_window=1\ninclude_communities=True\nmin_score_graph=0.0"]
     end
     subgraph s_stores["Stores"]
     qdrant["Qdrant (server/retrieval/qdrant_store.py)\nurl=http://127.0.0.1:56333"]
     pg["Postgres chunk rows + generation manifests\npostgres_url=postgresql://postgres:postgres@localhost:5432/tribrid_rag"]
-    neo4j["Neo4j (server/db/neo4j.py)\nneo4j_uri=bolt://localhost:7687\nneo4j_database_mode=shared\ncommunity_algorithm=louvain"]
+    neo4j["Neo4j (server/db/neo4j.py)\nneo4j_uri=bolt://localhost:7687\nneo4j_database_mode=shared"]
     end
     subgraph s_fuse["Fusion and shaping (server/retrieval/fusion.py)"]
     fusion["Weighted RRF fusion\nvector_weight=0.4\nsparse_weight=0.3\ngraph_weight=0.3\nrrf_k=60\n"]
@@ -158,12 +158,8 @@ flowchart TB
 
 | Field | Default | What it does |
 |---|---|---|
-| `mode` | `chunk` | Graph retrieval mode. 'chunk' uses lexical chunk nodes + Neo4j vector index; 'entity' uses the legacy code-entity graph. |
 | `enabled` | `True` | Enable graph search in tri-brid retrieval |
-| `chunk_neighbor_window` | `1` | When mode='chunk', include up to N adjacent chunks (NEXT_CHUNK) around each seed hit |
-| `chunk_seed_overfetch_multiplier` | `10` | When mode='chunk' and Neo4j uses a shared database, overfetch seed hits before filtering by corpus_id |
-| `chunk_entity_expansion_enabled` | `True` | When mode='chunk', expand from seed chunks via Entity graph (IN_CHUNK links) to find related chunks |
-| `chunk_entity_expansion_weight` | `0.8` | Blend weight for entity-expansion scores relative to seed chunk scores (mode='chunk') |
+| `chunk_neighbor_window` | `1` | Include up to N adjacent chunks (NEXT_CHUNK) around relationship hits |
 | `max_hops` | `2` | Maximum graph traversal hops |
 | `include_communities` | `True` | Include community-based expansion in graph search |
 | `top_k` | `30` | Number of results to retrieve from graph search |
@@ -180,7 +176,6 @@ flowchart TB
 | `neo4j_auto_create_databases` | `True` | Automatically create per-corpus Neo4j databases when missing (Enterprise). |
 | `max_hops` | `2` | Maximum traversal hops for graph search |
 | `include_communities` | `True` | Include community detection in graph analysis |
-| `community_algorithm` | `louvain` | Community detection algorithm |
 | `entity_types` | `['function', 'class', 'module', 'variable', 'import']` | Entity types to extract and store in graph |
 | `relationship_types` | `['calls', 'imports', 'inherits', 'contains', 'references']` | Relationship types to extract |
 | `graph_search_top_k` | `30` | Number of results from graph traversal |
