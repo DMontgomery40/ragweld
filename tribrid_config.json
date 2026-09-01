@@ -186,7 +186,6 @@
     "neo4j_vector_query_mode": "auto",
     "max_hops": 2,
     "include_communities": true,
-    "community_algorithm": "louvain",
     "entity_types": [
       "function",
       "class",

@@ -240,7 +240,45 @@ The CRITICAL config/retrieval surface was reported before mutation. Containment 
 
 ## Task 7 - GDS Leiden communities
 
-Status: pending
+Status: complete
+
+### Pre-edit impact analysis
+
+- `Neo4jClient.detect_communities`: LOW, no indexed upstream caller; `_store_communities`: LOW, one; `_modularity_groups`: UNKNOWN.
+- `Neo4jClient.get_communities`, member/subgraph methods, and `list_communities`: LOW or UNKNOWN with the Graph Explorer route as the bounded consumer.
+- `Neo4jClient.get_graph_stats`: CRITICAL, 224 total dependants across 55 indexed processes.
+- Backend `GraphStorageConfig`: CRITICAL, 96 direct / 123 total dependants; the removed generated config field shares the public generated-type blast radius recorded in Task 2.
+- `useGraph` and `GraphSubtab`: LOW, each bounded by the `GraphSubtab` flow. The pre-existing filter-state defect found during the headed drive was fixed across `useGraphStore`, `useGraph`, and `GraphSubtab` under that same surface.
+- `_probe_neo4j_readiness` and the new Leiden symbols were not named in the pre-task graph and reported UNKNOWN.
+
+The CRITICAL stats/config blast radius was reported before mutation. Containment is the derived-view API contract, generated types, deployment/readiness tests, real GDS 2.13.7 execution, failure cleanup, out-of-scope sentinels, and the no-interception headed Graph Explorer drive.
+
+### TDD and verification evidence
+
+- RED: the new Leiden contract failed collection with `ModuleNotFoundError: server.graph`. The first real GDS run then failed with the installed 2.13.7 error that Leiden only runs on an undirected graph, proving reciprocal directed arcs alone were insufficient.
+- Deployment GREEN: a disposable `neo4j:5.26.20-community` instance installed observed GDS `2.13.7`; its health transitioned to healthy only after the exact `gds.version()` probe matched `2\.13\.`. Compose now installs APOC plus Graph Data Science and allowlists/unrestricts `apoc.*,gds.*`; application readiness fails closed when communities require missing/wrong GDS.
+- Algorithm GREEN: the approved scoped bidirectional weighted Cypher projection is converted through the documented `gds.graph.relationships.toUndirected` procedure with `SINGLE` aggregation, then weighted hierarchical Leiden writes `communityPath` with seed 19 and concurrency 1 and derives `communityId`. Unique projection names are dropped in `finally` on success and failure.
+- Live GREEN: 3/3 real Neo4j integration tests passed on GDS 2.13.7 in 5.95s. Two weighted cliques remain two identical final communities over repeated runs; an AST relationship graph receives communities; an out-of-scope sentinel remains untouched; no `Community`/`IN_COMMUNITY` ontology exists; and a real temporary uniqueness constraint forces a post-Leiden write failure, proves projection removal, then proves a clean retry. The final review fix deliberately removes `repo_id` from one internal edge and still preserves the stable partition.
+- Focused final gate: 179/179 deployment, config, readiness, generated-contract, metadata, graph-stats, and graph-API tests passed in 15.93s. Ruff, banned-pattern validation, generated-type validation, `uv lock --check`, TypeScript compilation, and Vite production build passed. The unused direct `types-networkx` dev dependency and every Ragweld NetworkX/Louvain community implementation are gone.
+- Headed Playwright against an isolated overlay API/UI and disposable GDS, no request interception: 1/1 passed in 7.8s with a retained trace. It selected the real six-entity/seven-edge/two-community corpus, clicked a derived community, selected a member and expanded its neighborhood, changed hops, exercised entity and sole-relationship filters, zoomed in/out, fit, panned, reloaded, and selected the second community.
+- The browser drive found a real pre-existing filter contradiction: unchecked boxes represented the empty-array sentinel that also meant “show all.” The local store now models all as `null` and none as `[]`; both entity and relationship controls render and filter truthfully, including the one-relationship-type edge case. The same drive removed a React border shorthand/non-shorthand warning. The disposable corpus and graph were deleted by exact id afterwards.
+- Obsolete production search is empty for persisted `Community` nodes, `IN_COMMUNITY` writers, `_store_communities`, `_modularity_groups`, Louvain calls, and `community_algorithm`. Removed config names remain only in migration strip lists and negative tests.
+
+### DeepSeek V4 Flash review
+
+- First response id: `resp_C-uf_8inDGodZGImUQKaZ7zp1lUMo2G48MxouUkfOqd3oyQrYx_hnsxocdSrhXOS6PafnO_Fe9Ii2g4S6bHrgteOpPb3O48JcxIEyvMoPGuCgO_4w90xcmbsddNODi44P_w91jK7qmkSgVP8eXk3-kDQFhw-_pTh-PRPSWycQPxvzu5xmFhLf0W5lo4rjR1lop5g8z7VG8iA6pPYBlZbKdfnZurTHDCwJA6HKnW4aSPgaHAFjxH3uwoNKm2-wEmnl2QTXvYkVqTNjEYM89_9T6mBLz9NHigXnBA1_3RCcrLdz0L4DnFKEedpAhQaxVlnyw6sABXKlih56AnNTtoN1u95DiGH88lp22eDbCSP-wXvQShyx6rNh0ykT7wm_h29rsbqyMWnp6Wca2yC7hHSctw-viNUHZ98uzx_fQNL5E7MC_9dkOlZvyJdjSc2mQ==`.
+- First verdict: FAIL, one P1. The relationship projection redundantly required `r.repo_id`, which excluded an otherwise correctly scoped legacy internal relationship whose two endpoint entities had the staged repo id.
+- Fix: both relationship-property predicates were removed; endpoint scoping remains strict. A unit assertion forbids their return and the live weighted-clique regression strips the property from one edge before two successful stable detections.
+- First re-review response id: `resp_3eEwbf5sO1dkqF7hSQUoxx8BxhaRcbJkGJBNeoWTFhQFs2I7acz_GCqBNDRKrvWsAgYHlJGyv6f8ppWbvTDP78etPVOxUY8wWRLzjcEI4aM724rLrOXh47iQ7gcR8JHVQkKx0hJwBWlAKsdxOWPgnnjP_IasUoECyc68pgWaYH1zrH5MZp_QmEZu7RLnz6elx7MGxsug8Fl9dqNPpz2Cnhhe_i7wYNgaFR-a2EiBLwXCQQhAgflKQd0VVa8nzXop4m1Oh0WQLY7YqqF_2czRGzuTUoSDyWcu18YOgjAjDMPydRUzNze0ZNJ_u0YG2pKyZUrprgBUfbTyI4hvJ_LiC5f7V_9nvSzWTJ0pDUtKWb8dpSL-q3xK7ssCaDJkgwbFe9UJw9z1mDBKsF7I_OQ9JAzgu_e6kap8IBHnTumADqf05xZR9VmpY0MpNC5u6Q==`; it exhausted its 10,000-token reasoning ceiling and returned no verdict, so it was explicitly rejected as non-PASS.
+- Completed re-review response id: `resp_tSE-nxX8Y5W_YZRYmvUMz_Sm1pf25oWpXVsAINfXjLE0Ya6uJj65fmx4btkWkhdDbGhKN5A-tNDSJB6yAWdUas8nbZsajR1quE_ah1Bzje_EPGlilCbM2QRaDXxXQ4CQVfMBezknkqS6XaNKvnV0r4SpHfTksWtvrwz7wmeTa6uNSn4ROZK3HdIaIh46CR2lnkLKOWhpv0udlTsdaWXSgiT06e-gwfBcUk5Cwj7Kqb23C8x80ZKUlGV_daB4pbGsju7Rqo6CbhXHF6buSf8rbc3u9s-4j3XNfR-eBVHlqZvOCV1ACO0MnFOCMPcsrrrjJ1yjhaa0yP_tD6pMIjGXoFwbWmZNgV87Erca47oLZqBydEXO9PwVSj-5fssoiyqaeW42gvoy159CMZIwzcT8mi13iruH_cTSE9r7PiH_JkKBXa8XjQ8mtsbV2CImcQ==`.
+- Resolved model: `deepseek.deepseek-v4-flash`.
+- Completed re-review usage: 21,902 input + 873 output = 22,775 tokens.
+- Completed re-review cost: `$0.0050883`.
+- Final verdict: **PASS**.
+
+### GitNexus scope gate
+
+`detect-changes --scope compare --base-ref main --repo ragweld` reported MEDIUM risk across 19 tracked files, 34 indexed symbols, and three affected Graph Explorer flows (`FailureDetail`, `LoadStats`, and `LoadCommunities`). This matches the reviewed Neo4j derived-view, config migration, readiness, and Graph Explorer scope. New untracked Leiden source/tests are separately present in the complete DeepSeek diff and commit inventory.
 
 ## Task 8 - Full verification, deployment, reindex, browser acceptance
 

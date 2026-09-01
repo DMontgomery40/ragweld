@@ -240,6 +240,24 @@ def test_base_compose_uses_project_scoped_names_and_named_database_volumes() -> 
     assert neo4j_logs["type"] == "volume"
 
 
+def test_neo4j_runtime_pins_gds_213_and_requires_functional_readiness() -> None:
+    config = _compose_config("docker-compose.yml")
+    neo4j = config["services"]["neo4j"]
+    environment = neo4j["environment"]
+
+    assert environment["NEO4J_PLUGINS"] == '["apoc", "graph-data-science"]'
+    assert environment["NEO4J_dbms_security_procedures_unrestricted"] == "apoc.*,gds.*"
+    assert environment["NEO4J_dbms_security_procedures_allowlist"] == "apoc.*,gds.*"
+    healthcheck = " ".join(neo4j["healthcheck"]["test"])
+    assert "gds.version()" in healthcheck
+    assert "2\\.13\\." in healthcheck
+
+    readiness_source = (ROOT / "server" / "api" / "health.py").read_text(encoding="utf-8")
+    neo4j_source = (ROOT / "server" / "db" / "neo4j.py").read_text(encoding="utf-8")
+    assert "gds_version" in readiness_source
+    assert "CALL gds.version()" in neo4j_source
+
+
 def test_promtail_collects_only_ragweld_owned_container_logs() -> None:
     import yaml
 
@@ -631,6 +649,7 @@ def test_secure_ingress_ui_contract_marks_missing_services_deployment_only() -> 
 
 def test_generation_gateway_topology_is_pinned_local_and_has_no_paid_fallback() -> None:
     import yaml
+
     from server.models.tribrid_config_model import TriBridConfig
 
     config = _compose_config("docker-compose.yml", "infra/docker-compose.observability.yml")

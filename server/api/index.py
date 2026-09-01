@@ -37,6 +37,7 @@ from server.api.dependency_errors import (
 from server.chat.provider_router import ProviderRoute, select_provider_route
 from server.db.neo4j import Neo4jClient
 from server.db.postgres import PostgresClient
+from server.graph.communities import detect_leiden_communities
 from server.indexing.chunker import Chunker
 from server.indexing.embedder import Embedder, configure_postgres_embedding_cache_backend
 from server.indexing.estimate import (
@@ -103,6 +104,7 @@ from server.models.index import (
     Chunk,
     FigureRouteConflictDetail,
     FigureRouteConflictResponse,
+    GraphCommunityTelemetry,
     GraphExtractionTelemetry,
     GraphGenerationMetadata,
     GraphResolutionTelemetry,
@@ -3299,6 +3301,7 @@ async def _background_index_job(
     figure_totals: FigureRunTotals | None = None  # this run's figure phase, priced for the summary
     graph_extraction: GraphExtractionTelemetry | None = None
     graph_resolution: GraphResolutionTelemetry | None = None
+    graph_communities: GraphCommunityTelemetry | None = None
     graph_run_metadata: GraphGenerationMetadata | None = None
     graph_failure_codes: list[str] = []
     graph_promotable: bool | None = None
@@ -3327,6 +3330,7 @@ async def _background_index_job(
             schema_payload=approved_proposal.schema_payload if approved_proposal else None,
             extraction=graph_extraction,
             resolution=resolution,
+            communities=graph_communities,
             override=override,
             partial=partial,
         )
@@ -3585,6 +3589,36 @@ async def _background_index_job(
                                 "Graph promotion override was supplied for a graph that already "
                                 "passes every invariant; remove the override reason and retry."
                             ),
+                        )
+                    if cfg.graph_storage.include_communities:
+                        community_driver = await asyncio.to_thread(
+                            _create_sync_graph_driver, cfg
+                        )
+                        try:
+                            await asyncio.to_thread(community_driver.verify_connectivity)
+                            graph_communities = await detect_leiden_communities(
+                                driver=community_driver,
+                                neo4j_database=graph_database,
+                                repo_id=staging_repo_id,
+                            )
+                        finally:
+                            await asyncio.to_thread(community_driver.close)
+                        _emit_event(
+                            queue,
+                            {
+                                "type": "log",
+                                "message": (
+                                    "🧭 GDS Leiden communities: "
+                                    f"count={graph_communities.community_count} "
+                                    f"levels={graph_communities.levels} "
+                                    f"modularity={graph_communities.modularity:.4f}"
+                                ),
+                                "meta": {
+                                    "stage": "graph_communities",
+                                    **graph_communities.model_dump(mode="json"),
+                                },
+                            },
+                            drop_oldest=True,
                         )
                     graph_generation_id = staging_repo_id
                     graph_run_metadata = _current_graph_metadata()

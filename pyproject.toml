@@ -104,7 +104,6 @@ dev-dependencies = [
     "pytest-cov>=4.1.0",
     "ruff>=0.2.0",
     "mypy>=1.8.0",
-    "types-networkx>=3.0",
     "datamodel-code-generator>=0.25.0",
 ]
 

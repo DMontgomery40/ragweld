@@ -53,8 +53,10 @@ interface GraphStore {
   activeQuery: string;
 
   // Filter state
-  visibleEntityTypes: string[];
-  visibleRelationTypes: string[];
+  /** `null` means every type; `[]` truthfully means none. */
+  visibleEntityTypes: string[] | null;
+  /** `null` means every type; `[]` truthfully means none. */
+  visibleRelationTypes: string[] | null;
   maxHops: number;
 
   // Actions
@@ -71,8 +73,8 @@ interface GraphStore {
   setTotalMatched: (total: number) => void;
   setActiveQuery: (query: string) => void;
   setViewMode: (mode: 'viz' | 'table') => void;
-  setVisibleEntityTypes: (types: string[]) => void;
-  setVisibleRelationTypes: (types: string[]) => void;
+  setVisibleEntityTypes: (types: string[] | null) => void;
+  setVisibleRelationTypes: (types: string[] | null) => void;
   setMaxHops: (hops: number) => void;
   reset: () => void;
 }
@@ -82,8 +84,8 @@ export const MAX_ENTITY_LIMIT = 2000;
 export const DEFAULT_ENTITY_LIMIT = 200;
 export const ENTITY_LIMIT_CHOICES = [100, 200, 500, 1000, MAX_ENTITY_LIMIT] as const;
 
-const defaultEntityTypes: string[] = [];
-const defaultRelationTypes: string[] = [];
+const defaultEntityTypes: string[] | null = null;
+const defaultRelationTypes: string[] | null = null;
 
 export const useGraphStore = create<GraphStore>()((set) => ({
   // Initial state

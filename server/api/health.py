@@ -40,6 +40,7 @@ async def _probe_neo4j_readiness(
     *,
     db_name: str,
     status: ReadinessDependencyStatus,
+    require_gds: bool = False,
 ) -> bool:
     try:
         await neo4j.connect()
@@ -63,6 +64,24 @@ async def _probe_neo4j_readiness(
                 "Verify Neo4j database permissions and the resolved corpus database."
             )
             return False
+        if require_gds:
+            try:
+                gds_version = await neo4j.gds_version()
+            except Exception:
+                status.ok = False
+                status.error = "Neo4j GDS readiness could not be verified."
+                status.operator_hint = (
+                    "Install the Graph Data Science 2.13 plugin and allow apoc.*,gds.* procedures."
+                )
+                return False
+            if not gds_version.startswith("2.13."):
+                status.ok = False
+                status.error = f"Neo4j GDS 2.13.x is required; found {gds_version or 'none'}."
+                status.operator_hint = (
+                    "Install a Neo4j 5.26-compatible Graph Data Science 2.13.x plugin."
+                )
+                return False
+            status.info = {**(status.info or {}), "gds_version": gds_version}
         return True
     finally:
         await _disconnect_neo4j_quietly(neo4j)
@@ -161,7 +180,14 @@ async def readiness_check(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> ReadinessSt
             cfg.graph_storage.resolve_password(),
             database=db_name,
         )
-        if not await _probe_neo4j_readiness(neo4j, db_name=db_name, status=neo4j_status):
+        if not await _probe_neo4j_readiness(
+            neo4j,
+            db_name=db_name,
+            status=neo4j_status,
+            require_gds=bool(
+                cfg.graph_indexing.enabled and cfg.graph_storage.include_communities
+            ),
+        ):
             ready = False
     except Exception:
         ready = False

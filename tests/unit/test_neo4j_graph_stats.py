@@ -1,4 +1,4 @@
-"""Unit tests for Neo4j graph stats / community detection without a live Neo4j instance."""
+"""Unit tests for Neo4j graph stats without a live Neo4j instance."""
 
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ class _QueueSession:
         self.queries: list[str] = []
         self.params: list[dict[str, object]] = []
 
-    async def __aenter__(self) -> "_QueueSession":
+    async def __aenter__(self) -> _QueueSession:
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
@@ -85,32 +85,6 @@ async def test_get_graph_stats_uses_optional_match_and_parses_counts() -> None:
     q0 = session.queries[0]
     assert "OPTIONAL MATCH (e:__Entity__" in q0
     assert "OPTIONAL MATCH (:__Entity__" in q0
-    assert "OPTIONAL MATCH (c:Community" in q0
-
-
-def _clique_pair_with_bridge() -> dict[str, set[str]]:
-    adjacency: dict[str, set[str]] = {}
-
-    def link(a: str, b: str) -> None:
-        adjacency.setdefault(a, set()).add(b)
-        adjacency.setdefault(b, set()).add(a)
-
-    for i in range(6):
-        for j in range(i + 1, 6):
-            link(f"a{i}", f"a{j}")
-            link(f"b{i}", f"b{j}")
-    link("a0", "b0")
-    adjacency["isolated"] = set()
-    return adjacency
-
-
-def test_modularity_groups_keep_bridged_cliques_apart_and_are_deterministic() -> None:
-    """Label propagation collapsed two cliques joined by one bridge into one group
-    (adversarial review of the 2026-08-25 drive fixes); Louvain must not."""
-    from server.db.neo4j import _modularity_groups
-
-    groups = _modularity_groups(_clique_pair_with_bridge())
-    assert groups == [[f"a{i}" for i in range(6)], [f"b{i}" for i in range(6)]]
-    assert groups == _modularity_groups(_clique_pair_with_bridge())  # stable partition
-    assert _modularity_groups({"solo": set(), "pair": set()}) == []
-
+    assert "community_entity.communityId IS NOT NULL" in q0
+    assert "count(DISTINCT community_entity.communityId)" in q0
+    assert ":Community" not in q0

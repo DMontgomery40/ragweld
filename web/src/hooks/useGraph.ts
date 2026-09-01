@@ -298,8 +298,8 @@ export function useGraph() {
    * Filter entities by type
    */
   const getEntitiesByType = useCallback(
-    (types: string[]): Entity[] => {
-      if (types.length === 0) return entities;
+    (types: string[] | null): Entity[] => {
+      if (types === null) return entities;
       return entities.filter((e) => types.includes(e.entity_type));
     },
     [entities]
@@ -309,8 +309,8 @@ export function useGraph() {
    * Filter relationships by type
    */
   const getRelationshipsByType = useCallback(
-    (types: string[]): Relationship[] => {
-      if (types.length === 0) return relationships;
+    (types: string[] | null): Relationship[] => {
+      if (types === null) return relationships;
       return relationships.filter((r) => types.includes(r.relation_type));
     },
     [relationships]

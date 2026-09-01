@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import os
 import re
 import time
-from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -54,7 +52,7 @@ SEMANTIC_RELATION_TYPES: set[str] = {
 ALL_RELATION_TYPES: set[str] = CODE_RELATION_TYPES | SEMANTIC_RELATION_TYPES
 
 _BATCH_SIZE_DEFAULT = 500
-_DEFAULT_REPO_SCOPED_NODE_LABELS: tuple[str, ...] = ("Document", "Chunk", "__Entity__", "Community")
+_DEFAULT_REPO_SCOPED_NODE_LABELS: tuple[str, ...] = ("Document", "Chunk", "__Entity__")
 
 
 # The one entity-name predicate. The entity list and the corpus subgraph must select the
@@ -124,6 +122,16 @@ class Neo4jClient:
             "versions": parsed_versions,
             "edition": str(rec.get("edition") or ""),
         }
+
+    async def gds_version(self) -> str:
+        """Return the installed Graph Data Science version or fail closed."""
+        driver = self._require_driver()
+        async with driver.session(database=self.database) as session:
+            result = await session.run(
+                "CALL gds.version() YIELD gdsVersion RETURN gdsVersion LIMIT 1"
+            )
+            record = await result.single()
+        return str(record.get("gdsVersion") or "") if record else ""
 
     async def database_exists(self, database: str) -> bool:
         """Return True if a database exists (Neo4j 5 multi-db aware)."""
@@ -425,8 +433,8 @@ class Neo4jClient:
         async with driver.session(database=self.database) as session:
             res = await session.run(
                 """
-                MATCH (c:Community {repo_id: $repo_id, community_id: $community_id})
-                MATCH (e:__Entity__ {repo_id: $repo_id})-[:IN_COMMUNITY]->(c)
+                MATCH (e:__Entity__ {repo_id: $repo_id})
+                WHERE toString(e.communityId) = $community_id
                 RETURN count(DISTINCT e) AS members;
                 """,
                 repo_id=repo_id,
@@ -445,15 +453,18 @@ class Neo4jClient:
 
         driver = self._require_driver()
         query = """
-        MATCH (c:Community {repo_id: $repo_id, community_id: $community_id})
-        MATCH (e:__Entity__ {repo_id: $repo_id})-[:IN_COMMUNITY]->(c)
+        MATCH (e:__Entity__ {repo_id: $repo_id})
+        WHERE toString(e.communityId) = $community_id
+        OPTIONAL MATCH (e)-[degree_rel]-(other:__Entity__ {repo_id: $repo_id})
+        WHERE type(degree_rel) IN $allowed_rels
+        WITH e, count(DISTINCT degree_rel) AS degree
         RETURN e.entity_id AS entity_id,
                e.name AS name,
                e.entity_type AS entity_type,
                e.file_path AS file_path,
                e.description AS description,
                properties(e) AS properties
-        ORDER BY name ASC
+        ORDER BY degree DESC, name ASC, entity_id ASC
         LIMIT $limit;
         """
         async with driver.session(database=self.database) as session:
@@ -461,6 +472,7 @@ class Neo4jClient:
                 query,
                 repo_id=repo_id,
                 community_id=community_id,
+                allowed_rels=sorted(ALL_RELATION_TYPES),
                 limit=lim,
             )
             records = await res.data()
@@ -488,10 +500,12 @@ class Neo4jClient:
         driver = self._require_driver()
 
         cypher = """
-        MATCH (c:Community {repo_id: $repo_id, community_id: $community_id})
-        MATCH (e:__Entity__ {repo_id: $repo_id})-[:IN_COMMUNITY]->(c)
-        WITH e
-        ORDER BY e.name ASC
+        MATCH (e:__Entity__ {repo_id: $repo_id})
+        WHERE toString(e.communityId) = $community_id
+        OPTIONAL MATCH (e)-[degree_rel]-(other:__Entity__ {repo_id: $repo_id})
+        WHERE type(degree_rel) IN $allowed_rels
+        WITH e, count(DISTINCT degree_rel) AS degree
+        ORDER BY degree DESC, e.name ASC, e.entity_id ASC
         LIMIT $limit
 
         WITH collect(e) AS nodes
@@ -692,113 +706,55 @@ class Neo4jClient:
             rec = await res.single()
         return int((rec.get("total") if rec else 0) or 0)
 
-    # Community operations
-    async def detect_communities(self, repo_id: str) -> list[Community]:
-        """Detect entity communities by deterministic Louvain partitioning over entity relationships.
-
-        Communities are groups of entities that are actually linked to each other
-        (``associated_with``, ``located_in``, ``owns``, ...). Entities with no
-        relationships belong to no community, and a corpus whose graph has no
-        entity-entity edges has no communities; the UI says so instead of showing
-        one directory bucket. Community ids are content-derived (a hash of the
-        member set) and carry no repo id, so staging -> active promotion, which
-        only rewrites ``repo_id``, leaves them valid.
-        """
-        driver = self._require_driver()
-        allowed_rels = sorted(ALL_RELATION_TYPES)
-        async with driver.session(database=self.database) as session:
-            res = await session.run(
-                """
-                MATCH (e:__Entity__ {repo_id: $repo_id})
-                RETURN e.entity_id AS entity_id, e.name AS name
-                ORDER BY e.entity_id ASC;
-                """,
-                repo_id=repo_id,
-            )
-            node_records = await res.data()
-            res = await session.run(
-                """
-                MATCH (a:__Entity__ {repo_id: $repo_id})-[r]-(b:__Entity__ {repo_id: $repo_id})
-                WHERE type(r) IN $allowed_rels AND a.entity_id < b.entity_id
-                RETURN DISTINCT a.entity_id AS source_id, b.entity_id AS target_id;
-                """,
-                repo_id=repo_id,
-                allowed_rels=allowed_rels,
-            )
-            edge_records = await res.data()
-
-        names: dict[str, str] = {}
-        for r in node_records:
-            eid = str(r.get("entity_id") or "").strip()
-            if eid:
-                names[eid] = str(r.get("name") or eid)
-        adjacency: dict[str, set[str]] = {eid: set() for eid in names}
-        for r in edge_records:
-            a = str(r.get("source_id") or "").strip()
-            b = str(r.get("target_id") or "").strip()
-            if a in adjacency and b in adjacency and a != b:
-                adjacency[a].add(b)
-                adjacency[b].add(a)
-
-        communities: list[Community] = []
-        # CPU-bound partitioning stays off the event loop.
-        groups = await asyncio.to_thread(_modularity_groups, adjacency)
-        for members in groups:
-            ranked = sorted(members, key=lambda eid: (-len(adjacency[eid]), names[eid], eid))
-            hub = ranked[0]
-            digest = hashlib.sha1("\n".join(sorted(members)).encode("utf-8")).hexdigest()[:12]
-            preview = ", ".join(names[eid] for eid in ranked[:5])
-            if len(ranked) > 5:
-                preview += f", +{len(ranked) - 5} more"
-            communities.append(
-                Community(
-                    community_id=f"c-{digest}",
-                    name=names[hub],
-                    summary=f"{len(members)} linked entities around {names[hub]}: {preview}",
-                    member_ids=list(ranked),
-                    level=0,
-                )
-            )
-        communities.sort(key=lambda c: (-len(c.member_ids), c.name, c.community_id))
-
-        await self._store_communities(repo_id, communities)
-        return communities
-
     async def get_communities(self, repo_id: str, level: int | None) -> list[Community]:
         driver = self._require_driver()
-        where = "WHERE c.repo_id = $repo_id"
-        params: dict[str, Any] = {"repo_id": repo_id}
-        if level is not None:
-            where += " AND c.level = $level"
-            params["level"] = int(level)
-
-        query = f"""
-        MATCH (c:Community)
-        {where}
-        OPTIONAL MATCH (e:__Entity__ {{repo_id: $repo_id}})-[:IN_COMMUNITY]->(c)
-        WITH c, collect(e.entity_id) AS member_ids
-        RETURN c.community_id AS community_id,
-               c.name AS name,
-               c.summary AS summary,
-               c.level AS level,
-               member_ids AS member_ids;
+        query = """
+        MATCH (e:__Entity__ {repo_id: $repo_id})
+        WHERE e.communityId IS NOT NULL AND e.communityPath IS NOT NULL
+        OPTIONAL MATCH (e)-[degree_rel]-(other:__Entity__ {repo_id: $repo_id})
+        WHERE type(degree_rel) IN $allowed_rels
+        WITH e,
+             count(DISTINCT degree_rel) AS degree,
+             toString(e.communityId) AS community_id,
+             size(e.communityPath) - 1 AS level
+        WHERE $level IS NULL OR level = $level
+        ORDER BY community_id ASC, degree DESC, e.name ASC, e.entity_id ASC
+        WITH community_id, level,
+             collect({entity_id: e.entity_id, name: e.name, degree: degree}) AS ranked
+        RETURN community_id,
+               level,
+               ranked[0].name AS name,
+               [row IN ranked | row.entity_id] AS member_ids,
+               [row IN ranked | row.name] AS member_names
         """
         async with driver.session(database=self.database) as session:
-            res = await session.run(query, **params)
+            res = await session.run(
+                query,
+                repo_id=repo_id,
+                level=int(level) if level is not None else None,
+                allowed_rels=sorted(ALL_RELATION_TYPES),
+            )
             records = await res.data()
 
         out: list[Community] = []
         for r in records:
+            member_ids = [str(x) for x in (r.get("member_ids") or [])]
+            member_names = [str(x) for x in (r.get("member_names") or [])]
+            preview = ", ".join(member_names[:5])
+            if len(member_names) > 5:
+                preview += f", +{len(member_names) - 5} more"
             out.append(
                 Community(
                     community_id=str(r["community_id"]),
                     name=str(r["name"]),
-                    summary=str(r["summary"] or ""),
-                    member_ids=[str(x) for x in (r.get("member_ids") or [])],
+                    summary=(
+                        f"{len(member_ids)} related entities around {str(r['name'])}: {preview}"
+                    ),
+                    member_ids=member_ids,
                     level=int(r.get("level") or 0),
                 )
             )
-        return out
+        return sorted(out, key=lambda community: (-len(community.member_ids), community.name, community.community_id))
 
     async def execute_cypher(
         self, query: str, params: dict[str, Any] | None
@@ -922,8 +878,10 @@ class Neo4jClient:
                 WITH count(e) AS total_entities
                 OPTIONAL MATCH (:__Entity__ {repo_id: $repo_id})-[r]->(:__Entity__ {repo_id: $repo_id})
                 WITH total_entities, count(r) AS total_relationships
-                OPTIONAL MATCH (c:Community {repo_id: $repo_id})
-                WITH total_entities, total_relationships, count(c) AS total_communities
+                OPTIONAL MATCH (community_entity:__Entity__ {repo_id: $repo_id})
+                WHERE community_entity.communityId IS NOT NULL
+                WITH total_entities, total_relationships,
+                     count(DISTINCT community_entity.communityId) AS total_communities
                 OPTIONAL MATCH (d:Document {repo_id: $repo_id})
                 WITH total_entities, total_relationships, total_communities, count(d) AS total_documents
                 OPTIONAL MATCH (k:Chunk {repo_id: $repo_id})
@@ -1149,79 +1107,6 @@ class Neo4jClient:
         except Exception:
             pass
         return sorted(labels)
-
-    async def _store_communities(self, repo_id: str, communities: Iterable[Community]) -> None:
-        driver = self._require_driver()
-        async with driver.session(database=self.database) as session:
-            # Clear existing communities + membership edges
-            await session.run(
-                """
-                MATCH (c:Community {repo_id: $repo_id})
-                DETACH DELETE c;
-                """,
-                repo_id=repo_id,
-            )
-
-            comm_payload = [
-                {
-                    "community_id": c.community_id,
-                    "name": c.name,
-                    "summary": c.summary,
-                    "level": int(c.level),
-                    "member_ids": list(c.member_ids),
-                }
-                for c in communities
-            ]
-
-            await session.run(
-                """
-                UNWIND $communities AS c
-                MERGE (comm:Community {repo_id: $repo_id, community_id: c.community_id})
-                SET comm.name = c.name,
-                    comm.summary = c.summary,
-                    comm.level = c.level;
-                """,
-                repo_id=repo_id,
-                communities=comm_payload,
-            )
-
-            await session.run(
-                """
-                UNWIND $communities AS c
-                MATCH (comm:Community {repo_id: $repo_id, community_id: c.community_id})
-                UNWIND c.member_ids AS mid
-                MATCH (e:__Entity__ {repo_id: $repo_id, entity_id: mid})
-                MERGE (e)-[:IN_COMMUNITY]->(comm);
-                """,
-                repo_id=repo_id,
-                communities=comm_payload,
-            )
-
-
-def _modularity_groups(adjacency: dict[str, set[str]]) -> list[list[str]]:
-    """Deterministic Louvain communities over an undirected entity graph.
-
-    Label propagation with lexical tie-breaks collapsed two dense cliques joined
-    by one bridge into a single group (adversarial review, 2026-08-25); Louvain
-    maximizes modularity and keeps them apart. ``seed=0`` makes the partition
-    reproducible for identical graphs. Isolated entities are dropped and every
-    returned group has at least two members; groups and members are sorted so
-    downstream ids are stable.
-    """
-    import networkx as nx
-
-    graph: nx.Graph[str] = nx.Graph()
-    graph.add_nodes_from(sorted(adjacency))
-    for node in sorted(adjacency):
-        for other in sorted(adjacency[node]):
-            if node < other:
-                graph.add_edge(node, other)
-    if graph.number_of_edges() == 0:
-        return []
-    partition = nx.community.louvain_communities(graph, seed=0)
-    groups = [sorted(members) for members in partition if len(members) >= 2]
-    return sorted(groups)
-
 
 def _entity_from_record(record: Any) -> Entity:
     props = _entity_properties_from_mapping(record)

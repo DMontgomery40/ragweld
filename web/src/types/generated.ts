@@ -1265,8 +1265,6 @@ export interface GraphStorageConfig {
   max_hops?: number; // default: 2
   /** Include community detection in graph analysis */
   include_communities?: boolean; // default: True
-  /** Community detection algorithm */
-  community_algorithm?: "louvain" | "label_propagation"; // default: "louvain"
   /** Entity types to extract and store in graph */
   entity_types?: string[]; // default: ["function", "class", "module", "variable", "im...
   /** Relationship types to extract */

@@ -22,6 +22,7 @@ import { API_BASE, activateCorpusInBrowser } from './corpus_fixture';
 
 const CODE_CORPUS = 'ragweld_code';
 const NO_ENTITY_CORPUS = 'nasa-apollo-11';
+const LEIDEN_CORPUS = String(process.env.GRAPH_COMMUNITY_CORPUS || '').trim();
 /** A real `ragweld_code` entity whose id carries both a `/` and a `::`. */
 const CODE_ENTITY_ID = 'server/retrieval/rerank.py::Reranker';
 const SEARCH_TERM = 'reranker';
@@ -176,7 +177,7 @@ test.describe('Graph Explorer on the ragweld_code code graph', () => {
     await page.keyboard.press('Escape');
   });
 
-  test('M-60: the communities empty state names the real cause, not an expensive re-index', async ({
+  test('M-60: the communities surface describes either derived Leiden views or their real absence', async ({
     page,
     baseURL,
   }) => {
@@ -184,15 +185,20 @@ test.describe('Graph Explorer on the ragweld_code code graph', () => {
     const stats = await (await page.request.get(`${API_BASE}/graph/${CODE_CORPUS}/stats`)).json();
     expect(stats.total_entities).toBeGreaterThan(0);
     expect(stats.total_relationships).toBeGreaterThan(0);
-    expect(stats.total_communities).toBe(0);
-
-    const empty = page.getByTestId('graph-communities-empty');
-    await expect(empty).toBeVisible({ timeout: 60_000 });
-    // The old copy claimed the graph had no linked entities and prescribed a Force re-index.
-    await expect(empty).not.toContainText('no linked entities');
-    await expect(empty).not.toContainText('Force re-index');
-    await expect(empty).toContainText('community detection');
-    await expect(empty).toContainText(String(stats.total_entities).replace(/\B(?=(\d{3})+(?!\d))/g, ','));
+    if (stats.total_communities > 0) {
+      await expect(page.getByTestId('graph-communities').locator('> button')).toHaveCount(
+        stats.total_communities
+      );
+      await expect(page.getByTestId('graph-communities-empty')).toHaveCount(0);
+    } else {
+      const empty = page.getByTestId('graph-communities-empty');
+      await expect(empty).toBeVisible({ timeout: 60_000 });
+      // The old copy claimed the graph had no linked entities and prescribed a Force re-index.
+      await expect(empty).not.toContainText('no linked entities');
+      await expect(empty).not.toContainText('Force re-index');
+      await expect(empty).toContainText('Leiden');
+      await expect(empty).toContainText(String(stats.total_entities).replace(/\B(?=(\d{3})+(?!\d))/g, ','));
+    }
   });
 
   test('M-63/M-64/M-149: labels, real wheel zoom with a readout, and export', async ({ page, baseURL }) => {
@@ -346,6 +352,86 @@ test.describe('Graph Explorer on the ragweld_code code graph', () => {
     const looping = page.getByText('Select an entity to load its neighborhood');
     expect(await looping.count()).toBe(0);
     await context.setOffline(false);
+  });
+});
+
+test.describe('Graph Explorer on a GDS Leiden graph', () => {
+  test.skip(!LEIDEN_CORPUS, 'set GRAPH_COMMUNITY_CORPUS to the isolated live Leiden corpus');
+
+  test('derived communities survive filters, member expansion, navigation controls, and reload', async ({
+    page,
+    baseURL,
+  }) => {
+    await gotoGraph(page, baseURL, LEIDEN_CORPUS);
+    const statsResponse = await page.request.get(`${API_BASE}/graph/${LEIDEN_CORPUS}/stats`);
+    expect(statsResponse.ok()).toBe(true);
+    const stats = await statsResponse.json();
+    expect(stats.total_entities).toBe(6);
+    expect(stats.total_relationships).toBe(7);
+    expect(stats.total_communities).toBe(2);
+
+    const communityButtons = page.getByTestId('graph-communities').locator('> button');
+    await expect(communityButtons).toHaveCount(2);
+    await communityButtons.first().click();
+    await expect(page.getByTestId('graph-entity-count')).toContainText('in this community');
+    expect((await vizCounts(page)).nodes).toBe(3);
+
+    // A member selection leaves the derived community view and loads a real neighborhood.
+    const firstMember = page.getByTestId('graph-entities').locator('> button').first();
+    await firstMember.click();
+    await expect(page.getByTestId('graph-entity-count')).toContainText('in this neighborhood');
+    const neighborhood = await vizCounts(page);
+    expect(neighborhood.nodes).toBeGreaterThan(1);
+    expect(neighborhood.edges).toBeGreaterThan(0);
+
+    await page.getByTestId('graph-max-hops').fill('2');
+    await page.getByTestId('graph-max-hops').press('Enter');
+    await expect(page.getByTestId('graph-max-hops')).toHaveValue('2');
+
+    // Entity and relationship filters must change the real canvas inputs and be reversible.
+    await page.getByText('Filters', { exact: true }).click();
+    const conceptFilter = page
+      .getByTestId('graph-subtab')
+      .locator('label')
+      .filter({ hasText: /^concept$/ })
+      .getByRole('checkbox');
+    if (await conceptFilter.count()) {
+      const beforeEntityFilter = (await vizCounts(page)).nodes;
+      await conceptFilter.uncheck();
+      expect((await vizCounts(page)).nodes).toBeLessThan(beforeEntityFilter);
+      await conceptFilter.check();
+    }
+    const relationFilter = page
+      .getByTestId('graph-subtab')
+      .locator('label')
+      .filter({ hasText: /^associated_with$/ })
+      .getByRole('checkbox');
+    const beforeRelationshipFilter = (await vizCounts(page)).edges;
+    await relationFilter.uncheck();
+    expect((await vizCounts(page)).edges).toBe(0);
+    await relationFilter.check();
+    expect((await vizCounts(page)).edges).toBe(beforeRelationshipFilter);
+
+    const beforeZoom = await settledZoom(page, 'graph-zoom-level');
+    await page.getByTestId('graph-zoom-in').click();
+    await expect.poll(() => zoomLevel(page, 'graph-zoom-level')).toBeGreaterThan(beforeZoom);
+    await page.getByTestId('graph-zoom-out').click();
+    await page.getByTestId('graph-zoom-fit').click();
+    const canvas = page.getByTestId('graph-viz-canvas').locator('canvas');
+    const box = await canvas.boundingBox();
+    expect(box).toBeTruthy();
+    await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box!.x + box!.width / 2 + 80, box!.y + box!.height / 2 + 45, { steps: 8 });
+    await page.mouse.up();
+    await expect(page.getByTestId('graph-error')).toHaveCount(0);
+
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(page.getByTestId('graph-stats')).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByTestId('graph-communities').locator('> button')).toHaveCount(2);
+    await page.getByTestId('graph-communities').locator('> button').last().click();
+    await expect(page.getByTestId('graph-entity-count')).toContainText('in this community');
+    expect((await vizCounts(page)).nodes).toBe(3);
   });
 });
 

@@ -4787,11 +4787,6 @@ class GraphStorageConfig(BaseModel):
         description="Include community detection in graph analysis"
     )
 
-    community_algorithm: Literal["louvain", "label_propagation"] = Field(
-        default="louvain",
-        description="Community detection algorithm"
-    )
-
     entity_types: list[str] = Field(
         default=["function", "class", "module", "variable", "import"],
         description="Entity types to extract and store in graph"
@@ -6919,7 +6914,6 @@ class TriBridConfig(BaseModel):
             'NEO4J_DATABASE': self.graph_storage.neo4j_database,
             'GRAPH_MAX_HOPS': self.graph_storage.max_hops,
             'GRAPH_INCLUDE_COMMUNITIES': self.graph_storage.include_communities,
-            'GRAPH_COMMUNITY_ALGORITHM': self.graph_storage.community_algorithm,
             'GRAPH_ENTITY_TYPES': ','.join(self.graph_storage.entity_types),
             'GRAPH_RELATIONSHIP_TYPES': ','.join(self.graph_storage.relationship_types),
             'GRAPH_SEARCH_TOP_K': self.graph_storage.graph_search_top_k,
@@ -7289,7 +7283,6 @@ class TriBridConfig(BaseModel):
                 neo4j_database=data.get('NEO4J_DATABASE', 'neo4j'),
                 max_hops=data.get('GRAPH_MAX_HOPS', 2),
                 include_communities=data.get('GRAPH_INCLUDE_COMMUNITIES', True),
-                community_algorithm=data.get('GRAPH_COMMUNITY_ALGORITHM', 'louvain'),
                 entity_types=data.get('GRAPH_ENTITY_TYPES', 'function,class,module,variable,import').split(','),
                 relationship_types=data.get('GRAPH_RELATIONSHIP_TYPES', 'calls,imports,inherits,contains,references').split(','),
                 graph_search_top_k=data.get('GRAPH_SEARCH_TOP_K', 30),

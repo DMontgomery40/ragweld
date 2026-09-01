@@ -146,6 +146,18 @@ PRODUCTION_DEFAULTS = {
 }
 
 
+def test_proxmox_runtime_inherits_pinned_neo4j_gds_contract() -> None:
+    compose = yaml.safe_load(BASE_COMPOSE.read_text(encoding="utf-8"))
+    neo4j = compose["services"]["neo4j"]
+    environment = neo4j["environment"]
+
+    assert neo4j["image"] == "${NEO4J_IMAGE:-neo4j:5.26.20-community}"
+    assert environment["NEO4J_PLUGINS"] == '["apoc", "graph-data-science"]'
+    assert environment["NEO4J_dbms_security_procedures_unrestricted"] == "apoc.*,gds.*"
+    assert environment["NEO4J_dbms_security_procedures_allowlist"] == "apoc.*,gds.*"
+    assert "gds.version()" in " ".join(neo4j["healthcheck"]["test"])
+
+
 def _run_renderer(*, source: Path, output: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [

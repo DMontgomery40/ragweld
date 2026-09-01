@@ -162,8 +162,7 @@ function controlStyle(disabled: boolean): React.CSSProperties {
     ...controlButtonStyle,
     color: 'var(--fg-muted)',
     background: 'transparent',
-    borderColor: 'var(--line)',
-    borderStyle: 'dashed',
+    border: '1px dashed var(--line)',
     cursor: 'not-allowed',
   };
 }
@@ -338,6 +337,9 @@ export function GraphSubtab() {
   const filteredRelationships = useMemo(() => {
     return getRelationshipsByType(visibleRelationTypes);
   }, [getRelationshipsByType, visibleRelationTypes]);
+
+  const entityFilterApplied = visibleEntityTypes !== null;
+  const relationshipFilterApplied = visibleRelationTypes !== null;
 
   const vizEntityIdSet = useMemo(() => {
     return new Set<string>(filteredEntities.map((e) => e.entity_id));
@@ -673,7 +675,7 @@ export function GraphSubtab() {
   const entityCountLabel = useMemo(() => {
     const shown = filteredEntities.length;
     const fmt = (n: number) => n.toLocaleString();
-    const hidden = visibleEntityTypes.length ? ' (type filter applied)' : '';
+    const hidden = entityFilterApplied ? ' (type filter applied)' : '';
     // Derived from the scope the rows were LOADED under, never from the current
     // selection: a failed expansion leaves the previous rows on screen, and reading
     // the label off `selectedEntity`/`expansion` relabelled one entity's 86-node
@@ -695,7 +697,7 @@ export function GraphSubtab() {
           : `${fmt(shown)} ${where}${hidden}`;
       }
     }
-  }, [filteredEntities.length, totalMatched, scope, visibleEntityTypes.length]);
+  }, [entityFilterApplied, filteredEntities.length, totalMatched, scope]);
 
   /**
    * Communities are absent for three different reasons and the operator needs the
@@ -713,7 +715,7 @@ export function GraphSubtab() {
     if (relationships === 0) {
       return `No communities: this graph has ${entities.toLocaleString()} entities but no relationships between them, so there is nothing to cluster. Semantic KG relation extraction produced no edges on this corpus.`;
     }
-    return `No communities: ${entities.toLocaleString()} entities and ${relationships.toLocaleString()} relationships are stored, but community detection has not produced any clusters for this graph generation. Communities are written during indexing - re-index this corpus to run detection over the current graph.`;
+    return `No communities: ${entities.toLocaleString()} entities and ${relationships.toLocaleString()} relationships are stored, but Leiden has not produced any community properties for this graph generation. Re-index this corpus to derive them from the current graph.`;
   }, [stats]);
 
   /**
@@ -727,18 +729,18 @@ export function GraphSubtab() {
     }
     if (selectedCommunity) return 'No relationships between the members of this community.';
     if (!filteredEntities.length) return 'Nothing is loaded yet.';
-    if (visibleRelationTypes.length) {
+    if (relationshipFilterApplied) {
       return 'No relationships of the selected types. Clear the relationship-type filter to see the rest.';
     }
     return 'These entities have no relationships between them. Click one to load its neighborhood.';
-  }, [selectedEntity, selectedCommunity, filteredEntities.length, visibleRelationTypes.length]);
+  }, [selectedEntity, selectedCommunity, filteredEntities.length, relationshipFilterApplied]);
 
   const entitiesEmptyReason = useMemo(() => {
-    if (visibleEntityTypes.length) return 'No entities of the selected types. Clear the entity-type filter to see the rest.';
+    if (entityFilterApplied) return 'No entities of the selected types. Clear the entity-type filter to see the rest.';
     if (activeQuery) return `No entity name matches \u201c${activeQuery}\u201d in this corpus graph.`;
     if (selectedCommunity) return 'No entities in this community.';
     return 'This corpus has no entity graph yet.';
-  }, [visibleEntityTypes.length, activeQuery, selectedCommunity]);
+  }, [entityFilterApplied, activeQuery, selectedCommunity]);
 
   /** Room for a third column? Below this the visualization gets its own row. */
   const wideLayout = layoutWidth === 0 || layoutWidth >= 1080;
@@ -872,7 +874,7 @@ export function GraphSubtab() {
           🕸️ Graph Explorer
         </h3>
         <div style={{ marginTop: '6px', fontSize: '13px', color: 'var(--fg-muted)' }}>
-          Inspect entities, relationships, and communities stored in Neo4j for the active corpus.
+          Inspect entities, relationships, and Leiden-derived community views for the active corpus.
         </div>
         <div style={{ marginTop: '12px', display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
           <button
@@ -1358,17 +1360,19 @@ export function GraphSubtab() {
                 <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '6px' }}>Entity types</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
                   {entityTypes.map((t) => {
-                    const checked = visibleEntityTypes.includes(t);
+                    const allVisible = visibleEntityTypes === null;
+                    const checked = allVisible || visibleEntityTypes.includes(t);
                     return (
                       <label key={t} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'var(--fg)' }}>
                         <input
                           type="checkbox"
                           checked={checked}
                           onChange={(e) => {
+                            const current = allVisible ? entityTypes : visibleEntityTypes;
                             const next = e.target.checked
-                              ? Array.from(new Set([...visibleEntityTypes, t]))
-                              : visibleEntityTypes.filter((x) => x !== t);
-                            setVisibleEntityTypes(next);
+                              ? Array.from(new Set([...current, t]))
+                              : current.filter((x) => x !== t);
+                            setVisibleEntityTypes(next.length === entityTypes.length ? null : next);
                           }}
                         />
                         {t}
@@ -1382,17 +1386,19 @@ export function GraphSubtab() {
                 <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '6px' }}>Relationship types</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
                   {relationTypes.map((t) => {
-                    const checked = visibleRelationTypes.includes(t);
+                    const allVisible = visibleRelationTypes === null;
+                    const checked = allVisible || visibleRelationTypes.includes(t);
                     return (
                       <label key={t} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'var(--fg)' }}>
                         <input
                           type="checkbox"
                           checked={checked}
                           onChange={(e) => {
+                            const current = allVisible ? relationTypes : visibleRelationTypes;
                             const next = e.target.checked
-                              ? Array.from(new Set([...visibleRelationTypes, t]))
-                              : visibleRelationTypes.filter((x) => x !== t);
-                            setVisibleRelationTypes(next);
+                              ? Array.from(new Set([...current, t]))
+                              : current.filter((x) => x !== t);
+                            setVisibleRelationTypes(next.length === relationTypes.length ? null : next);
                           }}
                         />
                         {t}

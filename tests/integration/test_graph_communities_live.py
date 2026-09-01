@@ -24,6 +24,7 @@ from neo4j_graphrag.components.types import (
 
 from server.db.neo4j import Neo4jClient
 from server.db.postgres import PostgresClient
+from server.graph.communities import detect_leiden_communities
 from server.indexing.generations import build_generation
 from server.indexing.graphrag_pipeline import ScopedNeo4jWriter
 from server.indexing.official_graphrag import write_lexical_graph_with_graphrag
@@ -49,8 +50,19 @@ def _entity(entity_id: str, name: str, entity_type: str, label: str) -> Neo4jNod
     )
 
 
-def _rel(a: str, b: str) -> Neo4jRelationship:
-    return Neo4jRelationship(start_node_id=a, end_node_id=b, type="associated_with", properties={"weight": 1.0})
+def _rel(
+    a: str,
+    b: str,
+    *,
+    weight: float = 1.0,
+    relationship_type: str = "associated_with",
+) -> Neo4jRelationship:
+    return Neo4jRelationship(
+        start_node_id=a,
+        end_node_id=b,
+        type=relationship_type,
+        properties={"weight": weight},
+    )
 
 
 async def _write_graph(
@@ -78,10 +90,11 @@ async def _write_graph(
         await asyncio.to_thread(driver.close)
 
 
-async def test_label_propagation_communities_survive_promotion_and_feed_the_subgraph(client: AsyncClient) -> None:
+async def test_gds_leiden_communities_are_scoped_stable_and_feed_the_subgraph(client: AsyncClient) -> None:
     active = f"graph-comm-{uuid4().hex[:8]}"
     run_id = uuid4().hex
     staging = f"__staging__{active}__{run_id}"
+    foreign = f"__staging__foreign-{uuid4().hex[:8]}__{uuid4().hex}"
     neo = Neo4jClient(
         os.environ.get("NEO4J_URI", "bolt://127.0.0.1:7687"),
         os.environ.get("NEO4J_USER", "neo4j"),
@@ -107,7 +120,7 @@ async def test_label_propagation_communities_survive_promotion_and_feed_the_subg
         )
         await _write_graph(staging, run_id, lexical, lexical_cfg)
 
-        # Two linked groups (a triangle and a chain) plus one isolated entity.
+        # Two weighted cliques joined by one weak bridge.
         entities = Neo4jGraph(
             nodes=[
                 _entity("a1", "Aurora Tidal Observatory", "org", "Org"),
@@ -116,32 +129,198 @@ async def test_label_propagation_communities_survive_promotion_and_feed_the_subg
                 _entity("b1", "KestrelDB", "concept", "Concept"),
                 _entity("b2", "Pelican gateway", "concept", "Concept"),
                 _entity("b3", "Sensor ingest pipeline", "concept", "Concept"),
-                _entity("z1", "Unlinked footnote", "concept", "Concept"),
             ],
-            # One bridge (a3 -> b1) joins the groups: community detection must still
-            # separate them (connected-component grouping would not).
             relationships=[
-                _rel("a1", "a2"),
-                _rel("a2", "a3"),
-                _rel("a1", "a3"),
-                _rel("b1", "b2"),
-                _rel("b2", "b3"),
-                _rel("b1", "b3"),
-                _rel("a3", "b1"),
+                _rel("a1", "a2", weight=5.0),
+                _rel("a2", "a3", weight=5.0),
+                _rel("a1", "a3", weight=5.0),
+                _rel("b1", "b2", weight=5.0),
+                _rel("b2", "b3", weight=5.0),
+                _rel("b1", "b3", weight=5.0),
+                _rel("a3", "b1", weight=0.01),
             ],
         )
         await _write_graph(staging, run_id, entities, lexical_cfg)
+        compatibility_driver = GraphDatabase.driver(
+            os.environ.get("NEO4J_URI", "bolt://127.0.0.1:7687"),
+            auth=(
+                os.environ.get("NEO4J_USER", "neo4j"),
+                os.environ.get("NEO4J_PASSWORD", "password"),
+            ),
+        )
+        try:
+            await asyncio.to_thread(
+                compatibility_driver.execute_query,
+                "MATCH (:__Entity__ {repo_id: $repo_id, entity_id: 'a1'})"
+                "-[r:associated_with]->"
+                "(:__Entity__ {repo_id: $repo_id, entity_id: 'a2'}) REMOVE r.repo_id",
+                parameters_={"repo_id": staging},
+                database_="neo4j",
+            )
+        finally:
+            await asyncio.to_thread(compatibility_driver.close)
+        await _write_graph(
+            foreign,
+            run_id,
+            Neo4jGraph(
+                nodes=[_entity("foreign-1", "Untouched entity", "concept", "Concept")],
+                relationships=[],
+            ),
+            lexical_cfg,
+        )
+        foreign_driver = GraphDatabase.driver(
+            os.environ.get("NEO4J_URI", "bolt://127.0.0.1:7687"),
+            auth=(
+                os.environ.get("NEO4J_USER", "neo4j"),
+                os.environ.get("NEO4J_PASSWORD", "password"),
+            ),
+        )
+        try:
+            await asyncio.to_thread(
+                foreign_driver.execute_query,
+                "MATCH (e:__Entity__ {repo_id: $repo_id}) "
+                "SET e.communityPath = ['untouched'], e.communityId = 'untouched'",
+                parameters_={"repo_id": foreign},
+                database_="neo4j",
+            )
+        finally:
+            await asyncio.to_thread(foreign_driver.close)
 
-        detected = await neo.detect_communities(staging)
+        driver = GraphDatabase.driver(
+            os.environ.get("NEO4J_URI", "bolt://127.0.0.1:7687"),
+            auth=(
+                os.environ.get("NEO4J_USER", "neo4j"),
+                os.environ.get("NEO4J_PASSWORD", "password"),
+            ),
+        )
+        try:
+            first_telemetry = await detect_leiden_communities(
+                driver=driver, neo4j_database="neo4j", repo_id=staging
+            )
+            first_properties = await neo.execute_cypher(
+                """
+                MATCH (e:__Entity__ {repo_id: $repo_id})
+                RETURN e.entity_id AS entity_id,
+                       e.communityPath AS communityPath,
+                       e.communityId AS communityId
+                ORDER BY entity_id
+                """,
+                {"repo_id": staging},
+            )
+            second_telemetry = await detect_leiden_communities(
+                driver=driver, neo4j_database="neo4j", repo_id=staging
+            )
+            second_properties = await neo.execute_cypher(
+                """
+                MATCH (e:__Entity__ {repo_id: $repo_id})
+                RETURN e.entity_id AS entity_id,
+                       e.communityPath AS communityPath,
+                       e.communityId AS communityId
+                ORDER BY entity_id
+                """,
+                {"repo_id": staging},
+            )
+            projections, _, _ = await asyncio.to_thread(
+                driver.execute_query,
+                "CALL gds.graph.list() YIELD graphName "
+                "WHERE graphName STARTS WITH 'ragweld_' RETURN graphName",
+                database_="neo4j",
+            )
+        finally:
+            await asyncio.to_thread(driver.close)
+        assert first_telemetry == second_telemetry
+        assert first_telemetry.community_count == 2
+        assert first_telemetry.nodes_written == 6
+        assert first_telemetry.did_converge is True
+        assert first_properties == second_properties
+        assert all(row["communityPath"] for row in first_properties)
+        assert all(row["communityId"] == row["communityPath"][-1] for row in first_properties)
+        assert projections == []
+        assert await neo.execute_cypher(
+            "MATCH (e:__Entity__ {repo_id: $repo_id}) "
+            "RETURN e.communityPath AS path, e.communityId AS id",
+            {"repo_id": foreign},
+        ) == [{"path": ["untouched"], "id": "untouched"}]
+
+        # Force a real database failure after projection and Leiden have succeeded:
+        # members of one community cannot share communityId while this temporary
+        # uniqueness constraint exists. The named in-memory projection must still
+        # be removed, and a clean retry must restore the derived scalar property.
+        constraint_name = f"task7_community_id_unique_{uuid4().hex}"
+        failure_driver = GraphDatabase.driver(
+            os.environ.get("NEO4J_URI", "bolt://127.0.0.1:7687"),
+            auth=(
+                os.environ.get("NEO4J_USER", "neo4j"),
+                os.environ.get("NEO4J_PASSWORD", "password"),
+            ),
+        )
+        try:
+            await asyncio.to_thread(
+                failure_driver.execute_query,
+                "MATCH (e:__Entity__ {repo_id: $repo_id}) REMOVE e.communityId",
+                parameters_={"repo_id": staging},
+                database_="neo4j",
+            )
+            await asyncio.to_thread(
+                failure_driver.execute_query,
+                f"CREATE CONSTRAINT {constraint_name} IF NOT EXISTS "
+                "FOR (e:__Entity__) REQUIRE e.communityId IS UNIQUE",
+                database_="neo4j",
+            )
+            with pytest.raises(Exception, match="Constraint|constraint|unique"):
+                await detect_leiden_communities(
+                    driver=failure_driver, neo4j_database="neo4j", repo_id=staging
+                )
+            failure_projections, _, _ = await asyncio.to_thread(
+                failure_driver.execute_query,
+                "CALL gds.graph.list() YIELD graphName "
+                "WHERE graphName STARTS WITH 'ragweld_' RETURN graphName",
+                database_="neo4j",
+            )
+            assert failure_projections == []
+        finally:
+            await asyncio.to_thread(
+                failure_driver.execute_query,
+                f"DROP CONSTRAINT {constraint_name} IF EXISTS",
+                database_="neo4j",
+            )
+            await asyncio.to_thread(failure_driver.close)
+
+        retry_driver = GraphDatabase.driver(
+            os.environ.get("NEO4J_URI", "bolt://127.0.0.1:7687"),
+            auth=(
+                os.environ.get("NEO4J_USER", "neo4j"),
+                os.environ.get("NEO4J_PASSWORD", "password"),
+            ),
+        )
+        try:
+            assert (
+                await detect_leiden_communities(
+                    driver=retry_driver, neo4j_database="neo4j", repo_id=staging
+                )
+            ).nodes_written == 6
+        finally:
+            await asyncio.to_thread(retry_driver.close)
+
+        legacy = await neo.execute_cypher(
+            """
+            MATCH (node {repo_id: $repo_id})
+            OPTIONAL MATCH (node)-[relationship]->()
+            RETURN count(DISTINCT CASE WHEN node:Community THEN node END) AS nodes,
+                   count(DISTINCT CASE WHEN type(relationship) = 'IN_COMMUNITY' THEN relationship END) AS relationships
+            """,
+            {"repo_id": staging},
+        )
+        assert legacy == [{"nodes": 0, "relationships": 0}]
+
+        detected = await neo.get_communities(staging, None)
         assert len(detected) == 2, [c.model_dump() for c in detected]
         member_sets = sorted(sorted(c.member_ids) for c in detected)
         assert member_sets == [["a1", "a2", "a3"], ["b1", "b2", "b3"]]
         for community in detected:
-            assert community.community_id.startswith("c-")
             assert staging not in community.community_id and active not in community.community_id
             assert community.name in {"Tidal calibration campaign", "KestrelDB"}, community.name  # the bridge endpoints are the hubs
-            assert "linked entities around" in community.summary
-        assert all("z1" not in c.member_ids for c in detected)
+            assert "related entities around" in community.summary
 
         # Promotion is the manifest write on the corpus row (no relabel); the API
         # resolves the graph generation id from it and community ids stay valid.
@@ -182,7 +361,7 @@ async def test_label_propagation_communities_survive_promotion_and_feed_the_subg
         subgraph = await client.get(f"/api/graph/{active}/subgraph", params={"limit": 50})
         assert subgraph.status_code == 200, subgraph.text
         payload = subgraph.json()
-        assert {e["entity_id"] for e in payload["entities"]} == {"a1", "a2", "a3", "b1", "b2", "b3", "z1"}
+        assert {e["entity_id"] for e in payload["entities"]} == {"a1", "a2", "a3", "b1", "b2", "b3"}
         edges = {tuple(sorted((r["source_id"], r["target_id"]))) for r in payload["relationships"]}
         assert edges == {("a1", "a2"), ("a2", "a3"), ("a1", "a3"), ("b1", "b2"), ("b2", "b3"), ("b1", "b3"), ("a3", "b1")}
         assert all(r["relation_type"] == "associated_with" for r in payload["relationships"])
@@ -193,7 +372,7 @@ async def test_label_propagation_communities_survive_promotion_and_feed_the_subg
         assert {e["entity_id"] for e in capped.json()["entities"]} == {"a3", "b1", "a1"}
         assert {tuple(sorted((r["source_id"], r["target_id"]))) for r in capped.json()["relationships"]} == {("a1", "a3"), ("a3", "b1")}
     finally:
-        for repo_id in (active, staging):
+        for repo_id in (active, staging, foreign):
             try:
                 await neo.delete_graph(repo_id)
             except Exception:
@@ -274,14 +453,30 @@ async def test_code_entity_ids_round_trip_and_a_search_carries_its_own_edges(
                 _code_entity(unrelated, "list_entities", "function"),
             ],
             relationships=[
-                _rel(module, reranker),
-                _rel(reranker, rerank_init),
+                _rel(module, reranker, relationship_type="contains"),
+                _rel(reranker, rerank_init, relationship_type="contains"),
                 # MLXQwen3Reranker matches "reranker" too but links only OUTSIDE the
                 # result set, so the induced-edge query must not invent an edge for it.
-                _rel(mlx_reranker, unrelated),
+                _rel(mlx_reranker, unrelated, relationship_type="imports"),
             ],
         )
         await _write_graph(staging, run_id, graph, lexical_cfg)
+
+        driver = GraphDatabase.driver(
+            os.environ.get("NEO4J_URI", "bolt://127.0.0.1:7687"),
+            auth=(
+                os.environ.get("NEO4J_USER", "neo4j"),
+                os.environ.get("NEO4J_PASSWORD", "password"),
+            ),
+        )
+        try:
+            code_telemetry = await detect_leiden_communities(
+                driver=driver, neo4j_database="neo4j", repo_id=staging
+            )
+        finally:
+            await asyncio.to_thread(driver.close)
+        assert code_telemetry.community_count == 2
+        assert code_telemetry.nodes_written == 5
 
         pg = PostgresClient(require_env("POSTGRES_DSN"))
         await pg.connect()

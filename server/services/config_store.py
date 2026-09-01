@@ -65,6 +65,7 @@ _REMOVED_NESTED_KEYS: tuple[str, ...] = (
     "graph_indexing.vector_similarity_function",
     "graph_indexing.wait_vector_index_online",
     "graph_indexing.vector_index_online_timeout_s",
+    "graph_storage.community_algorithm",
 )
 
 _REMOVED_FLAT_KEYS: tuple[str, ...] = (
@@ -79,6 +80,7 @@ _REMOVED_FLAT_KEYS: tuple[str, ...] = (
     "BM25_B",
     "AUTO_PREPARE_DENSE_RETRIEVAL",
     "NEO4J_PASSWORD",
+    "GRAPH_COMMUNITY_ALGORITHM",
 )
 
 
