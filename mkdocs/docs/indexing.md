@@ -173,6 +173,9 @@ Before a proposal is hashed for review, `normalize_domain_schema` (`server/index
 
 Normalization is deterministic and idempotent — normalizing a normalized schema is a no-op — so the schema hash the operator approves is the hash of exactly the shape that lands on the graph. `validate_domain_schema` enforces both rules again on the validated proposal: a node type without the STRING `name` identity (or without a mandatory constraint on it), or any node/relationship type carrying a document-text property, refuses with a named error instead of promoting a graph of anonymous nodes or full-text copies.
 
+!!! note "Duplicate extracted node ids are folded before the writer"
+    The official GraphRAG 1.19 writer `CREATE`s one node per extracted row, so a model response that repeats a node id inside one chunk would yield two rows with the same chunk-prefixed `entity_id` and abort the run on the store's `(repo_id, entity_id)` uniqueness constraint — a real rebuild once died at 3,113 of 3,123 chunks that way. Before the writer sees the graph, `fold_duplicate_node_ids` (`server/indexing/graphrag_pipeline.py`) makes the ids unique: duplicates with the **same label** fold into the first occurrence (properties merged, first value wins), and a duplicate with a **different label** keeps a deterministic `#N` ordinal suffix so nothing is silently dropped. Relationships keep the ids the model wrote, so they attach to the first occurrence. When anything was folded, the scoped writer logs `GraphRAG extraction repeated node ids for <corpus>: folded=N rekeyed=M` — a warning, not a failure; the run continues and promotes normally.
+
 The approved hash, schema payload, extraction telemetry, entity-resolution counts, community telemetry, and any override are persisted on the generation manifest (`GraphGenerationMetadata`), so every promoted graph is auditable.
 
 !!! note "A textless PDF refuses the proposal synchronously"

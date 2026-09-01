@@ -387,6 +387,9 @@ flowchart LR
     - `Converting <file>: still running (Ns elapsed)`: the conversion itself is alive — large scanned PDFs are simply slow. Compare the elapsed time against the corpus before intervening.
     - Neither message and no recent events: make a second request (start/stop/delete); it answers `409` naming the holding run's id, its fence phase (`building` or `retiring`) and the last step that run reported. A fence whose heartbeat is older than `indexing.index_run_lease_seconds` is treated as crashed and taken over automatically.
 
+??? question "The run log says 'GraphRAG extraction repeated node ids'"
+    That is a warning, not a failure — the run continues. The extraction model returned the same node id more than once inside one chunk's response, and the scoped writer folded the duplicates before writing (`fold_duplicate_node_ids` in `server/indexing/graphrag_pipeline.py`): same-label duplicates merged into the first occurrence, a different-label duplicate kept a `#N` suffix so nothing was dropped, and relationships attach to the first occurrence. Without the fold, the graph store's uniqueness constraint on `(repo_id, entity_id)` would abort the whole run near the end of a long semantic index. If the `folded=`/`rekeyed=` counts are large or repeat across runs, the extraction alias is struggling with the chunk text — point `graph_indexing.semantic_kg_llm_model` at a stronger alias and re-index.
+
 ## Reindexing safely
 
 Common reasons to reindex:
