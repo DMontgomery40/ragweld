@@ -24,6 +24,24 @@ ENTITY_NAME_MATCH_CLAUSE = (
 )
 
 
+def entity_source_file_expr(var: str) -> str:
+    """Cypher for an entity's provenance file.
+
+    Code entities store the file that defines them. Semantic entities carry no
+    ``file_path`` of their own: the official extractor links them to their source
+    chunk with ``FROM_CHUNK`` and never copies the file onto the node, so the
+    explorer showed "File: —" for every NASA entity (Task 8 drive defect D16).
+    """
+    name = str(var or "").strip()
+    if not name.isidentifier():
+        raise ValueError("entity_source_file_expr needs a Cypher variable name")
+    return (
+        f"coalesce({name}.file_path, "
+        f"head([({name})-[:FROM_CHUNK]->(provenance_chunk:Chunk {{repo_id: $repo_id}}) "
+        f"| provenance_chunk.file_path]))"
+    )
+
+
 def normalize_entity_query(query: str | None) -> str:
     """Lower-cased, separator-folded search term; empty string means "no filter"."""
     q = (query or "").strip().lower()
@@ -151,13 +169,13 @@ class Neo4jClient:
         driver = self._require_driver()
         async with driver.session(database=self.database) as session:
             row = await session.run(
-                """
-                MATCH (n:__Entity__ {repo_id: $repo_id, entity_id: $entity_id})
+                f"""
+                MATCH (n:__Entity__ {{repo_id: $repo_id, entity_id: $entity_id}})
                 RETURN n.repo_id AS repo_id,
                        n.entity_id AS entity_id,
                        n.name AS name,
                        n.entity_type AS entity_type,
-                       n.file_path AS file_path,
+                       {entity_source_file_expr("n")} AS file_path,
                        n.description AS description,
                        properties(n) AS properties
                 LIMIT 1;
@@ -190,7 +208,7 @@ class Neo4jClient:
                n.entity_id AS entity_id,
                n.name AS name,
                n.entity_type AS entity_type,
-               n.file_path AS file_path,
+               {entity_source_file_expr("n")} AS file_path,
                n.description AS description,
                properties(n) AS properties
         ORDER BY name ASC
@@ -280,7 +298,7 @@ class Neo4jClient:
               entity_id: n.entity_id,
               name: n.name,
               entity_type: n.entity_type,
-              file_path: n.file_path,
+              file_path: {entity_source_file_expr("n")},
               description: n.description,
               properties: properties(n)
             }}
@@ -373,9 +391,7 @@ class Neo4jClient:
         RETURN count(DISTINCT n) AS neighbours;
         """
         async with driver.session(database=self.database) as session:
-            res = await session.run(
-                cypher, repo_id=repo_id, entity_id=entity_id
-            )
+            res = await session.run(cypher, repo_id=repo_id, entity_id=entity_id)
             rec = await res.single()
         if rec is None:
             return 0
@@ -407,15 +423,15 @@ class Neo4jClient:
             return []
 
         driver = self._require_driver()
-        query = """
-        MATCH (e:__Entity__ {repo_id: $repo_id})
+        query = f"""
+        MATCH (e:__Entity__ {{repo_id: $repo_id}})
         WHERE toString(e.communityId) = $community_id
-        OPTIONAL MATCH (e)-[degree_rel]-(other:__Entity__ {repo_id: $repo_id})
+        OPTIONAL MATCH (e)-[degree_rel]-(other:__Entity__ {{repo_id: $repo_id}})
         WITH e, count(DISTINCT degree_rel) AS degree
         RETURN e.entity_id AS entity_id,
                e.name AS name,
                e.entity_type AS entity_type,
-               e.file_path AS file_path,
+               {entity_source_file_expr("e")} AS file_path,
                e.description AS description,
                properties(e) AS properties
         ORDER BY degree DESC, name ASC, entity_id ASC
@@ -451,39 +467,39 @@ class Neo4jClient:
 
         driver = self._require_driver()
 
-        cypher = """
-        MATCH (e:__Entity__ {repo_id: $repo_id})
+        cypher = f"""
+        MATCH (e:__Entity__ {{repo_id: $repo_id}})
         WHERE toString(e.communityId) = $community_id
-        OPTIONAL MATCH (e)-[degree_rel]-(other:__Entity__ {repo_id: $repo_id})
+        OPTIONAL MATCH (e)-[degree_rel]-(other:__Entity__ {{repo_id: $repo_id}})
         WITH e, count(DISTINCT degree_rel) AS degree
         ORDER BY degree DESC, e.name ASC, e.entity_id ASC
         LIMIT $limit
 
         WITH collect(e) AS nodes
         UNWIND nodes AS a
-        OPTIONAL MATCH (a)-[r]-(b:__Entity__ {repo_id: $repo_id})
+        OPTIONAL MATCH (a)-[r]-(b:__Entity__ {{repo_id: $repo_id}})
         WHERE b IN nodes
         WITH nodes, [x IN collect(DISTINCT r) WHERE x IS NOT NULL] AS rels
 
         RETURN
           [n IN nodes |
-            {
+            {{
               entity_id: n.entity_id,
               name: n.name,
               entity_type: n.entity_type,
-              file_path: n.file_path,
+              file_path: {entity_source_file_expr("n")},
               description: n.description,
               properties: properties(n)
-            }
+            }}
           ] AS entities,
           [r IN rels |
-            {
+            {{
               source_id: startNode(r).entity_id,
               target_id: endNode(r).entity_id,
               relation_type: type(r),
               weight: coalesce(r.weight, 1.0),
               properties: properties(r)
-            }
+            }}
           ] AS relationships;
         """
 
@@ -580,7 +596,7 @@ class Neo4jClient:
               entity_id: n.entity_id,
               name: n.name,
               entity_type: n.entity_type,
-              file_path: n.file_path,
+              file_path: {entity_source_file_expr("n")},
               description: n.description,
               properties: properties(n)
             }}
@@ -694,7 +710,14 @@ class Neo4jClient:
                     level=int(r.get("level") or 0),
                 )
             )
-        return sorted(out, key=lambda community: (-len(community.member_ids), community.name, community.community_id))
+        return sorted(
+            out,
+            key=lambda community: (
+                -len(community.member_ids),
+                community.name,
+                community.community_id,
+            ),
+        )
 
     async def execute_cypher(
         self, query: str, params: dict[str, Any] | None
@@ -1058,6 +1081,7 @@ class Neo4jClient:
         except Exception:
             pass
         return sorted(labels)
+
 
 def _entity_from_record(record: Any) -> Entity:
     props = _entity_properties_from_mapping(record)

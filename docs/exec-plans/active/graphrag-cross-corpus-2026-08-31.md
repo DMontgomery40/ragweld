@@ -506,6 +506,26 @@ everything below live in `output/task8-graphrag-acceptance/click-ledger-2026-09-
   run); the code corpus is rebuilt again afterwards. Run record:
   `output/task8-graphrag-acceptance/2026-09-01-code-run-c58050a6-refused.json`.
 
+- **D16 / D17 (fixed):** the NASA Graph Explorer drive (Table view) showed `File: —` for every entity and never
+  showed extracted properties, while the API returned `file_path: null` but `properties: {ullage: 30.0,
+  pressure: 150.0, communityId: 797, communityPath: […]}` and the store holds a FROM_CHUNK edge to a chunk whose
+  `file_path` is `A11_MissionReport.pdf`. Cause D16: all six explorer projections in `server/db/neo4j.py`
+  returned `n.file_path` verbatim, which only code entities carry. Cause D17: `GraphSubtab` rendered
+  name/type/file/connections only. Fix: `entity_source_file_expr` (`coalesce(n.file_path, head([(n)-[:FROM_CHUNK]->
+  (provenance_chunk:Chunk {repo_id: $repo_id}) | provenance_chunk.file_path]))`) in every projection; the details
+  block renders a `graph-entity-properties` line (every extracted property) and a separate
+  `graph-entity-community` line (derived membership). Test honesty repair found on the way: the live explorer-view
+  test never wrote its lexical Document/Chunk nodes, so its FROM_CHUNK `MATCH … CREATE` silently created nothing and
+  the D1 co-mention premise was vacuous; it now writes the lexical graph through the scoped writer and asserts
+  `relationships_created == 2`. RED: `assert None == 'A11_MissionReport.md'`; GREEN on LXC100: 33 tests (twice; one
+  unrelated single failure in the first 5-file run did not recur on two reruns and its name was not captured),
+  ruff, mypy, `tsc`; Playwright exhaustive `graph_explorer.spec.ts` M-65 extended (File, `qualname: Reranker`,
+  `kind: class`, `start_line`, no `communityId` among properties, `Community:` line) and passed against the overlay
+  Vite build through the live API. DeepSeek V4 Flash review `gen-1788301230-pW6e16e829UqbW0rPHot` (4,984 prompt +
+  1,814 completion = 6,798 tokens, `$0.00096454`): **PASS**, no P1 (its P2-labelled items are confirmations, not
+  findings). detect-changes (stale index): medium, 6 files, three `GraphSubtab` flows. Deploy waits for the Epstein
+  run like D14.
+
 ### Final precommit GitNexus scope
 
 - Task 8 uncommitted range: HIGH risk across 55 files, 99 indexed symbols, eight affected flows. The named flows are `start_index` persisted/config resolution, mechanical docs automation helpers, and `RetrievalSubtab` config/readiness loading.

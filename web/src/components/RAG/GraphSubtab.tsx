@@ -1505,6 +1505,48 @@ export function GraphSubtab() {
                     {selectedEntity.description}
                   </div>
                 )}
+                {(() => {
+                  // Task 8 drive defect D17: the API already returns the entity's extracted
+                  // schema properties (pressure, ullage, kind, start_line, ...) but nothing
+                  // rendered them, so "inspect properties" was impossible. Community
+                  // membership is derived, not extracted, and is shown separately.
+                  const raw = (selectedEntity.properties || {}) as Record<string, unknown>;
+                  const shown = Object.entries(raw).filter(
+                    ([key, value]) => key !== 'communityId' && key !== 'communityPath' && value !== null && value !== undefined && value !== '',
+                  );
+                  const communityPath = Array.isArray(raw.communityPath) ? (raw.communityPath as unknown[]) : null;
+                  return (
+                    <div style={{ marginTop: '8px', fontSize: '12px', color: 'var(--fg)', lineHeight: 1.6 }}>
+                      <div data-testid="graph-entity-properties">
+                        <strong>Properties:</strong>{' '}
+                        {shown.length === 0
+                          ? 'none extracted'
+                          : shown.map(([key, value]) => (
+                              <span
+                                key={key}
+                                style={{
+                                  display: 'inline-block',
+                                  marginRight: '8px',
+                                  padding: '1px 6px',
+                                  borderRadius: '6px',
+                                  background: 'var(--bg-elev2)',
+                                  fontFamily: 'var(--font-mono)',
+                                  fontSize: '11.5px',
+                                }}
+                              >
+                                {key}: {typeof value === 'object' ? JSON.stringify(value) : String(value)}
+                              </span>
+                            ))}
+                      </div>
+                      {raw.communityId !== undefined && raw.communityId !== null ? (
+                        <div data-testid="graph-entity-community">
+                          <strong>Community:</strong> {String(raw.communityId)}
+                          {communityPath && communityPath.length > 1 ? ` (path ${communityPath.map(String).join(' › ')})` : ''}
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })()}
               </div>
             ) : selectedCommunity ? (
               <div style={{ marginBottom: '16px' }} data-testid="graph-community-details">

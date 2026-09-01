@@ -720,9 +720,12 @@ async def test_schema_labelled_semantic_graph_keeps_types_and_edges_in_every_exp
             token_count=8,
             embedding=[0.2, 0.1],
         )
-        _lexical, lexical_cfg = await write_lexical_graph_with_graphrag(
+        lexical, lexical_cfg = await write_lexical_graph_with_graphrag(
             repo_id=staging, run_id=run_id, file_path="A11_MissionReport.md", chunks=[chunk]
         )
+        # The lexical Document/Chunk nodes go through the same scoped writer as in production;
+        # without them the FROM_CHUNK provenance below would silently match nothing.
+        await _write_graph(staging, run_id, lexical, lexical_cfg)
         await _write_graph(
             staging,
             run_id,
@@ -753,7 +756,7 @@ async def test_schema_labelled_semantic_graph_keeps_types_and_edges_in_every_exp
             ),
         )
         try:
-            await asyncio.to_thread(
+            provenance_edges = await asyncio.to_thread(
                 driver.execute_query,
                 "MATCH (c:Chunk {repo_id: $repo_id}) WITH c LIMIT 1 "
                 "MATCH (e:__Entity__ {repo_id: $repo_id}) WHERE e.entity_id IN $ids "
@@ -761,6 +764,7 @@ async def test_schema_labelled_semantic_graph_keeps_types_and_edges_in_every_exp
                 parameters_={"repo_id": staging, "ids": [lox_tank, orphan]},
                 database_="neo4j",
             )
+            assert provenance_edges.summary.counters.relationships_created == 2
             telemetry = await detect_leiden_communities(
                 driver=driver, neo4j_database="neo4j", repo_id=staging
             )
@@ -836,6 +840,25 @@ async def test_schema_labelled_semantic_graph_keeps_types_and_edges_in_every_exp
         assert outgoing.status_code == 200, outgoing.text
         assert [(r["target_id"], r["relation_type"]) for r in outgoing.json()] == [(launch_site, "LOCATED_AT")]
 
+        # Task 8 drive defect D16: a semantic entity stores no file_path of its own, so every
+        # explorer view must report the file of the chunk it was extracted from (FROM_CHUNK);
+        # entities without provenance stay honest with null.
+        provenance = {lox_tank: "A11_MissionReport.md", orphan: "A11_MissionReport.md"}
+        single = await client.get(f"/api/graph/{active}/entity", params={"entity_id": lox_tank})
+        assert single.status_code == 200, single.text
+        assert single.json()["file_path"] == "A11_MissionReport.md"
+        for view, entities in (
+            ("entities", listed.json()),
+            ("typed", typed.json()),
+            ("subgraph", payload["entities"]),
+            ("neighbors", neighbourhood["entities"]),
+            ("one_hop", one_hop.json()["entities"]),
+        ):
+            assert lox_tank in {e["entity_id"] for e in entities}, view
+            assert {e["entity_id"]: e["file_path"] for e in entities} == {
+                e["entity_id"]: provenance.get(e["entity_id"]) for e in entities
+            }, view
+
         communities = await client.get(f"/api/graph/{active}/communities")
         assert communities.status_code == 200, communities.text
         listed_communities = communities.json()
@@ -854,6 +877,15 @@ async def test_schema_labelled_semantic_graph_keeps_types_and_edges_in_every_exp
         expected_member_edges = {edge for edge in schema_edges if edge[0] in members and edge[1] in members}
         assert {(r["source_id"], r["target_id"], r["relation_type"]) for r in community_sub.json()["relationships"]} == expected_member_edges
         assert expected_member_edges, "Leiden kept the LOX tank with at least one schema neighbour"
+        assert {e["entity_id"]: e["file_path"] for e in community_sub.json()["entities"]} == {
+            e["entity_id"]: provenance.get(e["entity_id"]) for e in community_sub.json()["entities"]
+        }
+        members_view = await client.get(f"/api/graph/{active}/community/{home['community_id']}/members")
+        assert members_view.status_code == 200, members_view.text
+        assert {e["entity_id"] for e in members_view.json()} == members
+        assert {e["entity_id"]: e["file_path"] for e in members_view.json()} == {
+            e["entity_id"]: provenance.get(e["entity_id"]) for e in members_view.json()
+        }
     finally:
         for repo_id in (active, staging):
             try:

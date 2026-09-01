@@ -319,6 +319,15 @@ test.describe('Graph Explorer on the ragweld_code code graph', () => {
 
     await page.getByTestId(`graph-entity-row-${CODE_ENTITY_ID}`).click();
     await expect(page.getByTestId('graph-entity-details')).toContainText(CODE_ENTITY_ID, { timeout: 30_000 });
+    // D17: the details must show the entity's extracted properties and its provenance file,
+    // not only name/type/connections. A code entity carries its AST facts and its file.
+    await expect(page.getByTestId('graph-entity-details')).toContainText('File: server/retrieval/rerank.py');
+    const propertiesText = await page.getByTestId('graph-entity-properties').innerText();
+    expect(propertiesText).toContain('qualname: Reranker');
+    expect(propertiesText).toContain('kind: class');
+    expect(propertiesText).toMatch(/start_line: \d+/);
+    expect(propertiesText, 'derived community membership is not an extracted property').not.toContain('communityId');
+    await expect(page.getByTestId('graph-entity-community')).toContainText('Community:');
     const afterExpand = await entityRows.count();
     expect(afterExpand).toBeGreaterThan(1);
 
