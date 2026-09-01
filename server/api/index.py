@@ -4272,7 +4272,27 @@ async def propose_graph_schema(
         existing = await postgres.get_graph_schema_proposal(corpus_id)
         if existing and not request.force_refresh and proposal_matches(existing, fingerprint, cfg):
             return existing
-        proposal = await build_proposal_from_corpus(corpus, cfg, fingerprint=fingerprint)
+        try:
+            proposal = await build_proposal_from_corpus(corpus, cfg, fingerprint=fingerprint)
+        except ValueError as exc:
+            # The proposer answered, but the domain rules rejected the shape (no node
+            # types, no relationships, a forbidden label ...). That is a review outcome
+            # the operator must read, not a server fault (Task 8 drive finding D8).
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "graph_schema_unusable",
+                    "corpus_id": corpus_id,
+                    "model_alias": str(cfg.graph_indexing.semantic_kg_llm_model or "").strip()
+                    or _resolve_semantic_kg_route(cfg).model,
+                    "message": str(exc),
+                    "operator_hint": (
+                        "The sampled text did not yield a usable closed-world schema for this "
+                        "model. Provide text with named entities and relationships, or choose "
+                        "another KG model alias, then generate the proposal again."
+                    ),
+                },
+            ) from exc
         await postgres.set_graph_schema_proposal(corpus_id, proposal)
         return proposal
     finally:

@@ -185,3 +185,40 @@ async def test_real_apollo_schema_proposal_persists_reuses_and_invalidates_appro
     finally:
         await client.delete(f"/api/corpora/{corpus_id}")
         await pg.disconnect()
+
+
+async def test_numeric_only_corpus_proposal_is_a_typed_422_not_a_500(
+    client: AsyncClient, tmp_path: Path
+) -> None:
+    """Task 8 drive finding D8: a corpus whose sampled text carries no extractable domain
+    (the disposable numeric fixture) makes the proposer return an empty schema; the domain
+    validator rejects it, and the API used to surface that as an unhandled 500. The operator
+    must get a typed 422 that names the reason instead.
+    """
+    corpus_dir = tmp_path / "numeric-only"
+    corpus_dir.mkdir()
+    (corpus_dir / "measurements.txt").write_text("0000 1111 2222 3333 4444 5555.\n" * 20)
+    corpus_id = f"numeric-schema-{uuid.uuid4().hex[:8]}"
+    created = await client.post(
+        "/api/corpora",
+        json={"corpus_id": corpus_id, "name": corpus_id, "path": str(corpus_dir)},
+    )
+    assert created.status_code in (200, 201), created.text
+    try:
+        configured = await client.patch(
+            f"/api/config/graph_indexing?corpus_id={corpus_id}",
+            json={"enabled": True, "build_code_graph": False, "semantic_kg_llm_model": _MODEL},
+        )
+        assert configured.status_code == 200, configured.text
+        response = await client.post(
+            f"/api/index/{corpus_id}/graph-schema/proposal", json={"force_refresh": True}
+        )
+        assert response.status_code == 422, response.text
+        detail = response.json()["detail"]
+        assert detail["code"] == "graph_schema_unusable"
+        assert detail["corpus_id"] == corpus_id
+        assert "node types" in detail["message"]
+        assert detail["model_alias"] == _MODEL
+        assert detail["operator_hint"]
+    finally:
+        await client.delete(f"/api/corpora/{corpus_id}")
