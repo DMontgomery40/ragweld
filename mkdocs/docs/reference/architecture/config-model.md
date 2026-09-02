@@ -36,7 +36,7 @@ flowchart LR
     root --> n_vector_search
     n_sparse_search["sparse_search\n4 fields"]
     root --> n_sparse_search
-    n_graph_search["graph_search\n5 fields"]
+    n_graph_search["graph_search\n6 fields"]
     root --> n_graph_search
     n_reranking["reranking\n12 fields"]
     root --> n_reranking
@@ -88,7 +88,7 @@ flowchart LR
 | `fusion` | 6 | Configuration for tri-brid fusion of vector + sparse + graph results. | [fusion](../config/fusion.md) |
 | `vector_search` | 3 | Configuration for the vector (dense) leg served by Qdrant. | [vector_search](../config/vector_search.md) |
 | `sparse_search` | 4 | Configuration for the sparse (IDF-modified BM25 sparse vectors in Qdrant) leg. | [sparse_search](../config/sparse_search.md) |
-| `graph_search` | 5 | Configuration for graph-based search using Neo4j. | [graph_search](../config/graph_search.md) |
+| `graph_search` | 6 | Configuration for graph-based search using Neo4j. | [graph_search](../config/graph_search.md) |
 | `reranking` | 12 | Reranking configuration for result refinement. | [reranking](../config/reranking.md) |
 | `generation` | 10 | LLM generation configuration. | [generation](../config/generation.md) |
 | `enrichment` | 6 | Code enrichment and chunk_summary generation configuration. | [enrichment](../config/enrichment.md) |

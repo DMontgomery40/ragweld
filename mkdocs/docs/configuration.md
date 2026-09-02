@@ -110,6 +110,7 @@ flowchart TB
 | `graph_search.top_k` | int | 5–100 | Qdrant seed Top-K for the graph leg |
 | `graph_search.chunk_neighbor_window` | int | 0–10 | Include up to N adjacent `NEXT_CHUNK` chunks around relationship hits |
 | `graph_search.include_communities` | bool | — | Include community expansion (GDS Leiden communities written at index time) |
+| `graph_search.max_related_entities_per_seed` | int | 1–1000 | Cap on related entities each seed entity may expand to (nearest first, then most connected) — bounds how far a hub entity can reach |
 
 ### Retrieval and Confidence Gates
 

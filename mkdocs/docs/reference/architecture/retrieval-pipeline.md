@@ -161,6 +161,7 @@ flowchart TB
 | `enabled` | `True` | Enable graph search in tri-brid retrieval |
 | `chunk_neighbor_window` | `1` | Include up to N adjacent chunks (NEXT_CHUNK) around relationship hits |
 | `max_hops` | `2` | Maximum graph traversal hops |
+| `max_related_entities_per_seed` | `50` | Maximum related entities kept per seed entity during graph traversal, nearest first then most connected. Bounds how far a hub entity can expand. |
 | `include_communities` | `True` | Include community-based expansion in graph search |
 | `top_k` | `30` | Number of results to retrieve from graph search |
 

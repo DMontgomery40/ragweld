@@ -38,6 +38,9 @@
 !!! note "Runtime-managed corpora carry a typed `internal` flag"
     Some corpora are registered by the runtime, not by an operator: the chat Recall corpus (`recall_default`) and the Codex session corpora. Each carries a `meta.system_kind` marker, and the `Corpus` wire model now derives a typed `internal` flag from it (`server/api/repos.py` `_corpus_from_row`; see `tests/unit/test_domain_models.py`). These corpora index through their own path and never have an operator-run index run, so operator surfaces exclude them: the Dashboard's **Recent Index Runs** panel filters them out (they would otherwise read "never indexed" forever), and "delete all unindexed corpora" cleanup skips them via `internal` instead of a hardcoded `recall_default` check. See [UI tour](../manual/ui.md).
 
+!!! note "Deleting a corpus takes its dead runs with it"
+    `DELETE /api/corpora/{corpus_id}` removes the corpus's own rows **and** the staging rows (`__staging__<corpus>__<run>`) its index runs wrote before promotion — both in one transaction, through the shared staging sweep (`_delete_corpus_staging_rows` in `server/db/postgres.py`). A run that died mid-index therefore cannot leave orphan rows behind a deleted corpus, and the sweep is prefix-scoped so a sibling corpus whose id merely starts with the same text (corpus `a` vs `a__b`) is never touched.
+
 ## Models Using corpus_id
 
 | Model | Fields |

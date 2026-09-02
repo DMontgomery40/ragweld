@@ -45,6 +45,10 @@
 | `graph_search.top_k` | 30 | Qdrant seed Top-K |
 | `graph_search.chunk_neighbor_window` | 1 | Include adjacent `NEXT_CHUNK` chunks around relationship hits |
 | `graph_search.include_communities` | true | Include community expansion (GDS Leiden) |
+| `graph_search.max_related_entities_per_seed` | 50 | Cap on related entities each seed entity may contribute (nearest first, then most connected) — bounds how far a hub entity expands |
+
+!!! note "Co-mention is not adjacency, and hubs are capped"
+    Entity expansion walks the **semantic graph only** (`server/retrieval/graphrag_retriever.py`): every node on an entity path must be an `__Entity__`, and no relationship on the path may be lexical structure (`FROM_CHUNK`, `NEXT_CHUNK`, `FROM_DOCUMENT` — the structural set is derived from the same `LexicalGraphConfig` the index writer uses), so two entities co-mentioned in one chunk are not neighbours unless the extractor linked them with a real relationship. Each seed entity keeps at most `graph_search.max_related_entities_per_seed` related entities, **nearest first, then by how many paths connect them**, so a hub entity — a person named in most of a corpus, say — cannot reach nearly every entity within two hops and turn one query into a corpus-wide scan. Raise the cap for sparse, well-linked graphs where recall matters more than latency; lower it when a few hubs dominate the graph and p95 search latency climbs. The Cypher ceiling (`1000`) and the Pydantic field's upper bound are the same contract.
 
 ## Storage Configuration (Selected)
 
@@ -82,8 +86,9 @@ flowchart LR
     Q["Query embedding"] --> SEED["Dense seeds\n(manifest Qdrant generation)"]
     SEED --> JOIN["graphJoinId join\n(Neo4j Chunk nodes)"]
     JOIN --> ENT["FROM_CHUNK entities"]
-    ENT --> WALK["Entity relationship walk\n(graph_search.max_hops)"]
-    WALK --> REL["Related chunks\nvia FROM_CHUNK"]
+    ENT --> WALK["Semantic entity walk\n(graph_search.max_hops,\nextracted edges only)"]
+    WALK --> CAP["Per-seed cap\n(graph_search.max_related_entities_per_seed)"]
+    CAP --> REL["Related chunks\nvia FROM_CHUNK"]
     JOIN --> NB["NEXT_CHUNK neighbors\n(chunk_neighbor_window)"]
     REL --> HYD["Postgres hydration"]
     NB --> HYD

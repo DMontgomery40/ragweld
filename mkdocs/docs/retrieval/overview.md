@@ -53,7 +53,7 @@
 |-----------|------------|----------|
 | Vector | `vector_search.enabled`, `vector_search.top_k` | 50 |
 | Sparse | `sparse_search.enabled`, `sparse_search.top_k`, `sparse_search.bm25_k1`, `sparse_search.bm25_b` | 50 / 1.2 / 0.4 |
-| Graph | `graph_search.enabled`, `graph_search.max_hops`, `graph_search.top_k` | true / 2 / 30 |
+| Graph | `graph_search.enabled`, `graph_search.max_hops`, `graph_search.top_k`, `graph_search.max_related_entities_per_seed` | true / 2 / 30 / 50 |
 | Fusion | `fusion.method`, `fusion.rrf_k`, `fusion.*_weight` | rrf / 60 |
 | Reranker | `reranking.reranker_mode`, `tribrid_reranker_topn` | none / 50 |
 
