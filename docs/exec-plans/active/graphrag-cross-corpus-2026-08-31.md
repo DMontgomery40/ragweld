@@ -706,3 +706,93 @@ carry S numbers; the working scratchpad with every row lives with the session an
   (5,377 prompt + 500 completion, $0.00045): **PASS**, no P1; P2 notes were pre-existing style (RuntimeError from the
   catalog lookup matches the route resolver's own errors; `int(llm_timeout_s)` on an int-typed field) and were not
   changed.
+- **Wave-2 external reviews (DeepSeek V4 Flash):** server side `gen-1788359732-Zlo7MJKyIyL0PSyb1fok` (21,218 prompt +
+  4,934 completion, $0.00435): **PASS**. Web side `gen-1788359800-rjwR3pwUVtjlK8xMnb8g` (17,928 + 3,909, $0.00515):
+  **FAIL** on one P1 that does not hold: it asks for a `?? {}` fallback on `metadata.storage_breakdown` "if the field is
+  missing", but `storage_breakdown` is a required field of the registered `DashboardIndexStatusMetadata` and
+  `DashboardIndexStatsResponse` contracts (no default; `generated.ts` types it non-optional), and a fallback would be
+  the hidden-fallback pattern this repo forbids; its P2 on the deck's `loading` identifier is answered by the
+  component's own `useState` (`loading` at line 139). Recorded as rejected with reasons, no change made.
+- **Paid lanes after the limit was raised (deployed eec26d46):** Python live suites 9 passed / 1 failed; Playwright paid
+  specs 25 passed / 1 failed. Both failures were test-side: the live pipeline test called `build_semantic_pipeline`
+  without the two new arguments (missed by a broken caller grep) and the G1/G2/G3 spec predates the Task 8 schema
+  approval gate (409 `graph_schema_approval_required`); both fixed and rerun below. The onboarding spec (M1/M5) passed,
+  which is the end-to-end proof of S18.
+- **Paid-lane repairs pushed (87561a37, rebased over another autopilot commit):** the live pipeline test now passes the
+  route upstream and the operator template to `build_semantic_pipeline`; the G1/G2/G3 explorer spec derives and approves
+  the schema proposal through the same endpoint the Indexing page uses (`indexCorpus` takes `approvedGraphSchemaHash`),
+  expects GDS Leiden's integer community ids, requires the legend to name the reviewed schema's labels, and reads node
+  colours from the legend's swatches; 1 passed in 50 s on the LXC100 overlay against the deployed eec26d46.
+- **D19 rebuild started through the live UI (14:54 UTC, run a512c3ac, force reindex, Luna, the new extraction
+  template):** the Start-indexing dialog quoted $0.72 / ~112 min (the D13 estimator's measured rate); the Current run
+  panel adopted the live run id at once (D2 holds). Progress 18 % at 15:30 with the fix lanes' Playwright indexing and
+  probes competing for the box, so the wall time will overshoot the idle estimate. `ragweld.service` must not be
+  restarted until it ends (lanes note carries the INDEX RUN ACTIVE line). Observation S29: while a run is active
+  `/api/index/{id}/runs/latest` reports progress 0.0 / total_chunks 0 (the on-disk summary is rewritten only at phase
+  boundaries) whereas `/api/index/{id}/status` reports the live fraction but no run id; no operator surface currently
+  shows the 0 %, the Current run panel prints only the status pill and run id.
+- **Six-alias extraction comparison (operator: "try other models, google is your friend"; 52 worst Epstein chunks,
+  LAW template, effort medium):** openai.gpt-5.6-luna 81 entities / 2 noisy / 0 failures / 59 s;
+  google.gemini-3.5-flash-lite 97 / 9 / 0 / 87 s; z-ai.glm-5.3-flash 69 / 3 / 0 / 87 s; deepseek.deepseek-v4-flash
+  95 / 7 / 1 / 271 s; google.gemini-3.7-flash 58 / 1 / 13 failures / 147 s; anthropic.claude-haiku-4.5 59 entities all
+  with EMPTY names (it does not honour the template's `name` property) + 5 gateway timeouts / 365 s. Luna stays the
+  default: fastest, lowest noise, zero failures, cheapest; gemini-3.5-flash-lite is the only alias that extracts more,
+  at four times the noise. (Part 1 of the probe ran before D25; the Gemini `reasoning_effort` 400s it surfaced are
+  what D25 fixed.)
+- **S19 fixed (Mac tree, deploy pending):** the Graph & Enrichment card's "Prompt Templates" row now links "Edit
+  Semantic KG Extraction Prompt" (`PromptLink` to `semantic_kg_extraction`); `indexing_config_cards.spec.ts` gained
+  "the Graph card links the semantic KG extraction prompt it runs" (RED: element not found → GREEN: 9 passed, tsc clean
+  on the overlay). Exhaustive-suite env trap re-learned: `EXHAUSTIVE_API_BASE_URL` needs the `/api` suffix and
+  `PLAYWRIGHT_WEB_BASE_URL` the `/web` path with Vite started via `npm run dev`, or the fixture dies on
+  `POST /api/corpora -> 404`.
+- **Drive continued while the run indexes (Admin, Data Quality, Retrieval, Synthetic Lab, Learning Reranker, Eval
+  Analysis, Infrastructure x5, Glossary, settings search, Dock Chat/Swap, MCP probe):** S30 Admin Dependencies/Advanced
+  paint blank for 5-10 s; S31 vLLM/MLflow cards say "Blocked surfaces: chat, benchmark, eval" for lanes that work through
+  LiteLLM; S32 the email corpus shows code-corpus chunk-summary exclusion defaults; S33 Synthetic Lab's generator/judge
+  pickers are flat native selects over the whole ~400-row catalog including image/audio/moderation routes; S34 the MCP
+  probe result line prints `http://ragweld.dtmont.com:80/mcp/` (the in-process `httpx.ASGITransport` base URL) instead of
+  the advertised https URL; S36 Dock Chat letter-wraps the composer's Send/Attach buttons in the 360 px dock; S37 the Chat
+  page's Routing Trace panel showed the MCP probe's trace as the conversation's (S10 family); S38 `/api/models` logs the
+  "LiteLLM serves 2 alias(es) absent from data/models.json" warning on every call; S40 the MCP card says top_k=5 while
+  `mcp.default_top_k` is 20. **S39 (HIGH, root cause of the 179.5 s probe search):** per-leg timing on
+  epstein-files-public during the run: vector 16 ms, sparse 22 ms, graph 9,658 ms; the graph leg resolves 1,742 of
+  3,003 entities for a 5-seed query because `traversal_query()` expands `[*0..max_hops]` over any relationship and any
+  intermediate node carrying `repo_id`, and Chunk nodes do, so `Entity-FROM_CHUNK->Chunk<-FROM_CHUNK-Entity` is a legal
+  2-hop path and every entity co-mentioned with a hub entity is "related"; 20 seeds (the probe default) take 62 s.
+- **Fix lanes dispatched (LXC100 overlays under /root/overlays, clean tree from `git archive HEAD`, live venv with cwd
+  first on sys.path, config path pointed at a copy):** lane-server-hygiene (S22 shared sanitiser in /api/answer, S26
+  `delete_corpus_with_data` sweeps staging rows), lane-reaper (S24 seeded graphs `pytest_`-named and deleted in
+  `finally`, the two leaked `seed-*` graphs removed, S25 all live-test corpus ids renamed to the reapable prefix with a
+  source-scan guard test), lane-d26-rerank (reasoning aliases as the cloud reranker: OpenRouter-native reasoning
+  control keyed on the upstream + measured max_tokens + typed empty-content error + live Luna rerank test),
+  lane-web-chat (S23 `traceOpen`, S28 `learning-ranker` alias, chat_seed re-seed on reload, S36 dock composer),
+  lane-graph-leg (S39: entity-only traversal, bounded expansion, live seeded-graph test, before/after timings).
+  Their results, the DeepSeek review of the merged diff and the deploy wait for the D19 run to finish.
+- **Lanes merged, gated and pushed (40204a0b):** all five lanes' work is on `main` in seven commits: the staging-row
+  cascade + shared sanitiser + reaper store sweep and prefix guard, the deck evidence wrap (S43) and the Help page's
+  removed-preset copy (S44), the catalog refresh committing every file it regenerates (S42) and the Benchmark default
+  anchored on the corpus's answering alias (S41), the S19 extraction-prompt link, D26 (per-provider reasoning floor +
+  sized rerank budget + typed empty-content error), the chat lane (S36 composer, S23 dead trace props, S28 subtab id,
+  seed-once init script), and S39 (entity-only bounded traversal, `graph_search.max_related_entities_per_seed`,
+  default 50). Cross-lane gate on the merged tree: **1,692 unit tests pass**, 20 skipped; the one remaining failure is
+  the overlay artifact `test_local_generation_models_are_current_everywhere`, which shells out to `git ls-files` and
+  the overlay is not a git repo. Overlay trap re-learned twice: a subprocess started from an overlay imports the
+  editable install at `/opt/ragweld` unless `PYTHONPATH` names the overlay, which is what made the proxmox renderer
+  contract test "fail" on the lane's new config field.
+- **Adversarial review of the merged diff, two independent models.** DeepSeek V4 Flash: first attempt spent its whole
+  8,000-token budget on reasoning and returned empty content (the D26 failure mode, in the reviewer this time), then
+  PASS; asked for traced evidence it raised two P1s, **both refuted empirically**: it claimed `CALL (seed_entity) { … }`
+  is invalid Cypher and that `seed_score` is out of scope inside the subquery, but the variable-scope clause is GA in
+  Neo4j 5.23+ and the box runs 5.26.20, and `tests/integration/test_graph_traversal_live.py` passes against it
+  (1 passed in 26.5 s). Its P2 on the local `staging_repo_id` import is backwards: `server.indexing.generations`
+  imports `PostgresClient` from `server.db.postgres`, so a module-level import is the cycle; a comment now says so.
+  `openai.gpt-5.6-luna` reviewed the same diff and found the real one: `openrouter_provider()` accepted a truncated
+  `openrouter/google` and was case-sensitive, so a differently-cased mandatory-reasoning provider would have been sent
+  the `"none"` its endpoint rejects. Fixed with RED→GREEN tests (5 failing → 93 passed).
+- **Review findings adjudicated, not fixed.** Luna's P1 that the per-seed cap "silently discards" graph candidates is
+  the design: the cap is a typed operator tunable with a glossary entry, the leg is one fused signal among three, and
+  the trace already reports `fusion_graph_resolved_entities`, which moves when the cap binds. Its P2 that an unmeasured
+  mandatory-reasoning provider fails closed on HTTP 400 is deliberate and documented in `gateway_reasoning.py`: the
+  upstream's own 400 names the cause, and relabelling it a budget error would be a lie. Its P2 on the `40n+256` rerank
+  budget stands as a note: measured 1,008 tokens for 50 candidates leaves 2x headroom, and overflow is the typed budget
+  error, not a silent truncation.
