@@ -379,8 +379,20 @@ class MCPProbeResponse(BaseModel):
     tool: str = Field(default="search", description="Tool that was invoked.")
     transport_url: str = Field(description="Streamable HTTP endpoint the client session connected to.")
     corpus_id: str = Field(description="Corpus the tool searched.")
-    mode: str = Field(description="Retrieval mode the tool resolved (request override or mcp.default_mode).")
-    top_k: int = Field(ge=1, description="Result count the tool resolved.")
+    mode: str = Field(
+        description=(
+            "Retrieval mode the tool actually applied: the request override, or the default the "
+            "MOUNTED server captured at process start (not the persisted `mcp.default_mode`, "
+            "which only takes effect on a restart)."
+        )
+    )
+    top_k: int = Field(
+        ge=1,
+        description=(
+            "Result count the tool actually applied: the request override, or the MOUNTED "
+            "server's captured `default_top_k`."
+        ),
+    )
     results: list[ChunkMatch] = Field(default_factory=list, description="Structured tool output, validated as ChunkMatch rows.")
 
 

@@ -14,7 +14,7 @@
 // Sources, or start a fresh thread about X), and a `thread=new` deep link must land in a fresh
 // thread scoped to X without touching the used one.
 import { expect, test, type Page } from '@playwright/test';
-import { seedAnswerFromSearch } from './chat_seed';
+import { runSeedSearch, seedAnswerFromSearch, seedConversationFromRun } from './chat_seed';
 import {
   acceptanceCorpusPath,
   API_BASE,
@@ -387,6 +387,14 @@ test('the conversation Top-K reaches the server and bounds a real answer', async
   const answered = await sourceBlocks.last().getByTestId('chat-citation-open').count();
   expect(answered, `new answer cited ${answered} sources`).toBeGreaterThan(0);
   expect(answered).toBeLessThanOrEqual(2);
+
+  // S37/P2-A on the live path: the run this send just produced is the conversation's own, and
+  // the panel must not label it as coming from somewhere else. The seeded specs below prove the
+  // reload and session-switch halves; this is the ordinary "ask, then look at the trace" one.
+  await openTracePanel(page);
+  const panel = page.locator('#chat-trace');
+  await expect(panel).toContainText(/run_id: \S+/, { timeout: 60_000 });
+  await expect(page.getByTestId('chat-trace-foreign-run')).toHaveCount(0);
 });
 
 test('the docked chat mirrors the live conversation instead of drifting into its own state', async ({
@@ -529,6 +537,17 @@ test('opening another chat control dismisses the Sources popover', async ({ page
 });
 
 
+/** Open the Routing Trace panel, whatever `ui.chat_show_trace` left it as. */
+async function openTracePanel(page: Page): Promise<void> {
+  const panel = page.locator('#chat-trace');
+  await expect(panel).toBeVisible({ timeout: 60_000 });
+  // The panel follows `ui.chat_show_trace`, so it can already be open: clicking would close it.
+  if (!(await panel.evaluate((el) => (el as HTMLDetailsElement).open))) {
+    await panel.locator('summary').click();
+  }
+  await expect(panel).toHaveJSProperty('open', true);
+}
+
 test('the trace panel says when it is showing a run this conversation did not produce', async ({
   page,
   request,
@@ -537,18 +556,61 @@ test('the trace panel says when it is showing a run this conversation did not pr
   // recent run, which can be a Retrieval-tab search or an MCP probe. It rendered that under
   // "Routing Trace" with nothing saying where it came from.
   if (!corpus) throw new Error('corpus not provisioned');
-  await seedAnswerFromSearch(page, request, corpus.corpusId, 'What calibrates the salinity array?', {
-    sources: [corpus.corpusId],
-  });
+  // A real run on the corpus that no conversation produced -- exactly the Retrieval-tab search
+  // in the finding. Nothing is seeded into localStorage, so chat opens on an empty thread.
+  const foreign = await runSeedSearch(request, corpus.corpusId, 'What calibrates the salinity array?', 5);
   await gotoChatWithGlobalCorpus(page, corpus.corpusId);
+  await openTracePanel(page);
   const panel = page.locator('#chat-trace');
-  await expect(panel).toBeVisible({ timeout: 60_000 });
-  // The panel follows `ui.chat_show_trace`, so it can already be open: clicking would close it.
-  if (!(await panel.evaluate((el) => (el as HTMLDetailsElement).open))) {
-    await panel.locator('summary').click();
-  }
-  await expect(panel).toHaveJSProperty('open', true);
+  await expect(panel).toContainText(`run_id: ${foreign.runId}`, { timeout: 60_000 });
   const notice = page.getByTestId('chat-trace-foreign-run');
   await expect(notice).toBeVisible({ timeout: 60_000 });
+  await expect(notice).toContainText(corpus.corpusId);
+});
+
+test('the conversation that produced the run keeps it across a reload and a session switch', async ({
+  page,
+  request,
+}) => {
+  // The other half of S37 (P2-A): "this conversation" was collected from window events this tab
+  // happened to witness, so it was empty after a reload -- the panel called the conversation's
+  // OWN answer a foreign run -- and switching conversations left the previous conversation's
+  // run unlabelled. It is a property of the stored thread, not of the tab.
+  if (!corpus) throw new Error('corpus not provisioned');
+  const earlier = await runSeedSearch(request, corpus.corpusId, 'What is the calibration interval?', 5);
+  await seedConversationFromRun(page, corpus.corpusId, 'What is the calibration interval?', earlier, {
+    label: 'Earlier conversation',
+  });
+  // Seeded second, so this is the active thread AND the corpus's most recent run, which is the
+  // run the panel falls back to when it has no explicit selection.
+  const latest = await runSeedSearch(request, corpus.corpusId, 'How often is the salinity array calibrated?', 5);
+  await seedConversationFromRun(page, corpus.corpusId, 'How often is the salinity array calibrated?', latest, {
+    label: 'Latest conversation',
+    append: true,
+  });
+  expect(latest.runId).not.toBe(earlier.runId);
+
+  await gotoChatWithGlobalCorpus(page, corpus.corpusId);
+  await openTracePanel(page);
+  const panel = page.locator('#chat-trace');
+  const notice = page.getByTestId('chat-trace-foreign-run');
+  // The panel really is showing this conversation's run: an absent notice over an absent trace
+  // would prove nothing.
+  await expect(panel).toContainText(`run_id: ${latest.runId}`, { timeout: 60_000 });
+  await expect(notice).toHaveCount(0);
+
+  // A reload restores the same saved conversation, and it still owns its run.
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('#chat-input', { timeout: 90_000 });
+  await openTracePanel(page);
+  await expect(panel).toContainText(`run_id: ${latest.runId}`, { timeout: 60_000 });
+  await expect(notice).toHaveCount(0);
+
+  // Switching to the other saved conversation leaves the same trace on screen, and that run is
+  // now foreign: the label follows the conversation, not the tab.
+  await page.getByTestId('chat-history-toggle').click();
+  await page.getByRole('button').filter({ hasText: 'Earlier conversation' }).first().click();
+  await expect(panel).toContainText(`run_id: ${latest.runId}`);
+  await expect(notice).toBeVisible({ timeout: 30_000 });
   await expect(notice).toContainText(corpus.corpusId);
 });

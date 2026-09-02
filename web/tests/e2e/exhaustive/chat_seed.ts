@@ -26,28 +26,33 @@ export type SeedOptions = {
   topK?: number;
   /** Names the seeded conversation, so a failure screenshot says which spec wrote it. */
   label?: string;
+  /**
+   * Keep the threads already seeded on this page and add this one as the active conversation.
+   * Init scripts stack in registration order, so a later call reads what an earlier one wrote:
+   * that is how a spec seeds two real conversations and switches between them.
+   */
+  append?: boolean;
+};
+
+/** One real retrieval run: the matches it returned and the run id the API recorded for it. */
+export type SeededRun = {
+  matches: SeededMatch[];
+  /** `debug.observability_run_id` -- the run `/api/traces/latest` will serve for this corpus. */
+  runId: string;
 };
 
 /**
- * Seed a chat thread whose assistant message carries the REAL retrieval results for `query`
- * (`POST /api/search` against the indexed corpus), and return those matches so the caller can
- * assert its API-level preconditions before touching the DOM.
+ * Run the retrieval the chat pipeline runs, and report the run it was recorded under.
  *
- * Applies as an init script, so it must be called before the navigation that should see it.
- * Init scripts run on EVERY navigation of the page, a `page.reload()` included, so the script
- * marks itself applied in sessionStorage (per tab; survives a reload, dies with the context)
- * and is a no-op afterwards. A spec that reloads to check persistence therefore checks the
- * app's persistence, not a re-seed.
+ * Exported because a spec about the Routing Trace needs a run on the corpus that no
+ * conversation produced, which is the same call without the seeding.
  */
-export async function seedAnswerFromSearch(
-  page: Page,
+export async function runSeedSearch(
   request: APIRequestContext,
   corpusId: string,
   query: string,
-  opts: SeedOptions = {},
-): Promise<SeededMatch[]> {
-  const topK = opts.topK ?? 8;
-  const label = opts.label ?? 'Exhaustive spec';
+  topK = 8,
+): Promise<SeededRun> {
   const res = await request.post(`${API_BASE}/search`, {
     data: {
       query,
@@ -60,11 +65,35 @@ export async function seedAnswerFromSearch(
     },
   });
   if (!res.ok()) throw new Error(`POST /api/search -> ${res.status()} ${(await res.text()).slice(0, 300)}`);
-  const matches = ((await res.json()) as { matches: SeededMatch[] }).matches;
-  expect(matches.length, `retrieval returned no matches for: ${query}`).toBeGreaterThan(0);
+  const body = (await res.json()) as { matches: SeededMatch[]; debug?: Record<string, unknown> | null };
+  const runId = String(body.debug?.observability_run_id || '').trim();
+  expect(runId, `POST /api/search recorded no run id for: ${query}`).not.toBe('');
+  return { matches: body.matches, runId };
+}
+
+/**
+ * Write a thread into localStorage whose assistant message carries the results of `run` -- and
+ * the run id the API recorded for it, which is what the Routing Trace panel matches a
+ * conversation against.
+ *
+ * Applies as an init script, so it must be called before the navigation that should see it.
+ * Init scripts run on EVERY navigation of the page, a `page.reload()` included, so the script
+ * marks itself applied in sessionStorage (per tab; survives a reload, dies with the context)
+ * and is a no-op afterwards. A spec that reloads to check persistence therefore checks the
+ * app's persistence, not a re-seed.
+ */
+export async function seedConversationFromRun(
+  page: Page,
+  corpusId: string,
+  query: string,
+  run: SeededRun,
+  opts: SeedOptions = {},
+): Promise<void> {
+  const label = opts.label ?? 'Exhaustive spec';
+  const append = opts.append ?? false;
   const seedId = `exhaustive-seed-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   await page.addInitScript(
-    ({ cid, q, sources, title, seedId }) => {
+    ({ cid, q, sources, title, seedId, runId, append }) => {
       const appliedKey = `ragweld-exhaustive-seed-applied:${seedId}`;
       if (sessionStorage.getItem(appliedKey)) return;
       sessionStorage.setItem(appliedKey, '1');
@@ -85,15 +114,41 @@ export async function seedAnswerFromSearch(
             createdAt: new Date(now + 1).toISOString(),
             content: [{ type: 'text', text: 'Grounded answer seeded from retrieval (see sources).' }],
             status: { type: 'complete', reason: 'stop' },
-            metadata: { unstable_state: null, unstable_annotations: [], unstable_data: [], steps: [], custom: { runId: `spec-${now}`, sources } },
+            metadata: { unstable_state: null, unstable_annotations: [], unstable_data: [], steps: [], custom: { runId, sources } },
           },
         ],
       };
-      localStorage.setItem('ragweld-chat-threads:v2', JSON.stringify({ version: 2, active_conversation_id: convId, sessions: [session] }));
+      let sessions: unknown[] = [session];
+      if (append) {
+        try {
+          const stored = JSON.parse(localStorage.getItem('ragweld-chat-threads:v2') || 'null');
+          if (stored && Array.isArray(stored.sessions)) sessions = [session, ...stored.sessions];
+        } catch {
+          // a corrupt store is replaced, not appended to
+        }
+      }
+      localStorage.setItem('ragweld-chat-threads:v2', JSON.stringify({ version: 2, active_conversation_id: convId, sessions }));
       localStorage.setItem('tribrid_active_corpus', cid);
       localStorage.setItem('tribrid_active_repo', cid);
     },
-    { cid: corpusId, q: query, sources: matches, title: label, seedId },
+    { cid: corpusId, q: query, sources: run.matches, title: label, seedId, runId: run.runId, append },
   );
-  return matches;
+}
+
+/**
+ * Seed a chat thread whose assistant message carries the REAL retrieval results for `query`
+ * (`POST /api/search` against the indexed corpus), and return those matches so the caller can
+ * assert its API-level preconditions before touching the DOM.
+ */
+export async function seedAnswerFromSearch(
+  page: Page,
+  request: APIRequestContext,
+  corpusId: string,
+  query: string,
+  opts: SeedOptions = {},
+): Promise<SeededMatch[]> {
+  const run = await runSeedSearch(request, corpusId, query, opts.topK ?? 8);
+  expect(run.matches.length, `retrieval returned no matches for: ${query}`).toBeGreaterThan(0);
+  await seedConversationFromRun(page, corpusId, query, run, opts);
+  return run.matches;
 }

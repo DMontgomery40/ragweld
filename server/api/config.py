@@ -862,9 +862,14 @@ async def mcp_status(request: Request) -> MCPStatusResponse:
     except Exception as e:
         details.append(f"Error resolving MCP HTTP status: {e}")
 
-    from server.mcp.server import mounted_tool_config
+    from server.mcp.server import mounted_state, mounted_tool_config
 
-    mounted_mcp = mounted_tool_config()
+    # `mounted_tool_config()` is populated by building the singleton, and this route builds it
+    # to list the tools -- so it answers "a server was constructed", not "a transport is
+    # mounted". Only the process that actually mounted one may describe its tool defaults;
+    # otherwise a card would advertise defaults for a transport whose probe answers 503.
+    mount_enabled, _mount_path = mounted_state()
+    mounted_mcp = mounted_tool_config() if mount_enabled else None
     restart_pending = bool(
         mounted_mcp is not None
         and config_mcp is not None

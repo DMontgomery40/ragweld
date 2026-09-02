@@ -4371,9 +4371,9 @@ export interface MCPProbeResponse {
   transport_url: string;
   /** Corpus the tool searched. */
   corpus_id: string;
-  /** Retrieval mode the tool resolved (request override or mcp.default_mode). */
+  /** Retrieval mode the tool actually applied: the request override, or the default the MOUNTED server captured at process start (not the persisted `mcp.default_mode`, which only takes effect on a restart). */
   mode: string;
-  /** Result count the tool resolved. */
+  /** Result count the tool actually applied: the request override, or the MOUNTED server's captured `default_top_k`. */
   top_k: number;
   /** Structured tool output, validated as ChunkMatch rows. */
   results?: ChunkMatch[];

@@ -531,6 +531,42 @@ export function loadChatSessionsFromStorage(storage: Storage, chatHistoryMax: nu
   };
 }
 
+/**
+ * The run ids the ACTIVE stored conversation produced.
+ *
+ * The Routing Trace panel falls back to the corpus's most recent run, which can just as easily
+ * be a Retrieval-tab search or an MCP probe, so it has to say when what it shows is not an
+ * answer from this conversation (S37). "This conversation" is a property of the stored thread,
+ * not of a tab's lifetime: a reload, or switching sessions, must not turn the conversation's
+ * own run into a foreign one. The chat pipeline records the run on the assistant message it
+ * produced, so the answer is read straight back out of the persisted thread.
+ */
+export function readActiveConversationRunIds(storage: Storage): Set<string> {
+  const runIds = new Set<string>();
+  let parsed: ChatSessionsState | null = null;
+  try {
+    const raw = storage.getItem(CHAT_SESSIONS_STORAGE_KEY);
+    parsed = raw ? coerceChatSessionsState(JSON.parse(raw)) : null;
+  } catch {
+    return runIds;
+  }
+  if (!parsed) return runIds;
+  // Same resolution the loader uses, so this reads the thread the app actually activates.
+  const activeId = String(parsed.active_conversation_id || '').trim();
+  const active =
+    parsed.sessions.find((session) => String(session?.conversation_id || '').trim() === activeId) ||
+    parsed.sessions[0] ||
+    null;
+  for (const message of active?.messages || []) {
+    if (!message || message.role !== 'assistant') continue;
+    const custom = getMessageCustom(message as ThreadMessage);
+    // `eventId` is the same run under the feedback API's name; the pipeline writes both.
+    const runId = String(custom.runId || custom.eventId || '').trim();
+    if (runId) runIds.add(runId);
+  }
+  return runIds;
+}
+
 export function upsertChatSession(options: UpsertChatSessionOptions): ChatSession[] {
   const nextMessages = clampChatHistory(options.messages, options.chatHistoryMax);
   const nextActiveId = String(options.activeId || '').trim() || createConversationId();

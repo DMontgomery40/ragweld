@@ -6,7 +6,6 @@
 import { useState } from 'react';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { StatusIndicator } from '@/components/ui/StatusIndicator';
-import { useConfig } from '@/hooks/useConfig';
 import { useMCPServer } from '@/hooks/useMCPServer';
 import { useRepoStore } from '@/stores/useRepoStore';
 
@@ -14,13 +13,15 @@ export function MCPSubtab() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [question, setQuestion] = useState('');
   const { status, probe, probeQuestion, loading, probing, error, refresh, probeSearch } = useMCPServer();
-  const { config } = useConfig();
   const activeRepo = useRepoStore((s) => s.activeRepo);
-  // The probe sends no mode or top_k, so it runs on the configured defaults. The card used to
-  // name a literal top_k=5 while `mcp.default_top_k` was 20, which is the number the result line
-  // then printed (S40).
-  const defaultMode = config?.mcp?.default_mode ?? null;
-  const defaultTopK = config?.mcp?.default_top_k ?? null;
+  // The probe sends no mode or top_k, so it runs on the defaults the tool itself applies. The
+  // card used to name a literal top_k=5 while `mcp.default_top_k` was 20, which is the number
+  // the result line then printed (S40); it then named the PERSISTED config, while the mounted
+  // tool still answered on the values it captured at process start (P2-B). Both the card and
+  // the probe now report the mounted server, and say so when config has moved on.
+  const mountedMode = status?.default_mode ?? null;
+  const mountedTopK = status?.default_top_k ?? null;
+  const restartPending = Boolean(status?.defaults_restart_pending);
 
   const refreshAndStamp = async () => {
     await refresh();
@@ -181,12 +182,26 @@ export function MCPSubtab() {
         <div style={{ fontSize: '13px', fontWeight: 800, color: 'var(--fg)', marginBottom: '6px' }}>Probe the search tool</div>
         <div style={{ fontSize: '13px', color: 'var(--fg-muted)', marginBottom: '10px' }}>
           Calls the MCP <span className="mono">search</span> tool through a real client session on the mounted transport,
-          on this deployment&rsquo;s defaults (
-          <span className="mono">mode={defaultMode ?? 'mcp.default_mode'}</span>,{' '}
-          <span className="mono">top_k={defaultTopK ?? 'mcp.default_top_k'}</span>), against the active corpus
+          on the defaults the mounted tools actually run on (
+          <span className="mono">mode={mountedMode ?? 'mcp.default_mode'}</span>,{' '}
+          <span className="mono">top_k={mountedTopK ?? 'mcp.default_top_k'}</span>), against the active corpus
           {activeRepo ? <> (<span className="mono">{activeRepo}</span>)</> : ' (select a corpus first)'}. Ask a real question about the
           corpus — every query is reranker training signal.
         </div>
+        {restartPending ? (
+          <div
+            role="alert"
+            data-testid="mcp-defaults-restart-pending"
+            style={{ fontSize: '12.5px', lineHeight: 1.5, color: 'var(--warn)', marginBottom: '10px' }}
+          >
+            Restart pending: the mounted tools captured{' '}
+            <span className="mono">mode={mountedMode ?? 'n/a'}</span>,{' '}
+            <span className="mono">top_k={mountedTopK ?? 'n/a'}</span> when this API process started, while
+            config.mcp now says <span className="mono">mode={status?.config_default_mode ?? 'n/a'}</span>,{' '}
+            <span className="mono">top_k={status?.config_default_top_k ?? 'n/a'}</span>. MCP clients keep getting the
+            mounted values until the API is restarted.
+          </div>
+        ) : null}
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
           <input
             type="text"

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { TraceExternalLinks } from '@/components/Observability/TraceExternalLinks';
 import { ChatSubtabs } from '@/components/Chat/ChatSubtabs';
 import { ChatInterface } from '@/components/Chat/ChatInterface';
+import { CHAT_SESSIONS_CHANGED_EVENT, readActiveConversationRunIds } from '@/components/Chat/chatSessions';
 import { ChatSettings } from '@/components/Chat/ChatSettings';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { useAPI, useConfig, useSubtab } from '@/hooks';
@@ -88,10 +89,32 @@ export default function ChatTab() {
     }
   }, [api]);
 
-  // The run this conversation last produced, so the panel can say when what it is showing
-  // came from somewhere else on this corpus (an MCP probe, a Retrieval-tab search): the
-  // fallback query asks for the corpus's latest run, not the conversation's (S37).
-  const [conversationRunId, setConversationRunId] = useState<string | null>(null);
+  // The runs THIS conversation produced, so the panel can say when what it is showing came
+  // from somewhere else on this corpus (an MCP probe, a Retrieval-tab search): the fallback
+  // query asks for the corpus's latest run, not the conversation's (S37).
+  //
+  // Derived from the stored thread rather than from what this tab happened to witness. A run
+  // id collected only from `open-trace`/`run-complete` belongs to the tab's lifetime: after a
+  // reload it was empty, so the conversation's own run was labelled foreign, and switching
+  // conversations left the previous one's run unlabelled. It is a set, not the last run,
+  // because "View trace" on an older answer opens a run this conversation still produced.
+  const readConversationRunIds = useCallback((): Set<string> => {
+    try {
+      return readActiveConversationRunIds(localStorage);
+    } catch {
+      return new Set<string>();
+    }
+  }, []);
+  const [conversationRunIds, setConversationRunIds] = useState<Set<string>>(readConversationRunIds);
+
+  useEffect(() => {
+    const refresh = () => setConversationRunIds(readConversationRunIds());
+    // Every write to the stored threads announces itself, so selecting a saved session,
+    // restoring one after a reload and finishing a run all land here.
+    refresh();
+    window.addEventListener(CHAT_SESSIONS_CHANGED_EVENT, refresh);
+    return () => window.removeEventListener(CHAT_SESSIONS_CHANGED_EVENT, refresh);
+  }, [readConversationRunIds]);
 
   // Listen for "View trace & logs" clicks from ChatInterface
   useEffect(() => {
@@ -100,7 +123,6 @@ export default function ChatTab() {
       const runId = typeof detail.run_id === 'string' ? detail.run_id : null;
       setSubtab('ui', { replace: true });
       setSelectedRunId(runId);
-      setConversationRunId(runId);
       setTraceOpen(true);
       // Load immediately (uses run_id if present)
       void loadTrace({ runId });
@@ -117,7 +139,6 @@ export default function ChatTab() {
       const detail = (ev as CustomEvent).detail || {};
       const runId = typeof detail.run_id === 'string' ? detail.run_id : null;
       setSelectedRunId(runId);
-      setConversationRunId(runId);
       if (!traceOpen) return;
       void loadTrace({ runId });
     };
@@ -247,7 +268,7 @@ export default function ChatTab() {
             <summary style={{ cursor: 'pointer', fontWeight: 600, color: 'var(--accent-text)', fontSize: '13px' }}>
               Routing Trace {trace?.events?.length ? `(${trace.events.length} events)` : ''}
             </summary>
-            {trace && (!conversationRunId || conversationRunId !== trace.run_id) ? (
+            {trace && !conversationRunIds.has(String(trace.run_id || '')) ? (
               <div
                 data-testid="chat-trace-foreign-run"
                 style={{ marginTop: '8px', fontSize: '12px', color: 'var(--fg-muted)' }}

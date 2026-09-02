@@ -171,9 +171,16 @@ test.describe.serial('curious-user drive P1 fixes on an isolated corpus', () => 
 
   test('M12: the MCP subtab lists registered tools and probes real retrieval', async ({ page, baseURL, request }) => {
     await activateCorpusInBrowser(page, corpus.corpusId);
-    const mcpConfig = (await (await request.get(`${API_BASE}/config`)).json()) as { mcp?: { default_top_k?: number } };
-    const configuredTopK = Number(mcpConfig.mcp?.default_top_k ?? 0);
-    expect(configuredTopK).toBeGreaterThan(0);
+    // P2-B: the number that matters is the one the MOUNTED tools apply, which the status
+    // boundary reports. `config.mcp.default_top_k` is only what a restart would mount.
+    const mcpStatus = (await (await request.get(`${API_BASE}/mcp/status`)).json()) as {
+      default_top_k?: number | null;
+      default_mode?: string | null;
+      config_default_top_k?: number | null;
+      defaults_restart_pending?: boolean;
+    };
+    const mountedTopK = Number(mcpStatus.default_top_k ?? 0);
+    expect(mountedTopK, 'the status must report the top_k the mounted MCP tools use').toBeGreaterThan(0);
     const deadCalls = trackRequests(page, (url) => /\/api\/mcp\/(http\/|test|rag_search)/.test(url));
     await gotoWeb(page, baseURL, 'infrastructure?subtab=mcp');
     await expect(page.getByTestId('mcp-tool-search')).toBeVisible({ timeout: 60_000 });
@@ -183,7 +190,7 @@ test.describe.serial('curious-user drive P1 fixes on an isolated corpus', () => 
     await expect(page.getByTestId('mcp-error')).toHaveCount(0);
     // S40: the card described a top_k the probe does not use.
     const probeCard = page.getByTestId('mcp-probe');
-    await expect(probeCard).toContainText(`top_k=${configuredTopK}`);
+    await expect(probeCard).toContainText(`top_k=${mountedTopK}`);
     await page.getByTestId('mcp-probe-question').fill(REAL_QUESTION);
     await page.getByTestId('mcp-probe-run').click();
     const results = page.getByTestId('mcp-probe-results');
@@ -194,9 +201,35 @@ test.describe.serial('curious-user drive P1 fixes on an isolated corpus', () => 
     await expect(results).toContainText('in-process transport');
     await expect(results).toContainText('/mcp/');
     await expect(results).toContainText('tool search');
-    await expect(results).toContainText(`top_k ${configuredTopK}`);
+    await expect(results).toContainText(`top_k ${mountedTopK}`);
     await expect(results).toContainText('mode tribrid');
     expect(deadCalls()).toEqual([]);
+
+    // P2-B: change the persisted default. The mounted tools keep the value they captured at
+    // process start, so the card must keep describing THAT and say a restart is pending --
+    // it used to print the new number over a tool that had never seen it.
+    const configBefore = (await (await request.get(`${API_BASE}/config`)).json()) as { mcp?: { default_top_k?: number } };
+    const configuredTopK = Number(configBefore.mcp?.default_top_k ?? 0);
+    expect(configuredTopK).toBeGreaterThan(0);
+    const changedTopK = mountedTopK + 7;
+    const patched = await request.patch(`${API_BASE}/config/mcp`, { data: { default_top_k: changedTopK } });
+    expect(patched.ok(), await patched.text()).toBe(true);
+    // The card reads config through the store, which is scoped to the ACTIVE corpus, so the
+    // operator's edit lands there too -- and a per-corpus `mcp.default_top_k` reaches the
+    // mounted tool even less than the global one does.
+    await patchCorpusConfigSection(request, corpus.corpusId, 'mcp', { default_top_k: changedTopK });
+    try {
+      await gotoWeb(page, baseURL, 'infrastructure?subtab=mcp');
+      await expect(page.getByTestId('mcp-tool-search')).toBeVisible({ timeout: 60_000 });
+      await expect(page.getByTestId('mcp-probe')).toContainText(`top_k=${mountedTopK}`);
+      const pending = page.getByTestId('mcp-defaults-restart-pending');
+      await expect(pending).toBeVisible({ timeout: 30_000 });
+      await expect(pending).toContainText(`top_k=${changedTopK}`);
+    } finally {
+      const restored = await request.patch(`${API_BASE}/config/mcp`, { data: { default_top_k: configuredTopK } });
+      expect(restored.ok(), await restored.text()).toBe(true);
+      await patchCorpusConfigSection(request, corpus.corpusId, 'mcp', { default_top_k: configuredTopK });
+    }
   });
 
   test('M8: the benchmark discloses that every model was grounded on the corpus', async ({ page, baseURL, request }) => {

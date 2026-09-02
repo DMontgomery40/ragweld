@@ -9,8 +9,12 @@ from mcp.server.transport_security import TransportSecuritySettings
 
 from server.config import load_config
 from server.mcp.tools import register_mcp_tools
+from server.models.tribrid_config_model import MCPConfig
 
 _MOUNTED: dict[str, object] = {"enabled": False, "mount_path": ""}
+# The exact MCPConfig the mounted tools close over. Captured, not copied: `register_mcp_tools`
+# closes over this object, so reporting it can never drift from what a tool call actually uses.
+_MOUNTED_TOOL_CONFIG: dict[str, MCPConfig | None] = {"cfg": None}
 
 
 def record_mounted_state(*, enabled: bool, mount_path: str) -> None:
@@ -22,6 +26,17 @@ def record_mounted_state(*, enabled: bool, mount_path: str) -> None:
 def mounted_state() -> tuple[bool, str]:
     """The MCP transport this process serves right now, independent of persisted config edits."""
     return bool(_MOUNTED["enabled"]), str(_MOUNTED["mount_path"])
+
+
+def mounted_tool_config() -> MCPConfig | None:
+    """The MCP config the mounted tools actually run on, or None when no server was built.
+
+    The FastMCP singleton is built once per process and its tools close over the config as it
+    was then, so an operator's later `mcp.default_mode` / `mcp.default_top_k` edit does not
+    reach them until a restart. Every surface that describes what the tools do must report
+    THIS, not `load_global_config()`, or it describes a deployment that does not exist yet.
+    """
+    return _MOUNTED_TOOL_CONFIG["cfg"]
 
 
 @lru_cache(maxsize=1)
@@ -48,5 +63,6 @@ def get_mcp_server() -> FastMCP:
     )
 
     register_mcp_tools(mcp, mcp_cfg)
+    _MOUNTED_TOOL_CONFIG["cfg"] = mcp_cfg
     return mcp
 
