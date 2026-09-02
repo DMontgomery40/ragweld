@@ -15,6 +15,7 @@ from server.config_control_plane import (
     validate_integration_contracts,
     validate_secret_registry,
 )
+from server.gateway_catalog import LOCAL_GATEWAY_ALIAS
 from server.models.tribrid_config_model import TriBridConfig
 
 
@@ -72,9 +73,10 @@ def _contract(integration_id: str):
     raise AssertionError(f"no integration contract {integration_id!r}")
 
 
-async def _vllm_readiness(*, litellm_enabled: bool):
+async def _vllm_readiness(*, litellm_enabled: bool, chat_model: str = "openai.gpt-5.6-luna"):
     config = TriBridConfig()
     config.chat.litellm.enabled = litellm_enabled
+    config.chat.litellm.default_model = chat_model
     config.chat.vllm.enabled = False
     return await _build_runtime_integration_readiness(config, _contract("vllm"))
 
@@ -91,6 +93,13 @@ async def test_an_unready_vllm_blocks_chat_only_when_chat_runs_on_it() -> None:
 
     gateway_off = await _vllm_readiness(litellm_enabled=False)
     assert set(gateway_off.blocked_surfaces) == {"runtime", "chat", "benchmark"}
+
+    # The local lane is itself a gateway route, so chat reaches vLLM with the gateway on
+    # whenever the chat default model is that route.
+    gateway_on_local_model = await _vllm_readiness(
+        litellm_enabled=True, chat_model=LOCAL_GATEWAY_ALIAS
+    )
+    assert set(gateway_on_local_model.blocked_surfaces) == {"runtime", "chat", "benchmark"}
 
 
 def test_mlflow_does_not_claim_the_eval_lane_it_never_touches() -> None:

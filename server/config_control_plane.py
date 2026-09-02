@@ -19,6 +19,7 @@ from server.chat.gateway_runtime import (
     resolve_vllm_base_url,
 )
 from server.db.neo4j import Neo4jClient
+from server.gateway_catalog import LOCAL_GATEWAY_ALIAS
 from server.db.postgres import PostgresClient
 from server.indexing.generations import qdrant_collection_of
 from server.models.tribrid_config_model import (
@@ -1135,11 +1136,15 @@ async def _build_runtime_integration_readiness(
         for path in contract.required_config_paths[1:]
         if _is_missing(_config_value(config, path))
     ]
-    # Chat and the benchmark answer through whichever generation lane is selected. With the
-    # gateway on they never reach the serving lane, so an off or unreachable vLLM blocks only
-    # that lane; with the gateway off they fall back to it and it does block them (S31).
+    # Chat and the benchmark answer through whichever generation lane is selected. They reach
+    # vLLM with the gateway off, and with the gateway on when the chat default model is the
+    # local serving route (it is itself a gateway alias); otherwise an off or unreachable vLLM
+    # blocks only its own lane and saying more is false (S31).
+    chat_runs_on_the_local_lane = not bool(config.chat.litellm.enabled) or (
+        str(config.chat.litellm.default_model or "").strip() == LOCAL_GATEWAY_ALIAS
+    )
     vllm_blocked_surfaces = (
-        ["runtime"] if bool(config.chat.litellm.enabled) else list(contract.blocked_surfaces)
+        list(contract.blocked_surfaces) if chat_runs_on_the_local_lane else ["runtime"]
     )
     if not enabled:
         return _build_integration_readiness(
