@@ -804,10 +804,12 @@ async def test_index_search_and_delete_on_promoted_lane(
         # Dashboard storage truth on the real stores (replaces the former fake-Postgres test).
         assert int(storage["chunks_bytes"]) > 0
         assert int(storage["postgres_total_bytes"]) >= int(storage["chunks_bytes"])
+        # Neo4j 5 Community exposes no store-size source (S5): the breakdown says so instead
+        # of printing a zero, and the total counts only what was measured.
+        assert storage["neo4j_store_bytes"] is None
+        assert str(storage["neo4j_store_note"] or "").strip()
         assert int(storage["total_storage_bytes"]) == (
-            int(storage["postgres_total_bytes"])
-            + int(storage["qdrant_dense_vector_bytes"])
-            + int(storage["neo4j_store_bytes"])
+            int(storage["postgres_total_bytes"]) + int(storage["qdrant_dense_vector_bytes"])
         )
         dashboard_status = await client.get("/api/index/status", params={"corpus_id": corpus_id})
         assert dashboard_status.status_code == 200, dashboard_status.text
