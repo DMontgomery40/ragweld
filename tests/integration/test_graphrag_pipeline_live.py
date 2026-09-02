@@ -138,6 +138,8 @@ async def test_semantic_and_code_files_use_scoped_official_writer_contract(
             route_base_url=str(route.base_url or ""),
             route_api_key=str(route.api_key or ""),
             max_concurrency=2,
+            llm_timeout_s=int(cfg.graph_indexing.semantic_kg_llm_timeout_s),
+            reasoning_effort=str(cfg.graph_indexing.semantic_kg_reasoning_effort),
         )
         semantic_chunks = [
             Chunk(

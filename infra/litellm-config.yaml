@@ -99,10 +99,6 @@ model_list:
   litellm_params:
     model: openrouter/anthropic/claude-opus-4.7
     api_key: os.environ/OPENROUTER_API_KEY
-- model_name: anthropic.claude-opus-4.7-fast
-  litellm_params:
-    model: openrouter/anthropic/claude-opus-4.7-fast
-    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: anthropic.claude-opus-4.7.batch
   litellm_params:
     model: openrouter/anthropic/claude-opus-4.7:batch
@@ -463,6 +459,10 @@ model_list:
   litellm_params:
     model: openrouter/ibm-granite/granite-4.1-8b
     api_key: os.environ/OPENROUTER_API_KEY
+- model_name: ibm-granite.granite-4.2-8b
+  litellm_params:
+    model: openrouter/ibm-granite/granite-4.2-8b
+    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: inception.mercury-2
   litellm_params:
     model: openrouter/inception/mercury-2
@@ -474,10 +474,6 @@ model_list:
 - model_name: inclusionai.ling-3.0-flash-fin.free
   litellm_params:
     model: openrouter/inclusionai/ling-3.0-flash-fin:free
-    api_key: os.environ/OPENROUTER_API_KEY
-- model_name: kwaipilot.kat-coder-air-v2.5
-  litellm_params:
-    model: openrouter/kwaipilot/kat-coder-air-v2.5
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: kwaipilot.kat-coder-pro-v2
   litellm_params:
@@ -607,10 +603,6 @@ model_list:
   litellm_params:
     model: openrouter/mistralai/codestral-2508
     api_key: os.environ/OPENROUTER_API_KEY
-- model_name: mistralai.codestral-2508.batch
-  litellm_params:
-    model: openrouter/mistralai/codestral-2508:batch
-    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: mistralai.devstral-2512
   litellm_params:
     model: openrouter/mistralai/devstral-2512
@@ -627,10 +619,6 @@ model_list:
   litellm_params:
     model: openrouter/mistralai/ministral-8b-2512
     api_key: os.environ/OPENROUTER_API_KEY
-- model_name: mistralai.ministral-8b-2512.batch
-  litellm_params:
-    model: openrouter/mistralai/ministral-8b-2512:batch
-    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: mistralai.mistral-large
   litellm_params:
     model: openrouter/mistralai/mistral-large
@@ -642,10 +630,6 @@ model_list:
 - model_name: mistralai.mistral-large-2512
   litellm_params:
     model: openrouter/mistralai/mistral-large-2512
-    api_key: os.environ/OPENROUTER_API_KEY
-- model_name: mistralai.mistral-large-2512.batch
-  litellm_params:
-    model: openrouter/mistralai/mistral-large-2512:batch
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: mistralai.mistral-medium-3
   litellm_params:
@@ -663,10 +647,6 @@ model_list:
   litellm_params:
     model: openrouter/mistralai/mistral-medium-3.1
     api_key: os.environ/OPENROUTER_API_KEY
-- model_name: mistralai.mistral-medium-3.1.batch
-  litellm_params:
-    model: openrouter/mistralai/mistral-medium-3.1:batch
-    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: mistralai.mistral-nemo
   litellm_params:
     model: openrouter/mistralai/mistral-nemo
@@ -682,10 +662,6 @@ model_list:
 - model_name: mistralai.mistral-small-2603
   litellm_params:
     model: openrouter/mistralai/mistral-small-2603
-    api_key: os.environ/OPENROUTER_API_KEY
-- model_name: mistralai.mistral-small-2603.batch
-  litellm_params:
-    model: openrouter/mistralai/mistral-small-2603:batch
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: mistralai.mistral-small-3.1-24b-instruct
   litellm_params:
@@ -823,6 +799,10 @@ model_list:
   litellm_params:
     model: openrouter/openai/gpt-3.5-turbo-instruct
     api_key: os.environ/OPENROUTER_API_KEY
+- model_name: openai.gpt-3.5-turbo.batch
+  litellm_params:
+    model: openrouter/openai/gpt-3.5-turbo:batch
+    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-4
   litellm_params:
     model: openrouter/openai/gpt-4
@@ -835,6 +815,10 @@ model_list:
   litellm_params:
     model: openrouter/openai/gpt-4-turbo-preview
     api_key: os.environ/OPENROUTER_API_KEY
+- model_name: openai.gpt-4-turbo.batch
+  litellm_params:
+    model: openrouter/openai/gpt-4-turbo:batch
+    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-4.1
   litellm_params:
     model: openrouter/openai/gpt-4.1
@@ -843,9 +827,21 @@ model_list:
   litellm_params:
     model: openrouter/openai/gpt-4.1-mini
     api_key: os.environ/OPENROUTER_API_KEY
+- model_name: openai.gpt-4.1-mini.batch
+  litellm_params:
+    model: openrouter/openai/gpt-4.1-mini:batch
+    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-4.1-nano
   litellm_params:
     model: openrouter/openai/gpt-4.1-nano
+    api_key: os.environ/OPENROUTER_API_KEY
+- model_name: openai.gpt-4.1-nano.batch
+  litellm_params:
+    model: openrouter/openai/gpt-4.1-nano:batch
+    api_key: os.environ/OPENROUTER_API_KEY
+- model_name: openai.gpt-4.1.batch
+  litellm_params:
+    model: openrouter/openai/gpt-4.1:batch
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-4o
   litellm_params:
@@ -871,6 +867,14 @@ model_list:
   litellm_params:
     model: openrouter/openai/gpt-4o-mini-2024-07-18
     api_key: os.environ/OPENROUTER_API_KEY
+- model_name: openai.gpt-4o-mini.batch
+  litellm_params:
+    model: openrouter/openai/gpt-4o-mini:batch
+    api_key: os.environ/OPENROUTER_API_KEY
+- model_name: openai.gpt-4o.batch
+  litellm_params:
+    model: openrouter/openai/gpt-4o:batch
+    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5
   litellm_params:
     model: openrouter/openai/gpt-5
@@ -887,13 +891,25 @@ model_list:
   litellm_params:
     model: openrouter/openai/gpt-5-mini
     api_key: os.environ/OPENROUTER_API_KEY
+- model_name: openai.gpt-5-mini.batch
+  litellm_params:
+    model: openrouter/openai/gpt-5-mini:batch
+    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5-nano
   litellm_params:
     model: openrouter/openai/gpt-5-nano
     api_key: os.environ/OPENROUTER_API_KEY
+- model_name: openai.gpt-5-nano.batch
+  litellm_params:
+    model: openrouter/openai/gpt-5-nano:batch
+    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5-pro
   litellm_params:
     model: openrouter/openai/gpt-5-pro
+    api_key: os.environ/OPENROUTER_API_KEY
+- model_name: openai.gpt-5-pro.batch
+  litellm_params:
+    model: openrouter/openai/gpt-5-pro:batch
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.1
   litellm_params:
@@ -911,6 +927,10 @@ model_list:
   litellm_params:
     model: openrouter/openai/gpt-5.1-codex-mini
     api_key: os.environ/OPENROUTER_API_KEY
+- model_name: openai.gpt-5.1.batch
+  litellm_params:
+    model: openrouter/openai/gpt-5.1:batch
+    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.2
   litellm_params:
     model: openrouter/openai/gpt-5.2
@@ -926,6 +946,14 @@ model_list:
 - model_name: openai.gpt-5.2-pro
   litellm_params:
     model: openrouter/openai/gpt-5.2-pro
+    api_key: os.environ/OPENROUTER_API_KEY
+- model_name: openai.gpt-5.2-pro.batch
+  litellm_params:
+    model: openrouter/openai/gpt-5.2-pro:batch
+    api_key: os.environ/OPENROUTER_API_KEY
+- model_name: openai.gpt-5.2.batch
+  litellm_params:
+    model: openrouter/openai/gpt-5.2:batch
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.3-codex
   litellm_params:
@@ -943,13 +971,29 @@ model_list:
   litellm_params:
     model: openrouter/openai/gpt-5.4-mini
     api_key: os.environ/OPENROUTER_API_KEY
+- model_name: openai.gpt-5.4-mini.batch
+  litellm_params:
+    model: openrouter/openai/gpt-5.4-mini:batch
+    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.4-nano
   litellm_params:
     model: openrouter/openai/gpt-5.4-nano
     api_key: os.environ/OPENROUTER_API_KEY
+- model_name: openai.gpt-5.4-nano.batch
+  litellm_params:
+    model: openrouter/openai/gpt-5.4-nano:batch
+    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.4-pro
   litellm_params:
     model: openrouter/openai/gpt-5.4-pro
+    api_key: os.environ/OPENROUTER_API_KEY
+- model_name: openai.gpt-5.4-pro.batch
+  litellm_params:
+    model: openrouter/openai/gpt-5.4-pro:batch
+    api_key: os.environ/OPENROUTER_API_KEY
+- model_name: openai.gpt-5.4.batch
+  litellm_params:
+    model: openrouter/openai/gpt-5.4:batch
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.5
   litellm_params:
@@ -959,6 +1003,14 @@ model_list:
   litellm_params:
     model: openrouter/openai/gpt-5.5-pro
     api_key: os.environ/OPENROUTER_API_KEY
+- model_name: openai.gpt-5.5-pro.batch
+  litellm_params:
+    model: openrouter/openai/gpt-5.5-pro:batch
+    api_key: os.environ/OPENROUTER_API_KEY
+- model_name: openai.gpt-5.5.batch
+  litellm_params:
+    model: openrouter/openai/gpt-5.5:batch
+    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.6-luna
   litellm_params:
     model: openrouter/openai/gpt-5.6-luna
@@ -966,6 +1018,14 @@ model_list:
 - model_name: openai.gpt-5.6-luna-pro
   litellm_params:
     model: openrouter/openai/gpt-5.6-luna-pro
+    api_key: os.environ/OPENROUTER_API_KEY
+- model_name: openai.gpt-5.6-luna-pro.batch
+  litellm_params:
+    model: openrouter/openai/gpt-5.6-luna-pro:batch
+    api_key: os.environ/OPENROUTER_API_KEY
+- model_name: openai.gpt-5.6-luna.batch
+  litellm_params:
+    model: openrouter/openai/gpt-5.6-luna:batch
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.6-sol
   litellm_params:
@@ -975,6 +1035,14 @@ model_list:
   litellm_params:
     model: openrouter/openai/gpt-5.6-sol-pro
     api_key: os.environ/OPENROUTER_API_KEY
+- model_name: openai.gpt-5.6-sol-pro.batch
+  litellm_params:
+    model: openrouter/openai/gpt-5.6-sol-pro:batch
+    api_key: os.environ/OPENROUTER_API_KEY
+- model_name: openai.gpt-5.6-sol.batch
+  litellm_params:
+    model: openrouter/openai/gpt-5.6-sol:batch
+    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.6-terra
   litellm_params:
     model: openrouter/openai/gpt-5.6-terra
@@ -982,6 +1050,18 @@ model_list:
 - model_name: openai.gpt-5.6-terra-pro
   litellm_params:
     model: openrouter/openai/gpt-5.6-terra-pro
+    api_key: os.environ/OPENROUTER_API_KEY
+- model_name: openai.gpt-5.6-terra-pro.batch
+  litellm_params:
+    model: openrouter/openai/gpt-5.6-terra-pro:batch
+    api_key: os.environ/OPENROUTER_API_KEY
+- model_name: openai.gpt-5.6-terra.batch
+  litellm_params:
+    model: openrouter/openai/gpt-5.6-terra:batch
+    api_key: os.environ/OPENROUTER_API_KEY
+- model_name: openai.gpt-5.batch
+  litellm_params:
+    model: openrouter/openai/gpt-5:batch
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-audio
   litellm_params:
@@ -1035,9 +1115,17 @@ model_list:
   litellm_params:
     model: openrouter/openai/o3-mini-high
     api_key: os.environ/OPENROUTER_API_KEY
+- model_name: openai.o3-mini.batch
+  litellm_params:
+    model: openrouter/openai/o3-mini:batch
+    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.o3-pro
   litellm_params:
     model: openrouter/openai/o3-pro
+    api_key: os.environ/OPENROUTER_API_KEY
+- model_name: openai.o3.batch
+  litellm_params:
+    model: openrouter/openai/o3:batch
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.o4-mini
   litellm_params:
@@ -1046,6 +1134,10 @@ model_list:
 - model_name: openai.o4-mini-high
   litellm_params:
     model: openrouter/openai/o4-mini-high
+    api_key: os.environ/OPENROUTER_API_KEY
+- model_name: openai.o4-mini.batch
+  litellm_params:
+    model: openrouter/openai/o4-mini:batch
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: perceptron.perceptron-mk1
   litellm_params:

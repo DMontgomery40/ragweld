@@ -258,8 +258,8 @@ def fold_duplicate_node_ids(graph: Neo4jGraph) -> tuple[Neo4jGraph, dict[str, in
 
     The 1.19 writer ``CREATE``s one node per row, so a model response that repeats a
     node id inside one chunk yields two rows with the same chunk-prefixed ``entity_id``
-    and the store's uniqueness constraint aborts the run (Task 8 drive defect D12: the
-    Epstein rebuild died after 3,113 of 3,123 chunks). Duplicates with the same label
+    and the store's uniqueness constraint aborts the run (Task 8 drive defect D12: a
+    two-hour rebuild died after 3,113 of 3,123 chunks). Duplicates with the same label
     fold into the first occurrence (properties merged, first value wins); a duplicate
     with a different label keeps a deterministic ordinal suffix so nothing is dropped.
     Relationships keep the ids the model wrote, i.e. they attach to the first
