@@ -896,3 +896,12 @@ carry S numbers; the working scratchpad with every row lives with the session an
   clock and uses the corpus's own `index_run_lease_seconds` (RED: the old reaper deleted a corpus with a live fence
   under a longer configured lease; 28 passed after); reranker tests drop `monkeypatch`; gateway tests ask real
   questions. P3: `Reranker.rerank()` raises on a failed result. Codex approval #3 in flight on the delta.
+- **Codex approval #3 (on 2689bbe7): BLOCK — one more P1, fixed in 37069cdc.** The chat stream wrapper turned an
+  in-stream generation failure into an assistant message ("Error: …" or the partial text), persisted it with the
+  question, and Recall auto-indexing read that as a conversation. A failed exchange now persists nothing (RED: the
+  history held the failure text), and the handler's empty stream is the same typed failure as every other one. P2s:
+  the answer lane's unrecognised retrieval failures are a typed `AnswerRetrievalFailedError` reported as retrieval
+  (they surfaced as "generation unavailable"); the remaining search/answer branches close their traces and a failed
+  answer stream no longer records "retrieval-only" as its model; the monkeypatch answer-stream test is replaced by a
+  real one (seeded corpus + a local gateway streaming only `[DONE]`); `Reranker.rerank()` is deleted. Round-3 gate
+  and codex approval #4 in flight.
