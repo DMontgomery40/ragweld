@@ -187,7 +187,7 @@ class TestConversationStore:
         store = ConversationStore()
         conv = store.get_or_create("test-id")
 
-        msg = Message(role="assistant", content="Hi there")
+        msg = Message(role="assistant", content="Epstein arranged two flights for Barry Cohen in October 2017.")
         store.add_message("test-id", msg, "resp_abc123")
 
         assert conv.last_provider_response_id == "resp_abc123"
@@ -249,7 +249,7 @@ class TestChatHistoryEndpoints:
         store.get_or_create("test-conv-2")
         store.add_message("test-conv-2", Message(role="user", content="Which flights did Jeffrey Epstein arrange for Barry Cohen in October 2017?"), None)
         store.add_message(
-            "test-conv-2", Message(role="assistant", content="Hi there"), None
+            "test-conv-2", Message(role="assistant", content="Epstein arranged two flights for Barry Cohen in October 2017."), None
         )
 
         response = await chat_client.get("/api/chat/history/test-conv-2")
@@ -260,7 +260,7 @@ class TestChatHistoryEndpoints:
         assert messages[0]["role"] == "user"
         assert messages[0]["content"] == "Which flights did Jeffrey Epstein arrange for Barry Cohen in October 2017?"
         assert messages[1]["role"] == "assistant"
-        assert messages[1]["content"] == "Hi there"
+        assert messages[1]["content"] == "Epstein arranged two flights for Barry Cohen in October 2017."
 
     @pytest.mark.asyncio
     async def test_get_history_nonexistent(self, chat_client: AsyncClient):
@@ -296,7 +296,7 @@ class TestChatEndpointWithMockedLLM:
     @pytest.mark.asyncio
     async def test_chat_creates_conversation(self, chat_client: AsyncClient):
         """Test that chat creates a new conversation when none provided."""
-        with completion_gateway("Test response") as base_url, gateway_env(base_url):
+        with completion_gateway("Barry Cohen weighed moving plane management to Jet Aviation in 2017.") as base_url, gateway_env(base_url):
 
             response = await chat_client.post(
                 "/api/chat",
@@ -310,7 +310,7 @@ class TestChatEndpointWithMockedLLM:
             assert isinstance(data.get("ended_at_ms"), int)
             assert isinstance(data.get("debug"), dict)
             assert "conversation_id" in data
-            assert data["message"]["content"] == "Test response"
+            assert data["message"]["content"] == "Barry Cohen weighed moving plane management to Jet Aviation in 2017."
             assert data["message"]["role"] == "assistant"
 
     @pytest.mark.asyncio
@@ -319,7 +319,7 @@ class TestChatEndpointWithMockedLLM:
         store = get_conversation_store()
         store.get_or_create("existing-conv")
 
-        with completion_gateway("Response 1") as base_url, gateway_env(base_url):
+        with completion_gateway("The first flight left Teterboro on 3 October 2017.") as base_url, gateway_env(base_url):
 
             response = await chat_client.post(
                 "/api/chat",
@@ -336,7 +336,7 @@ class TestChatEndpointWithMockedLLM:
     @pytest.mark.asyncio
     async def test_chat_stores_messages(self, chat_client: AsyncClient):
         """Test that chat stores user and assistant messages."""
-        with completion_gateway("Assistant says hi") as base_url, gateway_env(base_url):
+        with completion_gateway("Barry Cohen weighed moving plane management to Jet Aviation in 2017.") as base_url, gateway_env(base_url):
 
             response = await chat_client.post(
                 "/api/chat",
@@ -351,8 +351,10 @@ class TestChatEndpointWithMockedLLM:
             assert messages[0].role == "user"
             assert messages[0].content == "Which plane management company did Barry Cohen consider switching to?"
             assert messages[1].role == "assistant"
-            assert messages[1].content == "Assistant says hi"
+            assert messages[1].content == "Barry Cohen weighed moving plane management to Jet Aviation in 2017."
 
+    @pytest.mark.requires_postgres
+    @pytest.mark.requires_qdrant
     @pytest.mark.asyncio
     async def test_chat_returns_sources(self, chat_client: AsyncClient, real_corpus: str):
         """Chat returns the sources real retrieval found in the seeded corpus."""
@@ -580,8 +582,10 @@ class TestStreamEndpoint:
                     assert again.status_code == 200
                     assert len(slow_delta_requests()) == (1 if committed else 2), (committed, len(slow_delta_requests()))
                     await asyncio.sleep(0.5)
+                    # Every completed exchange records its query, the cache-served repeat included:
+                    # two records when the first exchange committed, one when only the repeat did.
                     logged = query_log.read_text(encoding="utf-8") if query_log.exists() else ""
-                    assert logged.count(question) == (1 if committed else 1), logged
+                    assert logged.count(question) == (2 if committed else 1), (committed, logged)
                     assert await _chat_cache_rows(pg, corpus_id) == 1
         try:
             await QdrantChunkStore(load_config()).delete_corpus(corpus_id)
@@ -698,6 +702,8 @@ class TestChatCitationsRealPipeline:
     collection and SSE completion payloads remain deterministic.
     """
 
+    @pytest.mark.requires_postgres
+    @pytest.mark.requires_qdrant
     @pytest.mark.asyncio
     async def test_chat_collects_sources_and_passes_leg_toggles(
         self, chat_client: AsyncClient, real_corpus: str
@@ -734,6 +740,8 @@ class TestChatCitationsRealPipeline:
         assert rag.get("fusion_sparse_requested") is True
         assert rag.get("fusion_graph_requested") is False
 
+    @pytest.mark.requires_postgres
+    @pytest.mark.requires_qdrant
     @pytest.mark.asyncio
     async def test_stream_done_includes_conversation_id_and_sources(
         self, chat_client: AsyncClient, real_corpus: str

@@ -11,6 +11,7 @@ answers 503, the stream emits a typed ``error`` event before ``done``.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import uuid
@@ -231,3 +232,72 @@ async def test_a_failed_retrieval_is_a_typed_503_on_both_answer_routes_never_an_
         assert detail.get("code") in {"required_retrieval_leg_failed", "dependency_unavailable"}, detail
     finally:
         await _cleanup(pg, repo_id)
+
+
+async def _answer_cache_rows(pg: PostgresClient, corpus_id: str) -> int:
+    """Generation-cache rows the answer lane wrote for this corpus (payload carries `answer`)."""
+    from server.retrieval.cache import SemanticCacheService
+
+    async with pg._pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT payload FROM semantic_cache_entries WHERE endpoint = 'answer' AND scope_key = $1;",
+            SemanticCacheService.scope_key([corpus_id]),
+        )
+    count = 0
+    for r in rows:
+        payload = r["payload"]
+        if isinstance(payload, str):
+            payload = json.loads(payload)
+        if isinstance(payload, dict) and "answer" in payload:
+            count += 1
+    return count
+
+
+@pytest.mark.requires_postgres
+@pytest.mark.requires_qdrant
+@pytest.mark.asyncio
+async def test_answer_stream_closed_on_done_has_its_cache_committed(tmp_path) -> None:
+    """The answer stream commits its generation cache before the terminal `done` event: a
+    client that reads `done` and leaves finds the answer cached (one generation row), and the
+    same question again is served from the cache - the provider sees no second request."""
+    import httpx
+
+    from tests.api.fake_gateway import slow_delta_gateway, slow_delta_requests
+    from tests.api.live_server import live_app_subprocess
+
+    pg = PostgresClient("postgresql://ignored")
+    await pg.connect()
+    repo_id = await _seeded_corpus(pg)
+    with slow_delta_gateway(delay_seconds=0.05) as base_url, gateway_env(base_url):
+        cfg = load_config()
+        cfg.chat.litellm.enabled = True
+        cfg.chat.litellm.base_url = base_url
+        cfg.chat.litellm.default_model = "openai.gpt-5.6-luna"
+        cfg.semantic_cache.enabled = 1
+        cfg.semantic_cache.mode = "read_write"
+        cfg.semantic_cache.min_query_chars = 1
+        await pg.upsert_corpus_config_json(repo_id, cfg.model_dump(mode="serialization"))
+        config_path = tmp_path / "tribrid_config.json"
+        config_path.write_text(json.dumps(cfg.model_dump(mode="serialization")), encoding="utf-8")
+        try:
+            with live_app_subprocess(
+                config_path=config_path,
+                env={"LITELLM_BASE_URL": base_url, "LITELLM_API_KEY": "pytest-fake-gateway-key"},
+            ) as live_url:
+                async with httpx.AsyncClient(base_url=live_url, timeout=60.0) as client:
+                    done_seen = False
+                    async with client.stream("POST", "/api/answer/stream", json=_request(repo_id)) as response:
+                        assert response.status_code == 200, response.status_code
+                        async for line in response.aiter_lines():
+                            if line.startswith("data: ") and '"done"' in line:
+                                done_seen = True
+                                break
+                    assert done_seen
+                    await asyncio.sleep(1.0)
+                    assert await _answer_cache_rows(pg, repo_id) == 1
+                    again = await client.post("/api/answer/stream", json=_request(repo_id))
+                    assert again.status_code == 200, again.text
+                    assert len(slow_delta_requests()) == 1, len(slow_delta_requests())
+                    assert "Jet Aviation" in again.text
+        finally:
+            await _cleanup(pg, repo_id)

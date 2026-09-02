@@ -48,4 +48,3 @@ async def append_chat_query_record(
             "top_paths": list(top_paths[:5]),
         },
     )
-

@@ -146,6 +146,8 @@ def register_mcp_tools(mcp: FastMCP, cfg: MCPConfig) -> None:
                 await _ensure_corpus_exists(corpus_id)
                 scoped_cfg = await load_scoped_config(repo_id=corpus_id)
             except (ConnectionError, TimeoutError, OSError) as exc:
+                if isinstance(exc, (FileNotFoundError, PermissionError, IsADirectoryError)):
+                    raise  # a config file problem, not a store outage
                 # A raw driver transport failure at the Postgres lookup boundary, typed the
                 # way the API's Postgres boundary types it.
                 raise DependencyUnavailableError("postgres", "MCP search corpus lookup") from exc
@@ -211,6 +213,8 @@ def register_mcp_tools(mcp: FastMCP, cfg: MCPConfig) -> None:
                 await _ensure_corpus_exists(corpus_id)
                 scoped_cfg = await load_scoped_config(repo_id=corpus_id)
             except (ConnectionError, TimeoutError, OSError) as exc:
+                if isinstance(exc, (FileNotFoundError, PermissionError, IsADirectoryError)):
+                    raise  # a config file problem, not a store outage
                 raise DependencyUnavailableError("postgres", "MCP answer corpus lookup") from exc
             text, sources, provider_info, debug = await answer_best_effort(
                 query=query,
