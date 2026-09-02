@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import time
@@ -535,6 +536,31 @@ async def stream_answer_best_effort(
             + "\n\n"
         )
 
+    # The answer is complete: commit its generation state (the semantic cache) before the
+    # terminal event goes out, shielded from the cancellation a closing client causes.
+    cache_written = False
+
+    async def _commit_generation_state() -> None:
+        nonlocal cache_written
+        if bool(llm_used) and bool(accumulated.strip()) and float(temperature) <= float(
+            config.semantic_cache.max_temperature_for_write
+        ):
+            cache_written = await cache_service.write(
+                endpoint="answer",
+                scope_key=cache_scope_key,
+                query=query,
+                request_fingerprint=cache_request_fingerprint,
+                payload={
+                    "answer": accumulated,
+                    "provider": provider_info.model_dump(mode="serialization") if provider_info is not None else None,
+                },
+                cache_mode=normalized_cache_mode,
+            )
+
+    try:
+        await asyncio.shield(_commit_generation_state())
+    except asyncio.CancelledError:
+        pass
     ended_at_ms = int(time.time() * 1000)
     debug = build_chat_debug_info(
         config=config,
@@ -550,7 +576,10 @@ async def stream_answer_best_effort(
         update={
             "llm_used": bool(llm_used),
             "llm_error": llm_error,
-            "fusion_debug": {**(getattr(fusion, "last_debug", None) or {})},
+            "fusion_debug": {
+                **(getattr(fusion, "last_debug", None) or {}),
+                **({"cache_write": True, "cache_namespace": "answer_generation"} if cache_written else {}),
+            },
         }
     )
 
@@ -572,21 +601,3 @@ async def stream_answer_best_effort(
     done_event_payload["ended_at_ms"] = int(ended_at_ms)
 
     yield f"data: {json.dumps(done_event_payload)}\n\n"
-
-    # `done` is on the wire: only now write the semantic cache, so a client that went away
-    # mid-answer leaves nothing durable behind. The done event carried no cache_write flag
-    # for this write; a later identical request reports the hit.
-    if bool(llm_used) and bool(accumulated.strip()) and float(temperature) <= float(
-        config.semantic_cache.max_temperature_for_write
-    ):
-        await cache_service.write(
-            endpoint="answer",
-            scope_key=cache_scope_key,
-            query=query,
-            request_fingerprint=cache_request_fingerprint,
-            payload={
-                "answer": accumulated,
-                "provider": provider_info.model_dump(mode="serialization") if provider_info is not None else None,
-            },
-            cache_mode=normalized_cache_mode,
-        )

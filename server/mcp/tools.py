@@ -110,11 +110,6 @@ def _mode_to_flags(mode: MCPMode) -> tuple[bool, bool, bool]:
     return False, False, True
 
 
-def _is_transport_outage(exc: BaseException) -> bool:
-    """A raw driver transport failure (refused/reset/timed-out connection) from the corpus and
-    config lookups, which the API's Postgres boundary classifies as a Postgres outage too."""
-    return isinstance(exc, (ConnectionError, TimeoutError, OSError))
-
 
 async def _ensure_corpus_exists(repo_id: str) -> None:
     global_cfg = load_config()
@@ -147,8 +142,13 @@ def register_mcp_tools(mcp: FastMCP, cfg: MCPConfig) -> None:
         # The corpus and config lookups sit under the same typed guard as retrieval, so a
         # store outage there is the typed dependency error, not FastMCP's generic text.
         try:
-            await _ensure_corpus_exists(corpus_id)
-            scoped_cfg = await load_scoped_config(repo_id=corpus_id)
+            try:
+                await _ensure_corpus_exists(corpus_id)
+                scoped_cfg = await load_scoped_config(repo_id=corpus_id)
+            except (ConnectionError, TimeoutError, OSError) as exc:
+                # A raw driver transport failure at the Postgres lookup boundary, typed the
+                # way the API's Postgres boundary types it.
+                raise DependencyUnavailableError("postgres", "MCP search corpus lookup") from exc
             rows = await fusion.search(
                 [corpus_id],
                 query,
@@ -173,9 +173,9 @@ def register_mcp_tools(mcp: FastMCP, cfg: MCPConfig) -> None:
         except ValueError:
             raise  # "Corpus not found": the tool's own argument error, not a runtime failure
         except Exception as exc:
-            if is_required_dependency_unavailable(exc) or _is_transport_outage(exc):
+            if is_required_dependency_unavailable(exc):
                 dependency: DependencyName = (
-                    "postgres" if is_postgres_unavailable(exc) or _is_transport_outage(exc) else "neo4j" if is_neo4j_unavailable(exc) else "qdrant"
+                    "postgres" if is_postgres_unavailable(exc) else "neo4j" if is_neo4j_unavailable(exc) else "qdrant"
                 )
                 return _search_tool_result(
                     error=_dependency_error_detail(
@@ -207,8 +207,11 @@ def register_mcp_tools(mcp: FastMCP, cfg: MCPConfig) -> None:
         # or a "retrieval-only" text: the same boundary contract as /api/answer. The corpus
         # and config lookups are inside the same guard, so a store outage there is typed too.
         try:
-            await _ensure_corpus_exists(corpus_id)
-            scoped_cfg = await load_scoped_config(repo_id=corpus_id)
+            try:
+                await _ensure_corpus_exists(corpus_id)
+                scoped_cfg = await load_scoped_config(repo_id=corpus_id)
+            except (ConnectionError, TimeoutError, OSError) as exc:
+                raise DependencyUnavailableError("postgres", "MCP answer corpus lookup") from exc
             text, sources, provider_info, debug = await answer_best_effort(
                 query=query,
                 corpus_id=corpus_id,
@@ -234,9 +237,9 @@ def register_mcp_tools(mcp: FastMCP, cfg: MCPConfig) -> None:
         except ValueError:
             raise  # "Corpus not found": the tool's own argument error, not a runtime failure
         except Exception as exc:
-            if is_required_dependency_unavailable(exc) or _is_transport_outage(exc):
+            if is_required_dependency_unavailable(exc):
                 dependency: DependencyName = (
-                    "postgres" if is_postgres_unavailable(exc) or _is_transport_outage(exc) else "neo4j" if is_neo4j_unavailable(exc) else "qdrant"
+                    "postgres" if is_postgres_unavailable(exc) else "neo4j" if is_neo4j_unavailable(exc) else "qdrant"
                 )
                 return _answer_tool_result(
                     error=_dependency_error_detail(

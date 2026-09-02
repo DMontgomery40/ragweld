@@ -11,6 +11,9 @@ from typing import Any, cast
 
 from server.chat.context_formatter import format_context_for_llm
 from server.chat.generation import GenerationResult, generate_chat_text, stream_chat_text
+from server.chat.query_record import append_chat_query_record
+from server.models.chat import Message
+from server.services.conversation_store import get_conversation_store
 from server.chat.generation_failure import generation_unavailable_detail, safe_error_message
 from server.chat.prompt_budget import (
     PromptBudgetError,
@@ -911,10 +914,31 @@ async def chat_stream(
                 "tokens_used": 0,
                 "web_grounding": WebGroundingMetadata().model_dump(mode="json"),
             }
+            # Commit the exchange (messages, provider chaining, query record) before `done`.
+            async def _commit_cached_exchange() -> None:
+                store = get_conversation_store()
+                store.add_message(conversation.id, Message(role="user", content=request.message), None)
+                store.add_message(conversation.id, Message(role="assistant", content=cached_text), provider_response_id)
+                if provider_response_id:
+                    conversation.last_provider_response_id = provider_response_id
+                try:
+                    await append_chat_query_record(
+                        config=config,
+                        fusion=fusion,
+                        event_id=run_id,
+                        conversation_id=conversation.id,
+                        corpus_ids=list(corpus_ids),
+                        query=request.message,
+                        top_paths=[s.file_path for s in sources[:5]],
+                    )
+                except Exception:
+                    pass
+
+            try:
+                await asyncio.shield(_commit_cached_exchange())
+            except asyncio.CancelledError:
+                pass
             yield f"data: {json.dumps(done_payload)}\n\n"
-            # `done` is on the wire: only now does the hit become this conversation's last response.
-            if provider_response_id:
-                conversation.last_provider_response_id = provider_response_id
             return
 
     def _capture_provider_response_id(val: str) -> None:
@@ -1006,23 +1030,90 @@ async def chat_stream(
             "tokens_used": usage_total_tokens(provider_usage),
             "web_grounding": web_grounding.model_dump(mode="json"),
         }
+        # No exchange to commit. Retrieval did happen, and its query/source record is a
+        # retrieval record for feedback and triplet mining, written the same shielded way.
+        async def _record_failed_retrieval() -> None:
+            try:
+                await append_chat_query_record(
+                    config=config,
+                    fusion=fusion,
+                    event_id=run_id,
+                    conversation_id=conversation.id,
+                    corpus_ids=list(corpus_ids),
+                    query=request.message,
+                    top_paths=[s.file_path for s in sources[:5]],
+                )
+            except Exception:
+                pass
+
+        try:
+            await asyncio.shield(_record_failed_retrieval())
+        except asyncio.CancelledError:
+            pass
         yield f"data: {json.dumps(done_event_payload)}\n\n"
         return
 
-        # The semantic-cache write happens after `done` is delivered (below), so the done
-        # event cannot report it: this flag is the state at delivery time.
-        cache_written = False
-        try:
-            dbg = dict(getattr(fusion, "last_debug", None) or {})
-            dbg.update(
-                {
-                    "cache_write": bool(cache_written),
-                    "cache_namespace": "chat_generation",
-                }
+    cache_written = False
+    # The answer is complete: commit the exchange's generation state (provider chaining and
+    # the semantic cache) before the terminal event goes out, shielded from the cancellation a
+    # closing client causes, so no state is left half-written in either direction.
+    async def _commit_generation_state() -> None:
+        """Commit the exchange atomically: the messages (synchronous, first), provider
+        chaining, the generation cache and the query/source record, all before the
+        terminal event goes out and all under one shield."""
+        nonlocal cache_written
+        store = get_conversation_store()
+        store.add_message(conversation.id, Message(role="user", content=request.message), None)
+        store.add_message(conversation.id, Message(role="assistant", content=accumulated), provider_response_id)
+        if provider_response_id:
+            conversation.last_provider_response_id = provider_response_id
+
+        if (
+            bool(llm_used)
+            and bool(accumulated.strip())
+            and cache_allowed
+            and float(temperature) <= float(config.semantic_cache.max_temperature_for_write)
+        ):
+            cache_written = await cache_service.write(
+                endpoint="chat",
+                scope_key=cache_scope_key,
+                query=request.message,
+                request_fingerprint=cache_request_fingerprint,
+                payload={
+                    "message": accumulated,
+                    "provider": provider_info.model_dump(mode="serialization") if provider_info is not None else None,
+                    "provider_response_id": provider_response_id,
+                },
+                cache_mode=request_cache_mode,
             )
-            cast(Any, fusion).last_debug = dbg
+        try:
+            await append_chat_query_record(
+                config=config,
+                fusion=fusion,
+                event_id=run_id,
+                conversation_id=conversation.id,
+                corpus_ids=list(corpus_ids),
+                query=request.message,
+                top_paths=[s.file_path for s in sources[:5]],
+            )
         except Exception:
             pass
+
+    try:
+        await asyncio.shield(_commit_generation_state())
+    except asyncio.CancelledError:
+        pass
+    try:
+        dbg = dict(getattr(fusion, "last_debug", None) or {})
+        dbg.update(
+            {
+                "cache_write": bool(cache_written),
+                "cache_namespace": "chat_generation",
+            }
+        )
+        cast(Any, fusion).last_debug = dbg
+    except Exception:
+        pass
 
     ended_at_ms = int(time.time() * 1000)
     sources_json = [s.model_dump(mode="serialization", by_alias=True) for s in sources]
@@ -1042,26 +1133,3 @@ async def chat_stream(
         "web_grounding": web_grounding.model_dump(mode="json"),
     }
     yield f"data: {json.dumps(done_event_payload)}\n\n"
-    # `done` is on the wire: only now update provider state and the semantic cache, so a
-    # client that went away mid-answer leaves nothing durable behind.
-    if provider_response_id:
-        conversation.last_provider_response_id = provider_response_id
-
-    if (
-        bool(llm_used)
-        and bool(accumulated.strip())
-        and cache_allowed
-        and float(temperature) <= float(config.semantic_cache.max_temperature_for_write)
-    ):
-        cache_written = await cache_service.write(
-            endpoint="chat",
-            scope_key=cache_scope_key,
-            query=request.message,
-            request_fingerprint=cache_request_fingerprint,
-            payload={
-                "message": accumulated,
-                "provider": provider_info.model_dump(mode="serialization") if provider_info is not None else None,
-                "provider_response_id": provider_response_id,
-            },
-            cache_mode=request_cache_mode,
-        )

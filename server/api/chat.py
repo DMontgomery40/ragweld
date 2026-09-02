@@ -24,6 +24,7 @@ from server.api.retrieval_errors import (
     required_retrieval_leg_http_exception,
     retrieval_contract_mismatch_http_exception,
 )
+from server.chat.query_record import append_chat_query_record
 from server.chat.handler import ChatGenerationError, chat_once
 from server.chat.handler import chat_stream as chat_stream_handler
 from server.chat.model_discovery import discover_litellm_models
@@ -163,44 +164,6 @@ def _validate_chat_images(images: list[ImageAttachment], cfg: ChatMultimodalConf
                 )
 
 
-async def _append_chat_query_log_entry(
-    *,
-    config: TriBridConfig,
-    fusion: FusionProtocol,
-    event_id: str,
-    conversation_id: str,
-    corpus_ids: list[str],
-    query: str,
-    top_paths: list[str],
-) -> None:
-    """Best-effort query log append for triplet mining correlation."""
-    if not getattr(config.tracing, "tracing_enabled", True):
-        return
-
-    from server.observability.query_log import append_query_log
-
-    fusion_debug = getattr(fusion, "last_debug", None) or {}
-    rag_debug = fusion_debug.get("chat_rag_fusion") if isinstance(fusion_debug, dict) else None
-    if not isinstance(rag_debug, dict):
-        rag_debug = fusion_debug if isinstance(fusion_debug, dict) else {}
-
-    await append_query_log(
-        config,
-        entry={
-            "event_id": event_id,
-            "kind": "chat",
-            "conversation_id": conversation_id,
-            "corpus_ids": corpus_ids,
-            "query": query,
-            "reranker_mode": str(rag_debug.get("rerank_mode") or str(config.reranking.reranker_mode or "")),
-            "rerank_ok": bool(rag_debug.get("rerank_ok", True)),
-            "rerank_applied": bool(rag_debug.get("rerank_applied", False)),
-            "rerank_skipped_reason": rag_debug.get("rerank_skipped_reason"),
-            "rerank_error": rag_debug.get("rerank_error"),
-            "rerank_candidates_reranked": int(rag_debug.get("rerank_candidates_reranked") or 0),
-            "top_paths": list(top_paths[:5]),
-        },
-    )
 
 
 @router.get("/traces/latest", response_model=TracesLatestResponse)
@@ -393,7 +356,7 @@ async def chat(request: ChatRequest, response: Response) -> ChatResponse:
                 await trace_store.end(run_id, ended_at_ms=ended_at_ms)
 
             try:
-                await _append_chat_query_log_entry(
+                await append_chat_query_record(
                     config=config,
                     fusion=fusion,
                     event_id=run_id,
@@ -629,39 +592,11 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
             yield sse
 
     async def wrapped_stream() -> Any:
+        caught_exc: tuple[type[BaseException] | None, BaseException | None, Any] = (None, None, None)
         ended_at_ms: int | None = None
         accumulated = ""
-        query_log_appended = False
         generation_failed = False
-        done_yielded = False  # the server produced the terminal event: the exchange exists
-        exchange_persisted = False
-        provider_id_for_persist: str | None = None
-        last_src_objs: list[Any] = []
-
-        def _persist_exchange(provider_id: str | None) -> None:
-            nonlocal exchange_persisted
-            if exchange_persisted:
-                return
-            store.add_message(conv.id, Message(role="user", content=request.message), None)
-            store.add_message(conv.id, Message(role="assistant", content=accumulated), provider_id)
-            exchange_persisted = True
-
-        async def _record_exchange(src_objs: list[Any]) -> None:
-            nonlocal query_log_appended
-            if not query_log_appended:
-                try:
-                    await _append_chat_query_log_entry(
-                        config=config,
-                        fusion=fusion,
-                        event_id=run_id,
-                        conversation_id=conv.id,
-                        corpus_ids=resolve_sources(request.sources),
-                        query=request.message,
-                        top_paths=[s.file_path for s in src_objs[:5]],
-                    )
-                    query_log_appended = True
-                except Exception:
-                    pass
+        def _kick_off_recall() -> None:
             # Best-effort Recall indexing (only when recall_default is selected).
             corpus_ids = resolve_sources(request.sources)
             if (
@@ -701,7 +636,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
 
                 asyncio.create_task(_do_index())
 
-        caught_exc: tuple[type[BaseException] | None, BaseException | None, Any] = (None, None, None)
+
         # This is the task that owns the rest of the request, so it attaches and detaches
         # the span itself rather than inheriting a token from the endpoint coroutine.
         stream_scope = observation.scope()
@@ -740,31 +675,8 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                                 data={"kind": "generation"},
                             )
                             await trace_store.annotate(run_id, **current_trace_payload_fields())
-                        # Retrieval did happen: the query and its sources stay linked to this run
-                        # for feedback and triplet mining, which do not need an answer.
                         yield f"data: {json.dumps(payload)}\n\n"
-                        if not query_log_appended:
-                            raw_sources = payload.get("sources") or []
-                            top_paths = [
-                                str(s.get("file_path") or "")
-                                for s in raw_sources[:5]
-                                if isinstance(s, dict) and s.get("file_path")
-                            ]
-                            try:
-                                await _append_chat_query_log_entry(
-                                    config=config,
-                                    fusion=fusion,
-                                    event_id=run_id,
-                                    conversation_id=conv.id,
-                                    corpus_ids=resolve_sources(request.sources),
-                                    query=request.message,
-                                    top_paths=top_paths,
-                                )
-                                query_log_appended = True
-                            except Exception:
-                                pass
                         continue
-
 
                     # Attach debug info for frontend compatibility.
                     from server.models.chat_config import RecallPlan as RecallPlanModel
@@ -866,24 +778,10 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                         )
                         await trace_store.annotate(run_id, **current_trace_payload_fields())
 
-                    # The server has produced the terminal event: from here the exchange exists
-                    # whether or not the client stays to read it. Persist it atomically in the
-                    # order that cannot be interrupted (synchronous message writes first), then
-                    # the query/source record for feedback mining and Recall, shielded from the
-                    # cancellation a closing client causes.
-                    provider_id: str | None = None
-                    raw_provider_id = payload.get("provider_response_id")
-                    if isinstance(raw_provider_id, str) and raw_provider_id.strip():
-                        provider_id = raw_provider_id.strip()
-                    provider_id_for_persist = provider_id
-                    last_src_objs = list(src_objs)
-                    done_yielded = True
+                    # The handler committed the exchange (messages, generation cache, query
+                    # record) before it produced this event; Recall reads that committed history.
+                    _kick_off_recall()
                     yield f"data: {json.dumps(payload)}\n\n"
-                    _persist_exchange(provider_id)
-                    try:
-                        await asyncio.shield(_record_exchange(src_objs))
-                    except asyncio.CancelledError:
-                        pass
 
                     continue
 
@@ -904,14 +802,9 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                 await trace_store.add_event(run_id, kind="chat.error", msg=str(e), data={})
             raise
         finally:
-            # Nothing was persisted before `done`, so an exchange that never reached it has
-            # nothing to roll back. One that did reach it exists even if the generator was
-            # closed at that yield (a client that leaves on the terminal event): persist it
-            # here, synchronously, and record it in the background. The trace close-out is
-            # shielded: a second cancellation must not leave the trace open.
-            if done_yielded and not exchange_persisted:
-                _persist_exchange(provider_id_for_persist)
-                asyncio.get_running_loop().create_task(_record_exchange(last_src_objs))
+            # Nothing is persisted before the commit that precedes `done`, so an exchange that
+            # never got there has nothing to roll back. The trace close-out is shielded: a
+            # second cancellation must not leave the trace open or the span unfinished.
             if trace_enabled:
                 try:
                     await asyncio.shield(_close_chat_trace(run_id, ended_at_ms))
