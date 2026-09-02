@@ -47,8 +47,11 @@ Every catalog row carries `selection_*` metadata that separates the broad candid
 !!! note "The local serving row names a lane, not a backend"
     The `ragweld-local` catalog row is titled **Ragweld local (self-hosted)** and claims no serving backend in its name or notes: which backend fronts that alias (vLLM today), whether the lane is switched on for this host (`chat.vllm.enabled`), and which model it serves are host truth, served as `generation.local_serving` on `GET /api/runtime-capabilities` — never a property of the catalog row. Operator surfaces that preselect or describe the local lane read the lane state from there plus the readiness probe, so a host that does not serve a local model never shows one as live or pre-checked (the Benchmark tab's default model selection, for example, skips it).
 
+!!! tip "Benchmark defaults start from the alias this corpus answers with"
+    The Benchmark tab's first run no longer pre-checks whichever two rows happen to sort first in the catalog — on one live deployment that silently compared two AionLabs aliases the operator had never chosen. The default selection now anchors on the **answering alias**: `chat.litellm.default_model` while the LiteLLM lane is enabled, matched against a row's model id or catalog model exactly the way the Chat picker matches it. Display order fills the second slot, the local serving row is skipped unless its lane is actually reachable (whether it is the anchor or a filler), and the run gate still requires at least two selected models. The contract is pinned by `web/tests/e2e/exhaustive/benchmark_workbench.spec.ts` and the unit tests beside `web/src/components/Benchmark/defaultSelection.ts`.
+
 ??? note "Where the gateway aliases live"
-    Selectable model rows route through LiteLLM gateway aliases declared in `infra/litellm-config.yaml` (the gateway service on port `54000`). The alias list moves with the catalog: current config adds a wave of `openai.*.batch` aliases pointing at the `:batch` OpenRouter snapshot ids, adds `ibm-granite.granite-4.2-8b`, and drops stale entries such as `anthropic.claude-opus-4.7-fast`, `kwaipilot.kat-coder-air-v2.5`, and the retired Mistral batch aliases. Alias presence alone is not runtime truth — a row's `selection_status` metadata plus `GET /api/runtime-capabilities` decide what a picker can select today, and the alias config is versioned with the repo so changes are reviewable.
+    Selectable model rows route through LiteLLM gateway aliases declared in `infra/litellm-config.yaml` (the gateway service on port `54000`). The alias list moves with the catalog: the current config adds `anthropic.claude-fable-5.1` (plus its `.batch` batch-priced variant) and `inception.mercury-2.5-preview`, and drops retired snapshot aliases such as `anthropic.claude-opus-4.8-fast` and `anthropic.claude-opus-5-fast` — earlier refreshes added a wave of `openai.*.batch` aliases pointing at the `:batch` OpenRouter snapshot ids, added `ibm-granite.granite-4.2-8b`, and dropped stale entries such as `anthropic.claude-opus-4.7-fast`, `kwaipilot.kat-coder-air-v2.5`, and the retired Mistral batch aliases. Alias presence alone is not runtime truth — a row's `selection_status` metadata plus `GET /api/runtime-capabilities` decide what a picker can select today, and the alias config is versioned with the repo so changes are reviewable.
 
 ## Upsert Flow
 
@@ -79,7 +82,9 @@ Behavior:
     `[auto-refresh] pricing_unknown=true`.
 - Leaves unmanaged providers (`voyage`, `jina`, `huggingface`, `local`, `ollama`, `mlx`, etc.) untouched.
 - Writes canonical + mirror catalogs atomically and byte-identically.
+- Regenerates the LiteLLM gateway alias config (`infra/litellm-config.yaml`) alongside the catalog and its web mirror (`write_catalog_trio`), so the aliases the gateway serves never drift from the catalog rows.
 - No-op runs make no commit when nothing changed.
+- The refresh workflow stages all three regenerated files — `data/models.json`, `web/public/models.json`, and `infra/litellm-config.yaml` — in the same commit. A lockstep test in `tests/unit/test_gateway_catalog.py` fails when the checked-in gateway config does not match the catalog, so a refresh that stages only the JSON can no longer land on main with a stale alias config.
 
 ## Example
 

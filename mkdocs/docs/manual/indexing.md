@@ -50,6 +50,9 @@ Indexing turns a folder into a set of **retrieval primitives**:
 !!! note "Graph indexing is policy-derived"
     There is no separate semantic-KG toggle. With graph indexing enabled, external document corpora run semantic entity extraction and code corpora can select the AST policy (`graph_indexing.build_code_graph`); runtime-managed corpora (Recall, Codex sessions) are excluded. A semantic run also requires a reviewed graph schema — **RAG → Indexing** walks you through generate → review → approve, and the API refuses a run without the approved hash. See the [Indexing pipeline](../indexing.md).
 
+!!! tip "Edit the extraction prompt from the Graph card"
+    The Graph card on **RAG → Indexing** carries an **Edit Semantic KG Extraction Prompt** link that deep-links straight into **Eval Analysis → System Prompts** with `semantic_kg_extraction` preselected — the template the semantic policy formats for every chunk during extraction. You no longer have to know that the prompt lives under System Prompts to find it; the card that runs the policy links to it. See the [Indexing pipeline](../indexing.md) for what the template must keep (the `{schema}` and `{text}` placeholders) and what happens when it is invalid.
+
 ??? question "Why does the proposal show a `name` property on every node type — and where did my `body` property go?"
     Two domain rules are applied to every proposal before it is hashed for review (`normalize_domain_schema` in `server/indexing/graphrag_schema.py`):
 
