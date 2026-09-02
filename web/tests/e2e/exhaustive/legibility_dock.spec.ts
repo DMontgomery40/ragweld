@@ -197,3 +197,64 @@ test('Get Started swapped into the dock lays out readably at dock width', async 
     `docked Get Started clipped horizontally with no scrollable ancestor: ${JSON.stringify(clips)}`,
   ).toEqual([]);
 });
+
+// The docked chat composer keeps its buttons on one line (2026-09-02 drive, S36).
+// The dock body inherits `overflow-wrap: anywhere` so long ids wrap instead of
+// clipping; the composer's textarea would not shrink below its intrinsic
+// 20-column width, so at dock width the Attach/Send column was squeezed and the
+// inherited anywhere-wrapping rendered "Send" as S/e/n/d and "Attach" as Att/ach.
+// Real Dock Chat click, real chat surface, measured at deviceScaleFactor 1.
+test('the docked chat composer keeps Attach and Send on one line', async ({ page, baseURL }) => {
+  await page.goto(new URL('dashboard?subtab=glossary', baseURL).toString(), { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.layout', { timeout: 20000 });
+
+  await page.getByTestId('dock-chat').click();
+  const dockNative = page.getByTestId('dock-native');
+  await expect(dockNative, 'Chat did not dock in native mode').toBeVisible();
+  await expect(dockNative.locator('#chat-input'), 'the docked chat composer did not render').toBeVisible({
+    timeout: 60_000,
+  });
+  const dockBox = (await dockNative.boundingBox())!;
+
+  const composer = await dockNative.evaluate((root) => {
+    const read = (selector: string) => {
+      const el = root.querySelector(selector) as HTMLElement;
+      const cs = getComputedStyle(el);
+      const box = el.getBoundingClientRect();
+      // One rect per line box of the label: a letter-per-line button yields one per character.
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      return {
+        text: (el.textContent || '').trim(),
+        width: box.width,
+        height: box.height,
+        right: box.right,
+        lines: range.getClientRects().length,
+        fontSize: parseFloat(cs.fontSize),
+        boxY:
+          parseFloat(cs.paddingTop) +
+          parseFloat(cs.paddingBottom) +
+          parseFloat(cs.borderTopWidth) +
+          parseFloat(cs.borderBottomWidth),
+        scrollWidth: el.scrollWidth,
+        clientWidth: el.clientWidth,
+      };
+    };
+    return { attach: read('[data-testid=chat-attach-button]'), send: read('#chat-send'), input: read('#chat-input') };
+  });
+
+  for (const button of [composer.attach, composer.send]) {
+    expect(button.lines, `"${button.text}" renders on ${button.lines} lines in the dock`).toBe(1);
+    expect(
+      button.height - button.boxY,
+      `"${button.text}" is ${button.height}px tall in the dock — its label wraps across lines`,
+    ).toBeLessThanOrEqual(button.fontSize * 1.6);
+    expect(button.scrollWidth, `"${button.text}" overflows its own box`).toBeLessThanOrEqual(button.clientWidth + 1);
+    expect(button.right, `"${button.text}" sticks out of the dock pane`).toBeLessThanOrEqual(dockBox.x + dockBox.width + 2);
+  }
+  // The text column is the one that gives way, and it must still be a usable input.
+  expect(composer.input.width, `the docked textarea is ${composer.input.width}px wide`).toBeGreaterThanOrEqual(120);
+  expect(composer.input.right, 'the docked textarea sticks out of the dock pane').toBeLessThanOrEqual(
+    dockBox.x + dockBox.width + 2,
+  );
+});

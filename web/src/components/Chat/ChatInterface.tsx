@@ -83,17 +83,6 @@ const WELCOME_PROMPTS = [
   'What kinds of questions can I ask about this corpus?',
 ];
 
-export interface TraceStep {
-  step: string;
-  duration: number;
-  details: unknown;
-}
-
-interface ChatInterfaceProps {
-  traceOpen?: boolean;
-  onTraceUpdate?: (steps: TraceStep[], open: boolean, source?: 'config' | 'response' | 'clear') => void;
-}
-
 function emitRunComplete(runId?: string, startedAtMs?: number, endedAtMs?: number): void {
   try {
     window.dispatchEvent(
@@ -249,9 +238,14 @@ const ChatComposer = memo(function ChatComposer({ blockedReason, multimodal, onC
     [addFiles],
   );
 
+  // Docked, the composer sits in a ~280-360px pane whose body inherits
+  // `overflow-wrap: anywhere` (DockPanel, A-44). A textarea's automatic minimum width is its
+  // intrinsic 20-column size, so the text column refused to shrink, the button column paid,
+  // and anywhere-wrapping split "Send" into S/e/n/d and "Attach" into Att/ach (S36). The text
+  // column is the only thing allowed to shrink; the buttons keep their labels on one line.
   return (
-    <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end' }}>
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '8px' }}>
+    <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end', minWidth: 0 }}>
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>
         {attachments.length > 0 && (
           <div
             data-testid="chat-attachments"
@@ -361,6 +355,7 @@ const ChatComposer = memo(function ChatComposer({ blockedReason, multimodal, onC
             fontSize: '14px',
             fontFamily: 'inherit',
             resize: 'none',
+            minWidth: 0,
             minHeight: '70px',
             maxHeight: '140px',
           }}
@@ -383,7 +378,7 @@ const ChatComposer = memo(function ChatComposer({ blockedReason, multimodal, onC
         style={{ display: 'none' }}
       />
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flexShrink: 0 }}>
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
@@ -397,6 +392,7 @@ const ChatComposer = memo(function ChatComposer({ blockedReason, multimodal, onC
             borderRadius: '12px',
             fontSize: '13px',
             fontWeight: 700,
+            whiteSpace: 'nowrap',
             cursor: sending || Boolean(blockedReason) || !visionEnabled || attachments.length >= maxImages ? 'not-allowed' : 'pointer',
             opacity: sending || Boolean(blockedReason) || !visionEnabled || attachments.length >= maxImages ? 0.5 : 1,
           }}
@@ -417,6 +413,7 @@ const ChatComposer = memo(function ChatComposer({ blockedReason, multimodal, onC
             borderRadius: '12px',
             fontSize: '13px',
             fontWeight: 700,
+            whiteSpace: 'nowrap',
             cursor: Boolean(blockedReason) || (!canSend && !sending) ? 'not-allowed' : 'pointer',
           }}
           aria-label={sending ? 'Stop generation' : 'Send message'}
@@ -949,7 +946,7 @@ const ThreadWelcome = memo(function ThreadWelcome({ onPromptSelect }: { onPrompt
   );
 });
 
-export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
+export function ChatInterface() {
   const { api } = useAPI();
   const { config } = useConfig();
   const { showToast } = useUIHelpers();
@@ -1017,7 +1014,6 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
 
   const chatShowConfidence = config?.ui?.chat_show_confidence ?? false;
   const chatShowCitations = config?.ui?.chat_show_citations ?? true;
-  const chatShowTrace = config?.ui?.chat_show_trace ?? true;
   const chatShowDebugFooter = config?.ui?.chat_show_debug_footer ?? true;
   const recallGateShowDecision = Boolean(config?.chat?.recall_gate?.show_gate_decision ?? true);
   const recallGateShowSignals = Boolean(config?.chat?.recall_gate?.show_signals ?? false);
@@ -1053,14 +1049,6 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
   useEffect(() => { activeSourcesRef.current = activeSources; }, [activeSources]);
   useEffect(() => { topKOverrideRef.current = topKOverride; }, [topKOverride]);
   useEffect(() => { sendingRef.current = sending; }, [sending]);
-
-  const notifyTrace = useCallback(
-    (steps: TraceStep[], open: boolean, source: 'config' | 'response' | 'clear' = 'response') => {
-      const effectiveOpen = source === 'response' ? open && chatShowTrace : open;
-      onTraceUpdate?.(steps, effectiveOpen, source);
-    },
-    [chatShowTrace, onTraceUpdate],
-  );
 
   const isRequestTokenActive = useCallback((token: number) => activeRequestTokenRef.current === token, []);
 
@@ -1175,10 +1163,9 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
         setLastMatches([]);
         setLastLatencyMs(null);
         setLastRecallPlan(null);
-        notifyTrace([], false, 'clear');
       }
     },
-    [chatHistoryMax, notifyTrace, resetTransientChatState],
+    [chatHistoryMax, resetTransientChatState],
   );
 
   const loadChatHistory = useCallback(() => {
@@ -1252,11 +1239,12 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
 
   // Initial load, and a reload when the loader's inputs change - but NEVER mid-send. This used
   // to also live in the unmount effect below, whose cleanup then aborted and nulled the
-  // in-flight request every time `loadChatHistory`'s identity changed (config settling churns
-  // it through activateSession -> notifyTrace -> chatShowTrace). A send in flight when that
-  // happened lost its abort controller, so a later Stop had nothing to abort and the answer
-  // stayed "Streaming" forever (M-93). Reloading history over a live answer would also drop its
-  // accumulation, so this defers while sending, exactly like the mirror listener.
+  // in-flight request every time `loadChatHistory`'s identity changed (config settling churned
+  // it through activateSession -> a since-deleted trace callback keyed on chat_show_trace). A
+  // send in flight when that happened lost its abort controller, so a later Stop had nothing
+  // to abort and the answer stayed "Streaming" forever (M-93). Reloading history over a live
+  // answer would also drop its accumulation, so this defers while sending, exactly like the
+  // mirror listener.
   useEffect(() => {
     if (sendingRef.current) return;
     loadChatHistory();
@@ -1583,7 +1571,6 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
       messagesRef.current = nextMessages;
       saveChatHistory(nextMessages);
       setSending(true);
-      notifyTrace([], false, 'clear');
 
       const abortController = new AbortController();
       requestAbortControllerRef.current = abortController;
@@ -1755,7 +1742,6 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
       includeVector,
       isRequestTokenActive,
       maybeToastRerankOutcome,
-      notifyTrace,
       recallIntensity,
       renameConversation,
       resetTransientChatState,

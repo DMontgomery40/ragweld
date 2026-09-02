@@ -34,6 +34,10 @@ export type SeedOptions = {
  * assert its API-level preconditions before touching the DOM.
  *
  * Applies as an init script, so it must be called before the navigation that should see it.
+ * Init scripts run on EVERY navigation of the page, a `page.reload()` included, so the script
+ * marks itself applied in sessionStorage (per tab; survives a reload, dies with the context)
+ * and is a no-op afterwards. A spec that reloads to check persistence therefore checks the
+ * app's persistence, not a re-seed.
  */
 export async function seedAnswerFromSearch(
   page: Page,
@@ -58,10 +62,14 @@ export async function seedAnswerFromSearch(
   if (!res.ok()) throw new Error(`POST /api/search -> ${res.status()} ${(await res.text()).slice(0, 300)}`);
   const matches = ((await res.json()) as { matches: SeededMatch[] }).matches;
   expect(matches.length, `retrieval returned no matches for: ${query}`).toBeGreaterThan(0);
+  const seedId = `exhaustive-seed-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   await page.addInitScript(
-    ({ cid, q, sources, title }) => {
+    ({ cid, q, sources, title, seedId }) => {
+      const appliedKey = `ragweld-exhaustive-seed-applied:${seedId}`;
+      if (sessionStorage.getItem(appliedKey)) return;
+      sessionStorage.setItem(appliedKey, '1');
       const now = Date.now();
-      const convId = `exhaustive-seed-${now}`;
+      const convId = seedId;
       const session = {
         conversation_id: convId,
         created_at: now,
@@ -85,7 +93,7 @@ export async function seedAnswerFromSearch(
       localStorage.setItem('tribrid_active_corpus', cid);
       localStorage.setItem('tribrid_active_repo', cid);
     },
-    { cid: corpusId, q: query, sources: matches, title: label },
+    { cid: corpusId, q: query, sources: matches, title: label, seedId },
   );
   return matches;
 }

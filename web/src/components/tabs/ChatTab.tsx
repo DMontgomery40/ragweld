@@ -220,9 +220,7 @@ export default function ChatTab() {
       >
         <div className="settings-section" style={{ borderLeft: '3px solid var(--link)', padding: 0 }}>
           <ErrorBoundary>
-            <ChatInterface
-              traceOpen={traceOpen}
-            />
+            <ChatInterface />
           </ErrorBoundary>
         </div>
 

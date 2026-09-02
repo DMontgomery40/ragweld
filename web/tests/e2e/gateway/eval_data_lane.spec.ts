@@ -95,7 +95,7 @@ test.describe('eval data lane surfaces', () => {
       });
       expect(patched.ok(), `PATCH /api/config/training -> ${patched.status()}`).toBeTruthy();
 
-      await page.goto(`rag?subtab=learning-ranker&corpus=${encodeURIComponent(corpusId)}`, { waitUntil: 'domcontentloaded' });
+      await page.goto(`rag?subtab=learning-reranker&corpus=${encodeURIComponent(corpusId)}`, { waitUntil: 'domcontentloaded' });
       const mine = page.getByRole('button', { name: /mine triplets/i }).first();
       await expect(mine).toBeVisible({ timeout: 60_000 });
       await expect(mine).toBeEnabled();

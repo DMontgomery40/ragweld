@@ -18,7 +18,7 @@ export const UI_SURFACES: UISurface[] = [
   { route: '/rag', subtab: 'retrieval', label: 'RAG / Retrieval' },
   { route: '/rag', subtab: 'graph', label: 'RAG / Graph' },
   { route: '/rag', subtab: 'reranker', label: 'RAG / Reranker' },
-  { route: '/rag', subtab: 'learning-ranker', label: 'RAG / Learning Ranker' },
+  { route: '/rag', subtab: 'learning-reranker', label: 'RAG / Learning Reranker' },
   { route: '/rag', subtab: 'learning-agent', label: 'RAG / Learning Agent Studio' },
   { route: '/rag', subtab: 'indexing', label: 'RAG / Indexing' },
   { route: '/eval', subtab: 'analysis', label: 'Eval / Analysis' },
@@ -201,7 +201,7 @@ export const ACTION_BLACKLIST_PATTERNS: RegExp[] = [
 export const HOST_ACTION_SURFACE_KEYS = new Set<string>([
   // Onboarding buttons switch the active corpus and launch indexing on operator corpora.
   '/start|',
-  '/rag|learning-ranker',
+  '/rag|learning-reranker',
   '/rag|learning-agent',
   '/rag|indexing',
   '/rag|graph',

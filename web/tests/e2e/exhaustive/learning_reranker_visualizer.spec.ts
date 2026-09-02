@@ -13,7 +13,7 @@
 // reranker training runs, so it is the deterministic zero-telemetry case.
 import { expect, test } from '@playwright/test';
 
-const STUDIO_PATH = 'rag?subtab=learning-ranker&corpus=epstein-files-1';
+const STUDIO_PATH = 'rag?subtab=learning-reranker&corpus=epstein-files-1';
 
 test('Neural Visualizer shows a neutral empty state at zero points, not a painted mass', async ({
   page,

@@ -168,7 +168,7 @@ test('Reranker Training Studio: an out-of-range epoch count clamps to the Pydant
   page,
   request,
 }) => {
-  await gotoScoped(page, 'rag?subtab=learning-ranker');
+  await gotoScoped(page, 'rag?subtab=learning-reranker');
   // The training-config form (Epochs and its siblings) lives in the Inspector dock panel's
   // "Paths + Config" tab (id: 'config', TrainingStudio.tsx:1095), which is not the Inspector's
   // default active tab.
