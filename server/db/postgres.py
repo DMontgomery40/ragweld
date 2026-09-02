@@ -52,6 +52,36 @@ _VECTOR_AVAILABLE_BY_DSN: dict[tuple[str, str], bool] = {}
 
 _STAGING_REPO_PREFIX = "__staging__"
 
+# Every table an index run writes under its staging id, child tables first (all of
+# them cascade from ``corpora``; the explicit order keeps the sweep readable and
+# identical between de-index and corpus deletion).
+_STAGING_ROW_TABLES: tuple[str, ...] = (
+    "chunk_summaries_last_build",
+    "chunk_summaries",
+    "documents",
+    "chunks",
+    "corpus_configs",
+    "corpora",
+)
+
+
+async def _delete_corpus_staging_rows(conn: asyncpg.Connection, repo_id: str) -> None:
+    """Drop every staging row of ``repo_id`` (``__staging__<repo_id>__<run>``), all runs.
+
+    Staging ids are ``__staging__<corpus>__<run>`` and run ids never contain
+    ``__``, so the remainder after the corpus's staging prefix must be free of
+    ``__``: corpus ``a`` never sweeps the staging rows of corpus ``a__b``.
+    """
+    from server.indexing.generations import staging_repo_id
+
+    staging_prefix = staging_repo_id(repo_id, "")
+    for table in _STAGING_ROW_TABLES:
+        await conn.execute(
+            f"DELETE FROM {table} WHERE starts_with(repo_id, $1) "
+            "AND position('__' in substr(repo_id, length($1) + 1)) = 0;",
+            staging_prefix,
+        )
+
 
 def _coerce_jsonb_dict(value: Any) -> dict[str, Any]:
     """Coerce asyncpg JSON/JSONB values to a dict (robust across codecs)."""
@@ -2395,13 +2425,6 @@ class PostgresClient:
                 raw_backlog = meta.get("reclaim_backlog")
                 backlog_collections: list[str] = []
                 backlog_graphs: list[str] = []
-                staging_tables = (
-                    "chunk_summaries_last_build",
-                    "chunk_summaries",
-                    "chunks",
-                    "corpus_configs",
-                    "corpora",
-                )
                 if isinstance(raw_backlog, list):
                     for item in raw_backlog:
                         try:
@@ -2416,7 +2439,7 @@ class PostgresClient:
                         if entry.staged_graph_repo_id:
                             backlog_graphs.append(entry.staged_graph_repo_id)
                         staged_id = staging_repo_id(repo_id, entry.run_id)
-                        for table in staging_tables:
+                        for table in _STAGING_ROW_TABLES:
                             await conn.execute(
                                 f"DELETE FROM {table} WHERE repo_id = $1;", staged_id
                             )
@@ -2433,17 +2456,9 @@ class PostgresClient:
                     if fence.staged_graph_repo_id:
                         backlog_graphs.append(fence.staged_graph_repo_id)
                 # Every staging row of THIS corpus goes too (dead runs whose fence or
-                # backlog record was lost or malformed). Staging ids are
-                # ``__staging__<corpus>__<run>`` and run ids never contain ``__``, so
-                # the remainder after the prefix must be free of ``__``: corpus ``a``
-                # never sweeps the staging rows of corpus ``a__b``.
-                staging_prefix = staging_repo_id(repo_id, "")
-                for table in staging_tables:
-                    await conn.execute(
-                        f"DELETE FROM {table} WHERE starts_with(repo_id, $1) "
-                        "AND position('__' in substr(repo_id, length($1) + 1)) = 0;",
-                        staging_prefix,
-                    )
+                # backlog record was lost or malformed); the same sweep runs under
+                # delete_corpus_with_data.
+                await _delete_corpus_staging_rows(conn, repo_id)
                 if backlog_collections or backlog_graphs:
                     tombstone = DeletionTombstone(
                         qdrant_collections=list(
@@ -2606,11 +2621,17 @@ class PostgresClient:
         return int(result.split()[-1])
 
     async def delete_corpus_with_data(self, repo_id: str) -> None:
-        """Delete a corpus row and all index data tied to it."""
+        """Delete a corpus row, all index data tied to it, and its staging rows, in one transaction.
+
+        A run that died before promotion left its rows under
+        ``__staging__<repo_id>__<run>``; they go with the corpus (the sweep
+        ``delete_index_state`` runs), so a deleted corpus leaves nothing in any table.
+        """
         await self._require_pool()
         assert self._pool is not None
         async with self._pool.acquire() as conn:
             async with conn.transaction():
+                await _delete_corpus_staging_rows(conn, repo_id)
                 await conn.execute(
                     "DELETE FROM chunk_summaries_last_build WHERE repo_id = $1;", repo_id
                 )

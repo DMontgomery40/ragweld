@@ -27,8 +27,8 @@ from server.db.postgres import PostgresClient
 from server.graph.communities import detect_leiden_communities
 from server.indexing.generations import build_generation
 from server.indexing.graphrag_pipeline import ScopedNeo4jWriter
-from tests.official_graphrag import write_lexical_graph_with_graphrag
 from server.models.index import Chunk
+from tests.official_graphrag import write_lexical_graph_with_graphrag
 from tests.service_requirements import require_env
 
 pytestmark = [pytest.mark.requires_postgres, pytest.mark.requires_neo4j, pytest.mark.asyncio]
@@ -91,10 +91,10 @@ async def _write_graph(
 
 
 async def test_gds_leiden_communities_are_scoped_stable_and_feed_the_subgraph(client: AsyncClient) -> None:
-    active = f"graph-comm-{uuid4().hex[:8]}"
+    active = f"pytest_graph_comm_{uuid4().hex[:8]}"
     run_id = uuid4().hex
     staging = f"__staging__{active}__{run_id}"
-    foreign = f"__staging__foreign-{uuid4().hex[:8]}__{uuid4().hex}"
+    foreign = f"__staging__pytest_foreign_{uuid4().hex[:8]}__{uuid4().hex}"
     neo = Neo4jClient(
         os.environ.get("NEO4J_URI", "bolt://127.0.0.1:7687"),
         os.environ.get("NEO4J_USER", "neo4j"),
@@ -416,7 +416,7 @@ async def test_code_entity_ids_round_trip_and_a_search_carries_its_own_edges(
     M-61: the response must carry the total match count so the UI can print a
     denominator instead of an undenominated "200 shown".
     """
-    active = f"graph-code-{uuid4().hex[:8]}"
+    active = f"pytest_graph_code_{uuid4().hex[:8]}"
     run_id = uuid4().hex
     staging = f"__staging__{active}__{run_id}"
     neo = Neo4jClient(
@@ -620,7 +620,7 @@ async def test_neighbors_never_return_the_centre_twice_on_a_cyclic_graph(
     The graph is a triangle so that a 3-hop walk from any node reaches that node again;
     max hops is operator-settable 1-5, so this is reachable from the UI.
     """
-    active = f"graph-cycle-{uuid4().hex[:8]}"
+    active = f"pytest_graph_cycle_{uuid4().hex[:8]}"
     run_id = uuid4().hex
     staging = f"__staging__{active}__{run_id}"
     neo = Neo4jClient(
@@ -719,7 +719,7 @@ async def test_schema_labelled_semantic_graph_keeps_types_and_edges_in_every_exp
     schema owns both vocabularies, so every view must return the stored kind and
     the schema edges verbatim, while a walk still never crosses a Chunk node.
     """
-    active = f"graph-schema-{uuid4().hex[:8]}"
+    active = f"pytest_graph_schema_{uuid4().hex[:8]}"
     run_id = uuid4().hex
     staging = f"__staging__{active}__{run_id}"
     neo = Neo4jClient(
@@ -933,7 +933,7 @@ async def test_scoped_writer_survives_a_repeated_node_id_inside_one_chunk(
     on the store's ``(repo_id, entity_id)`` uniqueness constraint after 3,113 successful chunks.
     The scoped writer must fold the duplicate before writing and the graph must still promote.
     """
-    active = f"graph-dup-{uuid4().hex[:8]}"
+    active = f"pytest_graph_dup_{uuid4().hex[:8]}"
     run_id = uuid4().hex
     staging = f"__staging__{active}__{run_id}"
     neo = Neo4jClient(

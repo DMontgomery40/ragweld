@@ -8,8 +8,11 @@ schema change adds a ``repo_id``-keyed table to the production delete but not th
 reaper, the reaper silently leaves orphan rows for every reaped test corpus.
 
 This guards the duplication by source introspection — no database — asserting the
-ordered list of ``DELETE FROM <table> WHERE repo_id`` statements is identical in
-both. It fails the moment either side gains, drops, or reorders a table.
+ordered sequence of cascade steps is identical in both: every
+``DELETE FROM <table> WHERE repo_id`` statement AND every shared
+``_delete_corpus_*`` helper call (the staging-row sweep lives in one such helper,
+which the reaper calls with its raw connection). It fails the moment either side
+gains, drops, or reorders a step.
 """
 
 from __future__ import annotations
@@ -20,26 +23,36 @@ import re
 from server.db.postgres import PostgresClient
 from tests.corpus_reaper import reap_stale_test_corpora
 
-_DELETE_BY_REPO = re.compile(r"DELETE\s+FROM\s+([a-z_]+)\s+WHERE\s+repo_id", re.IGNORECASE)
+# One regex, two alternatives, so the ORDER of table deletes relative to helper
+# calls is compared too (the staging sweep runs before the exact-id deletes).
+_CASCADE_STEP = re.compile(
+    r"DELETE\s+FROM\s+([a-z_]+)\s+WHERE\s+repo_id|await\s+(_delete_corpus_[a-z_]+)\(",
+    re.IGNORECASE,
+)
 
 
-def _cascade_tables(func) -> list[str]:
-    return _DELETE_BY_REPO.findall(inspect.getsource(func))
+def _cascade_steps(func) -> list[str]:
+    return [table or f"{helper}()" for table, helper in _CASCADE_STEP.findall(inspect.getsource(func))]
 
 
 def test_reaper_cascade_matches_the_production_corpus_delete() -> None:
-    reaper = _cascade_tables(reap_stale_test_corpora)
-    production = _cascade_tables(PostgresClient.delete_corpus_with_data)
+    reaper = _cascade_steps(reap_stale_test_corpora)
+    production = _cascade_steps(PostgresClient.delete_corpus_with_data)
 
-    assert reaper, "no DELETE ... WHERE repo_id found in the reaper — source or regex drifted"
+    assert reaper, "no cascade step found in the reaper — source or regex drifted"
     assert production, (
-        "no DELETE ... WHERE repo_id found in delete_corpus_with_data — source or regex drifted"
+        "no cascade step found in delete_corpus_with_data — source or regex drifted"
+    )
+    assert "_delete_corpus_staging_rows()" in production, (
+        "delete_corpus_with_data no longer sweeps staging rows through the shared helper; "
+        "update this contract deliberately, not by accident"
     )
     assert reaper == production, (
         "the reaper's Postgres cascade has drifted from "
-        "PostgresClient.delete_corpus_with_data; a repo_id-keyed table was added, dropped, or "
-        "reordered in one but not the other, which would leak orphan rows for every reaped "
-        "test corpus. Keep the two cascades identical (same tables, same order).\n"
+        "PostgresClient.delete_corpus_with_data; a repo_id-keyed table or a shared "
+        "_delete_corpus_* helper call was added, dropped, or reordered in one but not the "
+        "other, which would leak orphan rows for every reaped test corpus. Keep the two "
+        "cascades identical (same steps, same order).\n"
         f"  reaper:     {reaper}\n"
         f"  production: {production}"
     )

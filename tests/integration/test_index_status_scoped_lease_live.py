@@ -28,7 +28,7 @@ pytestmark = [pytest.mark.requires_postgres, pytest.mark.asyncio]
 async def test_index_status_reads_the_fence_with_the_corpus_scoped_lease(
     client: AsyncClient,
 ) -> None:
-    corpus_id = f"scoped-lease-{uuid.uuid4().hex[:8]}"
+    corpus_id = f"pytest_scoped_lease_{uuid.uuid4().hex[:8]}"
     pg = PostgresClient(require_env("POSTGRES_DSN"))
     await pg.connect()
     try:
@@ -107,7 +107,7 @@ async def test_deindex_repairs_a_corrupt_reclaim_backlog(client: AsyncClient) ->
     entry (its real Qdrant collection, Neo4j graph and staging rows go), removes
     the key whatever its shape, leaves no tombstone, and the next start succeeds.
     """
-    corpus_id = f"backlog-repair-{uuid.uuid4().hex[:8]}"
+    corpus_id = f"pytest_backlog_repair_{uuid.uuid4().hex[:8]}"
     pg = PostgresClient(require_env("POSTGRES_DSN"))
     cfg = load_config()
     qdrant = QdrantChunkStore(cfg)
@@ -225,7 +225,7 @@ async def test_deindex_absorbs_a_dead_runs_fence_inventory_and_orphan_staging_ro
     staging rows) plus any orphan staging rows of this corpus, and must leave a
     sibling corpus's staging rows alone: ``a`` never sweeps ``a__b``.
     """
-    corpus_id = f"fence-inventory-{uuid.uuid4().hex[:8]}"
+    corpus_id = f"pytest_fence_inventory_{uuid.uuid4().hex[:8]}"
     sibling_id = f"{corpus_id}__b"
     pg = PostgresClient(require_env("POSTGRES_DSN"))
     cfg = load_config()

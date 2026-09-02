@@ -74,7 +74,7 @@ def test_schema_pdf_sampler_reads_every_page_of_small_pdfs(
 async def test_schema_proposal_refuses_a_large_textless_pdf_inside_the_edge_window(
     client: AsyncClient, tmp_path: Path
 ) -> None:
-    corpus_id = f"schema-textless-{uuid4().hex[:8]}"
+    corpus_id = f"pytest_schema_textless_{uuid4().hex[:8]}"
     corpus_path = tmp_path / "textless"
     corpus_path.mkdir()
     (corpus_path / "one-hundred-empty-pages.pdf").write_bytes(

@@ -9,6 +9,7 @@ from neo4j_graphrag.components.types import (
     Neo4jRelationship,
 )
 
+from server.gateway_reasoning import reasoning_model_params
 from server.indexing.code_graph import extract_code_graph, module_id, symbol_id
 from server.indexing.graphrag_pipeline import (
     RESERVED_SCOPE_KEYS,
@@ -21,7 +22,6 @@ from server.indexing.graphrag_pipeline import (
     extraction_prompt_template,
     fold_duplicate_node_ids,
     lexical_graph_config,
-    reasoning_model_params,
     require_run_id,
     require_staging_graph_id,
     resolution_property_for_policy,
@@ -35,7 +35,7 @@ from server.models.index import Chunk
 from server.models.tribrid_config_model import TriBridConfig
 
 RUN_ID = "a" * 32
-STAGING_ID = f"__staging__apollo__{RUN_ID}"
+STAGING_ID = f"__staging__pytest_apollo__{RUN_ID}"
 
 
 def _graph() -> Neo4jGraph:

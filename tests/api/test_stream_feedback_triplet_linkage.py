@@ -65,7 +65,7 @@ class _DeterministicFusion:
 
 
 async def test_stream_chat_feedback_mining_linkage(client, tmp_path: Path) -> None:
-    corpus_id = f"stream-link-{tmp_path.name}"
+    corpus_id = f"pytest_stream_link_{tmp_path.name}"
     corpus_root = tmp_path / "corpus"
     corpus_root.mkdir(parents=True, exist_ok=True)
     (corpus_root / "good.txt").write_text("good", encoding="utf-8")

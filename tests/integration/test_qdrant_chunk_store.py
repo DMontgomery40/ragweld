@@ -43,7 +43,7 @@ def _chunk(chunk_id: str, content: str, *, embedding: list[float] | None, ordina
 
 async def test_staged_generations_serve_both_legs_and_retire_after_the_manifest_commit() -> None:
     store = QdrantChunkStore(load_config())
-    corpus_id = f"qdrant-store-{uuid.uuid4().hex[:8]}"
+    corpus_id = f"pytest_qdrant_store_{uuid.uuid4().hex[:8]}"
     try:
         # No manifest -> no generation: reads fail closed, never an empty 200.
         assert await store.status(corpus_id, physical=None) is None
@@ -130,7 +130,7 @@ async def test_staged_generations_serve_both_legs_and_retire_after_the_manifest_
         try:
             assert not client.collection_exists(first)
             assert not any(
-                a.alias_name.startswith("ragweld_chunks_") and corpus_id in a.alias_name
+                a.alias_name.startswith(corpus_collection_prefix(corpus_id))
                 for a in client.get_aliases().aliases
             )
         finally:
@@ -142,7 +142,7 @@ async def test_staged_generations_serve_both_legs_and_retire_after_the_manifest_
 
 async def test_generation_qualified_graph_join_payloads_are_exact_and_counted() -> None:
     store = QdrantChunkStore(load_config())
-    corpus_id = f"qdrant-graph-join-{uuid.uuid4().hex[:8]}"
+    corpus_id = f"pytest_qdrant_graph_join_{uuid.uuid4().hex[:8]}"
     graph_repo_id = f"staging-{corpus_id}-run-a"
     try:
         generation = await store.create_generation(corpus_id, embedding_dim=4)
@@ -186,7 +186,7 @@ async def test_generation_qualified_graph_join_payloads_are_exact_and_counted() 
 
 async def test_sparse_only_generation_serves_sparse_and_reports_zero_dense_points() -> None:
     store = QdrantChunkStore(load_config())
-    corpus_id = f"qdrant-sparse-only-{uuid.uuid4().hex[:8]}"
+    corpus_id = f"pytest_qdrant_sparse_only_{uuid.uuid4().hex[:8]}"
     try:
         generation = await store.create_generation(corpus_id, embedding_dim=8)
         await store.write_chunks(
@@ -215,7 +215,7 @@ async def test_sparse_only_generation_serves_sparse_and_reports_zero_dense_point
 async def test_incremental_upsert_records_a_manifest_then_appends() -> None:
     """Recall-style writers get a generation and its manifest on first write (real Postgres corpus row)."""
     store = QdrantChunkStore(load_config())
-    corpus_id = f"qdrant-recall-{uuid.uuid4().hex[:8]}"
+    corpus_id = f"pytest_qdrant_recall_{uuid.uuid4().hex[:8]}"
     pg = PostgresClient(require_env("POSTGRES_DSN"))
     await pg.connect()
     try:
@@ -286,7 +286,7 @@ async def test_incremental_upsert_records_a_manifest_then_appends() -> None:
 
 async def test_wiped_physical_generation_reads_as_missing() -> None:
     store = QdrantChunkStore(load_config())
-    corpus_id = f"qdrant-wiped-{uuid.uuid4().hex[:8]}"
+    corpus_id = f"pytest_qdrant_wiped_{uuid.uuid4().hex[:8]}"
     try:
         generation = await store.create_generation(corpus_id, embedding_dim=2)
         await store.write_chunks(
@@ -328,7 +328,7 @@ async def test_fusion_keeps_same_chunk_id_distinct_across_corpora() -> None:
     from server.services import config_store
 
     suffix = uuid.uuid4().hex[:8]
-    corpus_ids = [f"fusion-a-{suffix}", f"fusion-b-{suffix}"]
+    corpus_ids = [f"pytest_fusion_a_{suffix}", f"pytest_fusion_b_{suffix}"]
     cfg = load_config()
     cfg.embedding.embedding_backend = "deterministic"
     cfg.vector_search.enabled = True
@@ -405,8 +405,8 @@ async def test_startup_upgrade_records_manifests_for_pre_manifest_corpora() -> N
 
     cfg = load_config()
     store = QdrantChunkStore(cfg)
-    legacy_id = f"legacy-alias-{uuid.uuid4().hex[:8]}"
-    fresh_id = f"never-indexed-{uuid.uuid4().hex[:8]}"
+    legacy_id = f"pytest_legacy_alias_{uuid.uuid4().hex[:8]}"
+    fresh_id = f"pytest_never_indexed_{uuid.uuid4().hex[:8]}"
     pg = PostgresClient(require_env("POSTGRES_DSN"))
     await pg.connect()
     try:
@@ -448,7 +448,7 @@ async def test_startup_upgrade_records_manifests_for_pre_manifest_corpora() -> N
         # Round-3 manifests carried one previous_* slot: the upgrade rewrites them to
         # the retired list (stamped with the manifest's own promotion time), masks ids
         # equal to the live ones, and never records the same pair twice.
-        shaped_id = f"legacy-shape-{uuid.uuid4().hex[:8]}"
+        shaped_id = f"pytest_legacy_shape_{uuid.uuid4().hex[:8]}"
         await pg.upsert_corpus(shaped_id, name=shaped_id, root_path=".")
         await pg.update_corpus_meta(
             shaped_id,
@@ -463,7 +463,7 @@ async def test_startup_upgrade_records_manifests_for_pre_manifest_corpora() -> N
                 }
             },
         )
-        equal_id = f"legacy-equal-{uuid.uuid4().hex[:8]}"
+        equal_id = f"pytest_legacy_equal_{uuid.uuid4().hex[:8]}"
         await pg.upsert_corpus(equal_id, name=equal_id, root_path=".")
         await pg.update_corpus_meta(
             equal_id,
@@ -506,7 +506,7 @@ async def test_startup_upgrade_records_manifests_for_pre_manifest_corpora() -> N
 async def test_a_generation_is_never_recreated_over_an_existing_collection() -> None:
     """Generation names cannot collide (128-bit suffix) and a create never wipes an existing collection."""
     store = QdrantChunkStore(load_config())
-    corpus_id = f"qdrant-no-recreate-{uuid.uuid4().hex[:8]}"
+    corpus_id = f"pytest_qdrant_no_recreate_{uuid.uuid4().hex[:8]}"
     try:
         first = await store.create_generation(corpus_id, embedding_dim=4)
         prefix, _, suffix = first.rpartition("__")
@@ -542,7 +542,7 @@ async def test_figure_chunk_metadata_survives_the_payload_round_trip() -> None:
     Qdrant payload or a figure hit is indistinguishable from ordinary page text.
     """
     store = QdrantChunkStore(load_config())
-    corpus_id = f"qdrant-figure-{uuid.uuid4().hex[:8]}"
+    corpus_id = f"pytest_qdrant_figure_{uuid.uuid4().hex[:8]}"
     figure = FigureAnnotation(
         kind="chart",
         summary="Bar chart of monthly rainfall against the thirty-year mean",
@@ -595,7 +595,7 @@ async def test_figure_chunk_metadata_survives_the_payload_round_trip() -> None:
 async def test_non_figure_chunk_carries_no_figure_metadata() -> None:
     """Ordinary chunks stay unmarked: the badge must not appear on page text."""
     store = QdrantChunkStore(load_config())
-    corpus_id = f"qdrant-no-figure-{uuid.uuid4().hex[:8]}"
+    corpus_id = f"pytest_qdrant_no_figure_{uuid.uuid4().hex[:8]}"
     try:
         generation = await store.create_generation(corpus_id, embedding_dim=4)
         await store.write_chunks(

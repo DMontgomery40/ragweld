@@ -81,7 +81,7 @@ async def test_reranker_info_reflects_corpus_scope_not_global(client: AsyncClien
     GLOBAL config and ignored corpus_id - so mode cards said CLOUD while runtime info
     said disabled. Info must reflect the same corpus the cards configure.
     """
-    corpus_id = "m06-reranker-scope"
+    corpus_id = "pytest_m06_reranker_scope"
     await _create_corpus(client, corpus_id)
     try:
         # Configure CLOUD reranking for THIS corpus only (defaults pass validation).

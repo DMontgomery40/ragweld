@@ -45,7 +45,7 @@ def _chunk(file_path: str, ordinal: int, provenance: ChunkProvenance | None) -> 
 
 
 async def test_provenance_and_documents_round_trip_promote_and_delete(client: AsyncClient) -> None:
-    corpus_id = f"docs-persist-{uuid.uuid4().hex[:8]}"
+    corpus_id = f"pytest_docs_persist_{uuid.uuid4().hex[:8]}"
     run_id = f"run-{uuid.uuid4().hex[:8]}"
     staging = staging_repo_id(corpus_id, run_id)
     pg = PostgresClient(require_env("POSTGRES_DSN"))

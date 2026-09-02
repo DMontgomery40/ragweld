@@ -589,9 +589,11 @@ async def test_index_search_and_delete_on_promoted_lane(
             corpus_id, embedding_dim=int(cfg.embedding.embedding_dim)
         )
         # Real Neo4j graphs under the seeded ids: the due entry's own graph must be
-        # physically deleted, the shared one must physically survive.
-        due_graph = f"seed-due-graph-{uuid.uuid4().hex[:6]}"
-        shared_graph = f"seed-shared-graph-{uuid.uuid4().hex[:6]}"
+        # physically deleted, the shared one must physically survive. Both carry the
+        # reaper's prefix and are deleted in the ``finally`` below, so a failed
+        # assertion between seeding and the check cannot leak them.
+        due_graph = f"pytest_seed_due_graph_{uuid.uuid4().hex[:6]}"
+        shared_graph = f"pytest_seed_shared_graph_{uuid.uuid4().hex[:6]}"
         seed_neo4j = Neo4jClient(
             cfg.graph_storage.neo4j_uri,
             cfg.graph_storage.neo4j_user,
@@ -611,75 +613,72 @@ async def test_index_search_and_delete_on_promoted_lane(
                     )
             assert (await seed_neo4j.get_graph_stats(due_graph)).total_entities == 1
             assert (await seed_neo4j.get_graph_stats(shared_graph)).total_entities == 1
+            seeded = committed_generation.model_copy(
+                update={
+                    "retired": [
+                        # Both entries name the SAME graph: only the due entry's own
+                        # collection may go; the shared graph must survive because the
+                        # fresh entry still holds it.
+                        RetiredGeneration(
+                            run_id="seed-due",
+                            qdrant_collection=due_collection,
+                            graph_repo_id=shared_graph,
+                            retired_at=datetime.now(UTC) - timedelta(seconds=7200),
+                        ),
+                        RetiredGeneration(
+                            run_id="seed-due-own-graph",
+                            qdrant_collection=None,
+                            graph_repo_id=due_graph,
+                            retired_at=datetime.now(UTC) - timedelta(seconds=7200),
+                        ),
+                        RetiredGeneration(
+                            run_id="seed-fresh",
+                            qdrant_collection=fresh_collection,
+                            graph_repo_id=shared_graph,
+                            retired_at=datetime.now(UTC),
+                        ),
+                    ]
+                }
+            )
+            await pg.set_generation(corpus_id, seeded)
+            seventh = await client.post(
+                "/api/index",
+                json={**index_request, "force_reindex": False},
+            )
+            assert seventh.status_code == 200, seventh.text
+            assert (await _wait_for_index(client, corpus_id))["status"] == "complete"
+            await _wait_fence_released(pg, corpus_id)
+            after_mixed = await pg.get_generation(corpus_id)
+            assert after_mixed is not None
+            retired_now = {r.qdrant_collection for r in after_mixed.retired}
+            assert due_collection not in retired_now, (
+                after_mixed
+            )  # its grace had elapsed: dropped and pruned
+            assert (
+                await qdrant.status(corpus_id, physical=due_collection)
+            ).physical_collection is None
+            assert fresh_collection in retired_now, after_mixed  # still inside its grace: kept
+            # The shared graph survived on the fresh entry (entry-wise retirement would have
+            # dropped it with the due entry); the due entry is gone entirely.
+            by_run = {r.run_id: r for r in after_mixed.retired}
+            assert by_run["seed-fresh"].graph_repo_id == shared_graph, after_mixed
+            # The due entry lost its own collection but still names the shared graph
+            # (dropping it entry-wise would have deleted a graph the fresh entry holds);
+            # it goes with the graph once nothing alive names it.
+            assert "seed-due" in by_run and by_run["seed-due"].qdrant_collection is None, (
+                after_mixed
+            )
+            assert by_run["seed-due"].graph_repo_id == shared_graph, after_mixed
+            assert "seed-due-own-graph" not in by_run, after_mixed  # its only resource was dropped
+            # Physically: the due entry's own graph is gone, the shared graph survived.
+            assert (await seed_neo4j.get_graph_stats(due_graph)).total_entities == 0
+            assert (await seed_neo4j.get_graph_stats(shared_graph)).total_entities == 1
         finally:
+            # A plain graph has no registry row for the reaper to rail on, prefix or
+            # not: the test itself removes both graphs, on every exit path.
+            for gid in (due_graph, shared_graph):
+                await seed_neo4j.delete_graph(gid)
             await seed_neo4j.disconnect()
-        seeded = committed_generation.model_copy(
-            update={
-                "retired": [
-                    # Both entries name the SAME graph: only the due entry's own
-                    # collection may go; the shared graph must survive because the
-                    # fresh entry still holds it.
-                    RetiredGeneration(
-                        run_id="seed-due",
-                        qdrant_collection=due_collection,
-                        graph_repo_id=shared_graph,
-                        retired_at=datetime.now(UTC) - timedelta(seconds=7200),
-                    ),
-                    RetiredGeneration(
-                        run_id="seed-due-own-graph",
-                        qdrant_collection=None,
-                        graph_repo_id=due_graph,
-                        retired_at=datetime.now(UTC) - timedelta(seconds=7200),
-                    ),
-                    RetiredGeneration(
-                        run_id="seed-fresh",
-                        qdrant_collection=fresh_collection,
-                        graph_repo_id=shared_graph,
-                        retired_at=datetime.now(UTC),
-                    ),
-                ]
-            }
-        )
-        await pg.set_generation(corpus_id, seeded)
-        seventh = await client.post(
-            "/api/index",
-            json={**index_request, "force_reindex": False},
-        )
-        assert seventh.status_code == 200, seventh.text
-        assert (await _wait_for_index(client, corpus_id))["status"] == "complete"
-        await _wait_fence_released(pg, corpus_id)
-        after_mixed = await pg.get_generation(corpus_id)
-        assert after_mixed is not None
-        retired_now = {r.qdrant_collection for r in after_mixed.retired}
-        assert due_collection not in retired_now, (
-            after_mixed
-        )  # its grace had elapsed: dropped and pruned
-        assert (await qdrant.status(corpus_id, physical=due_collection)).physical_collection is None
-        assert fresh_collection in retired_now, after_mixed  # still inside its grace: kept
-        # The shared graph survived on the fresh entry (entry-wise retirement would have
-        # dropped it with the due entry); the due entry is gone entirely.
-        by_run = {r.run_id: r for r in after_mixed.retired}
-        assert by_run["seed-fresh"].graph_repo_id == shared_graph, after_mixed
-        # The due entry lost its own collection but still names the shared graph
-        # (dropping it entry-wise would have deleted a graph the fresh entry holds);
-        # it goes with the graph once nothing alive names it.
-        assert "seed-due" in by_run and by_run["seed-due"].qdrant_collection is None, after_mixed
-        assert by_run["seed-due"].graph_repo_id == shared_graph, after_mixed
-        assert "seed-due-own-graph" not in by_run, after_mixed  # its only resource was dropped
-        # Physically: the due entry's own graph is gone, the shared graph survived.
-        check_neo4j = Neo4jClient(
-            cfg.graph_storage.neo4j_uri,
-            cfg.graph_storage.neo4j_user,
-            cfg.graph_storage.resolve_password(),
-            database=cfg.graph_storage.resolve_database(corpus_id),
-        )
-        await check_neo4j.connect()
-        try:
-            assert (await check_neo4j.get_graph_stats(due_graph)).total_entities == 0
-            assert (await check_neo4j.get_graph_stats(shared_graph)).total_entities == 1
-            await check_neo4j.delete_graph(shared_graph)
-        finally:
-            await check_neo4j.disconnect()
         assert (
             await qdrant.status(corpus_id, physical=fresh_collection)
         ).physical_collection == fresh_collection

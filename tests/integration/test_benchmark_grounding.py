@@ -84,7 +84,7 @@ async def test_benchmark_grounds_every_model_on_the_corpus(client: AsyncClient, 
     if skip_reason:
         pytest.skip(skip_reason)
 
-    corpus_id = f"bench-ground-{uuid.uuid4().hex[:8]}"
+    corpus_id = f"pytest_bench_ground_{uuid.uuid4().hex[:8]}"
     pg = PostgresClient(require_env("POSTGRES_DSN"))
     try:
         await pg.connect()

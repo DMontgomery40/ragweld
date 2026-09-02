@@ -184,7 +184,7 @@ async def test_config_readiness_marks_missing_litellm_key_unconfigured(client: A
 async def test_scoped_config_readiness_reports_a_deindexing_manifest_as_degraded(
     client: AsyncClient,
 ) -> None:
-    corpus_id = f"readiness-deindex-{uuid.uuid4().hex[:8]}"
+    corpus_id = f"pytest_readiness_deindex_{uuid.uuid4().hex[:8]}"
     config = load_config()
     pg = PostgresClient(config.indexing.postgres_url)
     tombstone = None

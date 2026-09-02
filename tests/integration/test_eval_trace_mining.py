@@ -53,7 +53,7 @@ async def _wait_for_index(client: AsyncClient, corpus_id: str, *, timeout_s: flo
 async def test_sse_eval_persists_answer_provenance_and_mining_rejects_answer_leaking_negatives(
     client: AsyncClient, tmp_path: Path
 ) -> None:
-    corpus_id = f"eval-trace-{uuid.uuid4().hex[:8]}"
+    corpus_id = f"pytest_eval_trace_{uuid.uuid4().hex[:8]}"
     pg = PostgresClient(require_env("POSTGRES_DSN"))
     persisted: list[Path] = []
     triplets_path = tmp_path / "triplets.jsonl"

@@ -73,7 +73,7 @@ async def test_unknown_corpus_is_a_404_on_every_observability_route(client: Asyn
 
 
 async def test_status_and_incidents_reflect_real_queries_on_the_corpus(client: AsyncClient) -> None:
-    corpus_id = f"obs-live-{uuid.uuid4().hex[:8]}"
+    corpus_id = f"pytest_obs_live_{uuid.uuid4().hex[:8]}"
     pg = PostgresClient(require_env("POSTGRES_DSN"))
     cfg = load_config()
     qdrant = QdrantChunkStore(cfg)

@@ -154,7 +154,7 @@ async def _mutate(driver, database: str, case: str, repo_id: str, run_id: str) -
 async def test_each_invalid_staged_graph_is_typed_and_cannot_replace_active_manifest(
     case: str,
 ) -> None:
-    active_id = f"promotion-active-{uuid4().hex[:8]}"
+    active_id = f"pytest_promotion_active_{uuid4().hex[:8]}"
     active_run = uuid4().hex
     staged_run = uuid4().hex
     staged_id = f"__staging__{active_id}__{staged_run}"
@@ -235,7 +235,7 @@ async def test_real_empty_semantic_run_is_refused_then_authenticated_chunk_only_
     client: AsyncClient,
     tmp_path: Path,
 ) -> None:
-    corpus_id = f"promotion-refusal-{uuid4().hex[:8]}"
+    corpus_id = f"pytest_promotion_refusal_{uuid4().hex[:8]}"
     corpus_root = tmp_path / "entity-sparse"
     corpus_root.mkdir()
     (corpus_root / "measurements.txt").write_text(
@@ -402,7 +402,7 @@ async def test_code_policy_keeps_same_name_entities_with_distinct_ids_promotable
     ``unresolved_duplicate_entity``). The invariant must count duplicates on the policy's
     resolution property: ``entity_id`` for code, ``name`` for semantic.
     """
-    active_id = f"promotion-code-{uuid4().hex[:8]}"
+    active_id = f"pytest_promotion_code_{uuid4().hex[:8]}"
     staged_run = uuid4().hex
     staged_id = f"__staging__{active_id}__{staged_run}"
     cfg = load_config()

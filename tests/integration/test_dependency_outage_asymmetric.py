@@ -26,7 +26,7 @@ def _assert_dependency_503(response, dependency: str, *, label: str = "request")
 @pytest.mark.requires_postgres
 @pytest.mark.asyncio
 async def test_neo4j_outage_is_attributed_and_does_not_delete_corpus(client: AsyncClient) -> None:
-    corpus_id = f"neo4j-outage-{uuid.uuid4().hex[:10]}"
+    corpus_id = f"pytest_neo4j_outage_{uuid.uuid4().hex[:10]}"
     pg = PostgresClient(require_env("POSTGRES_DSN"))
     old_neo4j_uri = os.environ.get("NEO4J_URI")
 

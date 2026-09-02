@@ -8,6 +8,7 @@ from typing import Any, cast
 
 from server.chat.context_formatter import format_context_for_llm
 from server.chat.generation import GenerationResult, generate_chat_text, stream_chat_text
+from server.chat.generation_failure import safe_error_message
 from server.chat.prompt_builder import get_system_prompt
 from server.chat.provider_router import select_provider_route
 from server.dependency_errors import is_required_dependency_unavailable
@@ -16,15 +17,6 @@ from server.models.tribrid_config_model import ChatDebugInfo, ChatProviderInfo, 
 from server.retrieval.cache import CacheMode, SemanticCacheService
 from server.retrieval.errors import RequiredRetrievalLegError, RetrievalContractMismatchError
 from server.services.rag import FusionProtocol, build_chat_debug_info
-
-
-def _safe_error_message(e: Exception, *, max_len: int = 400) -> str:
-    # Best-effort redaction; keep debugging useful without leaking secrets.
-    msg = str(e) or type(e).__name__
-    msg = re.sub(r"(sk-[A-Za-z0-9_\\-]{10,})", "sk-REDACTED", msg)
-    msg = re.sub(r"(Bearer\\s+)[A-Za-z0-9_.\\-]{10,}", r"\\1REDACTED", msg)
-    msg = msg.replace("\n", " ").replace("\r", " ").strip()
-    return msg[: int(max_len)]
 
 
 def _format_retrieval_only_answer(*, query: str, corpus_id: str, chunks: list[ChunkMatch]) -> str:
@@ -160,7 +152,7 @@ async def retrieve_best_effort(
         return (
             [],
             {
-                "retrieval_error": _safe_error_message(e),
+                "retrieval_error": safe_error_message(e),
                 "retrieval_error_kind": type(e).__name__,
             },
         )
@@ -322,7 +314,7 @@ async def answer_best_effort(
             raise RuntimeError("LLM returned an empty response")
     except Exception as e:
         llm_used = False
-        llm_error = _safe_error_message(e)
+        llm_error = safe_error_message(e)
         answer_text = _format_retrieval_only_answer(query=query, corpus_id=corpus_id, chunks=chunks)
 
     debug = build_chat_debug_info(
@@ -565,7 +557,7 @@ async def stream_answer_best_effort(
             yield f"data: {json.dumps({'type': 'text', 'content': msg})}\n\n"
     except Exception as e:
         llm_used = False
-        llm_error = _safe_error_message(e)
+        llm_error = safe_error_message(e)
         msg = _format_retrieval_only_answer(query=query, corpus_id=corpus_id, chunks=chunks)
         accumulated = msg
         yield f"data: {json.dumps({'type': 'text', 'content': msg})}\n\n"

@@ -25,7 +25,7 @@ async def test_real_full_apollo_pdf_schema_proposal_fits_the_public_edge_window(
     if not _APOLLO_SOURCE.is_file():
         pytest.skip(f"Apollo source is unavailable on this runtime: {_APOLLO_SOURCE}")
 
-    corpus_id = f"apollo-full-schema-{uuid.uuid4().hex[:8]}"
+    corpus_id = f"pytest_apollo_full_schema_{uuid.uuid4().hex[:8]}"
     created = await client.post(
         "/api/corpora",
         json={"corpus_id": corpus_id, "name": corpus_id, "path": str(_APOLLO_SOURCE.parent)},
@@ -64,7 +64,7 @@ async def test_real_apollo_schema_proposal_persists_reuses_and_invalidates_appro
     if not _APOLLO_SOURCE.is_file():
         pytest.skip(f"Apollo source is unavailable on this runtime: {_APOLLO_SOURCE}")
 
-    corpus_id = f"apollo-schema-{uuid.uuid4().hex[:8]}"
+    corpus_id = f"pytest_apollo_schema_{uuid.uuid4().hex[:8]}"
     subset = tmp_path / "apollo-subset"
     subset.mkdir()
     reader = PdfReader(_APOLLO_SOURCE)
@@ -198,7 +198,7 @@ async def test_numeric_only_corpus_proposal_is_a_typed_422_not_a_500(
     corpus_dir = tmp_path / "numeric-only"
     corpus_dir.mkdir()
     (corpus_dir / "measurements.txt").write_text("0000 1111 2222 3333 4444 5555.\n" * 20)
-    corpus_id = f"numeric-schema-{uuid.uuid4().hex[:8]}"
+    corpus_id = f"pytest_numeric_schema_{uuid.uuid4().hex[:8]}"
     created = await client.post(
         "/api/corpora",
         json={"corpus_id": corpus_id, "name": corpus_id, "path": str(corpus_dir)},

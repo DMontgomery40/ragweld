@@ -9,8 +9,8 @@ from neo4j import GraphDatabase
 
 from server.db.neo4j import Neo4jClient
 from server.indexing.graphrag_pipeline import ScopedNeo4jWriter
-from tests.official_graphrag import write_lexical_graph_with_graphrag
 from server.models.index import Chunk
+from tests.official_graphrag import write_lexical_graph_with_graphrag
 
 
 @pytest.mark.requires_neo4j
@@ -33,7 +33,7 @@ async def test_neo4j_client_reports_live_server_without_custom_writer_schema() -
 @pytest.mark.asyncio
 async def test_official_graphrag_writer_round_trips_lexical_graph() -> None:
     run_id = uuid4().hex
-    repo_id = f"__staging__neo4j-live__{run_id}"
+    repo_id = f"__staging__pytest_neo4j_live__{run_id}"
     client = Neo4jClient(
         os.environ.get("NEO4J_URI", "bolt://127.0.0.1:7687"),
         os.environ.get("NEO4J_USER", "neo4j"),

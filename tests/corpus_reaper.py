@@ -42,6 +42,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
+from server.db.postgres import _delete_corpus_staging_rows
 from server.indexing.generations import STAGING_REPO_PREFIX
 from server.retrieval.qdrant_store import _COLLECTION_PREFIX, corpus_collection_prefix
 
@@ -133,9 +134,13 @@ async def reap_stale_test_corpora(
     session-fixture context binds to the wrong event loop and breaks every live
     test that reuses the cached pool. A one-shot raw connection (the same shape
     ``probe_postgres`` uses) touches no shared state. The delete cascade mirrors
-    ``PostgresClient.delete_corpus_with_data`` exactly: a Postgres-only, Neo4j-free
-    cascade over every table keyed by ``repo_id`` (never ``DELETE /api/corpora``,
-    which needs Neo4j credentials the test process may lack).
+    ``PostgresClient.delete_corpus_with_data`` exactly: the shared staging-row
+    sweep (``_delete_corpus_staging_rows``, called with this raw connection, so
+    the dead runs' ``__staging__<corpus>__<run>`` rows go with the corpus), then a
+    Postgres-only, Neo4j-free cascade over every table keyed by ``repo_id``
+    (never ``DELETE /api/corpora``, which needs Neo4j credentials the test
+    process may lack). ``tests/unit/test_corpus_reaper_cascade_parity.py`` pins
+    the two cascades to each other step for step.
     """
     import asyncpg
 
@@ -160,6 +165,7 @@ async def reap_stale_test_corpora(
 
         for repo_id in stale:
             async with conn.transaction():
+                await _delete_corpus_staging_rows(conn, repo_id)
                 await conn.execute("DELETE FROM chunk_summaries_last_build WHERE repo_id = $1;", repo_id)
                 await conn.execute("DELETE FROM chunk_summaries WHERE repo_id = $1;", repo_id)
                 await conn.execute("DELETE FROM documents WHERE repo_id = $1;", repo_id)

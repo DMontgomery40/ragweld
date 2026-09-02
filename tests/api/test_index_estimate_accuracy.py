@@ -379,7 +379,7 @@ async def test_a_refusal_carries_the_walk_and_none_of_the_measurements(tmp_path)
     from server.config import load_config
     from server.main import app
 
-    repo_id = f"refusal_{uuid.uuid4().hex[:10]}"
+    repo_id = f"pytest_refusal_{uuid.uuid4().hex[:10]}"
     root = tmp_path / repo_id
     root.mkdir()
     for i in range(5):

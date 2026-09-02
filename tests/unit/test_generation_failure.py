@@ -8,6 +8,9 @@ old card sent every one of them to "verify the gateway, client key and alias".
 
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
 import pytest
 
 from server.api.generation_errors import generation_unavailable_http_exception
@@ -122,3 +125,39 @@ def test_http_exception_path_agrees_with_the_stream_detail() -> None:
     assert wire["operator_hint"] == GENERATION_FAILURE_HINTS["upstream_unreachable"]
     assert "Connection error" in wire["gateway_reason"]
     assert "\n" not in wire["gateway_reason"]
+
+
+def test_answer_route_error_paths_redact_like_the_chat_path() -> None:
+    """/api/answer's retrieval_error and llm_error come from the one shared sanitiser.
+
+    answer_service kept its own copy: no URL rule (so OpenRouter's key-bearing
+    management link reached the debug payload) and a Bearer regex written with
+    doubled backslashes that matched a literal ``\\s`` and never redacted a token.
+    """
+    from server.services import answer_service
+
+    assert answer_service.safe_error_message is safe_error_message
+    raw = RuntimeError(
+        f"{SPEND_LIMIT_REASON} Authorization: Bearer sk-or-v1-0123456789abcdefghij\nnext line"
+    )
+    cleaned = answer_service.safe_error_message(raw)
+    assert KEY_HASH not in cleaned
+    assert "openrouter.ai" not in cleaned
+    assert "<url>" in cleaned
+    assert "sk-or-v1-0123456789abcdefghij" not in cleaned
+    assert "Bearer REDACTED" in cleaned
+    assert "\n" not in cleaned
+    assert "Key limit exceeded (weekly limit)" in cleaned
+
+
+def test_no_server_module_keeps_a_private_error_sanitiser() -> None:
+    """One redaction rule for every operator-facing reason: a private copy drifts silently."""
+    server_root = Path(__file__).resolve().parents[2] / "server"
+    canonical = server_root / "chat" / "generation_failure.py"
+    definition = re.compile(r"^\s*def _?safe_error_message\(", re.MULTILINE)
+    offenders = sorted(
+        str(path.relative_to(server_root.parent))
+        for path in server_root.rglob("*.py")
+        if path != canonical and definition.search(path.read_text(encoding="utf-8"))
+    )
+    assert offenders == [], f"private error sanitisers outside generation_failure.py: {offenders}"

@@ -111,9 +111,9 @@ async def test_semantic_and_code_files_use_scoped_official_writer_contract(
 ) -> None:
     semantic_run = uuid4().hex
     code_run = uuid4().hex
-    semantic_repo = f"__staging__pipeline-semantic__{semantic_run}"
-    code_repo = f"__staging__pipeline-code__{code_run}"
-    cfg, driver, database = _driver_and_database("pipeline-live")
+    semantic_repo = f"__staging__pytest_pipeline_semantic__{semantic_run}"
+    code_repo = f"__staging__pytest_pipeline_code__{code_run}"
+    cfg, driver, database = _driver_and_database("pytest_pipeline_live")
     cfg.graph_indexing.semantic_kg_llm_model = os.environ.get(
         "GRAPH_E2E_KG_MODEL", "openai.gpt-5.6-luna"
     )
@@ -280,8 +280,8 @@ async def test_semantic_and_code_files_use_scoped_official_writer_contract(
 
 async def test_code_policy_keeps_lexical_graph_for_non_ast_files() -> None:
     run_id = uuid4().hex
-    repo_id = f"__staging__pipeline-code-markdown__{run_id}"
-    cfg, driver, database = _driver_and_database("pipeline-code-markdown")
+    repo_id = f"__staging__pytest_pipeline_code_markdown__{run_id}"
+    cfg, driver, database = _driver_and_database("pytest_pipeline_code_markdown")
     neo = Neo4jClient(
         os.environ.get("NEO4J_URI", cfg.graph_storage.neo4j_uri),
         os.environ.get("NEO4J_USER", cfg.graph_storage.neo4j_user),
@@ -335,8 +335,8 @@ async def test_code_policy_keeps_lexical_graph_for_non_ast_files() -> None:
 
 async def test_live_writer_keeps_event_loop_responsive_for_ten_thousand_nodes() -> None:
     run_id = uuid4().hex
-    repo_id = f"__staging__pipeline-ticker__{run_id}"
-    cfg, driver, database = _driver_and_database("pipeline-ticker")
+    repo_id = f"__staging__pytest_pipeline_ticker__{run_id}"
+    cfg, driver, database = _driver_and_database("pytest_pipeline_ticker")
     await asyncio.to_thread(driver.verify_connectivity)
     neo = Neo4jClient(
         os.environ.get("NEO4J_URI", cfg.graph_storage.neo4j_uri),
