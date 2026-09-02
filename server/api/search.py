@@ -19,6 +19,7 @@ from server.api.generation_errors import (
     generation_unavailable_http_exception,
 )
 from server.api.retrieval_errors import (
+    answer_retrieval_failed_http_exception,
     reranker_failed_http_exception,
     RETRIEVAL_RUNTIME_UNAVAILABLE_RESPONSES,
     required_retrieval_leg_http_exception,
@@ -320,7 +321,7 @@ async def answer(request: AnswerRequest, response: Response) -> AnswerResponse:
                 await trace_store.add_event(run_id, kind="answer.error", msg=str(e), data={"kind": "retrieval"})
                 await trace_store.annotate(run_id, **current_trace_payload_fields())
                 await trace_store.end(run_id)
-            raise HTTPException(status_code=500, detail=f"Answer retrieval failed: {e.reason}") from e
+            raise answer_retrieval_failed_http_exception(e, operation="Answer retrieval") from e
         except Exception as e:
             if trace_enabled:
                 await trace_store.add_event(run_id, kind="answer.error", msg=str(e), data={})
@@ -473,7 +474,7 @@ async def answer_stream(request: AnswerRequest) -> StreamingResponse:
             await trace_store.end(run_id)
         setup_scope.__exit__(type(e), e, e.__traceback__)
         observation.finish((type(e), e, e.__traceback__))
-        raise HTTPException(status_code=500, detail=f"Answer retrieval failed: {e.reason}") from e
+        raise answer_retrieval_failed_http_exception(e, operation="Answer stream retrieval") from e
     except Exception as e:
         if trace_enabled:
             await trace_store.add_event(run_id, kind="answer.error", msg=str(e), data={})
@@ -556,7 +557,11 @@ async def answer_stream(request: AnswerRequest) -> StreamingResponse:
                 if trace_enabled:
                     await trace_store.add_event(
                         run_id,
-                        kind="answer.response",
+                        kind=(
+                            "answer.error"
+                            if debug_obj is not None and not bool(debug_obj.llm_used)
+                            else "answer.response"
+                        ),
                         data={
                             "sources_count": len(payload.get("sources") or []),
                             "latency_ms": float(max(0, ended_at_ms - started_at_ms)),

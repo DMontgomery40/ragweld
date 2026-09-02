@@ -16,6 +16,7 @@ from server.models.tribrid_config_model import (
     PromptBudgetExceededResponse,
     RequiredRetrievalLegFailureResponse,
     RerankerFailureResponse,
+    AnswerRetrievalFailureResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -43,7 +44,20 @@ CHAT_RUNTIME_UNAVAILABLE_RESPONSES: dict[int | str, dict[str, Any]] = {
 # /api/answer: everything the chat lane can fail on except the prompt-budget 413, which the
 # answer lane reports as a generation failure.
 ANSWER_RUNTIME_UNAVAILABLE_RESPONSES: dict[int | str, dict[str, Any]] = {
-    503: CHAT_RUNTIME_UNAVAILABLE_RESPONSES[503],
+    503: {
+        "model": (
+            DependencyUnavailableResponse
+            | RequiredRetrievalLegFailureResponse
+            | RerankerFailureResponse
+            | AnswerRetrievalFailureResponse
+            | GenerationUnavailableResponse
+            | IndexDeletionIncompleteResponse
+        ),
+        "description": (
+            "Answer storage, retrieval, the configured reranker, or generation is unavailable, or the "
+            "corpus is being de-indexed and its external cleanup has not completed."
+        ),
+    },
 }
 
 

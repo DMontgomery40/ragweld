@@ -253,3 +253,55 @@ def test_a_process_that_mounted_no_transport_reports_no_tool_defaults(tmp_path: 
     # What a restart WOULD mount is still honest information, and still reported.
     assert isinstance(body["config_default_top_k"], int) and body["config_default_top_k"] >= 1, body
     assert str(body["config_default_mode"]).strip(), body
+
+
+@pytest.mark.asyncio
+async def test_mcp_answer_tool_returns_a_typed_error_instead_of_an_answer_without_generation(tmp_path) -> None:
+    """The MCP ``answer`` tool fails closed like /api/answer: with no generation provider the
+    result is ``isError`` with the typed generation detail, never an answer assembled from the
+    retrieved sources and never a bare exception string.
+
+    Runs against a uvicorn subprocess: the MCP session manager can be started once per
+    process, and this module's other test already owns the in-process lifespan.
+    """
+    import uuid
+
+    import httpx
+    from mcp import ClientSession
+    from mcp.client.streamable_http import streamable_http_client
+
+    from server.config import load_config
+    from tests.api.live_server import live_app_subprocess
+
+    corpus_id = f"pytest_mcp_answer_{uuid.uuid4().hex[:8]}"
+    cfg = load_config()
+    cfg.chat.litellm.enabled = False
+    cfg.mcp.enabled = True
+    config_path = tmp_path / "tribrid_config.json"
+    config_path.write_text(json.dumps(cfg.model_dump(mode="serialization")), encoding="utf-8")
+    with live_app_subprocess(config_path=config_path, env={}) as live_url:
+        async with httpx.AsyncClient(base_url=live_url, timeout=120.0) as client:
+            created = await client.post(
+                "/api/corpora", json={"corpus_id": corpus_id, "name": corpus_id, "path": "."}
+            )
+            assert created.status_code == 200, created.text
+            try:
+                async with streamable_http_client(f"{live_url}/mcp/", http_client=client) as (read, write, _):
+                    async with ClientSession(read, write) as session:
+                        await session.initialize()
+                        result = await session.call_tool(
+                            "answer",
+                            {
+                                "query": "Which plane management company did Barry Cohen consider switching to?",
+                                "corpus_id": corpus_id,
+                            },
+                        )
+                assert result.isError is True
+                structured = result.structuredContent or {}
+                error = structured.get("error") or {}
+                assert error.get("code") == "generation_unavailable", structured
+                assert error.get("operation") == "MCP answer generation"
+                assert structured.get("result") is None
+                assert "retrieval-only" not in json.dumps(structured).lower()
+            finally:
+                await client.delete(f"/api/corpora/{corpus_id}")

@@ -810,6 +810,23 @@ class RerankerFailureResponse(BaseModel):
     detail: RerankerFailureDetail
 
 
+class AnswerRetrievalFailureDetail(BaseModel):
+    """Public error detail returned when answer retrieval fails for an untyped reason (HTTP 503)."""
+
+    code: Literal["answer_retrieval_failed"] = "answer_retrieval_failed"
+    operation: str = Field(description="Retrieval operation that could not complete")
+    message: str = Field(description="Stable, non-sensitive failure summary")
+    reason: str = Field(description="Sanitised reason from the retrieval lane (no secrets, no raw payloads)")
+    retryable: bool = Field(default=True, description="Whether the caller may retry after remediation")
+    operator_hint: str = Field(description="High-signal next step for the operator")
+
+
+class AnswerRetrievalFailureResponse(BaseModel):
+    """FastAPI response envelope for an untyped answer-retrieval failure."""
+
+    detail: AnswerRetrievalFailureDetail
+
+
 class RetrievalContractMismatchDetail(BaseModel):
     """Public error detail returned when a stored index contract blocks a retrieval request."""
 
@@ -850,6 +867,21 @@ class MCPSearchToolResult(BaseModel):
 
 
 GenerationFailureKind = Literal["spend_limit", "auth", "upstream_unreachable", "gateway_unreachable", "gateway"]
+
+
+class MCPAnswerToolResult(BaseModel):
+    """Structured MCP answer result, including typed fail-closed tool errors."""
+
+    result: AnswerResponse | None = Field(default=None, description="The answer when the tool succeeded.")
+    error: (
+        DependencyUnavailableDetail
+        | RequiredRetrievalLegFailureDetail
+        | RerankerFailureDetail
+        | RetrievalContractMismatchDetail
+        | AnswerRetrievalFailureDetail
+        | GenerationUnavailableDetail
+        | None
+    ) = Field(default=None, description="Typed failure returned with isError=true.")
 
 
 class GenerationUnavailableDetail(BaseModel):

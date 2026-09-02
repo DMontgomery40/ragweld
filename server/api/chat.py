@@ -621,7 +621,6 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
         query_log_appended = False
         assistant_persisted = False
         generation_failed = False
-        exchange_failed = False
         caught_exc: tuple[type[BaseException] | None, BaseException | None, Any] = (None, None, None)
         # This is the task that owns the rest of the request, so it attaches and detaches
         # the span itself rather than inheriting a token from the endpoint coroutine.
@@ -653,7 +652,6 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                         # No exchange happened: the error event already told the client, and
                         # neither the failure text nor the unanswered question belongs in the
                         # durable history (Recall would index it as a conversation).
-                        exchange_failed = True
                         try:
                             store.remove_last_message(conv.id, role="user", content=request.message)
                         except Exception:
@@ -666,6 +664,28 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                                 data={"kind": "generation"},
                             )
                             await trace_store.annotate(run_id, **current_trace_payload_fields())
+                        # Retrieval did happen: the query and its sources stay linked to this run
+                        # for feedback and triplet mining, which do not need an answer.
+                        if not query_log_appended:
+                            raw_sources = payload.get("sources") or []
+                            top_paths = [
+                                str(s.get("file_path") or "")
+                                for s in raw_sources[:5]
+                                if isinstance(s, dict) and s.get("file_path")
+                            ]
+                            try:
+                                await _append_chat_query_log_entry(
+                                    config=config,
+                                    fusion=fusion,
+                                    event_id=run_id,
+                                    conversation_id=conv.id,
+                                    corpus_ids=resolve_sources(request.sources),
+                                    query=request.message,
+                                    top_paths=top_paths,
+                                )
+                                query_log_appended = True
+                            except Exception:
+                                pass
                         yield f"data: {json.dumps(payload)}\n\n"
                         continue
 
@@ -841,28 +861,24 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                     continue
 
                 yield sse
+        except (asyncio.CancelledError, GeneratorExit):
+            # The client went away or the task was cancelled: whatever streamed so far is
+            # not an answer and must not become one in the durable history.
+            raise
         except Exception as e:
             caught_exc = (type(e), e, e.__traceback__)
             if trace_enabled:
                 await trace_store.add_event(run_id, kind="chat.error", msg=str(e), data={})
             raise
         finally:
-            if not assistant_persisted and not exchange_failed:
-                if accumulated.strip() and not generation_failed:
-                    try:
-                        store.add_message(conv.id, Message(role="assistant", content=accumulated), None)
-                        assistant_persisted = True
-                    except Exception:
-                        pass
-                else:
-                    try:
-                        store.remove_last_message(
-                            conv.id,
-                            role="user",
-                            content=request.message,
-                        )
-                    except Exception:
-                        pass
+            if not assistant_persisted:
+                # Only a `done` event persists an assistant message (above). Reaching here
+                # without one means the exchange did not complete, whatever was streamed:
+                # persist nothing and take the unanswered question back out of the history.
+                try:
+                    store.remove_last_message(conv.id, role="user", content=request.message)
+                except Exception:
+                    pass
             if trace_enabled:
                 await trace_store.annotate(run_id, **current_trace_payload_fields())
                 await trace_store.end(run_id, ended_at_ms=ended_at_ms)

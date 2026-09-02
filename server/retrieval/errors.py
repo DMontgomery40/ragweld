@@ -142,3 +142,16 @@ class AnswerRetrievalFailedError(RuntimeError):
     def __init__(self, *, reason: str) -> None:
         self.reason = str(reason or "").strip() or "retrieval failed without a reason"
         super().__init__(f"Answer retrieval failed: {self.reason}")
+
+    def to_detail(self, *, operation: str = "Answer retrieval") -> dict[str, Any]:
+        return {
+            "code": "answer_retrieval_failed",
+            "operation": operation,
+            "message": "Retrieval for the answer could not complete.",
+            "reason": self.reason,
+            "retryable": True,
+            "operator_hint": (
+                "Inspect the retrieval runtime for this corpus (stores, embedder, index contract) "
+                "using the reason, then retry. Ragweld did not answer without retrieved context."
+            ),
+        }

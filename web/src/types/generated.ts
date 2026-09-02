@@ -115,6 +115,21 @@ export interface AlertsUnavailableDetail {
   monitoring_path: string;
 }
 
+/** Public error detail returned when answer retrieval fails for an untyped reason (HTTP 503). */
+export interface AnswerRetrievalFailureDetail {
+  code?: "answer_retrieval_failed"; // default: "answer_retrieval_failed"
+  /** Retrieval operation that could not complete */
+  operation: string;
+  /** Stable, non-sensitive failure summary */
+  message: string;
+  /** Sanitised reason from the retrieval lane (no secrets, no raw payloads) */
+  reason: string;
+  /** Whether the caller may retry after remediation */
+  retryable?: boolean; // default: True
+  /** High-signal next step for the operator */
+  operator_hint: string;
+}
+
 /** Per-phase benchmark timing delta. */
 export interface BenchmarkBreakdownDelta {
   /** Benchmark breakdown phase. */
@@ -3427,6 +3442,11 @@ export interface AnswerResponse {
   latency_ms: number;
   /** Developer debug metadata (best-effort) */
   debug?: ChatDebugInfo | null;
+}
+
+/** FastAPI response envelope for an untyped answer-retrieval failure. */
+export interface AnswerRetrievalFailureResponse {
+  detail: AnswerRetrievalFailureDetail;
 }
 
 /** Corpus-scoped benchmark observability summary. */

@@ -1,3 +1,6 @@
+import asyncio
+from pathlib import Path
+import uuid
 """Tests for chat API endpoints with PydanticAI integration."""
 
 import json
@@ -7,6 +10,9 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
+from tests.api.fake_gateway import empty_stream_gateway, gateway_env, slow_delta_gateway
+from tests.api.live_server import live_app_subprocess
+from server.config import load_config
 from server.api.chat import set_config, set_fusion
 from server.gateway_catalog import warm_gateway_catalog
 from server.main import app
@@ -359,13 +365,13 @@ class TestStreamEndpoint:
         the durable history keeps neither an assistant message built from the failure text nor
         the unanswered question (the old behaviour stored both, and Recall indexed them)."""
 
-        async def mock_stream_chat_text(*args, **kwargs):
-            _ = (args, kwargs)
-            if False:  # pragma: no cover
-                yield ""
-
         question = "Which plane management company did Barry Cohen consider switching to?"
-        with patch("server.chat.handler.stream_chat_text", new=mock_stream_chat_text):
+        cfg = TriBridConfig()
+        cfg.chat.litellm.enabled = True
+        cfg.chat.litellm.default_model = "openai.gpt-5.6-luna"
+        with empty_stream_gateway() as base_url, gateway_env(base_url):
+            cfg.chat.litellm.base_url = base_url
+            set_config(cfg)
             response = await chat_client.post(
                 "/api/chat/stream",
                 json={
@@ -380,9 +386,65 @@ class TestStreamEndpoint:
             assert '"type": "error"' in body or '"type":"error"' in body
             assert "Error: LLM stream produced no content" not in body
 
-            store = get_conversation_store()
-            messages = store.get_messages("stream-conv")
-            assert [m.role for m in messages] == []
+            try:
+                store = get_conversation_store()
+                messages = store.get_messages("stream-conv")
+                assert [m.role for m in messages] == []
+            finally:
+                set_config(None)
+
+    @pytest.mark.asyncio
+    async def test_stream_closed_by_the_client_mid_answer_persists_no_exchange(self, tmp_path: Path):
+        """A client that goes away after the first delta ends the exchange without a `done`
+        event. Whatever streamed so far is not an answer: the durable history keeps neither a
+        partial assistant message nor the question (the old wrapper stored the fragment).
+
+        Served by a uvicorn subprocess over a real loopback socket (httpx's ASGI transport
+        buffers the whole body and cannot disconnect mid-stream). Persistence is observed
+        through the app's own history route on that server.
+        """
+        import httpx
+
+        first_question = "Which plane management company did Barry Cohen consider switching to?"
+        conversation_id = f"stream-closed-{uuid.uuid4().hex[:8]}"
+        with slow_delta_gateway(delay_seconds=0.5) as base_url, gateway_env(base_url):
+            cfg = load_config()
+            cfg.chat.litellm.enabled = True
+            cfg.chat.litellm.base_url = base_url
+            cfg.chat.litellm.default_model = "openai.gpt-5.6-luna"
+            cfg.chat.recall.enabled = False
+            cfg.semantic_cache.enabled = 0
+            config_path = tmp_path / "tribrid_config.json"
+            config_path.write_text(json.dumps(cfg.model_dump(mode="serialization")), encoding="utf-8")
+            with live_app_subprocess(
+                config_path=config_path,
+                env={"LITELLM_BASE_URL": base_url, "LITELLM_API_KEY": "pytest-fake-gateway-key"},
+            ) as live_url:
+                async with httpx.AsyncClient(base_url=live_url, timeout=60.0) as client:
+                    first_delta_seen = False
+                    async with client.stream(
+                        "POST",
+                        "/api/chat/stream",
+                        json={
+                            "message": first_question,
+                            "sources": {"corpus_ids": []},
+                            "conversation_id": conversation_id,
+                        },
+                    ) as response:
+                        assert response.status_code == 200
+                        async for line in response.aiter_lines():
+                            if line.startswith("data: ") and '"text"' in line:
+                                first_delta_seen = True
+                                break
+                    assert first_delta_seen
+                    await asyncio.sleep(2.0)  # the server's response task is cancelled on close
+                    # The durable history, read through the app's own boundary: nothing from
+                    # the abandoned exchange may be in it.
+                    history = await client.get(f"/api/chat/history/{conversation_id}")
+                    assert history.status_code == 200, history.text
+                    messages = history.json()
+                    assert messages == [], messages
+
 
 class TestChatCitationsRealPipeline:
     """Exercise the real rag pipeline without external API calls.

@@ -21,10 +21,15 @@ from server.models.tribrid_config_model import (
     MCPConfig,
     MCPSearchToolResult,
     RequiredRetrievalLegFailureDetail,
+    AnswerRetrievalFailureDetail,
+    GenerationUnavailableDetail,
+    MCPAnswerToolResult,
     RerankerFailureDetail,
     RetrievalContractMismatchDetail,
 )
+from server.chat.generation_failure import generation_unavailable_detail
 from server.retrieval.errors import (
+    AnswerRetrievalFailedError,
     RequiredRetrievalLegError,
     RerankerFailedError,
     RetrievalContractMismatchError,
@@ -34,6 +39,27 @@ from server.services.answer_service import answer_best_effort
 from server.services.config_store import get_config as load_scoped_config
 
 MCPMode = Literal["tribrid", "dense_only", "sparse_only", "graph_only"]
+
+
+def _answer_tool_result(
+    *,
+    result: AnswerResponse | None = None,
+    error: (
+        DependencyUnavailableDetail
+        | RequiredRetrievalLegFailureDetail
+        | RerankerFailureDetail
+        | RetrievalContractMismatchDetail
+        | AnswerRetrievalFailureDetail
+        | GenerationUnavailableDetail
+        | None
+    ) = None,
+) -> CallToolResult:
+    payload = MCPAnswerToolResult(result=result, error=error).model_dump(mode="json")
+    return CallToolResult(
+        content=[TextContent(type="text", text=json.dumps(payload, separators=(",", ":")))],
+        structuredContent=payload,
+        isError=error is not None,
+    )
 
 
 def _search_tool_result(
@@ -139,7 +165,7 @@ def register_mcp_tools(mcp: FastMCP, cfg: MCPConfig) -> None:
         corpus_id: str,
         mode: MCPMode | None = None,
         top_k: int | None = None,
-    ) -> AnswerResponse:
+    ) -> Annotated[CallToolResult, MCPAnswerToolResult]:
         """Answer a question using tri-brid retrieval + an LLM."""
         if not query.strip():
             raise ValueError("Query must not be empty")
@@ -154,27 +180,53 @@ def register_mcp_tools(mcp: FastMCP, cfg: MCPConfig) -> None:
         fusion = TriBridFusion()
 
         t0 = time.perf_counter()
-        text, sources, provider_info, debug = await answer_best_effort(
-            query=query,
-            corpus_id=corpus_id,
-            config=scoped_cfg,
-            fusion=fusion,
-            include_vector=include_vector,
-            include_sparse=include_sparse,
-            include_graph=include_graph,
-            top_k=effective_top_k,
-        )
+        # Every failure is a typed tool error (isError=true), never an answer without context
+        # or a "retrieval-only" text: the same boundary contract as /api/answer.
+        try:
+            text, sources, provider_info, debug = await answer_best_effort(
+                query=query,
+                corpus_id=corpus_id,
+                config=scoped_cfg,
+                fusion=fusion,
+                include_vector=include_vector,
+                include_sparse=include_sparse,
+                include_graph=include_graph,
+                top_k=effective_top_k,
+            )
+        except RetrievalContractMismatchError as exc:
+            return _answer_tool_result(error=RetrievalContractMismatchDetail.model_validate(exc.to_detail()))
+        except RequiredRetrievalLegError as exc:
+            return _answer_tool_result(error=RequiredRetrievalLegFailureDetail.model_validate(exc.to_detail()))
+        except RerankerFailedError as exc:
+            return _answer_tool_result(error=RerankerFailureDetail.model_validate(exc.to_detail()))
+        except AnswerRetrievalFailedError as exc:
+            return _answer_tool_result(
+                error=AnswerRetrievalFailureDetail.model_validate(exc.to_detail(operation="MCP answer retrieval"))
+            )
+        except DependencyUnavailableError as exc:
+            return _answer_tool_result(error=_dependency_error_detail(exc))
+        except Exception as exc:
+            return _answer_tool_result(error=generation_unavailable_detail(exc, operation="MCP answer generation"))
         dt_ms = (time.perf_counter() - t0) * 1000.0
 
+        if provider_info is None or not debug.llm_used:
+            return _answer_tool_result(
+                error=generation_unavailable_detail(
+                    RuntimeError("answer completed without a generation provider"),
+                    operation="MCP answer generation",
+                )
+            )
         # Note: The current /api/answer endpoint also reports tokens_used=0 (provider-specific).
-        return AnswerResponse(
-            query=query,
-            answer=text,
-            sources=sources,
-            model=provider_info.model if provider_info is not None else "",
-            tokens_used=0,
-            latency_ms=float(dt_ms),
-            debug=debug,
+        return _answer_tool_result(
+            result=AnswerResponse(
+                query=query,
+                answer=text,
+                sources=sources,
+                model=provider_info.model,
+                tokens_used=0,
+                latency_ms=float(dt_ms),
+                debug=debug,
+            )
         )
 
     @mcp.tool()

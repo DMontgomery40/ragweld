@@ -97,7 +97,7 @@ async def test_chat_returns_503_without_providers(
 
         response = await client.post(
             "/api/chat",
-            json={"message": "hello", "sources": {"corpus_ids": ["test-repo"]}},
+            json={"message": "Which plane management company did Barry Cohen consider switching to?", "sources": {"corpus_ids": ["test-repo"]}},
         )
 
         assert response.status_code == 503

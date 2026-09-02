@@ -13,11 +13,8 @@ from __future__ import annotations
 
 import json
 import os
-import threading
 import uuid
-from collections.abc import AsyncIterator, Iterator
-from contextlib import contextmanager
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from collections.abc import AsyncIterator
 
 import pytest
 from httpx import AsyncClient
@@ -28,6 +25,7 @@ from server.db.postgres import PostgresClient
 from server.models.index import Chunk
 from server.models.tribrid_config_model import TriBridConfig
 from server.retrieval.qdrant_store import QdrantChunkStore
+from tests.api.fake_gateway import empty_stream_gateway, gateway_env
 
 pytestmark = [pytest.mark.requires_postgres, pytest.mark.requires_qdrant]
 
@@ -144,53 +142,6 @@ async def test_answer_stream_emits_the_typed_error_event_instead_of_retrieval_on
             os.environ["LITELLM_API_KEY"] = old_litellm
 
 
-class _EmptyStreamGateway(BaseHTTPRequestHandler):
-    """An OpenAI-compatible gateway whose stream carries no content: only the terminator."""
-
-    def log_message(self, _format: str, *_args: object) -> None:
-        return
-
-    def do_POST(self) -> None:  # noqa: N802 - stdlib handler contract
-        length = int(self.headers.get("Content-Length") or "0")
-        self.rfile.read(length)
-        body = b"data: [DONE]\n\n"
-        self.send_response(200)
-        self.send_header("Content-Type", "text/event-stream")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-
-@contextmanager
-def _empty_stream_gateway() -> Iterator[str]:
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _EmptyStreamGateway)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        host, port = server.server_address
-        yield f"http://{host}:{port}/v1"
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=2)
-
-
-@contextmanager
-def _gateway_env(base_url: str) -> Iterator[None]:
-    """Point the process's gateway at the fake for the duration (the env wins over config)."""
-    saved = {name: os.environ.get(name) for name in ("LITELLM_BASE_URL", "LITELLM_API_KEY")}
-    os.environ["LITELLM_BASE_URL"] = base_url
-    os.environ["LITELLM_API_KEY"] = "pytest-empty-stream-key"
-    try:
-        yield
-    finally:
-        for name, value in saved.items():
-            if value is None:
-                os.environ.pop(name, None)
-            else:
-                os.environ[name] = value
-
-
 @pytest.mark.asyncio
 async def test_answer_stream_with_an_empty_provider_stream_fails_and_writes_no_cache(
     client: AsyncClient,
@@ -200,7 +151,7 @@ async def test_answer_stream_with_an_empty_provider_stream_fails_and_writes_no_c
     pg = PostgresClient("postgresql://ignored")
     await pg.connect()
     repo_id = f"pytest_ans_empty_{uuid.uuid4().hex[:10]}"
-    with _empty_stream_gateway() as base_url, _gateway_env(base_url):
+    with empty_stream_gateway() as base_url, gateway_env(base_url):
         try:
             await pg.upsert_corpus(repo_id, name=repo_id, root_path=".")
             cfg = load_config()

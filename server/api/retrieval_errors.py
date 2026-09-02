@@ -12,12 +12,15 @@ from server.models.tribrid_config_model import (
     DependencyUnavailableResponse,
     RequiredRetrievalLegFailureDetail,
     RequiredRetrievalLegFailureResponse,
+    AnswerRetrievalFailureDetail,
+    AnswerRetrievalFailureResponse,
     RerankerFailureDetail,
     RerankerFailureResponse,
     RetrievalContractMismatchDetail,
     RetrievalContractMismatchResponse,
 )
 from server.retrieval.errors import (
+    AnswerRetrievalFailedError,
     RequiredRetrievalLegError,
     RerankerFailedError,
     RetrievalContractMismatchError,
@@ -67,6 +70,19 @@ def reranker_failed_http_exception(exc: RerankerFailedError) -> HTTPException:
     logger.error(
         "Configured reranker failed",
         extra={"mode": detail.mode, "reason": detail.reason, "operator_hint": detail.operator_hint},
+    )
+    return HTTPException(status_code=503, detail=detail.model_dump(mode="json"))
+
+
+def answer_retrieval_failed_http_exception(
+    exc: AnswerRetrievalFailedError, *, operation: str
+) -> HTTPException:
+    """Translate an untyped answer-retrieval failure into its validated 503 boundary shape."""
+
+    detail = AnswerRetrievalFailureDetail.model_validate(exc.to_detail(operation=operation))
+    logger.error(
+        "Answer retrieval failed",
+        extra={"operation": operation, "reason": detail.reason, "operator_hint": detail.operator_hint},
     )
     return HTTPException(status_code=503, detail=detail.model_dump(mode="json"))
 
