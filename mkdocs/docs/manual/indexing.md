@@ -105,6 +105,9 @@ flowchart LR
 !!! note "Conservative resolution"
     Imports and calls only produce edges when the target is defined inside the corpus or the import explicitly resolves to a corpus file. Everything else is counted as unresolved rather than guessed, keeping the graph high-signal.
 
+!!! note "The file's Document node and its module entity are two distinct nodes"
+    A code corpus writes each file's lexical graph (one `Document` node per file plus its `Chunk` nodes) and the AST graph in the same pass, and both halves once used the bare file path as the writer id — the official GraphRAG writer keys nodes and relationship endpoints by id regardless of label, so the collision silently mis-wired the promoted graph: every `Document` carried the module's `contains` and `FROM_CHUNK` edges, and chunk `FROM_DOCUMENT` edges pointed at `module` entities instead of at the file. The Document id is now namespaced (`document::<file_path>`) and the assembled per-file graph refuses any writer-id collision instead of writing one (`assemble_code_file_graph` in `server/indexing/graphrag_pipeline.py`). Re-index code corpora indexed before this fix so their graphs are rebuilt with the correct wiring.
+
 !!! note "Same-name entities no longer block code-graph promotion"
     The code policy resolves entities on the qualified `entity_id` (`path::Qualified.symbol`), and the promotion invariant counts duplicate groups on that same resolution property (`server/indexing/graph_invariants.py`) — so two `__init__` methods of different classes promote normally. The semantic policy still resolves on `name`, and two extracted entities sharing a name there is still a promotion refusal (`unresolved_duplicate_entity`). See the [Indexing pipeline](../indexing.md) for the invariant details.
 
