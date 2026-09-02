@@ -948,3 +948,14 @@ carry S numbers; the working scratchpad with every row lives with the session an
   `monkeypatch` fixtures and marks the subprocess disconnect tests with their store capabilities. Codex accepted the
   retrieval cache and Recall priming result as retrieval-side state (not exchange records). Round-7 gate and codex
   approval #8 in flight.
+- **Codex approval #8 (on d27e923a): BLOCK, fixed in 8fc31d0d.** Persisting after `done` had opened a visibility
+  race and left the handler's cache write unreached when the client closed on `done`; persisting in two places
+  (handler cache, wrapper messages) left a window for the disconnect listener. Now the chat handler is the single
+  committer: immediately before it produces `done` it writes both messages synchronously, then provider chaining,
+  the generation cache and the query/source record (`server/chat/query_record.py`, shared with the non-stream path),
+  all under one shield; the wrapper only forwards, traces and starts Recall; the answer stream commits its cache the
+  same way. MCP transport-outage typing is confined to the lookup boundary. The chat endpoint suite runs on real
+  retrieval (a seeded corpus replaces `MockFusion`) under the live config; closing on `done` is proven to commit the
+  whole exchange (repeat served from the generation cache, provider request count stays 1 — RED on the previous
+  ordering), and leaving with every delta before `done` is asserted atomic-or-nothing (a race with the disconnect
+  listener, not a side). Two stability runs: 40 passed each. Round-8 gate and codex approval #9 in flight.
