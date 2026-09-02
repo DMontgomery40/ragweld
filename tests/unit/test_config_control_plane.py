@@ -15,6 +15,7 @@ from server.config_control_plane import (
     validate_integration_contracts,
     validate_secret_registry,
 )
+from server.chat.provider_router import select_provider_route
 from server.gateway_catalog import LOCAL_GATEWAY_ALIAS
 from server.models.tribrid_config_model import TriBridConfig
 
@@ -83,16 +84,29 @@ async def _vllm_readiness(*, litellm_enabled: bool, chat_model: str = "openai.gp
 
 @pytest.mark.asyncio
 async def test_an_unready_vllm_blocks_chat_only_when_chat_runs_on_it() -> None:
-    """``blocked_surfaces`` is read by operators as what stops working right now. With the
-    gateway on, chat and the benchmark answer through LiteLLM and never reach the serving
-    lane, so an off or unreachable vLLM blocks only that lane; with the gateway off they
-    fall back to it and it does block them (S31)."""
+    """``blocked_surfaces`` is read by operators as what stops working right now.
+
+    The only production route to generation is ``select_provider_route``, and it fails closed
+    when ``chat.litellm.enabled`` is false: there is no direct vLLM route. So an off or
+    unreachable vLLM blocks chat and the benchmark only when the gateway is ON and the chat
+    default model is the local serving alias (itself a gateway route). With the gateway off,
+    chat is blocked by LiteLLM's own row -- not vLLM's (S31)."""
     gateway_on = await _vllm_readiness(litellm_enabled=True)
     assert gateway_on.state != "ready"
     assert gateway_on.blocked_surfaces == ["runtime"]
 
+    # The premise, asserted rather than described: no gateway, no generation route at all.
+    # This goes red the moment anyone adds a direct vLLM lane -- the drift that made the old
+    # rule claim chat "falls back" to vLLM.
+    gateway_off_config = TriBridConfig()
+    gateway_off_config.chat.litellm.enabled = False
+    with pytest.raises(RuntimeError, match="LiteLLM generation gateway is disabled"):
+        select_provider_route(config=gateway_off_config)
+    # Chat and the benchmark are blocked with the gateway off -- by LiteLLM's contract.
+    assert _contract("litellm").blocked_surfaces == ["runtime", "chat", "benchmark"]
+
     gateway_off = await _vllm_readiness(litellm_enabled=False)
-    assert set(gateway_off.blocked_surfaces) == {"runtime", "chat", "benchmark"}
+    assert gateway_off.blocked_surfaces == ["runtime"]
 
     # The local lane is itself a gateway route, so chat reaches vLLM with the gateway on
     # whenever the chat default model is that route.

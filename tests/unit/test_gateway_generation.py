@@ -9,11 +9,21 @@ from typing import Any
 
 import pytest
 
-from server.chat.generation import generate_chat_text, stream_chat_text
+from server.chat.generation import (
+    GatewayContentMissingError,
+    generate_chat_text,
+    stream_chat_text,
+)
 from server.chat.provider_router import ProviderRoute
 from server.gateway_catalog import warm_gateway_catalog
+from server.models.tribrid_config_model import TriBridConfig
+from server.observability.runtime import current_trace_payload_fields, start_request_observation
 
 FAIL_ONCE_KEY = "fail-once-key"
+# A reasoning model that spends its whole output budget thinking answers with no assistant
+# content, and the gateway bills it anyway (defect D26).
+REASONING_ONLY_KEY = "reasoning-only-key"
+REASONING_ONLY_COST_USD = 0.004212
 
 
 @pytest.fixture(autouse=True)
@@ -42,6 +52,56 @@ class _GatewayHandler(BaseHTTPRequestHandler):
             body = json.dumps({"error": {"message": "controlled failure"}}).encode()
             self.send_response(503)
             self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if self.headers.get("Authorization") == f"Bearer {REASONING_ONLY_KEY}":
+            if payload.get("stream"):
+                chunks = [
+                    {"id": "resp-reasoning-only-stream", "choices": [{"delta": {"reasoning": "..."}}]},
+                    {
+                        "id": "resp-reasoning-only-stream",
+                        "choices": [{"delta": {}, "finish_reason": "length"}],
+                        "usage": {
+                            "prompt_tokens": 918,
+                            "completion_tokens": 256,
+                            "total_tokens": 1174,
+                            "completion_tokens_details": {"reasoning_tokens": 256},
+                        },
+                    },
+                ]
+                stream_body = (
+                    "".join(f"data: {json.dumps(chunk)}\n\n" for chunk in chunks) + "data: [DONE]\n\n"
+                ).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("X-Request-Id", "trace-reasoning-only-stream")
+                self.send_header("Content-Length", str(len(stream_body)))
+                self.end_headers()
+                self.wfile.write(stream_body)
+                return
+            body = json.dumps(
+                {
+                    "id": "resp-reasoning-only",
+                    "choices": [
+                        {
+                            "message": {"role": "assistant", "content": None, "reasoning": "..."},
+                            "finish_reason": "length",
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 918,
+                        "completion_tokens": 256,
+                        "total_tokens": 1174,
+                        "completion_tokens_details": {"reasoning_tokens": 256},
+                    },
+                    "hidden_params": {"response_cost": REASONING_ONLY_COST_USD},
+                }
+            ).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("X-Request-Id", "trace-reasoning-only")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -229,6 +289,108 @@ async def test_streaming_gateway_failure_reads_and_reports_error_body() -> None:
             ]
 
     assert len(_GatewayHandler.requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_billed_reasoning_only_reply_is_costed_before_the_typed_error() -> None:
+    """A 200 with no assistant content was still billed, so it must still be costed (D26).
+
+    The gateway answered, charged for 256 reasoning tokens and returned ``content: null``.
+    ``generate_chat_text`` used to raise ``GatewayContentMissingError`` before it extracted the
+    provider cost, so the request's whole spend disappeared from the trace. The typed error
+    still carries the usage AND the trace now carries the provider's own cost.
+    """
+    config = TriBridConfig()
+    config.tracing.tracing_enabled = True
+    config.tracing.tracing_mode = "local"
+    config.tracing.otel_export_enabled = False
+
+    with _gateway_server() as base_url:
+        with start_request_observation(
+            config=config, route_name="chat.send", path="/api/chat", method="POST"
+        ) as observation:
+            # Without a live observation `set_cost_summary` is a no-op and this test would
+            # assert nothing at all.
+            assert observation is not None, "tracing is off in this config; the test is vacuous"
+            with pytest.raises(GatewayContentMissingError) as raised:
+                await generate_chat_text(
+                    route=_route(
+                        base_url, model="openai.gpt-5.6-luna", api_key=REASONING_ONLY_KEY
+                    ),
+                    system_prompt="You are a retrieval reranker.",
+                    user_message=(
+                        "Which plane management company did Barry Cohen consider switching to "
+                        "from Jet Aviation?"
+                    ),
+                    images=[],
+                    temperature=0,
+                    max_tokens=64,
+                    context_chunks=[],
+                    body_fields={"reasoning": {"effort": "high"}},
+                )
+            cost = current_trace_payload_fields()["cost_summary"]
+
+    error = raised.value
+    assert error.finish_reason == "length"
+    assert error.usage is not None
+    assert error.usage["completion_tokens_details"]["reasoning_tokens"] == 256
+
+    assert cost is not None, "a billed empty-content reply left no cost summary on the trace"
+    assert cost.provider == "LiteLLM" and cost.model == "openai.gpt-5.6-luna"
+    assert (cost.input_tokens, cost.output_tokens, cost.total_tokens) == (918, 256, 1174)
+    assert cost.estimated_cost_usd == pytest.approx(REASONING_ONLY_COST_USD)
+    assert cost.cost_source == "provider" and cost.authoritative is True
+    assert len(_GatewayHandler.requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_billed_reasoning_only_stream_is_costed_before_the_typed_error() -> None:
+    """The streaming transport bills the same way and now fails the same way.
+
+    A stream that carried usage but never a content delta used to raise a bare RuntimeError
+    with the tokens dropped on the floor: no cost summary, no usage on the error. It now raises
+    the same typed ``GatewayContentMissingError`` the non-streaming transport does, after the
+    cost summary is on the trace. The message is unchanged, so
+    ``classify_generation_failure`` still reads it as a gateway failure.
+    """
+    config = TriBridConfig()
+    config.tracing.tracing_enabled = True
+    config.tracing.tracing_mode = "local"
+    config.tracing.otel_export_enabled = False
+
+    with _gateway_server() as base_url:
+        with start_request_observation(
+            config=config, route_name="chat.stream", path="/api/chat/stream", method="POST"
+        ) as observation:
+            assert observation is not None, "tracing is off in this config; the test is vacuous"
+            with pytest.raises(GatewayContentMissingError) as raised:
+                _ = [
+                    delta
+                    async for delta in stream_chat_text(
+                        route=_route(
+                            base_url, model="openai.gpt-5.6-luna", api_key=REASONING_ONLY_KEY
+                        ),
+                        system_prompt="You are a retrieval reranker.",
+                        user_message=(
+                            "Which plane management company did Barry Cohen consider switching "
+                            "to from Jet Aviation?"
+                        ),
+                        images=[],
+                        temperature=0,
+                        max_tokens=64,
+                        context_chunks=[],
+                    )
+                ]
+            cost = current_trace_payload_fields()["cost_summary"]
+
+    error = raised.value
+    assert str(error) == "LiteLLM stream produced no content"
+    assert error.finish_reason == "length"
+    assert error.usage is not None
+    assert error.usage["completion_tokens_details"]["reasoning_tokens"] == 256
+
+    assert cost is not None, "a billed empty stream left no cost summary on the trace"
+    assert (cost.input_tokens, cost.output_tokens, cost.total_tokens) == (918, 256, 1174)
 
 
 def _large_inline_png(pixels: int = 1400) -> str:

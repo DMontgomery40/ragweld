@@ -92,7 +92,7 @@ def test_traversal_expands_only_through_semantic_entity_relationships() -> None:
         f" AND entity_rel.repo_id = {scope})" in query
     )
     # Chunk expansion happens only after the entity expansion, from resolved entities.
-    assert query.index("RETURN related_entity, distance") < query.index(
+    assert query.index("RETURN collect({entity: related_entity, distance: distance})") < query.index(
         "MATCH (related_entity)-[related_source:FROM_CHUNK]->(related_chunk:Chunk)"
     )
 
@@ -111,6 +111,28 @@ def test_traversal_caps_related_entities_per_seed_nearest_first() -> None:
     )
     # Score decay by path length is kept, on the deduplicated seed score.
     assert "max(seed_score / (1.0 + distance)) AS expansion_score" in query
+
+
+def test_the_cap_counts_related_entities_and_never_the_seed_itself() -> None:
+    """The seed is not a "related entity" of itself, and its chunks are not optional.
+
+    ``*0..hops`` matches the seed at distance 0, so a cap applied to that row set spent one
+    slot on the seed: ``max_related_entities_per_seed=1`` admitted ZERO related entities. The
+    seed is now excluded from the capped set and re-added at distance 0, which keeps its own
+    chunks (score ``seed_score / (1.0 + 0)``) and gives the cap its stated meaning.
+    """
+    query = _query(max_related_entities_per_seed=1)
+
+    seed_excluded = query.index("WHERE related_entity <> seed_entity")
+    capped = query.index("LIMIT 1")
+    seed_restored = query.index("UNWIND [{entity: seed_entity, distance: 0}] + related_entities")
+    assert seed_excluded < capped < seed_restored
+    # collect() inside the subquery, so a seed with no related entities still returns its row
+    # (a bare RETURN would drop the seed's own chunks whenever the graph had no semantic edge).
+    assert "RETURN collect({entity: related_entity, distance: distance}) AS related_entities" in query
+    assert query.index("distance: 0") < query.index(
+        "MATCH (related_entity)-[related_source:FROM_CHUNK]"
+    )
 
 
 @pytest.mark.parametrize(("window", "present"), [(0, False), (1, True), (3, True)])

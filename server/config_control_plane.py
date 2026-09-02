@@ -1136,11 +1136,14 @@ async def _build_runtime_integration_readiness(
         for path in contract.required_config_paths[1:]
         if _is_missing(_config_value(config, path))
     ]
-    # Chat and the benchmark answer through whichever generation lane is selected. They reach
-    # vLLM with the gateway off, and with the gateway on when the chat default model is the
-    # local serving route (it is itself a gateway alias); otherwise an off or unreachable vLLM
-    # blocks only its own lane and saying more is false (S31).
-    chat_runs_on_the_local_lane = not bool(config.chat.litellm.enabled) or (
+    # Chat and the benchmark answer through the LiteLLM gateway or not at all:
+    # `select_provider_route` (server/chat/provider_router.py) raises "LiteLLM generation
+    # gateway is disabled" before it looks at any model, so there is no direct vLLM route to
+    # reach. An off or unreachable vLLM therefore blocks chat and the benchmark only when the
+    # gateway is ON and the chat default model is the local serving alias (itself a gateway
+    # route); with the gateway off, chat is blocked by LiteLLM's own row, and vLLM blocks only
+    # its own lane -- saying more is false (S31).
+    chat_runs_on_the_local_lane = bool(config.chat.litellm.enabled) and (
         str(config.chat.litellm.default_model or "").strip() == LOCAL_GATEWAY_ALIAS
     )
     vllm_blocked_surfaces = (

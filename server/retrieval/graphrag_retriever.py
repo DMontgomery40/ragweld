@@ -100,6 +100,12 @@ def traversal_query(
     chunk are not neighbours unless the extractor linked them. Each seed entity
     keeps at most ``max_related_entities_per_seed`` related entities, nearest
     first, so a hub entity cannot pull the whole corpus into one query.
+
+    The cap counts OTHER entities only. The seed itself is excluded from the
+    capped set and added back at distance 0, so its own chunks are always
+    reachable and ``max_related_entities_per_seed=1`` means one related entity --
+    not zero, which is what a cap that counted the seed's own distance-0 row
+    against itself used to mean.
     """
     repo_id = require_staging_graph_id(graph_repo_id)
     hops = _bounded_int(max_hops, name="max_hops", minimum=0, maximum=5)
@@ -138,7 +144,8 @@ def traversal_query(
     WITH seed_entity, max(score) AS seed_score, seed_join_ids
     CALL (seed_entity) {{
         MATCH entity_path=(seed_entity)-[entity_relationship*0..{hops}]-(related_entity:{ENTITY_LABEL})
-        WHERE all(entity_node IN nodes(entity_path)
+        WHERE related_entity <> seed_entity
+          AND all(entity_node IN nodes(entity_path)
                   WHERE entity_node:{ENTITY_LABEL} AND entity_node.repo_id = {scope})
           AND all(entity_rel IN relationships(entity_path)
                   WHERE NOT type(entity_rel) IN {structural} AND entity_rel.repo_id = {scope})
@@ -147,8 +154,12 @@ def traversal_query(
              count(entity_path) AS path_count
         ORDER BY distance ASC, path_count DESC, related_entity.entity_id ASC
         LIMIT {related_cap}
-        RETURN related_entity, distance
+        RETURN collect({{entity: related_entity, distance: distance}}) AS related_entities
     }}
+    UNWIND [{{entity: seed_entity, distance: 0}}] + related_entities AS expansion
+    WITH seed_entity, seed_score, seed_join_ids,
+         expansion.entity AS related_entity,
+         expansion.distance AS distance
     MATCH (related_entity)-[related_source:{shape.from_chunk}]->(related_chunk:{shape.chunk_label})
     WHERE related_source.repo_id = {scope}
       AND related_chunk.repo_id = {scope}

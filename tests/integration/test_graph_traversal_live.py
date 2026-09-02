@@ -1,10 +1,13 @@
 """Live traversal semantics of the Qdrant-seeded GraphRAG leg.
 
-Seeds a small Epstein-flights graph in which a hub entity is co-mentioned in a
-chunk with an entity the extractor never linked to it. A chunk co-mention must
-not act as a traversal hop, extracted relationships must, and
-``graph_search.max_related_entities_per_seed`` must bound what each seed entity
-pulls in, both through the retriever and through ``/api/search``.
+Seeds a small Epstein-flights graph: a hub entity co-mentioned in a chunk with an
+entity the extractor never linked to it, TWO entities it really is linked to (more
+than the cap under test), and a second seed entity the extractor linked to nothing.
+A chunk co-mention must not act as a traversal hop, extracted relationships must,
+``graph_search.max_related_entities_per_seed`` must admit exactly that many entities
+BESIDES the seed, and every seed entity -- including the one with no semantic edges
+at all -- must still contribute its own chunks. Proven through the retriever and
+through ``/api/search``.
 """
 
 from __future__ import annotations
@@ -45,16 +48,33 @@ _FILE = "epstein-flights.md"
 
 HUB = "jeffrey-epstein"
 RELATED = "barry-cohen"
+PILOT = "larry-visoski"
 UNRELATED = "kathy-ruemmler"
+# A second seed entity (named in the same seed chunk) that the extractor linked to no
+# other entity: it has its own chunk and zero entity-to-entity edges.
+LONE = "gulfstream-n212jm"
 
 SEED = "flights-seed"
 HUB_ONLY = "flights-hub-only"
 SHARED = "flights-shared"
 RELATED_CHUNK = "flights-related"
+PILOT_CHUNK = "flights-pilot"
+AIRCRAFT_CHUNK = "flights-aircraft"
 UNRELATED_CHUNK = "flights-unrelated"
 FILLER_A = "flights-filler-a"
 FILLER_B = "flights-filler-b"
 FILLER_C = "flights-filler-c"
+FILLER_D = "flights-filler-d"
+FILLER_E = "flights-filler-e"
+
+# What the seed entities own outright (distance 0: the hub's two chunks and the lone
+# entity's one), and the chunks reached through one extracted relationship each
+# (distance 1). The hub is linked to more entities than the cap under test, which is
+# what makes the cap observable; the lone entity is linked to none, which is what
+# proves a seed with no semantic edges is not dropped from the expansion.
+SEED_ENTITY_CHUNKS = (AIRCRAFT_CHUNK, HUB_ONLY, SHARED)
+RELATED_ENTITY_CHUNKS = (PILOT_CHUNK, RELATED_CHUNK)
+SEED_ENTITIES = (HUB, LONE)
 
 
 def _chunk(chunk_id: str, content: str, ordinal: int) -> Chunk:
@@ -85,6 +105,16 @@ def _chunks() -> list[Chunk]:
         ),
         _chunk(FILLER_B, "The hangar lease renewal was signed the same month.", 6),
         _chunk(FILLER_C, "Catering for the flight was billed to the household account.", 7),
+        _chunk(
+            PILOT_CHUNK, "Larry Visoski flew the October 2017 leg to Palm Beach.", 8
+        ),
+        _chunk(
+            AIRCRAFT_CHUNK,
+            "The Gulfstream N212JM was released from maintenance before the October legs.",
+            9,
+        ),
+        _chunk(FILLER_D, "De-icing was invoiced separately for the return leg.", 10),
+        _chunk(FILLER_E, "The crew hotel folio was attached to the same October file.", 11),
     ]
 
 
@@ -94,7 +124,14 @@ def _embed(chunks: list[Chunk], query_vector: list[float]) -> list[Chunk]:
     near = list(query_vector)
     near[0] = near[0] + 0.25
     near[1] = near[1] - 0.25
-    by_id = {SEED: query_vector, FILLER_A: near, FILLER_B: near, FILLER_C: near}
+    by_id = {
+        SEED: query_vector,
+        FILLER_A: near,
+        FILLER_B: near,
+        FILLER_C: near,
+        FILLER_D: near,
+        FILLER_E: near,
+    }
     return [
         chunk.model_copy(update={"embedding": by_id.get(chunk.chunk_id, inverse)})
         for chunk in chunks
@@ -112,6 +149,8 @@ async def _write_graph(
             *lexical.nodes,
             Neo4jNode(id=HUB, label="Person", properties={"name": "Jeffrey Epstein"}),
             Neo4jNode(id=RELATED, label="Person", properties={"name": "Barry Cohen"}),
+            Neo4jNode(id=PILOT, label="Person", properties={"name": "Larry Visoski"}),
+            Neo4jNode(id=LONE, label="Aircraft", properties={"name": "Gulfstream N212JM"}),
             Neo4jNode(id=UNRELATED, label="Person", properties={"name": "Kathy Ruemmler"}),
         ],
         relationships=[
@@ -125,8 +164,15 @@ async def _write_graph(
                 start_node_id=UNRELATED, end_node_id=UNRELATED_CHUNK, type="FROM_CHUNK"
             ),
             Neo4jRelationship(start_node_id=RELATED, end_node_id=RELATED_CHUNK, type="FROM_CHUNK"),
-            # The only extracted relationship: an entity-to-entity hop.
+            Neo4jRelationship(start_node_id=PILOT, end_node_id=PILOT_CHUNK, type="FROM_CHUNK"),
+            # A seed entity (named in the Qdrant-seeded chunk) with no entity-to-entity edge
+            # anywhere: its own chunk is all it can contribute, and it must still contribute it.
+            Neo4jRelationship(start_node_id=LONE, end_node_id=SEED, type="FROM_CHUNK"),
+            Neo4jRelationship(start_node_id=LONE, end_node_id=AIRCRAFT_CHUNK, type="FROM_CHUNK"),
+            # The extracted relationships: entity-to-entity hops. The hub has TWO, so a cap
+            # of one must admit one of them -- not zero, and not both.
             Neo4jRelationship(start_node_id=HUB, end_node_id=RELATED, type="ARRANGED_FLIGHTS_FOR"),
+            Neo4jRelationship(start_node_id=HUB, end_node_id=PILOT, type="FLOWN_BY"),
         ],
     )
     writer = ScopedNeo4jWriter(
@@ -152,8 +198,11 @@ async def test_co_mention_is_not_a_hop_and_hub_expansion_is_capped() -> None:
     cfg.graph_search.chunk_neighbor_window = 0
     cfg.graph_search.max_related_entities_per_seed = 50
     # Result shaping by chunk ordinal would re-add neighbours of graph hits; keep the
-    # API assertions about the graph leg alone.
+    # API assertions about the graph leg alone. Every chunk here lives in one file, so the
+    # per-file shaping cap (default 3) would trim the graph leg's own output before the
+    # assertions could see it -- this test is about the traversal cap, not that one.
     cfg.retrieval.neighbor_window = 0
+    cfg.retrieval.max_chunks_per_file = 10
     cfg.vector_search.enabled = True
     cfg.sparse_search.enabled = False
     cfg.reranking.reranker_mode = "none"
@@ -202,8 +251,15 @@ async def test_co_mention_is_not_a_hop_and_hub_expansion_is_capped() -> None:
             build_generation(run_id=run_id, qdrant_collection=collection, graph_repo_id=graph_id),
         )
 
-        seeds = await qdrant.vector_search(corpus_id, query_vector, 4, physical=collection)
-        assert {match.chunk_id for match in seeds} == {SEED, FILLER_A, FILLER_B, FILLER_C}
+        seeds = await qdrant.vector_search(corpus_id, query_vector, 6, physical=collection)
+        assert {match.chunk_id for match in seeds} == {
+            SEED,
+            FILLER_A,
+            FILLER_B,
+            FILLER_C,
+            FILLER_D,
+            FILLER_E,
+        }
 
         async def _traverse(max_related_entities_per_seed: int) -> GraphTraversalResult:
             return await retrieve_graph_chunks(
@@ -215,38 +271,56 @@ async def test_co_mention_is_not_a_hop_and_hub_expansion_is_capped() -> None:
                 collection_name=collection,
                 graph_repo_id=graph_id,
                 query_vector=query_vector,
-                top_k=4,
+                top_k=6,
                 max_hops=2,
                 neighbor_window=0,
                 max_related_entities_per_seed=max_related_entities_per_seed,
             )
 
-        # Co-mention is not adjacency: the hub's chunks and the extracted
-        # relationship's chunk come back, the co-mentioned entity's own chunk does not.
+        # Co-mention is not adjacency: both seed entities' own chunks and BOTH extracted
+        # relationships' chunks come back, the co-mentioned entity's own chunk does not.
         open_expansion = await _traverse(50)
-        assert open_expansion.qdrant_seed_chunks == 4
+        assert open_expansion.qdrant_seed_chunks == 6
         assert [chunk_id for chunk_id, _score in open_expansion.chunk_scores] == [
+            AIRCRAFT_CHUNK,
             HUB_ONLY,
             SHARED,
+            PILOT_CHUNK,
             RELATED_CHUNK,
         ]
         scores = dict(open_expansion.chunk_scores)
-        assert scores[HUB_ONLY] == scores[SHARED] == pytest.approx(1.0, abs=1e-6)
-        assert scores[RELATED_CHUNK] == pytest.approx(0.5, abs=1e-6)
-        assert open_expansion.resolved_entity_ids == (RELATED, HUB)
+        assert (
+            scores[AIRCRAFT_CHUNK]
+            == scores[HUB_ONLY]
+            == scores[SHARED]
+            == pytest.approx(1.0, abs=1e-6)
+        )
+        assert scores[PILOT_CHUNK] == scores[RELATED_CHUNK] == pytest.approx(0.5, abs=1e-6)
+        assert set(open_expansion.resolved_entity_ids) == {HUB, LONE, RELATED, PILOT}
         assert UNRELATED not in open_expansion.resolved_entity_ids
 
-        # The cap keeps the seed entity itself (distance 0) and drops the rest.
-        capped = await _traverse(1)
-        assert [chunk_id for chunk_id, _score in capped.chunk_scores] == [HUB_ONLY, SHARED]
-        assert capped.resolved_entity_ids == (HUB,)
+        # The cap counts RELATED entities: with the hub linked to two of them, a cap of one
+        # admits exactly one, and the seed entity's own chunks (distance 0) still come back.
+        # The cap used to be applied to a row set that included the seed's own distance-0 row,
+        # so a cap of one admitted ZERO related entities and the hub answered alone.
+        for cap in (1, 2):
+            capped = await _traverse(cap)
+            capped_ids = [chunk_id for chunk_id, _score in capped.chunk_scores]
+            # Every seed entity keeps its own chunks -- the hub's two AND the lone entity's
+            # one, which is the whole contribution of a seed the extractor linked to nothing.
+            assert set(SEED_ENTITY_CHUNKS) <= set(capped_ids), capped_ids
+            assert len([c for c in capped_ids if c in RELATED_ENTITY_CHUNKS]) == cap, capped_ids
+            assert len(capped_ids) == len(SEED_ENTITY_CHUNKS) + cap
+            # Both seed entities + exactly `cap` related ones, and never the co-mentioned one.
+            assert set(SEED_ENTITIES) <= set(capped.resolved_entity_ids)
+            assert len(capped.resolved_entity_ids) == len(SEED_ENTITIES) + cap, (
+                capped.resolved_entity_ids
+            )
+            assert UNRELATED not in capped.resolved_entity_ids
 
         # The typed tunable reaches the traversal through the corpus config.
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            for cap, expected_chunks, expected_entities in (
-                (1, [HUB_ONLY, SHARED], 1),
-                (50, [HUB_ONLY, SHARED, RELATED_CHUNK], 2),
-            ):
+            for cap in (1, 2):
                 cfg.graph_search.max_related_entities_per_seed = cap
                 await postgres.upsert_corpus_config_json(
                     corpus_id, cfg.model_dump(mode="serialization")
@@ -257,7 +331,7 @@ async def test_co_mention_is_not_a_hop_and_hub_expansion_is_capped() -> None:
                     json={
                         "query": _QUESTION,
                         "corpus_id": corpus_id,
-                        "top_k": 4,
+                        "top_k": 6,
                         "include_vector": False,
                         "include_sparse": False,
                         "include_graph": True,
@@ -266,13 +340,16 @@ async def test_co_mention_is_not_a_hop_and_hub_expansion_is_capped() -> None:
                 )
                 assert response.status_code == 200, response.text
                 payload = response.json()
-                assert [match["chunk_id"] for match in payload["matches"]] == expected_chunks
+                matched = [match["chunk_id"] for match in payload["matches"]]
+                assert set(SEED_ENTITY_CHUNKS) <= set(matched), (cap, matched)
+                assert len([c for c in matched if c in RELATED_ENTITY_CHUNKS]) == cap, (cap, matched)
+                assert len(matched) == len(SEED_ENTITY_CHUNKS) + cap, (cap, matched)
                 assert all(match["source"] == "graph" for match in payload["matches"])
                 debug = payload["debug"]
-                assert debug["fusion_graph_qdrant_seed_chunks"] == 4
-                assert debug["fusion_graph_resolved_entities"] == expected_entities
-                assert debug["fusion_graph_relationship_expansion_hits"] == len(expected_chunks)
-                assert debug["fusion_graph_hydrated_chunks"] == len(expected_chunks)
+                assert debug["fusion_graph_qdrant_seed_chunks"] == 6
+                assert debug["fusion_graph_resolved_entities"] == len(SEED_ENTITIES) + cap
+                assert debug["fusion_graph_relationship_expansion_hits"] == len(matched)
+                assert debug["fusion_graph_hydrated_chunks"] == len(matched)
     finally:
         config_store._store = None
         await qdrant.delete_corpus(corpus_id)

@@ -20,6 +20,14 @@ Safety rails, because this runs against the operator's live stores:
 - **Age** (registry rows). Only rows older than ``REAP_MAX_AGE_SECONDS`` are
   reaped, so a corpus a *concurrent* session created seconds ago on the shared
   box is never deleted out from under it.
+- **Liveness** (registry rows). A session that outlives the age threshold used to
+  be reapable mid-run: the parent corpus row ages out while the session is still
+  indexing into it. So a candidate is also refused when the corpus is *in use* --
+  it carries an unexpired index-run fence (``corpora.meta.index_run``, compared
+  against the DATABASE clock the heartbeats are written from), or any of its
+  staging rows (``__staging__<corpus>__<run>``) is younger than the threshold. A
+  fence that does not validate counts as held: a dead run can never be proven
+  from a malformed fence.
 - **No registry row** (store residue). Neo4j nodes and Qdrant collections carry
   no timestamp, so their rail is the registry itself: every store-writing test
   creates its ``corpora`` row before it writes a generation, so a test corpus a
@@ -42,8 +50,9 @@ import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
-from server.db.postgres import _delete_corpus_staging_rows
-from server.indexing.generations import STAGING_REPO_PREFIX
+from server.db.postgres import _coerce_jsonb_dict, _delete_corpus_staging_rows
+from server.indexing.generations import STAGING_REPO_PREFIX, IndexRunFence
+from server.models.tribrid_config_model import IndexingConfig
 from server.retrieval.qdrant_store import _COLLECTION_PREFIX, corpus_collection_prefix
 
 # The canonical prefix new corpus-creating fixtures should use.
@@ -69,6 +78,13 @@ TEST_CORPUS_PREFIXES: tuple[str, ...] = (
 # A row younger than this may belong to a concurrently running session on the
 # shared box, so it is left alone; the next session reaps it once it ages out.
 REAP_MAX_AGE_SECONDS: float = 30 * 60
+
+# Lease used to decide whether a corpus's index-run fence is still held. The typed
+# default of the production tunable (``indexing.index_run_lease_seconds``), which is
+# what the API compares heartbeats against; a box that raised its own lease only makes
+# this reaper take over sooner than the API would, so the check stays conservative by
+# also requiring the age and staging-row rails above.
+INDEX_FENCE_LEASE_SECONDS: int = int(IndexingConfig().index_run_lease_seconds)
 
 
 def staged_corpus_of(repo_id: str) -> str | None:
@@ -118,6 +134,32 @@ def qdrant_test_collection_prefixes() -> tuple[str, ...]:
     )
 
 
+def _row_created_at(value: object) -> datetime | None:
+    """The row's ``created_at`` as an aware datetime, or None when it cannot be read."""
+    if not isinstance(value, datetime):
+        return None
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
+def _index_fence_is_held(meta: object, *, now: datetime) -> bool:
+    """True when ``corpora.meta`` carries an index-run fence whose lease has not expired.
+
+    The same durable fence and the same ``IndexRunFence.is_stale`` predicate the API's
+    ``_live_fence`` uses, against the database clock the heartbeats are written from (host
+    time on a shared box can drift from it). A fence that will not validate, or a heartbeat
+    that cannot be compared, counts as HELD: a run can only be reaped when it is provably
+    dead.
+    """
+    raw = _coerce_jsonb_dict(meta).get("index_run")
+    if raw is None:
+        return False
+    try:
+        fence = IndexRunFence.model_validate(raw)
+        return not fence.is_stale(now=now, lease_seconds=INDEX_FENCE_LEASE_SECONDS)
+    except Exception:
+        return True
+
+
 async def reap_stale_test_corpora(
     dsn: str,
     *,
@@ -125,9 +167,13 @@ async def reap_stale_test_corpora(
 ) -> list[str]:
     """Delete stale test corpora reachable through ``dsn``; return the reaped ids.
 
-    A row is reaped only when its id matches :func:`is_test_corpus_id` and it is
-    at least ``max_age_seconds`` old. A row with no ``created_at`` is treated as
-    too fresh and kept, never reaped on a guess.
+    A row is reaped only when its id matches :func:`is_test_corpus_id`, it is at
+    least ``max_age_seconds`` old on the database clock, no unexpired index-run fence is on it, and none
+    of its staging rows is younger than ``max_age_seconds``. A row with no
+    ``created_at`` is treated as too fresh and kept, never reaped on a guess -- and
+    a staging row that cannot be dated keeps its parent too, because a session that
+    runs longer than the age threshold is exactly the case the fence and staging
+    rails exist for (its parent row ages out while it is still indexing).
 
     Uses a single raw asyncpg connection, not ``PostgresClient``: that client
     shares a process-wide asyncpg pool keyed by DSN, and a pool opened from the
@@ -144,23 +190,39 @@ async def reap_stale_test_corpora(
     """
     import asyncpg
 
-    cutoff = datetime.now(UTC) - timedelta(seconds=max_age_seconds)
     stale: list[str] = []
     reaped: list[str] = []
     conn = await asyncpg.connect(dsn)
     try:
-        rows = await conn.fetch("SELECT repo_id, created_at FROM corpora;")
+        # Age and fence liveness are both judged against the DATABASE clock: `created_at` and
+        # the fence heartbeats are written by Postgres, and the host clock of whichever
+        # session happens to run the reaper is not guaranteed to agree with it.
+        db_now = await conn.fetchval("SELECT now();")
+        cutoff = db_now - timedelta(seconds=max_age_seconds)
+        rows = await conn.fetch("SELECT repo_id, created_at, meta FROM corpora;")
+        # One pass over the registry: the aged-out candidates, and the corpora a run is
+        # still staging into (a fresh staging row means a live run, whatever its parent's age).
+        candidates: list[tuple[str, object]] = []
+        staged_into_now: set[str] = set()
         for row in rows:
             repo_id = str(row["repo_id"] or "")
             if not is_test_corpus_id(repo_id):
                 continue
-            created = row["created_at"]
-            if not isinstance(created, datetime):
+            created = _row_created_at(row["created_at"])
+            parent = staged_corpus_of(repo_id)
+            if parent is not None and (created is None or created > cutoff):
+                staged_into_now.add(parent)
+            if created is None:
                 continue  # cannot verify age -> never reap on a guess
-            if created.tzinfo is None:
-                created = created.replace(tzinfo=UTC)
             if created > cutoff:
                 continue  # too fresh; a concurrent session may own it
+            candidates.append((repo_id, row["meta"]))
+
+        for repo_id, meta in candidates:
+            if repo_id in staged_into_now:
+                continue  # a run is writing a generation into it right now
+            if _index_fence_is_held(meta, now=db_now):
+                continue  # a live index run holds the fence; its session outlived the age rail
             stale.append(repo_id)
 
         for repo_id in stale:

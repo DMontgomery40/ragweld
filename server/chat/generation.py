@@ -381,26 +381,31 @@ async def generate_chat_text(
                     f"LiteLLM request failed at {route.base_url}: {type(error).__name__}: {error}"
                 ) from error
 
-        try:
-            text = _response_text(data)
-        except GatewayContentMissingError as error:
-            raise GatewayContentMissingError(
-                f"LiteLLM response parse failed: {error}", finish_reason=error.finish_reason, usage=error.usage
-            ) from error
-        except Exception as error:
-            raise RuntimeError(f"LiteLLM response parse failed: {error}") from error
         usage = _usage(data)
-        web_grounding = _web_grounding(
-            requested=web_config is not None,
-            text=text,
-            annotations=_raw_annotations(data),
-            usage=usage,
-        )
         provider_cost_usd = extract_provider_cost(data)
         cost = build_trace_cost_summary(
             provider="LiteLLM", model=route.model, usage=usage, provider_cost_usd=provider_cost_usd
         )
         trace_id = _debug_trace_id(response)
+        finish_reason = _finish_reason(data)
+        # An answered request was billed for whatever it contained. A reasoning model that
+        # spends its whole output budget thinking returns no assistant content and still
+        # charges for the reasoning tokens (D26), so the empty-content reply is carried to the
+        # cost summary and the Langfuse generation FIRST and the typed error raised after --
+        # before this, a billed reasoning-only reply left no trace of its cost at all.
+        content_error: GatewayContentMissingError | None = None
+        content_cause: GatewayContentMissingError | None = None
+        try:
+            text = _response_text(data)
+        except GatewayContentMissingError as error:
+            text = ""
+            content_cause = error
+            content_error = GatewayContentMissingError(
+                f"LiteLLM response parse failed: {error}", finish_reason=error.finish_reason, usage=error.usage
+            )
+        except Exception as error:
+            raise RuntimeError(f"LiteLLM response parse failed: {error}") from error
+
         set_cost_summary(cost)
         record_langfuse_generation(
             name=observation_name,
@@ -416,7 +421,18 @@ async def generate_chat_text(
                 "provider_name": "LiteLLM",
                 "model": route.model,
                 "debug_trace_id": trace_id,
+                "finish_reason": finish_reason,
+                "content_missing": content_error is not None,
             },
+        )
+        if content_error is not None:
+            raise content_error from content_cause
+
+        web_grounding = _web_grounding(
+            requested=web_config is not None,
+            text=text,
+            annotations=_raw_annotations(data),
+            usage=usage,
         )
 
     response_id = data.get("id") if isinstance(data.get("id"), str) else None
@@ -427,7 +443,7 @@ async def generate_chat_text(
         cost_summary=cost,
         debug_trace_id=trace_id,
         web_grounding=web_grounding,
-        finish_reason=_finish_reason(data),
+        finish_reason=finish_reason,
     )
 
 
@@ -484,6 +500,7 @@ async def stream_chat_text(
     captured_usage: dict[str, Any] | None = None
     captured_trace_id: str | None = None
     captured_annotations: list[Any] = []
+    captured_finish_reason: str | None = None
     # Detached: this block stays open across the `yield content` below, so it can be entered
     # by the endpoint coroutine priming the stream and left by the response's own task.
     with stage_span_detached(
@@ -531,6 +548,9 @@ async def stream_chat_text(
                         choices = event.get("choices")
                         if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
                             continue
+                        event_finish_reason = choices[0].get("finish_reason")
+                        if isinstance(event_finish_reason, str) and event_finish_reason:
+                            captured_finish_reason = event_finish_reason
                         delta = choices[0].get("delta")
                         if isinstance(delta, dict) and isinstance(delta.get("annotations"), list):
                             captured_annotations.extend(delta["annotations"])
@@ -546,16 +566,9 @@ async def stream_chat_text(
                     f"LiteLLM stream failed at {route.base_url}: {type(error).__name__}: {error}"
                 ) from error
 
-        if not streamed_text:
-            raise RuntimeError("LiteLLM stream produced no content")
-        grounding = _web_grounding(
-            requested=web_config is not None,
-            text=streamed_text,
-            annotations=captured_annotations,
-            usage=captured_usage,
-        )
-        if on_web_grounding is not None:
-            on_web_grounding(grounding)
+        # Same rule as the non-streaming transport: a stream that billed tokens and produced
+        # no content (a reasoning model that spent the budget thinking) is recorded before the
+        # typed error is raised, so its cost never disappears from the trace.
         cost = build_trace_cost_summary(
             provider="LiteLLM", model=route.model, usage=captured_usage, provider_cost_usd=None
         )
@@ -572,5 +585,21 @@ async def stream_chat_text(
                 "provider_name": "LiteLLM",
                 "model": route.model,
                 "debug_trace_id": captured_trace_id,
+                "finish_reason": captured_finish_reason,
+                "content_missing": not streamed_text,
             },
         )
+        if not streamed_text:
+            raise GatewayContentMissingError(
+                "LiteLLM stream produced no content",
+                finish_reason=captured_finish_reason,
+                usage=captured_usage,
+            )
+        grounding = _web_grounding(
+            requested=web_config is not None,
+            text=streamed_text,
+            annotations=captured_annotations,
+            usage=captured_usage,
+        )
+        if on_web_grounding is not None:
+            on_web_grounding(grounding)
