@@ -3928,6 +3928,37 @@
       ]
     },
     {
+      "term": "Graph Max Related Entities Per Seed",
+      "key": "GRAPH_MAX_RELATED_ENTITIES_PER_SEED",
+      "definition": "GRAPH_MAX_RELATED_ENTITIES_PER_SEED caps how many related entities each seed entity may contribute to graph retrieval. Seeds are the entities extracted from the chunks Qdrant returned for the query; each expands through extracted relationships only, never through shared chunks, up to GRAPH_MAX_HOPS. Related entities are kept nearest first, then by how many paths connect them, so the cap trims the periphery of a hub rather than its closest links. Hub entities such as a person named in most of a corpus can otherwise reach nearly every entity within two hops and turn one query into a corpus-wide scan. Raise the cap for sparse, well-linked graphs where recall matters more than latency; lower it when a few hubs dominate the graph and p95 search latency climbs.",
+      "category": "general",
+      "related": [],
+      "links": [
+        {
+          "text": "Cypher CALL Subqueries",
+          "href": "https://neo4j.com/docs/cypher-manual/current/subqueries/call-subquery/"
+        },
+        {
+          "text": "Cypher Variable-Length Patterns",
+          "href": "https://neo4j.com/docs/cypher-manual/current/patterns/variable-length-patterns/"
+        },
+        {
+          "text": "Neo4j GraphRAG Python User Guide",
+          "href": "https://neo4j.com/docs/neo4j-graphrag-python/current/user_guide_rag.html"
+        },
+        {
+          "text": "Neo4j Cypher Query Tuning",
+          "href": "https://neo4j.com/docs/cypher-manual/current/query-tuning/"
+        }
+      ],
+      "badges": [
+        {
+          "text": "Latency-Recall",
+          "class": "info"
+        }
+      ]
+    },
+    {
       "term": "Graph Search Enabled",
       "key": "GRAPH_SEARCH_ENABLED",
       "definition": "GRAPH_SEARCH_ENABLED is the master switch for whether graph retrieval participates in the final evidence set. When enabled, the system can combine semantic similarity, lexical signals, and structural graph relationships, which usually improves multi-hop and cross-file question coverage. When disabled, behavior becomes a simpler dense-plus-sparse retrieval baseline with lower operational complexity. This flag is useful for incident isolation and A/B testing because it lets you measure graph contribution directly against non-graph retrieval. Keep a tested fallback profile so the system can degrade gracefully if graph infrastructure is unavailable.",

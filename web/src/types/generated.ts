@@ -1232,6 +1232,8 @@ export interface GraphSearchConfig {
   chunk_neighbor_window?: number; // default: 1
   /** Maximum graph traversal hops */
   max_hops?: number; // default: 2
+  /** Maximum related entities kept per seed entity during graph traversal, nearest first then most connected. Bounds how far a hub entity can expand. */
+  max_related_entities_per_seed?: number; // default: 50
   /** Include community-based expansion in graph search */
   include_communities?: boolean; // default: True
   /** Number of results to retrieve from graph search */

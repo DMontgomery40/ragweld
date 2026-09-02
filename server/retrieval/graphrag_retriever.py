@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -12,8 +13,13 @@ from neo4j_graphrag.retrievers import QdrantNeo4jRetriever
 from neo4j_graphrag.types import RetrieverResultItem
 from qdrant_client import QdrantClient
 
-from server.indexing.graphrag_pipeline import require_staging_graph_id
+from server.indexing.graphrag_pipeline import lexical_graph_config, require_staging_graph_id
 from server.retrieval.qdrant_store import DENSE_VECTOR_NAME
+
+ENTITY_LABEL = "__Entity__"
+MAX_RELATED_ENTITIES_PER_SEED_CEILING = 1000
+
+_CYPHER_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,6 +32,21 @@ class GraphTraversalResult:
     resolved_entity_ids: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True, slots=True)
+class LexicalGraphShape:
+    """Structural labels and relationship types of the official lexical graph.
+
+    These come from the same ``LexicalGraphConfig`` the index writer uses, so the
+    traversal never guesses which edges are document structure rather than
+    extracted semantics.
+    """
+
+    chunk_label: str
+    from_chunk: str
+    next_chunk: str
+    structural_relationship_types: tuple[str, ...]
+
+
 def _bounded_int(value: int, *, name: str, minimum: int, maximum: int) -> int:
     parsed = int(value)
     if parsed < minimum or parsed > maximum:
@@ -33,23 +54,70 @@ def _bounded_int(value: int, *, name: str, minimum: int, maximum: int) -> int:
     return parsed
 
 
-def traversal_query(*, graph_repo_id: str, max_hops: int, neighbor_window: int) -> str:
+def _cypher_identifier(value: str, *, name: str) -> str:
+    if not _CYPHER_IDENTIFIER.fullmatch(value):
+        raise ValueError(f"{name} is not a safe Cypher identifier: {value!r}")
+    return value
+
+
+def lexical_graph_shape() -> LexicalGraphShape:
+    lexical = lexical_graph_config()
+    from_chunk = _cypher_identifier(
+        str(lexical.node_to_chunk_relationship_type), name="node_to_chunk_relationship_type"
+    )
+    next_chunk = _cypher_identifier(
+        str(lexical.next_chunk_relationship_type), name="next_chunk_relationship_type"
+    )
+    from_document = _cypher_identifier(
+        str(lexical.chunk_to_document_relationship_type),
+        name="chunk_to_document_relationship_type",
+    )
+    return LexicalGraphShape(
+        chunk_label=_cypher_identifier(str(lexical.chunk_node_label), name="chunk_node_label"),
+        from_chunk=from_chunk,
+        next_chunk=next_chunk,
+        structural_relationship_types=tuple(sorted({from_chunk, next_chunk, from_document})),
+    )
+
+
+def traversal_query(
+    *,
+    graph_repo_id: str,
+    max_hops: int,
+    neighbor_window: int,
+    max_related_entities_per_seed: int,
+) -> str:
     """Build the retrieval tail appended to GraphRAG's external-store match query.
 
     Neo4j GraphRAG currently parameterizes only ``match_params`` and
     ``id_property`` for this retriever. The staged graph id and traversal
     bounds therefore must be validated server-generated literals before they
     enter the Cypher tail.
+
+    Expansion walks the semantic graph only: every node on an entity path is an
+    entity and no relationship on it is lexical structure (``FROM_CHUNK``,
+    ``NEXT_CHUNK``, ``FROM_DOCUMENT``), so two entities co-mentioned in one
+    chunk are not neighbours unless the extractor linked them. Each seed entity
+    keeps at most ``max_related_entities_per_seed`` related entities, nearest
+    first, so a hub entity cannot pull the whole corpus into one query.
     """
     repo_id = require_staging_graph_id(graph_repo_id)
     hops = _bounded_int(max_hops, name="max_hops", minimum=0, maximum=5)
     window = _bounded_int(neighbor_window, name="neighbor_window", minimum=0, maximum=10)
+    related_cap = _bounded_int(
+        max_related_entities_per_seed,
+        name="max_related_entities_per_seed",
+        minimum=1,
+        maximum=MAX_RELATED_ENTITIES_PER_SEED_CEILING,
+    )
+    shape = lexical_graph_shape()
     scope = f"'{repo_id}'"
+    structural = "[" + ", ".join(f"'{rel}'" for rel in shape.structural_relationship_types) + "]"
     neighbor_query = ""
     neighbor_candidates = "[]"
     if window:
         neighbor_query = f"""
-        OPTIONAL MATCH neighbor_path=(related_chunk)-[neighbor_rel:NEXT_CHUNK*1..{window}]-(neighbor:Chunk)
+        OPTIONAL MATCH neighbor_path=(related_chunk)-[neighbor_rel:{shape.next_chunk}*1..{window}]-(neighbor:{shape.chunk_label})
         WHERE neighbor.repo_id = {scope}
           AND all(rel IN neighbor_rel WHERE rel.repo_id = {scope})
           AND NOT neighbor.graphJoinId IN seed_join_ids
@@ -64,19 +132,29 @@ def traversal_query(*, graph_repo_id: str, max_hops: int, neighbor_window: int) 
     return f"""
     AND node.repo_id = {scope}
     WITH node, score, [match_param IN $match_params | match_param[0]] AS seed_join_ids
-    MATCH (seed_entity:__Entity__)-[seed_source:FROM_CHUNK]->(node)
+    MATCH (seed_entity:{ENTITY_LABEL})-[seed_source:{shape.from_chunk}]->(node)
     WHERE seed_entity.repo_id = {scope}
       AND seed_source.repo_id = {scope}
-    MATCH entity_path=(seed_entity)-[entity_relationship*0..{hops}]-(related_entity:__Entity__)
-    WHERE all(entity_node IN nodes(entity_path) WHERE entity_node.repo_id = {scope})
-      AND all(entity_rel IN relationships(entity_path) WHERE entity_rel.repo_id = {scope})
-    MATCH (related_entity)-[related_source:FROM_CHUNK]->(related_chunk:Chunk)
-    WHERE related_entity.repo_id = {scope}
-      AND related_source.repo_id = {scope}
+    WITH seed_entity, max(score) AS seed_score, seed_join_ids
+    CALL (seed_entity) {{
+        MATCH entity_path=(seed_entity)-[entity_relationship*0..{hops}]-(related_entity:{ENTITY_LABEL})
+        WHERE all(entity_node IN nodes(entity_path)
+                  WHERE entity_node:{ENTITY_LABEL} AND entity_node.repo_id = {scope})
+          AND all(entity_rel IN relationships(entity_path)
+                  WHERE NOT type(entity_rel) IN {structural} AND entity_rel.repo_id = {scope})
+        WITH related_entity,
+             min(length(entity_path)) AS distance,
+             count(entity_path) AS path_count
+        ORDER BY distance ASC, path_count DESC, related_entity.entity_id ASC
+        LIMIT {related_cap}
+        RETURN related_entity, distance
+    }}
+    MATCH (related_entity)-[related_source:{shape.from_chunk}]->(related_chunk:{shape.chunk_label})
+    WHERE related_source.repo_id = {scope}
       AND related_chunk.repo_id = {scope}
       AND NOT related_chunk.graphJoinId IN seed_join_ids
     WITH related_chunk,
-         max(score / (1.0 + length(entity_path))) AS expansion_score,
+         max(seed_score / (1.0 + distance)) AS expansion_score,
          collect(DISTINCT seed_entity.entity_id) + collect(DISTINCT related_entity.entity_id)
              AS resolved_entity_ids,
          seed_join_ids
@@ -126,6 +204,7 @@ def _retrieve_sync(
     top_k: int,
     max_hops: int,
     neighbor_window: int,
+    max_related_entities_per_seed: int,
 ) -> GraphTraversalResult:
     seed_join_ids: set[str] = set()
 
@@ -150,6 +229,7 @@ def _retrieve_sync(
                 graph_repo_id=graph_repo_id,
                 max_hops=max_hops,
                 neighbor_window=neighbor_window,
+                max_related_entities_per_seed=max_related_entities_per_seed,
             ),
             result_formatter=_format_record,
             neo4j_database=neo4j_database,
@@ -165,9 +245,7 @@ def _retrieve_sync(
             chunk_id = str(content.get("chunk_id") or "")
             if not chunk_id:
                 continue
-            entity_ids = {
-                str(value) for value in metadata.get("resolved_entity_ids", []) if value
-            }
+            entity_ids = {str(value) for value in metadata.get("resolved_entity_ids", []) if value}
             resolved.update(entity_ids)
             chunk_scores.append((chunk_id, float(content.get("score") or 0.0)))
         chunk_scores.sort(key=lambda hit: (-hit[1], hit[0]))
@@ -197,6 +275,7 @@ async def retrieve_graph_chunks(
     top_k: int,
     max_hops: int,
     neighbor_window: int,
+    max_related_entities_per_seed: int,
 ) -> GraphTraversalResult:
     """Run all synchronous official-retriever I/O off the application event loop."""
     return await asyncio.to_thread(
@@ -212,11 +291,16 @@ async def retrieve_graph_chunks(
         top_k=top_k,
         max_hops=max_hops,
         neighbor_window=neighbor_window,
+        max_related_entities_per_seed=max_related_entities_per_seed,
     )
 
 
 __all__ = [
+    "ENTITY_LABEL",
+    "MAX_RELATED_ENTITIES_PER_SEED_CEILING",
     "GraphTraversalResult",
+    "LexicalGraphShape",
+    "lexical_graph_shape",
     "retrieve_graph_chunks",
     "traversal_query",
 ]

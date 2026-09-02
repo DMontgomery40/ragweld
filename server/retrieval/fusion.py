@@ -787,6 +787,9 @@ class TriBridFusion:
                                 top_k=graph_k,
                                 max_hops=int(cfg.graph_search.max_hops),
                                 neighbor_window=int(cfg.graph_search.chunk_neighbor_window),
+                                max_related_entities_per_seed=int(
+                                    cfg.graph_search.max_related_entities_per_seed
+                                ),
                             )
                         debug["fusion_graph_qdrant_seed_chunks"] = (
                             traversal.qdrant_seed_chunks

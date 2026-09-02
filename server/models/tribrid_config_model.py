@@ -5069,6 +5069,16 @@ class GraphSearchConfig(BaseModel):
         description="Maximum graph traversal hops"
     )
 
+    max_related_entities_per_seed: int = Field(
+        default=50,
+        ge=1,
+        le=1000,
+        description=(
+            "Maximum related entities kept per seed entity during graph traversal, "
+            "nearest first then most connected. Bounds how far a hub entity can expand."
+        ),
+    )
+
     include_communities: bool = Field(
         default=True,
         description="Include community-based expansion in graph search"

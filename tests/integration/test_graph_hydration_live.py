@@ -17,13 +17,13 @@ from server.db.postgres import PostgresClient
 from server.indexing.embedder import Embedder
 from server.indexing.generations import build_generation
 from server.indexing.graphrag_pipeline import ScopedNeo4jWriter
-from tests.official_graphrag import write_lexical_graph_with_graphrag
 from server.main import app
 from server.models.index import Chunk, ChunkProvenance, PageRegion
 from server.retrieval.contracts import sparse_contract_from_config
 from server.retrieval.graphrag_retriever import retrieve_graph_chunks
 from server.retrieval.qdrant_store import QdrantChunkStore
 from server.services import config_store
+from tests.official_graphrag import write_lexical_graph_with_graphrag
 from tests.service_requirements import require_env
 
 pytestmark = [
@@ -122,7 +122,7 @@ async def test_manifest_collection_and_graph_prevent_raw_chunk_id_collisions() -
     cfg.graph_storage.neo4j_user = os.environ.get(
         "NEO4J_USER", cfg.graph_storage.neo4j_user
     )
-    corpus_id = f"graph-hydrate-{uuid4().hex[:8]}"
+    corpus_id = f"pytest_graph_hydrate_{uuid4().hex[:8]}"
     retired_run = uuid4().hex
     active_run = uuid4().hex
     retired_graph = f"__staging__{corpus_id}__{retired_run}"
@@ -253,6 +253,7 @@ async def test_manifest_collection_and_graph_prevent_raw_chunk_id_collisions() -
             top_k=1,
             max_hops=1,
             neighbor_window=0,
+            max_related_entities_per_seed=50,
         )
         first = await retrieve_graph_chunks(**call)
         second = await retrieve_graph_chunks(**{**call, "neighbor_window": 1})
