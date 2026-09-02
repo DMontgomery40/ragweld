@@ -28,6 +28,7 @@ from neo4j_graphrag.components.types import (
     TextChunks,
 )
 from neo4j_graphrag.experimental.pipeline import Pipeline
+from neo4j_graphrag.generation.prompts import ERExtractionTemplate
 from neo4j_graphrag.llm import OpenAILLM
 
 from server.indexing.code_graph import CODE_GRAPH_LANGUAGES, extract_code_graph
@@ -450,6 +451,56 @@ def semantic_extraction_llm(
     )
 
 
+# The official extractor formats the template with these keyword arguments
+# (``LLMEntityRelationExtractor.extract_for_chunk``); a template missing ``{schema}`` or
+# ``{text}`` would extract against no schema or no text. ``{examples}`` is optional.
+EXTRACTION_TEMPLATE_REQUIRED_PLACEHOLDERS: tuple[str, ...] = ("{schema}", "{text}")
+
+
+def extraction_prompt_template(text: str) -> ERExtractionTemplate:
+    """The operator's Semantic KG Extraction prompt as the official extraction template.
+
+    ``system_prompts.semantic_kg_extraction`` is shown and edited on the System Prompts page
+    but never reached the official pipeline, which ran the library's default template (Task 8
+    drive finding D24); that template says nothing about what a ``name`` may be, so Luna named
+    Epstein persons and emails with OCR noise (D19). The operator text is now the template the
+    extractor formats, so it must carry the placeholders the extractor fills.
+    """
+    template = str(text or "")
+    if not template.strip():
+        raise ValueError(
+            "GraphRAG extraction prompt is empty; it must carry the {schema} and {text} placeholders"
+        )
+    missing = [
+        placeholder
+        for placeholder in EXTRACTION_TEMPLATE_REQUIRED_PLACEHOLDERS
+        if placeholder not in template
+    ]
+    if missing:
+        raise ValueError(
+            "GraphRAG extraction prompt is missing the placeholder(s) the official extractor "
+            f"formats: {', '.join(missing)}"
+        )
+    return ERExtractionTemplate(template=template)
+
+
+def semantic_entity_relation_extractor(
+    *,
+    llm: OpenAILLM,
+    prompt_template: str,
+    max_concurrency: int,
+) -> LLMEntityRelationExtractor:
+    """The official extractor over the operator's template, strict structured output, fail closed."""
+    return LLMEntityRelationExtractor(
+        llm=llm,
+        prompt_template=extraction_prompt_template(prompt_template),
+        create_lexical_graph=True,
+        on_error=OnError.RAISE,
+        max_concurrency=max(1, int(max_concurrency)),
+        use_structured_output=True,
+    )
+
+
 def build_semantic_pipeline(
     *,
     driver: Driver,
@@ -462,6 +513,7 @@ def build_semantic_pipeline(
     max_concurrency: int,
     llm_timeout_s: int,
     reasoning_effort: str,
+    prompt_template: str,
 ) -> Pipeline:
     llm = semantic_extraction_llm(
         route_model=route_model,
@@ -470,12 +522,8 @@ def build_semantic_pipeline(
         llm_timeout_s=llm_timeout_s,
         reasoning_effort=reasoning_effort,
     )
-    extractor = LLMEntityRelationExtractor(
-        llm=llm,
-        create_lexical_graph=True,
-        on_error=OnError.RAISE,
-        max_concurrency=max(1, int(max_concurrency)),
-        use_structured_output=True,
+    extractor = semantic_entity_relation_extractor(
+        llm=llm, prompt_template=prompt_template, max_concurrency=max_concurrency
     )
     writer = ScopedNeo4jWriter(
         driver=driver,

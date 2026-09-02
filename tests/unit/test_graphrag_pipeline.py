@@ -18,12 +18,14 @@ from server.indexing.graphrag_pipeline import (
     chunks_to_text_chunks,
     document_info,
     document_node_id,
+    extraction_prompt_template,
     fold_duplicate_node_ids,
     lexical_graph_config,
     require_run_id,
     require_staging_graph_id,
     resolution_property_for_policy,
     run_component_coroutine_in_worker,
+    semantic_entity_relation_extractor,
     semantic_extraction_llm,
     stamp_graph_scope,
     validate_no_reserved_scope_keys,
@@ -143,6 +145,7 @@ def test_semantic_pipeline_refuses_an_incomplete_route_before_driver_use(
             max_concurrency=1,
             llm_timeout_s=30,
             reasoning_effort="medium",
+            prompt_template=TriBridConfig().system_prompts.semantic_kg_extraction,
         )
 
 
@@ -298,3 +301,56 @@ async def test_a_files_document_node_never_shares_its_writer_id_with_the_module_
     )
     with pytest.raises(ValueError, match="shared by a Document node and a module node"):
         assemble_code_file_graph(lexical_result.graph, colliding)
+
+
+def test_default_extraction_prompt_is_the_official_template_plus_naming_rules() -> None:
+    """Task 8 drive finding D19 (and its cause, D24): the operator's "Semantic KG Extraction"
+    prompt in System Prompts was never read by the official pipeline, which ran the library's
+    default template. That template says nothing about what a ``name`` may be, so Luna named
+    Epstein persons and emails with OCR noise (``-11>``, ``<=11IM11.11>``, ``777``). The LAW
+    default is now the official template carrying ragweld's naming rules, and it must keep
+    the three placeholders the official extractor formats.
+    """
+    text = TriBridConfig().system_prompts.semantic_kg_extraction
+    assert "{schema}" in text and "{text}" in text and "{examples}" in text
+    assert "OCR" in text and "subject line" in text
+    template = extraction_prompt_template(text)
+    rendered = template.format(text="Alice emailed Bob.", schema={"node_types": []}, examples="")
+    assert "Alice emailed Bob." in rendered
+    assert "node_types" in rendered
+    # The JSON example survives str.format (doubled braces in the source).
+    assert '"nodes"' in rendered and '"relationships"' in rendered
+
+
+@pytest.mark.parametrize(
+    ("template", "missing"),
+    [
+        ("Extract from: {text}", "{schema}"),
+        ("Schema: {schema}", "{text}"),
+        ("", "{schema}"),
+        ("   ", "{schema}"),
+    ],
+)
+def test_extraction_prompt_template_refuses_a_template_the_extractor_cannot_format(
+    template: str, missing: str
+) -> None:
+    with pytest.raises(ValueError, match=missing.replace("{", "\\{").replace("}", "\\}")):
+        extraction_prompt_template(template)
+
+
+def test_semantic_extractor_carries_the_operator_template_and_structured_output() -> None:
+    llm = semantic_extraction_llm(
+        route_model="openai.gpt-5.6-luna",
+        route_base_url="http://127.0.0.1:54000/v1",
+        route_api_key="not-a-real-key",
+        llm_timeout_s=30,
+        reasoning_effort="medium",
+    )
+    operator_text = "Rules: names must be readable. Types: {schema}. Examples: {examples}. Text: {text}"
+    extractor = semantic_entity_relation_extractor(
+        llm=llm, prompt_template=operator_text, max_concurrency=3
+    )
+    assert extractor.prompt_template.template == operator_text
+    assert extractor.use_structured_output is True
+    assert extractor.max_concurrency == 3
+    assert extractor.create_lexical_graph is True

@@ -173,6 +173,15 @@ class GraphExtractionTelemetry(BaseModel):
     extracted_entities: int = Field(ge=0)
     semantic_relationships: int = Field(ge=0)
     from_chunk_relationships: int = Field(ge=0)
+    # The measurement the next estimate for this corpus reuses (Task 8 drive finding D13):
+    # which gateway alias ran the extraction, how many workers ran it in parallel, and the
+    # wall time spent inside the extraction calls summed over those workers. Divided by
+    # succeeded_chunks that is the seconds one chunk costs one worker, independent of the
+    # concurrency the run happened to use. Empty/zero on code-policy runs and on records
+    # written before the measurement existed.
+    llm_model_alias: str = ""
+    workers: int = Field(default=0, ge=0)
+    worker_seconds: float = Field(default=0.0, ge=0.0)
 
 
 class GraphResolutionTelemetry(BaseModel):

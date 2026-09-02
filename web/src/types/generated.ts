@@ -1145,6 +1145,9 @@ export interface GraphExtractionTelemetry {
   extracted_entities: number;
   semantic_relationships: number;
   from_chunk_relationships: number;
+  llm_model_alias?: string; // default: ""
+  workers?: number; // default: 0
+  worker_seconds?: number; // default: 0.0
 }
 
 export interface GraphGenerationMetadata {
@@ -2409,8 +2412,8 @@ export interface RerankingConfig {
   tribrid_reranker_reload_on_change?: boolean; // default: False
   /** Reload check period (seconds) */
   tribrid_reranker_reload_period_sec?: number; // default: 60
-  /** Reranker API timeout (seconds) */
-  reranker_timeout?: number; // default: 10
+  /** Reranker API timeout (seconds). The default cloud window (50 candidates x 700 chars) takes 6-10 s through the gateway at idle; 30 s leaves headroom over the slowest idle call (Task 8 drive observation D15). */
+  reranker_timeout?: number; // default: 30
   /** Snippet chars for reranking input */
   rerank_input_snippet_chars?: number; // default: 700
 }
@@ -2713,8 +2716,8 @@ export interface SystemPromptsConfig {
   semantic_chunk_summaries?: string; // default: "Analyze this database chunk and create a compre..."
   /** Extract metadata from code chunks during indexing */
   code_enrichment?: string; // default: "Analyze this database and return a JSON object ..."
-  /** Prompt for LLM-assisted semantic KG extraction (typed entities + relations) */
-  semantic_kg_extraction?: string; // default: "You are a semantic knowledge graph extractor.\n..."
+  /** Template the official Neo4j GraphRAG extractor formats for every chunk during semantic KG extraction (must keep the {schema} and {text} placeholders; {examples} is optional). Carries the naming rules that keep OCR noise out of entity names. */
+  semantic_kg_extraction?: string; // default: "You are a top-tier algorithm designed for extra..."
   /** Analyze eval regressions with skeptical approach - avoid false explanations */
   eval_analysis?: string; // default: "You are an expert RAG (Retrieval-Augmented Gene..."
   /** Judge prompt for synthetic eval row curation and quality filtering */

@@ -9,6 +9,7 @@ from scripts.check_config_reality import (
     load_reality_map,
     validate_reality_map,
 )
+from server.config import _strip_removed_keys
 from server.models.tribrid_config_model import ChatConfig, TriBridConfig
 from server.services.config_store import _upgrade_raw_config
 
@@ -188,3 +189,99 @@ def test_upgrade_raw_config_strips_legacy_base_suffix_chat_prompt_keys() -> None
         assert not hasattr(cfg.chat, name)
     # The surviving state prompt is preserved through the migration.
     assert cfg.chat.system_prompt_direct == "Kept: a live state prompt."
+
+
+RETIRED_KG_EXTRACTION_PROMPT = """You are a semantic knowledge graph extractor.
+
+Given one corpus chunk, extract only entities and relations explicitly grounded in that text.
+
+Rules:
+- Return ONLY valid JSON (no markdown, no prose).
+- Never fabricate entities, aliases, or links.
+- Prefer exact surface forms for names (for example full person/organization names when present).
+- Do not emit file paths or line numbers as entities.
+- Keep output high-signal and deduplicated.
+
+JSON format:
+{
+  "entities": [
+    {"name": "Alex Rivera", "entity_type": "person"},
+    {"name": "Northwind Labs", "entity_type": "org"},
+    {"name": "Denver", "entity_type": "location"}
+  ],
+  "relations": [
+    {"source": "Alex Rivera", "target": "Northwind Labs", "relation_type": "works_for", "evidence_text": "Alex Rivera works for Northwind Labs.", "confidence": 0.92},
+    {"source": "Northwind Labs", "target": "Denver", "relation_type": "located_in", "evidence_text": "Northwind Labs is located in Denver.", "confidence": 0.95}
+  ]
+}
+
+Allowed entity_type values: person, org, location, event, concept
+Allowed relation_type values:
+- associated_with
+- met_with
+- communicated_with
+- works_for
+- member_of
+- founded
+- owns
+- funded
+- participated_in
+- located_in
+- references
+- related_to
+
+Constraints:
+- Extract only relations explicitly supported by the chunk text.
+- Use canonical, grounded names for source/target (no invented aliases).
+- If present, include optional "evidence_text" and "confidence" per relation."""
+
+
+def test_upgrade_raw_config_replaces_the_retired_kg_extraction_prompt_default() -> None:
+    """Every persisted config written before D24 carries the pre-official extraction prompt
+    verbatim (the System Prompts page stores the default when nothing was edited). That text
+    has no ``{schema}``/``{text}`` placeholders, so the official extractor cannot format it.
+    A stored value equal to the retired default is the default, not an operator edit: the
+    upgrade drops it so the LAW default applies, and reports the key as migrated.
+    """
+    raw = {"system_prompts": {"semantic_kg_extraction": RETIRED_KG_EXTRACTION_PROMPT}}
+    cfg, changed, migrated = _upgrade_raw_config(raw)
+    assert changed is True
+    assert "system_prompts.semantic_kg_extraction" in migrated
+    assert cfg.system_prompts.semantic_kg_extraction == TriBridConfig().system_prompts.semantic_kg_extraction
+    assert "{schema}" in cfg.system_prompts.semantic_kg_extraction
+
+
+def test_upgrade_raw_config_keeps_an_operator_edited_kg_extraction_prompt() -> None:
+    edited = "My rules. {schema} {examples} {text}"
+    cfg, _changed, migrated = _upgrade_raw_config(
+        {"system_prompts": {"semantic_kg_extraction": edited}}
+    )
+    assert "system_prompts.semantic_kg_extraction" not in migrated
+    assert cfg.system_prompts.semantic_kg_extraction == edited
+
+
+def test_flat_config_loader_drops_the_retired_kg_extraction_prompt_too() -> None:
+    """The flat tribrid_config.json loader and the deploy renderer share this normaliser."""
+    raw = _strip_removed_keys({"system_prompts": {"semantic_kg_extraction": RETIRED_KG_EXTRACTION_PROMPT}})
+    assert "semantic_kg_extraction" not in raw["system_prompts"]
+    kept = _strip_removed_keys({"system_prompts": {"semantic_kg_extraction": "edited {schema} {text}"}})
+    assert kept["system_prompts"]["semantic_kg_extraction"] == "edited {schema} {text}"
+
+
+def test_reranker_timeout_default_covers_a_full_cloud_candidate_window() -> None:
+    """Task 8 drive observation D15: chat's cloud rerank failed with a gateway ReadTimeout.
+    Measured on LXC100 (openai.gpt-4.1-nano, the default 50 candidates x 700 chars): 5.7 to
+    10.4 s at idle, 6.3 to 7.1 s beside four concurrent Luna extraction calls, 6.3 to 6.9 s
+    under full CPU saturation. Concurrent load added a tenth; the retired 10 s default was
+    simply inside the idle spread of the prompt it had to score. The default now leaves
+    headroom over the slowest idle call, and a persisted 10 (the retired default, which the
+    config page stores verbatim) is migrated the way the retired generation budget was.
+    """
+    assert TriBridConfig().reranking.reranker_timeout == 30
+    cfg, changed, migrated = _upgrade_raw_config({"reranking": {"reranker_timeout": 10}})
+    assert changed is True
+    assert "reranking.reranker_timeout" in migrated
+    assert cfg.reranking.reranker_timeout == 30
+    kept, _changed, kept_migrated = _upgrade_raw_config({"reranking": {"reranker_timeout": 12}})
+    assert "reranking.reranker_timeout" not in kept_migrated
+    assert kept.reranking.reranker_timeout == 12

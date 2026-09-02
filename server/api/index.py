@@ -82,6 +82,7 @@ from server.indexing.graph_policy import (
 from server.indexing.graphrag_pipeline import (
     ScopedNeo4jWriter,
     build_semantic_pipeline,
+    extraction_prompt_template,
     resolve_staged_entities,
     write_code_file_graph,
     write_deferred_code_relationships,
@@ -301,14 +302,19 @@ _LOCAL_EMBED_TPS_TABLE: dict[str, dict[str, int]] = {
     "cpu_only": {"mlx": 6_000, "huggingface": 5_000, "local": 4_000, "_default": 4_500},
 }
 
-# Semantic KG LLM extraction throughput heuristic: one extraction call per second per worker.
-# Deliberately one number and not a per-provider table. The old table had a single entry,
-# "litellm", which was reachable only while the caller passed that word as a provider hint;
-# now that the alias resolves to its catalog row, the provider is a real one (openrouter,
-# z-ai, ragweld) and no key would ever have matched. A table that cannot be hit is worse than
-# a constant: it reads as calibrated when it is not. Per-provider numbers belong here only
-# once someone measures them.
-_SEMANTIC_KG_CALLS_PER_SECOND = 1.0
+# Semantic KG extraction latency when no run has measured it yet: seconds one chunk costs
+# one worker, i.e. one gateway round-trip of a reasoning model at medium effort. Measured on
+# the Epstein rebuild (run ca5b8d92: 3,126 chunks, 4 workers, 2 h 07 min => 9.8 s) and the
+# NASA rebuild (run 3054ecc2: 1,002 chunks, 4 workers => 6.8 s) under openai.gpt-5.6-luna.
+# The previous constant, one call per second per worker, quoted "~12 min" for that Epstein
+# run (Task 8 drive finding D13). Deliberately one number and not a per-provider table: a
+# table that cannot be hit reads as calibrated when it is not. The corpus's own last
+# completed semantic run overrides this through its recorded worker-seconds, so the number
+# only ever prices a first run or a run under a model the corpus has not seen.
+_SEMANTIC_KG_SECONDS_PER_CHUNK_DEFAULT = 10.0
+# The runtime never fans out beyond this many concurrent extraction calls, whatever
+# indexing_workers says.
+_SEMANTIC_KG_MAX_PARALLEL_CALLS = 8
 
 
 
@@ -1599,15 +1605,59 @@ def _estimate_semantic_kg_seconds(
     *,
     chunks_in_scope: int,
     indexing_workers: int,
+    seconds_per_chunk: float,
 ) -> float:
+    """Wall seconds for the extraction phase: chunks x seconds per chunk, over the parallel calls."""
     count = max(0, int(chunks_in_scope or 0))
     if count <= 0:
         return 0.0
-    calls_per_second = _SEMANTIC_KG_CALLS_PER_SECOND
+    per_chunk = max(0.0, float(seconds_per_chunk or 0.0))
     workers = max(1, int(indexing_workers or 1))
     # Runtime executes semantic extraction in batches up to indexing_workers.
-    effective_calls_per_second = max(0.1, calls_per_second * float(min(workers, 8)))
-    return float(count) / effective_calls_per_second
+    parallel = float(min(workers, _SEMANTIC_KG_MAX_PARALLEL_CALLS))
+    return float(count) * per_chunk / parallel
+
+
+def _measured_semantic_kg_seconds_per_chunk(
+    latest_run: IndexRunSummary | None, *, alias: str
+) -> float | None:
+    """Seconds one chunk cost one worker on the corpus's last complete semantic run under ``alias``.
+
+    Only a run that actually called this alias can speak for it: a code-policy run never
+    called the extraction LLM, a run under another model measured another model, and a record
+    written before the measurement existed carries zero worker-seconds. All of those return
+    None and the caller falls back to the default rate, saying so in its assumption.
+    """
+    if latest_run is None or latest_run.graph_metadata is None:
+        return None
+    if str(latest_run.status) != "complete" or latest_run.graph_metadata.policy != "semantic":
+        return None
+    extraction = latest_run.graph_metadata.extraction
+    if not alias or extraction.llm_model_alias != alias:
+        return None
+    if extraction.worker_seconds <= 0.0 or extraction.succeeded_chunks <= 0:
+        return None
+    return float(extraction.worker_seconds) / float(extraction.succeeded_chunks)
+
+
+def _semantic_kg_seconds_assumption(
+    *,
+    chunks: int,
+    workers: int,
+    seconds_per_chunk: float,
+    measured_run: IndexRunSummary | None,
+) -> str:
+    """Why the semantic KG leg costs what it costs, naming where the rate came from."""
+    parallel = max(1, min(int(workers or 1), _SEMANTIC_KG_MAX_PARALLEL_CALLS))
+    source = (
+        f"measured on run {str(measured_run.run_id)[:8]} with {measured_run.graph_metadata.extraction.llm_model_alias}"
+        if measured_run is not None and measured_run.graph_metadata is not None
+        else "default; no completed run with this model to measure from"
+    )
+    return (
+        f"semantic KG≈{max(0, int(chunks or 0)):,} chunks at {float(seconds_per_chunk):.1f}s per chunk "
+        f"per worker ({source}), {parallel} in parallel"
+    )
 
 
 @lru_cache(maxsize=1)
@@ -1997,6 +2047,7 @@ async def _run_index(
                     max_concurrency=max(1, int(cfg.indexing.indexing_workers)),
                     llm_timeout_s=int(cfg.graph_indexing.semantic_kg_llm_timeout_s),
                     reasoning_effort=str(cfg.graph_indexing.semantic_kg_reasoning_effort),
+                    prompt_template=str(cfg.system_prompts.semantic_kg_extraction),
                 )
             else:
                 code_writer = await asyncio.to_thread(
@@ -2536,6 +2587,7 @@ async def _run_index_body(
             if graph_policy == "semantic":
                 if semantic_pipeline is None or graph_schema is None:
                     raise RuntimeError("Semantic graph writer was not initialized")
+                extraction_started = time.perf_counter()
                 with INDEX_STAGE_LATENCY_SECONDS.labels(
                     stage="neo4j_write_semantic_file"
                 ).time():
@@ -2544,6 +2596,13 @@ async def _run_index_body(
                         file_path=file_path,
                         chunks=chunks,
                         schema=graph_schema,
+                    )
+                if graph_extraction is not None:
+                    # Worker-seconds: every file's extraction time is summed even though
+                    # up to indexing_workers files run at once, so the next estimate can
+                    # divide by succeeded_chunks and get the per-worker rate (D13).
+                    graph_extraction.worker_seconds += max(
+                        0.0, time.perf_counter() - extraction_started
                     )
             else:
                 if code_writer is None:
@@ -3384,6 +3443,11 @@ async def _background_index_job(
                 extracted_entities=0,
                 semantic_relationships=0,
                 from_chunk_relationships=0,
+                llm_model_alias=(
+                    _semantic_kg_model_override(cfg) if graph_policy == "semantic" else ""
+                ),
+                workers=max(1, int(cfg.indexing.indexing_workers)),
+                worker_seconds=0.0,
             )
         approved_proposal = await require_approved_graph_schema(
             policy_corpus or {},
@@ -4591,20 +4655,34 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
     if est_tokens > 0 and tps > 0:
         base_embedding_seconds = float(est_tokens) / float(tps)
         if semantic_graph_active and semantic_kg_chunks > 0:
-            # The throughput table is keyed by provider, and the only way from a gateway
-            # alias to its provider is the same alias lookup that prices it.
-            semantic_provider_for_time = "litellm"
-            resolved_semantic_spec = _gateway_model_spec(semantic_alias)
-            if resolved_semantic_spec is not None:
-                semantic_provider_for_time = str(
-                    resolved_semantic_spec.get("provider") or semantic_provider_for_time
-                )
+            # The rate is the corpus's own measurement when its last complete semantic run
+            # ran this alias (Task 8 drive finding D13), else the default round-trip.
+            semantic_workers = int(getattr(cfg.indexing, "indexing_workers", 1) or 1)
+            latest_complete_run = await asyncio.to_thread(
+                _load_latest_run_summary, repo_id, ("complete",)
+            )
+            measured_seconds_per_chunk = _measured_semantic_kg_seconds_per_chunk(
+                latest_complete_run, alias=semantic_alias
+            )
+            seconds_per_chunk = (
+                measured_seconds_per_chunk
+                if measured_seconds_per_chunk is not None
+                else _SEMANTIC_KG_SECONDS_PER_CHUNK_DEFAULT
+            )
             estimated_seconds_semantic_kg = _estimate_semantic_kg_seconds(
                 chunks_in_scope=semantic_kg_chunks,
-                indexing_workers=int(getattr(cfg.indexing, "indexing_workers", 1) or 1),
+                indexing_workers=semantic_workers,
+                seconds_per_chunk=seconds_per_chunk,
             )
             assumptions.append(
-                f"semantic_graphrag≈{semantic_kg_chunks:,} chunks using {semantic_provider_for_time or 'unknown'}"
+                _semantic_kg_seconds_assumption(
+                    chunks=semantic_kg_chunks,
+                    workers=semantic_workers,
+                    seconds_per_chunk=seconds_per_chunk,
+                    measured_run=(
+                        latest_complete_run if measured_seconds_per_chunk is not None else None
+                    ),
+                )
             )
         if estimated_figures is not None:
             # Same figure count that priced the cost line above: one heuristic, both numbers,
@@ -4743,6 +4821,26 @@ async def start_index(request: IndexRequest, http_request: Request) -> IndexStat
                     "Remote-User; direct or anonymous overrides are unavailable."
                 ),
             )
+    if requested_policy == "semantic":
+        # The operator's extraction prompt is the official extractor's template (D24). One
+        # the extractor cannot format is a config error to read on the System Prompts page,
+        # refused before the schema gate, the fence, and any staged generation.
+        try:
+            extraction_prompt_template(str(cfg.system_prompts.semantic_kg_extraction))
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "graph_extraction_prompt_invalid",
+                    "corpus_id": request.repo_id,
+                    "message": str(exc),
+                    "operator_hint": (
+                        "System Prompts > Semantic KG Extraction must keep the {schema} and "
+                        "{text} placeholders the official extractor fills; edit it or reset "
+                        "it to the default, then start the run again."
+                    ),
+                },
+            ) from exc
     await require_approved_graph_schema(
         corpus,
         cfg,

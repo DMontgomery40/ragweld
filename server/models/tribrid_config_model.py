@@ -5152,10 +5152,14 @@ class RerankingConfig(BaseModel):
     )
 
     reranker_timeout: int = Field(
-        default=10,
+        default=30,
         ge=5,
         le=60,
-        description="Reranker API timeout (seconds)"
+        description=(
+            "Reranker API timeout (seconds). The default cloud window (50 candidates x 700 "
+            "chars) takes 6-10 s through the gateway at idle; 30 s leaves headroom over the "
+            "slowest idle call (Task 8 drive observation D15)."
+        ),
     )
 
     rerank_input_snippet_chars: int = Field(
@@ -6301,50 +6305,44 @@ Focus on:
     )
 
     semantic_kg_extraction: str = Field(
-        default='''You are a semantic knowledge graph extractor.
+        default='''You are a top-tier algorithm designed for extracting information in structured formats to build a knowledge graph.
 
-Given one corpus chunk, extract only entities and relations explicitly grounded in that text.
+Extract the entities (nodes) and specify their type from the following text. Also extract the relationships between these nodes.
 
-Rules:
-- Return ONLY valid JSON (no markdown, no prose).
-- Never fabricate entities, aliases, or links.
-- Prefer exact surface forms for names (for example full person/organization names when present).
-- Do not emit file paths or line numbers as entities.
-- Keep output high-signal and deduplicated.
+Return result as JSON using the following format:
+{{"nodes": [ {{"id": "0", "label": "Person", "properties": {{"name": "John"}} }}],
+"relationships": [{{"type": "KNOWS", "start_node_id": "0", "end_node_id": "1", "properties": {{"since": "2024-08-01"}} }}] }}
 
-JSON format:
-{
-  "entities": [
-    {"name": "Alex Rivera", "entity_type": "person"},
-    {"name": "Northwind Labs", "entity_type": "org"},
-    {"name": "Denver", "entity_type": "location"}
-  ],
-  "relations": [
-    {"source": "Alex Rivera", "target": "Northwind Labs", "relation_type": "works_for", "evidence_text": "Alex Rivera works for Northwind Labs.", "confidence": 0.92},
-    {"source": "Northwind Labs", "target": "Denver", "relation_type": "located_in", "evidence_text": "Northwind Labs is located in Denver.", "confidence": 0.95}
-  ]
-}
+Use only the following node and relationship types (if provided):
+{schema}
 
-Allowed entity_type values: person, org, location, event, concept
-Allowed relation_type values:
-- associated_with
-- met_with
-- communicated_with
-- works_for
-- member_of
-- founded
-- owns
-- funded
-- participated_in
-- located_in
-- references
-- related_to
+Naming rules. Every node carries a "name" property; it is the entity's identity for merging across chunks and for display:
+- "name" must be an identifier a reader would recognise: a person's full name as written, an organisation's name, a place name, a document's subject line or title, a dated event.
+- Name an email or message by its subject line when the text shows one. When the subject is empty or is only reply/forward markers such as "Re:", "RE: Re:" or "Fw:", name it "<sender> to <recipient>, <date>" from the message metadata instead.
+- Never use OCR artifacts, scanner noise, bare numbers, punctuation runs, redaction bars, single letters or fragments such as "-11>", "<=11IM11.11>", "777" or "Re:" as a name. If the text gives an entity no readable identifier, leave that entity out rather than inventing one.
+- Copy names exactly as written (no expansions or aliases you did not read) and reuse one spelling for the same entity within the chunk.
 
-Constraints:
-- Extract only relations explicitly supported by the chunk text.
-- Use canonical, grounded names for source/target (no invented aliases).
-- If present, include optional "evidence_text" and "confidence" per relation.''',
-        description="Prompt for LLM-assisted semantic KG extraction (typed entities + relations)"
+Assign a unique ID (string) to each node, and reuse it to define relationships.
+Do respect the source and target node types for relationship and the relationship direction.
+
+Make sure you adhere to the following rules to produce valid JSON objects:
+- Do not return any additional information other than the JSON in it.
+- Omit any backticks around the JSON - simply output the JSON on its own.
+- The JSON object must not wrapped into a list - it is its own JSON object.
+- Property names must be enclosed in double quotes
+
+Examples:
+{examples}
+
+Input text:
+
+{text}''',
+        description=(
+            "Template the official Neo4j GraphRAG extractor formats for every chunk during "
+            "semantic KG extraction (must keep the {schema} and {text} placeholders; "
+            "{examples} is optional). Carries the naming rules that keep OCR noise out of "
+            "entity names."
+        ),
     )
 
     eval_analysis: str = Field(
@@ -7306,7 +7304,7 @@ class TriBridConfig(BaseModel):
                 tribrid_reranker_maxlen=data.get('TRIBRID_RERANKER_MAXLEN', 512),
                 tribrid_reranker_reload_on_change=data.get('TRIBRID_RERANKER_RELOAD_ON_CHANGE', False),
                 tribrid_reranker_reload_period_sec=data.get('TRIBRID_RERANKER_RELOAD_PERIOD_SEC', 60),
-                reranker_timeout=data.get('RERANKER_TIMEOUT', 10),
+                reranker_timeout=data.get('RERANKER_TIMEOUT', 30),
                 rerank_input_snippet_chars=data.get('RERANK_INPUT_SNIPPET_CHARS', 700),
             ),
             generation=GenerationConfig(

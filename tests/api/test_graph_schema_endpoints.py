@@ -158,3 +158,47 @@ async def test_semantic_index_refuses_missing_schema_approval_before_taking_a_ru
         assert status.json()["status"] == "idle"
     finally:
         await client.delete(f"/api/corpora/{corpus_id}")
+
+
+@pytest.mark.asyncio
+async def test_semantic_index_refuses_an_unformattable_extraction_prompt_before_the_fence(
+    client: AsyncClient,
+) -> None:
+    """D24: the operator's Semantic KG Extraction prompt is the official extractor's template.
+    A template the extractor cannot format (no ``{schema}`` or ``{text}``) is refused as a
+    typed 422 before any schema approval, fence, or staged generation, with the hint that
+    names the System Prompts reset.
+    """
+    corpus_id = f"schema-prompt-{uuid4().hex[:8]}"
+    corpus_path = Path(__file__).resolve().parents[1] / "fixtures" / "acceptance_corpus"
+    created = await client.post(
+        "/api/corpora",
+        json={"corpus_id": corpus_id, "name": corpus_id, "path": str(corpus_path)},
+    )
+    assert created.status_code in (200, 201), created.text
+    try:
+        patched = await client.patch(
+            f"/api/config/system_prompts?corpus_id={corpus_id}",
+            json={"semantic_kg_extraction": "Extract everything from: {text}"},
+        )
+        assert patched.status_code == 200, patched.text
+        scoped = await client.get(f"/api/config?corpus_id={corpus_id}")
+        assert scoped.status_code == 200, scoped.text
+        assert scoped.json()["system_prompts"]["semantic_kg_extraction"] == "Extract everything from: {text}"
+
+        response = await client.post(
+            "/api/index",
+            json={"corpus_id": corpus_id, "repo_path": str(corpus_path), "force_reindex": True},
+        )
+        assert response.status_code == 422, response.text
+        detail = response.json()["detail"]
+        assert detail["code"] == "graph_extraction_prompt_invalid"
+        assert detail["corpus_id"] == corpus_id
+        assert "{schema}" in detail["message"]
+        assert "System Prompts" in detail["operator_hint"]
+
+        status = await client.get(f"/api/index/{corpus_id}/status")
+        assert status.status_code == 200, status.text
+        assert status.json()["status"] == "idle"
+    finally:
+        await client.delete(f"/api/corpora/{corpus_id}")

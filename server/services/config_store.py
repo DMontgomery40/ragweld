@@ -16,7 +16,7 @@ import json
 import logging
 from typing import Any
 
-from server.config import DEFAULT_CONFIG_PATH
+from server.config import DEFAULT_CONFIG_PATH, drop_retired_prompt_defaults
 from server.config import load_config as load_global_config
 from server.config import save_config as save_global_config
 from server.db.postgres import PostgresClient
@@ -185,6 +185,8 @@ def _upgrade_raw_config(raw: dict[str, Any]) -> tuple[TriBridConfig, bool, list[
         if _remove_nested_key(working, dotted):
             migrated_keys.append(dotted)
 
+    migrated_keys.extend(drop_retired_prompt_defaults(working))
+
     chunking = working.get("chunking")
     if isinstance(chunking, dict):
         strategy = str(chunking.get("chunking_strategy") or "").strip().lower()
@@ -196,6 +198,13 @@ def _upgrade_raw_config(raw: dict[str, Any]) -> tuple[TriBridConfig, bool, list[
     if isinstance(generation, dict) and generation.get("gen_max_tokens") == 2048:
         generation["gen_max_tokens"] = 512
         migrated_keys.append("generation.gen_max_tokens")
+
+    # The retired 10 s reranker timeout sat inside the idle latency spread of the default
+    # cloud candidate window (D15); the config page persisted that default verbatim.
+    reranking = working.get("reranking")
+    if isinstance(reranking, dict) and reranking.get("reranker_timeout") == 10:
+        reranking["reranker_timeout"] = 30
+        migrated_keys.append("reranking.reranker_timeout")
 
     embedding = working.get("embedding")
     if (
