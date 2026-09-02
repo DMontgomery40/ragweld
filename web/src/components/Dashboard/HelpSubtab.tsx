@@ -73,8 +73,8 @@ export function HelpSubtab() {
               from Eval Analysis → Analysis to measure retrieval quality.
             </li>
             <li>
-              <strong>Compare Configurations:</strong> Use the Admin tab to save and compare different RAG configurations
-              for different use cases.
+              <strong>Compare Models:</strong> Use the Benchmark tab to send one prompt to several gateway models and
+              compare their answers, latency and cost side by side against this corpus.
             </li>
           </ol>
         </div>
@@ -126,8 +126,8 @@ export function HelpSubtab() {
               description="Expands user queries into multiple variations to improve recall. Uses LLMs to generate semantically similar questions."
             />
             <ConceptCard
-              title="Configuration Presets"
-              description="Named configurations that bundle embedding models, chunking strategies, and retrieval settings for easy switching."
+              title="Corpus-scoped Configuration"
+              description="Every setting is tagged corpus or global. A corpus-tagged field is saved against the corpus named in the header and changes nothing for any other corpus; a global field applies to the whole deployment."
             />
           </div>
         </div>

@@ -1040,6 +1040,10 @@ export function ObservabilityOperatorDeck({
           font-family: "IBM Plex Mono", monospace;
           font-size: 12px;
           color: rgba(239, 245, 251, 0.94);
+          /* Live identifiers (a Qdrant generation name, a trace or run id) are single unbroken
+             tokens far wider than a card. Without this they overflowed the card and painted
+             across the neighbouring ones (S43). */
+          overflow-wrap: anywhere;
         }
 
         .obs-card-detail,
@@ -1048,6 +1052,7 @@ export function ObservabilityOperatorDeck({
           font-size: 12.5px;
           line-height: 1.55;
           color: rgba(198, 209, 222, 0.78);
+          overflow-wrap: anywhere;
         }
 
         .obs-evidence-stack {

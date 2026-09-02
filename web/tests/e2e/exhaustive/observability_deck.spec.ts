@@ -45,6 +45,46 @@ function attentionLabels(operatorHint: string): string[] {
  * These run against the live API and the real backends it is configured with.
  */
 test.describe('Observability operator deck', () => {
+  test('a card\'s evidence stays inside its card, however long the identifier is', async ({ page, baseURL }) => {
+    // The Grafana Command Center prints live identifiers (the Qdrant generation name, trace and
+    // run ids) as single unbroken tokens. With `overflow-wrap: normal` the retrieval card's
+    // generation name ran past its own card and painted over the neighbouring Evals and
+    // Benchmark cards on the live deployment (drive finding S43: scrollWidth 568 in a 198px
+    // card). Every evidence line must wrap inside its card.
+    // The deck scopes to the active corpus from storage, not to a query parameter, and the long
+    // identifier only appears for a corpus with a promoted Qdrant generation.
+    await page.addInitScript(() => {
+      localStorage.setItem('tribrid_active_corpus', 'epstein-files-public');
+      localStorage.setItem('tribrid_active_repo', 'epstein-files-public');
+    });
+    await page.goto(new URL('/web/grafana?subtab=overview', baseURL).toString(), {
+      waitUntil: 'domcontentloaded',
+    });
+    await expect(page.getByTestId('obs-chip-corpus')).toHaveText('corpus=epstein-files-public', { timeout: 60_000 });
+    await expect(page.locator('.obs-card-metric').first()).toBeVisible({ timeout: 60_000 });
+    await expect(page.locator('.obs-card-metric', { hasText: 'ragweld_chunks_' }).first()).toBeVisible({ timeout: 60_000 });
+
+    const overflowing = await page.evaluate(() => {
+      const selectors = ['.obs-card-metric', '.obs-card-detail', '.obs-evidence-mono', '.obs-evidence-copy'];
+      const rows: { selector: string; text: string; scrollWidth: number; clientWidth: number }[] = [];
+      for (const selector of selectors) {
+        for (const el of Array.from(document.querySelectorAll(selector))) {
+          const node = el as HTMLElement;
+          if (node.scrollWidth > node.clientWidth + 1) {
+            rows.push({
+              selector,
+              text: (node.textContent || '').trim().slice(0, 80),
+              scrollWidth: node.scrollWidth,
+              clientWidth: node.clientWidth,
+            });
+          }
+        }
+      }
+      return rows;
+    });
+    expect(overflowing, 'evidence text must wrap inside its card, not spill across its neighbours').toEqual([]);
+  });
+
   test('shows probe history per component instead of only the latest sample', async ({ page, baseURL, request }) => {
     const status = await request.get(`${API_BASE}/observability/status`);
     expect(status.status(), await status.text()).toBe(200);

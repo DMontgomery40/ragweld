@@ -335,3 +335,31 @@ test.describe('Dashboard information design', () => {
     await expect(page.getByTestId('storage-calc2-independent-note')).toContainText('independent scenario inputs');
   });
 });
+
+// S44: the Help page taught two things this build does not have. "Configuration Presets"
+// described named, switchable config bundles (profiles were removed from the product), and the
+// quick start told the operator to "save and compare different RAG configurations" in the Admin
+// tab, which only stages and applies edits for the corpus in the header. A page that documents a
+// feature nobody can find is worse than a shorter page.
+test.describe('Help page (documentation truth)', () => {
+  test('teaches only surfaces this build has', async ({ page, baseURL }) => {
+    await page.goto(new URL('/web/dashboard?subtab=help', baseURL).toString(), { waitUntil: 'domcontentloaded' });
+    // The dock renders a second copy of whatever page is docked, so scope to the main pane's
+    // own section (ids are duplicated between the two).
+    const help = page.locator('#tab-dashboard-help').first();
+    await expect(help).toBeVisible({ timeout: 60_000 });
+    await expect(help).toContainText('Help & Documentation');
+
+    await expect(help, 'profiles/presets were removed; the page must not promise them').not.toContainText(/preset/i);
+    await expect(help, 'the Admin tab does not save or compare named configurations').not.toContainText(
+      /save and compare different RAG configurations/i
+    );
+
+    // What it teaches instead is reachable: the Benchmark tab compares models, and the config
+    // surfaces are corpus-scoped.
+    await expect(help).toContainText('Benchmark');
+    await expect(help).toContainText(/corpus/i);
+    await page.goto(new URL('/web/benchmark', baseURL).toString(), { waitUntil: 'domcontentloaded' });
+    await expect(page.getByTestId('benchmark-model-list')).toBeVisible({ timeout: 60_000 });
+  });
+});
