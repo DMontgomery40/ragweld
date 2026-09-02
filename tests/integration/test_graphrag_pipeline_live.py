@@ -24,7 +24,7 @@ from server.api.index import _resolve_semantic_kg_route, graph_schema_input_fing
 from server.config import load_config
 from server.db.neo4j import Neo4jClient
 from server.db.postgres import PostgresClient
-from server.gateway_catalog import warm_gateway_catalog
+from server.gateway_catalog import gateway_upstream_for_alias, warm_gateway_catalog
 from server.indexing.generations import GenerationManifest
 from server.indexing.graphrag_pipeline import (
     GraphScopeCollisionError,
@@ -137,9 +137,11 @@ async def test_semantic_and_code_files_use_scoped_official_writer_contract(
             route_model=str(route.model or ""),
             route_base_url=str(route.base_url or ""),
             route_api_key=str(route.api_key or ""),
+            route_upstream=gateway_upstream_for_alias(str(route.model or "")),
             max_concurrency=2,
             llm_timeout_s=int(cfg.graph_indexing.semantic_kg_llm_timeout_s),
             reasoning_effort=str(cfg.graph_indexing.semantic_kg_reasoning_effort),
+            prompt_template=str(cfg.system_prompts.semantic_kg_extraction),
         )
         semantic_chunks = [
             Chunk(

@@ -93,11 +93,18 @@ export async function indexCorpus(
   request: APIRequestContext,
   corpusId: string,
   corpusPath: string,
-  opts: { timeoutMs?: number } = {}
+  opts: { timeoutMs?: number; approvedGraphSchemaHash?: string } = {}
 ): Promise<void> {
   const timeoutMs = opts.timeoutMs ?? INDEX_TIMEOUT_MS;
+  // A semantic-policy corpus indexes only against its reviewed schema hash (Task 8);
+  // callers that derived a proposal pass it through, everything else stays as before.
   const started = await request.post(`${API_BASE}/index`, {
-    data: { corpus_id: corpusId, repo_path: corpusPath, force_reindex: true },
+    data: {
+      corpus_id: corpusId,
+      repo_path: corpusPath,
+      force_reindex: true,
+      ...(opts.approvedGraphSchemaHash ? { approved_graph_schema_hash: opts.approvedGraphSchemaHash } : {}),
+    },
   });
   if (!started.ok()) await failWithBody(`POST /api/index for ${corpusId}`, started);
   const deadline = Date.now() + timeoutMs;

@@ -223,6 +223,8 @@ test.describe.serial('G1/G2/G3 on a semantic graph corpus provisioned by the sui
   // pre-existing corpus, so the graph assertions can never skip.
   let graphCorpus: ExhaustiveCorpus;
   let graphCorpusId = '';
+  /** Node labels of the reviewed schema the run indexed against (the legend must show these). */
+  let approvedNodeLabels: string[] = [];
 
   test.beforeAll(async ({ request }) => {
     test.setTimeout(10 * 60 * 1000);
@@ -233,7 +235,21 @@ test.describe.serial('G1/G2/G3 on a semantic graph corpus provisioned by the sui
       build_code_graph: false,
       semantic_kg_llm_model: EXHAUSTIVE_CHAT_MODEL,
     });
-    await indexCorpus(request, graphCorpusId, graphCorpus.corpusPath);
+    // Semantic indexing runs only against a reviewed schema (Task 8): derive the proposal
+    // the way the operator does on the Indexing page and approve its exact hash.
+    const proposalRes = await request.post(`${API_BASE}/index/${encodeURIComponent(graphCorpusId)}/graph-schema/proposal`, {
+      data: { force_refresh: false },
+    });
+    expect(proposalRes.ok(), await proposalRes.text()).toBeTruthy();
+    const proposal = (await proposalRes.json()) as {
+      schema_hash: string;
+      schema?: { node_types?: Array<{ label: string }> };
+      schema_payload?: { node_types?: Array<{ label: string }> };
+    };
+    expect(proposal.schema_hash).toMatch(/^[0-9a-f]{64}$/);
+    approvedNodeLabels = ((proposal.schema ?? proposal.schema_payload)?.node_types ?? []).map((n) => n.label);
+    expect(approvedNodeLabels.length, 'the reviewed schema names at least one node type').toBeGreaterThan(0);
+    await indexCorpus(request, graphCorpusId, graphCorpus.corpusPath, { approvedGraphSchemaHash: proposal.schema_hash });
     const stats = await (await request.get(`${API_BASE}/graph/${encodeURIComponent(graphCorpusId)}/stats`)).json();
     expect(stats.total_entities, 'semantic extraction must produce entities').toBeGreaterThan(0);
     expect(stats.total_relationships, 'semantic extraction must produce relationships').toBeGreaterThan(0);
@@ -253,7 +269,9 @@ test.describe.serial('G1/G2/G3 on a semantic graph corpus provisioned by the sui
     const ids = await communities.evaluateAll((els) => els.map((el) => el.getAttribute('data-testid') || ''));
     expect(ids.length).toBeGreaterThan(1);
     for (const id of ids) {
-      expect(id).toMatch(/^graph-community-c-[0-9a-f]{12}$/);
+      // Communities are GDS Leiden partitions since Task 7 (integer communityId), not the
+      // label-propagation hashes the 2026-08-25 fix wave named `c-<12 hex>`.
+      expect(id).toMatch(/^graph-community-\d+$/);
       expect(id).not.toContain('__staging__');
       expect(id).not.toContain('(root)');
     }
@@ -290,8 +308,15 @@ test.describe.serial('G1/G2/G3 on a semantic graph corpus provisioned by the sui
     expect(sizes.canvasW, 'fullscreen canvas fills the modal width').toBeGreaterThan(sizes.modalW - 4);
     expect(sizes.canvasH, 'fullscreen canvas fills the modal height').toBeGreaterThan(sizes.hostH - 4);
     expect(sizes.headerText).toMatch(/\d+ nodes • [1-9]\d* edges/);
+    // Entity types are the reviewed schema's labels since Task 8 (D1), not a closed
+    // vocabulary; the legend lists them and never the code policy's kinds.
     const legend = page.getByTestId('graph-fullscreen-legend');
-    await expect(legend).toContainText('concept');
+    const legendText = (await legend.innerText()).trim();
+    expect(legendText.length).toBeGreaterThan(0);
+    expect(
+      approvedNodeLabels.some((label) => legendText.includes(label)),
+      `legend "${legendText}" names none of the reviewed labels ${approvedNodeLabels.join(', ')}`,
+    ).toBe(true);
     await expect(legend).not.toContainText('function');
 
     // G3: scroll-zoom changes the zoom transform AND repaints; clicking a node selects it.
@@ -321,21 +346,24 @@ test.describe.serial('G1/G2/G3 on a semantic graph corpus provisioned by the sui
     expect(k1! > k0!, `wheel must zoom in (k ${k0} -> ${k1})`).toBeTruthy();
     expect(h1, 'the canvas must repaint after zoom').not.toBe(h0);
 
-    // Find a painted node (person = #f97316 / org = #0ea5e9) and click it.
+    // Find a painted node and click it. Node colours belong to the reviewed schema's
+    // labels (D1), so the targets are read from the legend's own swatches rather than a
+    // fixed palette.
     const nodePoint = await page.evaluate(() => {
       const canvas = document.querySelector('[data-testid="graph-fullscreen-canvas"] canvas') as HTMLCanvasElement;
       const rect = canvas.getBoundingClientRect();
       const scaleX = canvas.width / rect.width;
       const scaleY = canvas.height / rect.height;
       const data = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data;
-      // person, org, location, event, concept — the visualizer's node palette.
-      const targets = [
-        [249, 115, 22],
-        [14, 165, 233],
-        [16, 185, 129],
-        [234, 179, 8],
-        [148, 163, 184],
-      ];
+      const swatches = Array.from(
+        document.querySelectorAll('[data-testid="graph-fullscreen-legend"] span span'),
+      ) as HTMLElement[];
+      const targets: number[][] = [];
+      for (const swatch of swatches) {
+        const match = getComputedStyle(swatch).backgroundColor.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+        if (match) targets.push([Number(match[1]), Number(match[2]), Number(match[3])]);
+      }
+      if (targets.length === 0) return null;
       for (let y = Math.floor(canvas.height * 0.12); y < canvas.height * 0.88; y += 2) {
         for (let x = Math.floor(canvas.width * 0.05); x < canvas.width * 0.95; x += 2) {
           const i = (y * canvas.width + x) * 4;
