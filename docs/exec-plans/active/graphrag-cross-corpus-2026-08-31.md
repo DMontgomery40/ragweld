@@ -886,3 +886,13 @@ carry S numbers; the working scratchpad with every row lives with the session an
 - **Process trap recorded:** staging by path swept a lane's half-landed hunk of `server/api/config.py` into the P1
   commit while the definition it imported was still uncommitted; HEAD was inconsistent for one gate run. Inspect a
   staged file's diff for foreign hunks while lanes are live.
+- **Codex approval #2 (on 38a37d25): BLOCK — two more P1s, fixed in 9e84517c.** (a) The chat stream primes retrieval
+  before its first byte and its priming chain did not know `RerankerFailedError`, so a configured reranker's failure
+  became a generic 500 (RED `500 == 503`); mapped, and the fail-closed API test now covers `/api/chat` and
+  `/api/chat/stream`. (b) `retrieve_best_effort` converted unrecognised retrieval exceptions into an empty chunk list
+  and callers generated an ungrounded 200; retrieval now raises, the `TypeError` retry is gone, and the
+  "retrieval-only" model labels went with it (RED: a raising FusionProtocol returned `[]`). P2s: every new reranker
+  branch closes its trace; the reaper re-judges the fence and freshest staging row under `FOR UPDATE` on a fresh DB
+  clock and uses the corpus's own `index_run_lease_seconds` (RED: the old reaper deleted a corpus with a live fence
+  under a longer configured lease; 28 passed after); reranker tests drop `monkeypatch`; gateway tests ask real
+  questions. P3: `Reranker.rerank()` raises on a failed result. Codex approval #3 in flight on the delta.
