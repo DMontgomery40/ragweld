@@ -102,7 +102,7 @@ def _summary(corpus_id: str, run_id: str, **overrides) -> IndexRunSummary:
 async def test_the_status_line_reports_the_completed_run_not_ready_to_index(
     client: AsyncClient,
 ) -> None:
-    corpus_id = f"dash_status_{uuid.uuid4().hex[:10]}"
+    corpus_id = f"pytest_dash_status_{uuid.uuid4().hex[:10]}"
     await _register(corpus_id)
     try:
         # A completed run AND chunks in the store: the ragweld_code shape the row describes.
@@ -129,7 +129,7 @@ async def test_a_corpus_that_was_never_indexed_still_says_ready_to_index(
     client: AsyncClient,
 ) -> None:
     """The other half of the contract: the two states have to stay distinguishable."""
-    corpus_id = f"dash_status_{uuid.uuid4().hex[:10]}"
+    corpus_id = f"pytest_dash_status_{uuid.uuid4().hex[:10]}"
     await _register(corpus_id)
     try:
         response = await client.get("/api/index/status", params={"corpus_id": corpus_id})
@@ -145,7 +145,7 @@ async def test_a_corpus_that_was_never_indexed_still_says_ready_to_index(
 
 @pytest.mark.asyncio
 async def test_a_failed_last_run_is_reported_as_failed(client: AsyncClient) -> None:
-    corpus_id = f"dash_status_{uuid.uuid4().hex[:10]}"
+    corpus_id = f"pytest_dash_status_{uuid.uuid4().hex[:10]}"
     await _register(corpus_id)
     try:
         index_api._persist_run_summary(
@@ -173,7 +173,7 @@ async def test_an_interrupted_run_is_not_reported_as_a_completed_index(
     client: AsyncClient,
 ) -> None:
     """A persisted `indexing` summary with no live fence is a run that never committed."""
-    corpus_id = f"dash_status_{uuid.uuid4().hex[:10]}"
+    corpus_id = f"pytest_dash_status_{uuid.uuid4().hex[:10]}"
     await _register(corpus_id)
     try:
         index_api._persist_run_summary(
@@ -202,7 +202,7 @@ async def test_a_completed_run_whose_chunks_are_gone_is_not_reported_as_complete
     describes has been deleted, so the ops strip claimed "Indexing complete — 0 chunks" for a
     corpus with nothing in it — the same dishonesty M-44 removed, pointing the other way.
     """
-    corpus_id = f"dash_status_{uuid.uuid4().hex[:10]}"
+    corpus_id = f"pytest_dash_status_{uuid.uuid4().hex[:10]}"
     await _register(corpus_id)
     try:
         # A completed run on a corpus that has no chunks: exactly the post-delete shape.
@@ -223,7 +223,7 @@ async def test_a_completed_run_whose_chunks_are_gone_is_not_reported_as_complete
 @pytest.mark.asyncio
 async def test_deleting_the_index_discards_the_persisted_runs(client: AsyncClient) -> None:
     """DELETE must not leave run summaries describing an index that no longer exists."""
-    corpus_id = f"dash_status_{uuid.uuid4().hex[:10]}"
+    corpus_id = f"pytest_dash_status_{uuid.uuid4().hex[:10]}"
     await _register(corpus_id)
     try:
         index_api._persist_run_summary(_summary(corpus_id, "run_before_delete"))

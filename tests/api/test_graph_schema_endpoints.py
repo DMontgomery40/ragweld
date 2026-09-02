@@ -108,7 +108,7 @@ async def test_schema_proposal_refuses_a_large_textless_pdf_inside_the_edge_wind
 async def test_graph_schema_proposal_refuses_graph_off_policy_with_typed_conflict(
     client: AsyncClient,
 ) -> None:
-    corpus_id = f"schema-off-{uuid4().hex[:8]}"
+    corpus_id = f"pytest_schema_off_{uuid4().hex[:8]}"
     corpus_path = Path(__file__).resolve().parents[1] / "fixtures" / "acceptance_corpus"
     created = await client.post(
         "/api/corpora",
@@ -138,7 +138,7 @@ async def test_graph_schema_proposal_refuses_graph_off_policy_with_typed_conflic
 async def test_semantic_index_refuses_missing_schema_approval_before_taking_a_run_fence(
     client: AsyncClient,
 ) -> None:
-    corpus_id = f"schema-required-{uuid4().hex[:8]}"
+    corpus_id = f"pytest_schema_required_{uuid4().hex[:8]}"
     corpus_path = Path(__file__).resolve().parents[1] / "fixtures" / "acceptance_corpus"
     created = await client.post(
         "/api/corpora",
@@ -169,7 +169,7 @@ async def test_semantic_index_refuses_an_unformattable_extraction_prompt_before_
     typed 422 before any schema approval, fence, or staged generation, with the hint that
     names the System Prompts reset.
     """
-    corpus_id = f"schema-prompt-{uuid4().hex[:8]}"
+    corpus_id = f"pytest_schema_prompt_{uuid4().hex[:8]}"
     corpus_path = Path(__file__).resolve().parents[1] / "fixtures" / "acceptance_corpus"
     created = await client.post(
         "/api/corpora",

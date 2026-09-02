@@ -387,7 +387,7 @@ async def test_full_index_promotes_the_approved_official_pipeline_generation(
     client: AsyncClient,
     tmp_path: Path,
 ) -> None:
-    corpus_id = f"pipeline-index-{uuid4().hex[:8]}"
+    corpus_id = f"pytest_pipeline_index_{uuid4().hex[:8]}"
     corpus_path = tmp_path / "acceptance_corpus"
     corpus_path.mkdir()
     combined_fixture = "\n\n".join(

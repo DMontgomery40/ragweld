@@ -118,7 +118,7 @@ async def _search(client: AsyncClient, corpus_id: str, query: str) -> list[dict]
 
 
 async def test_source_document_viewer_end_to_end(client: AsyncClient, tmp_path: Path) -> None:
-    corpus_id = f"viewer-e2e-{uuid.uuid4().hex[:8]}"
+    corpus_id = f"pytest_viewer_e2e_{uuid.uuid4().hex[:8]}"
     legacy_id = f"{corpus_id}-legacy"
     root = tmp_path / "corpus"
     _materialize_corpus(root)
