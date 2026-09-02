@@ -814,3 +814,28 @@ carry S numbers; the working scratchpad with every row lives with the session an
   changes indexing semantics for existing corpora, so it is the operator's call, not a fix to make mid-session.
 - **Final pre-deploy gate on the merged tree:** 2,062 python tests pass (`tests/unit` + `tests/api`, 21 skipped) with
   the single known overlay artifact, and the web unit runner passes 16/16.
+- **D19 run complete and promoted (17:25 UTC, run a512c3ac, $0.844):** the promoted graph has 2,355 entities / 2,577
+  relationships / 1,028 communities against the old generation's 3,003 / 3,478 / 1,142. Labelled census over both
+  generations in Neo4j: noisy names 61 of 2,355 (2.6 %) vs 136 of 3,003 (4.5 %); pronoun/role Person entities 0 vs 5
+  (`you`, `I`, `Sender`, `Recipient`, `You`); the `<REDACTED>` entity and the "Email from <REDACTED> to Jeffrey
+  Epstein" family are gone. The staging graph peaked at 6,932 raw entities before resolution, so the cleaner names also
+  resolve better. Communities are led by real people (Jeffrey Epstein 313, Kathy Ruemmler 119, Richard Kahn 56, Steve
+  Bannon 49, Lawrence Summers 48).
+- **Deployed ec71b669 (17:26:47 restart, `/api/ready` true 17:28:24; the operator's interrupt landed after the deploy
+  script had already run; LiteLLM container restarted on the regenerated catalog).** Live verification on
+  https://ragweld.dtmont.com: S38 gone (gateway serves 403 = catalog 403, zero warnings since restart); a real Epstein
+  search through `/api/search` in 0.39 s with the graph leg resolving 116 entities from 10 seeds (S39 on production;
+  the MCP probe with top_k 20 returned 20 results with graph rows inside 8 s where it took 179 s before); Graph
+  Explorer shows the new generation; the MCP card reads "mode=tribrid, top_k=20" and the probe line names the
+  in-process transport (S40/S34); Dependencies shows vLLM "Blocked surfaces: runtime" and MLflow "training" (S31);
+  the Chat Routing Trace panel labels the corpus's latest search as not this conversation's (S37). Regression specs
+  against the deployed API: chat_corpus_scope + indexing_config_cards + dashboard_dead_controls, 33 passed. The
+  "OpenTelemetry + Grafana Stack: degraded" card seen right after the restart was Grafana still starting; readiness
+  reports it ready two minutes later.
+- **S45 (new, open):** choosing an entry from the Dock's "Choose something to dock" dialog set the dock title to
+  "Dashboard — System Status" while the dock's subtab strip and content stayed on Glossary. The S36 dock composer
+  fix is covered by `legibility_dock.spec.ts` on the overlay; its live check was blocked by S45.
+- **Operator process change (17:3x UTC):** every major change now needs a `codex exec` approval (gpt-5.6-sol, xhigh)
+  before work proceeds; the first pass covers 87561a37..ec71b669. Queued after this closes: an audit that run and
+  indexing cost is recorded through the connected telemetry (Langfuse, LiteLLM, OTel) rather than hand-rolled, and
+  shows correctly in Grafana.
