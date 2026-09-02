@@ -461,7 +461,9 @@ _LOCKED_INTEGRATION_CONTRACTS: tuple[ConfigIntegrationContract, ...] = (
         ],
         required_secret_ids=[],
         readiness_checks=["backend_selected", "required_fields_present", "experiment_probe"],
-        blocked_surfaces=["training", "eval"],
+        # Training only: the eval lane scores with Ragas/Promptfoo and imports nothing from
+        # MLflow, so an unready MLflow must not tell an operator that eval is blocked (S31).
+        blocked_surfaces=["training"],
     ),
     ConfigIntegrationContract(
         id="ragas",
@@ -1021,8 +1023,12 @@ def _build_integration_readiness(
     failing_checks: list[str] | None = None,
     operator_hint: str | None = None,
     links: list[TraceExternalLink] | None = None,
+    blocked_surfaces: list[str] | None = None,
 ) -> IntegrationReadiness:
+    # The contract lists every surface this integration can block; a caller whose current
+    # configuration blocks fewer of them passes the narrower list (see the vLLM lane).
     not_ready = state != "ready"
+    blocked = contract.blocked_surfaces if blocked_surfaces is None else blocked_surfaces
     return IntegrationReadiness(
         id=contract.id,
         label=contract.label,
@@ -1034,7 +1040,7 @@ def _build_integration_readiness(
         missing_config_paths=missing_config_paths or [],
         missing_secret_ids=missing_secret_ids or [],
         failing_checks=failing_checks or [],
-        blocked_surfaces=list(contract.blocked_surfaces) if not_ready else [],
+        blocked_surfaces=list(blocked) if not_ready else [],
         operator_hint=operator_hint,
         links=links or [],
     )
@@ -1129,6 +1135,12 @@ async def _build_runtime_integration_readiness(
         for path in contract.required_config_paths[1:]
         if _is_missing(_config_value(config, path))
     ]
+    # Chat and the benchmark answer through whichever generation lane is selected. With the
+    # gateway on they never reach the serving lane, so an off or unreachable vLLM blocks only
+    # that lane; with the gateway off they fall back to it and it does block them (S31).
+    vllm_blocked_surfaces = (
+        ["runtime"] if bool(config.chat.litellm.enabled) else list(contract.blocked_surfaces)
+    )
     if not enabled:
         return _build_integration_readiness(
             contract,
@@ -1138,6 +1150,7 @@ async def _build_runtime_integration_readiness(
             missing_config_paths=missing,
             failing_checks=["enabled"],
             operator_hint="Enable vLLM and configure its base URL/default model before cutting the serving lane over.",
+            blocked_surfaces=vllm_blocked_surfaces,
         )
     try:
         runtime_url = resolve_vllm_base_url(configured_url=config.chat.vllm.base_url)
@@ -1162,6 +1175,7 @@ async def _build_runtime_integration_readiness(
         missing_config_paths=missing,
         failing_checks=failing_checks,
         operator_hint=detail if state == "degraded" else "vLLM is selected as the serving lane.",
+        blocked_surfaces=vllm_blocked_surfaces,
         links=[
             TraceExternalLink(
                 label="vLLM Endpoint",
