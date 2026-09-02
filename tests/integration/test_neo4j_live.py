@@ -9,7 +9,7 @@ from neo4j import GraphDatabase
 
 from server.db.neo4j import Neo4jClient
 from server.indexing.graphrag_pipeline import ScopedNeo4jWriter
-from server.indexing.official_graphrag import write_lexical_graph_with_graphrag
+from tests.official_graphrag import write_lexical_graph_with_graphrag
 from server.models.index import Chunk
 
 

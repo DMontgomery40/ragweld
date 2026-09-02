@@ -90,7 +90,7 @@ RETRIEVAL_MODULES: tuple[str, ...] = (
     "server/indexing/loader.py",
     "server/indexing/chunker.py",
     "server/indexing/embedder.py",
-    "server/indexing/official_graphrag.py",
+    "server/indexing/graphrag_pipeline.py",
 )
 
 RETRIEVAL_SECTIONS: tuple[str, ...] = (

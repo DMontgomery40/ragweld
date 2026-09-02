@@ -17,7 +17,7 @@ from server.db.postgres import PostgresClient
 from server.indexing.embedder import Embedder
 from server.indexing.generations import build_generation
 from server.indexing.graphrag_pipeline import ScopedNeo4jWriter
-from server.indexing.official_graphrag import write_lexical_graph_with_graphrag
+from tests.official_graphrag import write_lexical_graph_with_graphrag
 from server.main import app
 from server.models.index import Chunk, ChunkProvenance, PageRegion
 from server.retrieval.contracts import sparse_contract_from_config

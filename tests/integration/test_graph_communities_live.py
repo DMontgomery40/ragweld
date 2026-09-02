@@ -27,7 +27,7 @@ from server.db.postgres import PostgresClient
 from server.graph.communities import detect_leiden_communities
 from server.indexing.generations import build_generation
 from server.indexing.graphrag_pipeline import ScopedNeo4jWriter
-from server.indexing.official_graphrag import write_lexical_graph_with_graphrag
+from tests.official_graphrag import write_lexical_graph_with_graphrag
 from server.models.index import Chunk
 from tests.service_requirements import require_env
 

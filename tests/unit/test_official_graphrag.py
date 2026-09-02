@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from neo4j_graphrag.components.types import Neo4jGraph, Neo4jNode, Neo4jRelationship
 
-from server.indexing.official_graphrag import (
+from tests.official_graphrag import (
     GRAPH_RAG_CHUNK_LABEL,
     GRAPH_RAG_DOCUMENT_LABEL,
     GRAPH_RAG_FROM_CHUNK,

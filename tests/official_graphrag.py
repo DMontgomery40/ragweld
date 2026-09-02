@@ -1,3 +1,9 @@
+"""Test-facing helpers over the official Neo4j GraphRAG 1.19 lexical contract.
+
+The live Neo4j suites seed lexical Document/Chunk graphs through the same official
+builder the production pipeline uses; nothing under ``server/`` imports this module.
+"""
+
 from __future__ import annotations
 
 from neo4j_graphrag.components.lexical_graph import LexicalGraphBuilder
@@ -24,12 +30,14 @@ async def write_lexical_graph_with_graphrag(
     file_path: str,
     chunks: list[Chunk],
 ) -> tuple[Neo4jGraph, LexicalGraphConfig]:
-    """Build one complete unscoped lexical graph for a file.
+    """Build one complete unscoped lexical graph for a file (test helper).
 
-    ``repo_id`` and ``run_id`` remain in the call shape until the index loop is
-    replaced in this task, but are deliberately not placed in model output.
-    Server-owned scope is applied only by ``ScopedNeo4jWriter`` after collision
-    validation.
+    Lives under ``tests/`` because no production path calls it: the index loop
+    builds its lexical graph inside the official pipeline (Task 8 review
+    observation D23). ``repo_id`` and ``run_id`` stay in the call shape so the
+    live suites read like the production call, but are deliberately not placed
+    in model output; server-owned scope is applied only by ``ScopedNeo4jWriter``
+    after collision validation.
     """
     del repo_id, run_id
     lexical = _lexical_graph_config()
