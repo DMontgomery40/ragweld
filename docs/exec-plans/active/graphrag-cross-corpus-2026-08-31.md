@@ -929,3 +929,12 @@ carry S numbers; the working scratchpad with every row lives with the session an
   fails closed on both answer routes without a generation call (a first attempt with an unindexed corpus produced a
   paid, ungrounded Luna answer — an empty index is a legitimate empty result, not a failure). Round-5 gate and codex
   approval #6 in flight.
+- **Codex approval #6 (on 1173ab53): BLOCK, fixed in b4aa9244.** The stated invariant was broader than the code: the
+  query/source log for feedback mining was appended before the `done` yield and a generation-cache hit assigned the
+  provider response id before its first byte; the answer stream's priming had no cancellation close-out; the MCP
+  `search` tool's lookups sat outside its guard; patched tests remained in the chat endpoint suite. All moved behind
+  `done` / under the guards; the chat endpoint suite now has no `patch` at all (fixed-completion mode added to the
+  local gateway), and the late-disconnect test seeds a corpus and reads the query-log file: no entry for the
+  abandoned exchange, one after the completed repeat. Invariant as now stated to codex: no durable record OF THE
+  EXCHANGE before `done`; retrieval-side state (retrieval cache, Recall priming result) is deliberately excluded.
+  Round-6 gate and codex approval #7 in flight.
