@@ -44,6 +44,9 @@ Every catalog row carries `selection_*` metadata that separates the broad candid
 !!! tip "Check `/api/runtime-capabilities` before promising a model"
     `data/models.json` is the broad catalog for pricing and candidates; **runtime-selectable truth** comes from the catalog's `selection_*` metadata plus `server/runtime_capabilities.py`, served as `GET /api/runtime-capabilities`. A model appearing in `/api/models` with `selection_status: "catalog_only"` does not mean ragweld can route to it today. The daily refresh adds, re-prices, and drops rows — the 2026-09-01 refresh added IBM Granite 4.2 8B, a wave of OpenAI batch-priced variants, and price updates for DeepSeek V4 Flash/Pro — so treat any specific row as volatile and read the runtime capabilities endpoint when a decision depends on what is selectable now.
 
+??? note "Where the gateway aliases live"
+    Selectable model rows route through LiteLLM gateway aliases declared in `infra/litellm-config.yaml` (the gateway service on port `54000`). The alias list moves with the catalog: current config adds a wave of `openai.*.batch` aliases pointing at the `:batch` OpenRouter snapshot ids, adds `ibm-granite.granite-4.2-8b`, and drops stale entries such as `anthropic.claude-opus-4.7-fast`, `kwaipilot.kat-coder-air-v2.5`, and the retired Mistral batch aliases. Alias presence alone is not runtime truth — a row's `selection_status` metadata plus `GET /api/runtime-capabilities` decide what a picker can select today, and the alias config is versioned with the repo so changes are reviewable.
+
 ## Upsert Flow
 
 Use `POST /api/models/upsert` to add or update entries safely:
