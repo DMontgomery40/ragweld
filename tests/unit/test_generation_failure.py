@@ -128,19 +128,23 @@ def test_http_exception_path_agrees_with_the_stream_detail() -> None:
 
 
 def test_answer_route_error_paths_redact_like_the_chat_path() -> None:
-    """/api/answer's retrieval_error and llm_error come from the one shared sanitiser.
+    """/api/answer's failure reason comes from the one shared classifier, so it is sanitised
+    by the one shared sanitiser.
 
-    answer_service kept its own copy: no URL rule (so OpenRouter's key-bearing
-    management link reached the debug payload) and a Bearer regex written with
-    doubled backslashes that matched a literal ``\\s`` and never redacted a token.
+    answer_service once kept its own sanitiser copy (no URL rule, a Bearer regex that never
+    matched) and used it to build "retrieval-only" answers. Both are gone: the answer lane
+    raises, and the reason a client sees is the chat lane's ``generation_unavailable_detail``.
     """
     from server.services import answer_service
 
-    assert answer_service.safe_error_message is safe_error_message
+    assert answer_service.generation_unavailable_detail is generation_unavailable_detail
+    assert not hasattr(answer_service, "safe_error_message")
     raw = RuntimeError(
         f"{SPEND_LIMIT_REASON} Authorization: Bearer sk-or-v1-0123456789abcdefghij\nnext line"
     )
-    cleaned = answer_service.safe_error_message(raw)
+    detail = answer_service.generation_unavailable_detail(raw, operation="Answer stream generation")
+    cleaned = detail.gateway_reason
+    assert cleaned == safe_error_message(raw)
     assert KEY_HASH not in cleaned
     assert "openrouter.ai" not in cleaned
     assert "<url>" in cleaned
@@ -148,6 +152,7 @@ def test_answer_route_error_paths_redact_like_the_chat_path() -> None:
     assert "Bearer REDACTED" in cleaned
     assert "\n" not in cleaned
     assert "Key limit exceeded (weekly limit)" in cleaned
+    assert detail.failure_kind == "spend_limit"
 
 
 def test_no_server_module_keeps_a_private_error_sanitiser() -> None:
