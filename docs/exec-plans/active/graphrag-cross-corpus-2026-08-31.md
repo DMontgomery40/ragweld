@@ -938,3 +938,13 @@ carry S numbers; the working scratchpad with every row lives with the session an
   abandoned exchange, one after the completed repeat. Invariant as now stated to codex: no durable record OF THE
   EXCHANGE before `done`; retrieval-side state (retrieval cache, Recall priming result) is deliberately excluded.
   Round-6 gate and codex approval #7 in flight.
+- **Codex approval #7 (on 81d5c680): BLOCK, fixed in 2ce8f773.** After `done` was yielded the wrapper awaited the
+  query-log write before its two synchronous message writes, so a client that closes on the terminal event (which
+  cancels the task) could leave a log without messages. Now the exchange exists the moment the server produces
+  `done`: both messages are written synchronously first, the query/source record and Recall follow under a shield,
+  and the wrapper's `finally` persists the same exchange if the generator is closed at that yield. The answer
+  stream's cancellation close-out covers its trace start/annotate awaits; the MCP tools type raw transport failures
+  from their lookups as the Postgres outage; the chat suite asks real questions everywhere, drops its unused
+  `monkeypatch` fixtures and marks the subprocess disconnect tests with their store capabilities. Codex accepted the
+  retrieval cache and Recall priming result as retrieval-side state (not exchange records). Round-7 gate and codex
+  approval #8 in flight.
