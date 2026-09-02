@@ -859,3 +859,16 @@ carry S numbers; the working scratchpad with every row lives with the session an
   `lane` label with run/corpus cost in Langfuse, one Langfuse emission path with proxy credentials and `traceparent`,
   and every paid path outside `generate_chat_text` enumerated). Plan v2 drafted; implementation queued behind this
   batch's approval.
+- **Cost telemetry (operator ask, 2026-09-02 17:4x UTC) — scoped, not implemented.** Measured on the live stack: the
+  only real cost record is LiteLLM's `litellm_spend_metric_total` in Prometheus ($7.50 over 12 h by model, no
+  run/corpus/lane attribution); Langfuse holds today's 28 generations with model/usage/cost all null and none of the
+  D19 run's extraction traffic; the index run's `semantic_kg_cost` is a per-chunk heuristic times catalog rates
+  (`_estimate_semantic_kg_cost_usd`), recomputed at status time; the "Cost & Capacity" dashboard has no cost panel.
+  Three codex (sol, xhigh) plan rounds converged on the design (LiteLLM-reported per-call cost incl. stream terminal
+  usage, `custom_prometheus_metadata_labels: ["metadata.lane"]`, `langfuse_otel` callback with app-owned run-root
+  spans + `traceparent` + `session_id`, immutable estimate vs measured run fields, catalog generator not YAML) and
+  left four P1 design decisions that are the operator's: the ledger (LiteLLM spend-log DB vs Langfuse exact-ID
+  reconciliation), the direct Cohere rerank route (delete or route via LiteLLM), routing every embedding call
+  (index, retrieval, cache) through gateway embedding aliases, and per-run cost contracts for Benchmark/Eval/
+  Promptfoo/Synthetic runs with IDs allocated before paid work. Recorded in the session task list with the
+  three verdicts (`scratchpad/codex_approval_E_plan*.out`); it needs its own exec plan.
