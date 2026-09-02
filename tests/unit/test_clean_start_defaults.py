@@ -80,10 +80,12 @@ def test_catalog_has_no_corpus_specific_promoted_artifact_claim() -> None:
 def test_semantic_kg_example_is_neutral_and_optional_lane_remains_explicit() -> None:
     prompt = SystemPromptsConfig().semantic_kg_extraction
 
-    assert "Alex Rivera" in prompt
-    assert "Northwind Labs" in prompt
-    assert "Denver" in prompt
+    # The LAW template is the official extractor's (D24): its worked example and its naming
+    # rules use neutral placeholders, never a real corpus's people.
+    assert "{schema}" in prompt and "{text}" in prompt
+    assert '"name": "John"' in prompt
     assert "Jeffrey Epstein" not in prompt
+    assert "Summers" not in prompt
 
     explicit_lane_paths = [
         "server/synthetic/hf_epstein_emails.py",

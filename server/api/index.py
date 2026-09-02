@@ -305,9 +305,9 @@ _LOCAL_EMBED_TPS_TABLE: dict[str, dict[str, int]] = {
 
 # Semantic KG extraction latency when no run has measured it yet: seconds one chunk costs
 # one worker, i.e. one gateway round-trip of a reasoning model at medium effort. Measured on
-# the Epstein rebuild (run ca5b8d92: 3,126 chunks, 4 workers, 2 h 07 min => 9.8 s) and the
+# the email-corpus rebuild (run ca5b8d92: 3,126 chunks, 4 workers, 2 h 07 min => 9.8 s) and the
 # NASA rebuild (run 3054ecc2: 1,002 chunks, 4 workers => 6.8 s) under openai.gpt-5.6-luna.
-# The previous constant, one call per second per worker, quoted "~12 min" for that Epstein
+# The previous constant, one call per second per worker, quoted "~12 min" for that email-corpus
 # run (Task 8 drive finding D13). Deliberately one number and not a per-provider table: a
 # table that cannot be hit reads as calibrated when it is not. The corpus's own last
 # completed semantic run overrides this through its recorded worker-seconds, so the number

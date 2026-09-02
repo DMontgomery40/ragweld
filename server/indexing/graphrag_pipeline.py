@@ -489,7 +489,7 @@ def extraction_prompt_template(text: str) -> ERExtractionTemplate:
     ``system_prompts.semantic_kg_extraction`` is shown and edited on the System Prompts page
     but never reached the official pipeline, which ran the library's default template (Task 8
     drive finding D24); that template says nothing about what a ``name`` may be, so Luna named
-    Epstein persons and emails with OCR noise (D19). The operator text is now the template the
+    email-corpus persons and emails with OCR noise (D19). The operator text is now the template the
     extractor formats, so it must carry the placeholders the extractor fills.
     """
     template = str(text or "")
