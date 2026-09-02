@@ -19,7 +19,7 @@ from neo4j_graphrag.components.schema import (
 )
 from neo4j_graphrag.llm import OpenAILLM
 
-from server.indexing.graphrag_pipeline import reasoning_model_params
+from server.gateway_reasoning import reasoning_model_params
 from server.models.index import Chunk, GraphSchemaProposal, GraphSchemaSample
 
 _GRAPH_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")

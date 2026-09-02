@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import urllib.parse
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -43,6 +43,36 @@ class GenerationResult:
     cost_summary: TraceCostSummary | None = None
     debug_trace_id: str | None = None
     web_grounding: WebGroundingMetadata | None = None
+    finish_reason: str | None = None
+
+
+class GatewayContentMissingError(RuntimeError):
+    """The gateway answered without assistant content.
+
+    ``finish_reason`` and ``usage`` say where the tokens went (a reasoning model that
+    spent the whole output budget thinking ends with ``"length"`` and reasoning tokens in
+    ``usage.completion_tokens_details``), so a caller can name the cause instead of a
+    bare parse failure.
+    """
+
+    def __init__(self, message: str, *, finish_reason: str | None, usage: dict[str, Any] | None) -> None:
+        super().__init__(message)
+        self.finish_reason = finish_reason
+        self.usage = usage
+
+
+# Body keys the transport owns; a caller's extra body fields may not redefine them.
+_RESERVED_BODY_FIELDS = frozenset({"model", "messages", "temperature", "max_tokens", "stream", "tools"})
+
+
+def _merge_body_fields(payload: dict[str, Any], body_fields: Mapping[str, Any] | None) -> None:
+    """Add caller-owned top-level body fields (an upstream's reasoning control) to the request."""
+    if not body_fields:
+        return
+    reserved = sorted(set(body_fields) & _RESERVED_BODY_FIELDS)
+    if reserved:
+        raise ValueError(f"body_fields may not override transport-owned request keys: {reserved}")
+    payload.update(body_fields)
 
 
 _WEB_PROMPT_SUFFIX = """
@@ -211,6 +241,13 @@ def _usage(data: Any) -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
+def _finish_reason(data: Any) -> str | None:
+    choices = data.get("choices") if isinstance(data, dict) else None
+    choice = choices[0] if isinstance(choices, list) and choices and isinstance(choices[0], dict) else None
+    value = choice.get("finish_reason") if choice is not None else None
+    return value if isinstance(value, str) and value else None
+
+
 def _debug_trace_id(response: httpx.Response) -> str | None:
     for name in ("x-debug-trace-id", "x-request-id", "openai-request-id", "request-id"):
         value = response.headers.get(name)
@@ -262,7 +299,9 @@ def _response_text(data: Any) -> str:
                 return "\n".join(parts)
     if isinstance(choice.get("text"), str):
         return str(choice["text"])
-    raise RuntimeError("Gateway response missing assistant content")
+    raise GatewayContentMissingError(
+        "Gateway response missing assistant content", finish_reason=_finish_reason(data), usage=_usage(data)
+    )
 
 
 def _raise_status(error: httpx.HTTPStatusError) -> None:
@@ -288,8 +327,14 @@ async def generate_chat_text(
     timeout_s: float = 120.0,
     observation_name: str = "chat.generation",
     web_config: ChatWebConfig | None = None,
+    body_fields: Mapping[str, Any] | None = None,
 ) -> GenerationResult:
-    """Generate one non-streaming response through LiteLLM."""
+    """Generate one non-streaming response through LiteLLM.
+
+    ``body_fields`` are extra top-level request keys in the upstream's own protocol (an
+    OpenRouter ``reasoning`` object, an OpenAI ``reasoning_effort``); they never redefine
+    the keys the transport owns.
+    """
 
     prompt = _prompt_with_context(
         system_prompt=system_prompt, context_text=context_text, context_chunks=context_chunks
@@ -318,6 +363,7 @@ async def generate_chat_text(
     }
     if web_config is not None:
         payload["tools"] = [_web_tool(web_config)]
+    _merge_body_fields(payload, body_fields)
     with stage_span(
         "generation.gateway_call", provider_name="LiteLLM", provider_kind="litellm", model=route.model
     ):
@@ -337,6 +383,10 @@ async def generate_chat_text(
 
         try:
             text = _response_text(data)
+        except GatewayContentMissingError as error:
+            raise GatewayContentMissingError(
+                f"LiteLLM response parse failed: {error}", finish_reason=error.finish_reason, usage=error.usage
+            ) from error
         except Exception as error:
             raise RuntimeError(f"LiteLLM response parse failed: {error}") from error
         usage = _usage(data)
@@ -377,6 +427,7 @@ async def generate_chat_text(
         cost_summary=cost,
         debug_trace_id=trace_id,
         web_grounding=web_grounding,
+        finish_reason=_finish_reason(data),
     )
 
 

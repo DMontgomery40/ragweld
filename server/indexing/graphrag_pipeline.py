@@ -31,6 +31,7 @@ from neo4j_graphrag.experimental.pipeline import Pipeline
 from neo4j_graphrag.generation.prompts import ERExtractionTemplate
 from neo4j_graphrag.llm import OpenAILLM
 
+from server.gateway_reasoning import reasoning_model_params
 from server.indexing.code_graph import CODE_GRAPH_LANGUAGES, extract_code_graph
 from server.indexing.graph_policy import GraphPolicy
 from server.models.index import Chunk, GraphResolutionTelemetry
@@ -414,32 +415,6 @@ def assemble_code_file_graph(lexical_graph: Neo4jGraph, code_graph: Neo4jGraph) 
         nodes=nodes,
         relationships=[*lexical_graph.relationships, *code_graph.relationships],
     )
-
-
-OPENROUTER_UPSTREAM_PREFIX = "openrouter/"
-
-
-def reasoning_model_params(*, reasoning_effort: str, route_upstream: str) -> dict[str, Any]:
-    """The operator's reasoning effort in the protocol of the alias's upstream.
-
-    LiteLLM maps the OpenAI ``reasoning_effort`` parameter onto OpenRouter only for models
-    its own capability map knows; every newer alias it does not know (the 2026 Gemini Flash
-    family among them) answers a request carrying it with a 400 ``UnsupportedParamsError``,
-    so a semantic run extracted nothing (follow-up finding D25). OpenRouter's native
-    ``reasoning`` object passes LiteLLM untouched in ``extra_body`` and is honoured by every
-    reasoning-capable model there and ignored by the rest, so an OpenRouter upstream gets
-    that form. An OpenAI-compatible upstream (the local vLLM lane) keeps the OpenAI
-    parameter, which is the protocol that server speaks.
-    """
-    effort = str(reasoning_effort or "").strip()
-    if not effort:
-        raise RuntimeError("GraphRAG semantic extraction requires a reasoning effort")
-    upstream = str(route_upstream or "").strip()
-    if not upstream:
-        raise RuntimeError("GraphRAG semantic extraction requires the alias's gateway upstream")
-    if upstream.startswith(OPENROUTER_UPSTREAM_PREFIX):
-        return {"temperature": 0, "extra_body": {"reasoning": {"effort": effort}}}
-    return {"temperature": 0, "reasoning_effort": effort}
 
 
 def semantic_extraction_llm(

@@ -1,0 +1,308 @@
+{
+ "corpus_id": "epstein-files-public",
+ "fetched_on": "2026-09-02",
+ "source": "POST /api/search on the live Ragweld deployment, top_k=60, reranker_mode=none",
+ "snippet_chars": 700,
+ "candidates": [
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_026224__msg_009__row_001332.txt:1-4:0",
+   "file_path": "HOUSE_OVERSIGHT_026224__msg_009__row_001332.txt",
+   "content": "can you share?\n\nEmail metadata: Jeffrey Epstein emailed Barry J. Cohen on 2017-10-02 17:20:00. Subject: \"Plane management\".\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_026216__msg_003__row_001165.txt:1-4:0",
+   "file_path": "HOUSE_OVERSIGHT_026216__msg_003__row_001165.txt",
+   "content": "Ah yes.\n\nEmail metadata: Barry J. Cohen emailed Jeffrey Epstein on 2017-10-02 20:23:25. Subject: \"Plane management\".\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_026216__msg_002__row_001164.txt:1-4:0",
+   "file_path": "HOUSE_OVERSIGHT_026216__msg_002__row_001164.txt",
+   "content": "new depreciation rules proposed under trump\n\nEmail metadata: Jeffrey Epstein emailed Barry J. Cohen on 2017-10-02 16:23:00. Subject: \"Plane management\".\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_026455__msg_001__row_001483.txt:1-4:0",
+   "file_path": "HOUSE_OVERSIGHT_026455__msg_001__row_001483.txt",
+   "content": "can you share?\n\nEmail metadata: Jeffrey Epstein emailed Barry J. Cohen <> on 2017-10-02 17:20:00. Subject: \"Fwd: Plane management\".\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_026218__msg_005__row_001171.txt:1-4:0",
+   "file_path": "HOUSE_OVERSIGHT_026218__msg_005__row_001171.txt",
+   "content": "isnt he changing the cushions? etc and adding internet?\n\nEmail metadata: Jeffrey Epstein emailed Barry J. Cohen on 2017-10-02 16:29:00. Subject: \"Plane management\".\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_026221__msg_007__row_001294.txt:1-4:0",
+   "file_path": "HOUSE_OVERSIGHT_026221__msg_007__row_001294.txt",
+   "content": "did anyone provide you with a biz plan that shows the proposal will generat a profit ?\n\nEmail metadata: Jeffrey Epstein emailed Barry J. Cohen on 2017-10-02 17:14:00. Subject: \"Plane management\".\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_026455__msg_004__row_001486.txt:1-4:0",
+   "file_path": "HOUSE_OVERSIGHT_026455__msg_004__row_001486.txt",
+   "content": "new depreciation rules proposed under trump\n\nEmail metadata: Jeffrey Epstein emailed Barry J. Cohen <> on 2017-10-02 16:23:00. Subject: \"Fwd: Plane management\".\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_026455__msg_003__row_001485.txt:1-4:0",
+   "file_path": "HOUSE_OVERSIGHT_026455__msg_003__row_001485.txt",
+   "content": "isn't he changing the cushions? etc and adding internet?\n\nEmail metadata: Jeffrey Epstein emailed Barry J. Cohen <> on 2017-10-02 16:29:00. Subject: \"Fwd: Plane management\".\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_026455__msg_002__row_001484.txt:1-4:0",
+   "file_path": "HOUSE_OVERSIGHT_026455__msg_002__row_001484.txt",
+   "content": "did anyone provide you with a biz plan that shows the proposal will generate a profit?\n\nEmail metadata: Jeffrey Epstein emailed Barry J. Cohen <> on 2017-10-02 17:14:00. Subject: \"Fwd: Plane management\".\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_026216__msg_000__row_001162.txt:1-4:0",
+   "file_path": "HOUSE_OVERSIGHT_026216__msg_000__row_001162.txt",
+   "content": "Thinking of switching from Jet Aviation to EJM. EJM is more expensive. Do you have a point of view?\n\nEmail metadata: Barry J. Cohen emailed Jeffrey Epstein on 2017-10-02 14:33:00. Subject: \"Plane management\".\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_026224__msg_010__row_001333.txt:1-4:0",
+   "file_path": "HOUSE_OVERSIGHT_026224__msg_010__row_001333.txt",
+   "content": "It won't take long to do. We're just swamped. I'll get something to you when I can. My biggest fear about taking this job is that there wouldn't be enough to do. You told me that concern was crazy. You were right.\n\nEmail metadata: Barry J. Cohen emailed Jeffrey Epstein on 2017-10-02 21:21:33. Subject: \"Plane management\".\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_026218__msg_006__row_001172.txt:1-4:0",
+   "file_path": "HOUSE_OVERSIGHT_026218__msg_006__row_001172.txt",
+   "content": "Adding Internet and possibly changing cushions. I recommended we do it with the 4 year inspection in the spring, but haven't heard back from him. I think I talked him out of automating the divans. I agreed with what you said about that.\n\nEmail metadata: Barry J. Cohen emailed Jeffrey Epstein on 2017-10-02 20:30:27. Subject: \"Plane management\".\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_026455__msg_000__row_001482.txt:1-5:0",
+   "file_path": "HOUSE_OVERSIGHT_026455__msg_000__row_001482.txt",
+   "content": "It won't take long to do. We're just swamped. I'll get something to you when I can.\nMy biggest fear about taking this job is that there wouldn't be enough to do. You told me that concern was crazy. You were right.\n\nEmail metadata: Barry J. Cohen <> emailed Jeffrey Epstein on 2017-10-02 17:21:00. Subject: \"Fwd: Plane management\".\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_029180__msg_000__row_002176.txt:1-4:600",
+   "file_path": "HOUSE_OVERSIGHT_029180__msg_000__row_002176.txt",
+   "content": " know if you might be flying to europe around then and could take a hitchhiker. :)\n\nEmail metadata: Lawrence Krauss emailed Jeffrey Epstein on 2018-08-29 18:06:32. Subject: \"Fwd: October 19, Heidelberg\". Other recipients: Lawrence Krauss.\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_016218__msg_000__row_000030.txt:18-23:2400",
+   "file_path": "HOUSE_OVERSIGHT_016218__msg_000__row_000030.txt",
+   "content": "n exchange for her signing a deal that required her to remain silent about an affair she claims to have had with Trump in 2006, shortly after the birth of his youngest son.\nThe White House has denied that Trump had sex with the adult film actress.\nNeither the White House nor Cohen had an immediate comment on Avenatti's new allegations about payments to Cohen's company.\n\nEmail metadata: Richard Kahn emailed Jeffrey Epstein on 2018-05-09 01:51:01. Subject: \"AT&T confirms it paid Trump lawyer Michael Cohen for 'insights' on administration\".\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_016218__msg_000__row_000030.txt:13-19:1800",
+   "file_path": "HOUSE_OVERSIGHT_016218__msg_000__row_000030.txt",
+   "content": "t said.\nThat CEO, Vas Narasimhan, was joined with a group of other companies' executives at that dinner.\nA Novartis spokesperson said in a statement that \"any agreements with Essential Consultants were entered before our current CEO taking office in February of this year and have expired.\"\nAvenatti's report says another company, Korea Aerospace Industries LTD, paid Essential Consultants $150,000 in November 2017.\nAvenatti's client Daniels, whose real name is Stephanie Clifford, was paid $130,000 by Essential Consultants on the eve of the 2016 presidential election.\nDaniels says the money was in exchange for her signing a deal that required her to remain silent about an affair she claims to h"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_029185__msg_001__row_002226.txt:1-4:600",
+   "file_path": "HOUSE_OVERSIGHT_029185__msg_001__row_002226.txt",
+   "content": " know if you might be flying to europe around then and could take a hitchhiker. :)\n\nEmail metadata: Lawrence Krauss <lkrauss@asu.edu> emailed Jeffrey Epstein on 2018-08-29 11:06:00. Subject: \"Re: October 19, Heidelberg\".\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_019203__msg_000__row_000120.txt:16-20:8400",
+   "file_path": "HOUSE_OVERSIGHT_019203__msg_000__row_000120.txt",
+   "content": "--the sausage really gets made in public television. I can't say I've been entirely successful in taming costs there, but I've been far better armed and more mindful of what they should be after the stern tutorial you administered.\nWhenever Templeton might be ready to evaluate another application, I'm ready for another proposal for them. I wonder if you might arrange a meeting for me with the famous Bamaby? I can't yet afford a grant writer, and so the time one of these suckers takes makes me think doing more advance reconnaissance is crucial. Would he meet with me? Kosher? I'd also love to meet with the Blacks as I get closer to making content on theatre. I hope that Debra is well.\nAnd hear"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_019203__msg_000__row_000120.txt:14-16:7800",
+   "file_path": "HOUSE_OVERSIGHT_019203__msg_000__row_000120.txt",
+   "content": "r Sonnets.\"\nJust a quick note to thank you again for all the help you've given me. The generous contribution you made last year to Verse Video Education is now in use (we've hired our new editor!). Once he helps us to plow through the work of this year, we'll begin to look forward to crafting educational content on the literature of art, sport and play (these materials now including footage from recent shoots with Shaquille O'Neal, Yo Yo Ma, Cynthia Nixon, Bono and others). 100K makes so much possible.\nBut, of course, you've also been a key preceptor as I've learned how --squirming all the way--the sausage really gets made in public television. I can't say I've been entirely successful in ta"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_019203__msg_000__row_000120.txt:17-21:9000",
+   "file_path": "HOUSE_OVERSIGHT_019203__msg_000__row_000120.txt",
+   "content": "et with the Blacks as I get closer to making content on theatre. I hope that Debra is well.\nAnd heard there's another little Jeff in the caribbean...\n\nEmail metadata: Lisa New emailed Jeffrey Epstein on 2016-12-19 04:36:41. Subject: \"Thank You from Lisa and Poetry in America\". Other recipients: Leah Reis-Dennis.\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_016218__msg_000__row_000030.txt:6-12:600",
+   "file_path": "HOUSE_OVERSIGHT_016218__msg_000__row_000030.txt",
+   "content": "tti, said AT&T had made four separate payments of $50,000 apiece to Cohen's company, for a total of $200,000 in late 2017 and into early 2018.\nThat company, Essential Consultants, was created by Cohen in October 2016 and soon after was used to make a $130,000 hush-money payment to Daniels.\nIn a prepared statement to CNBC, AT&T said Cohen's company \"was one of several firms we engaged in early 2017 to provide insights into understanding the new administration.\"\n\"They did no legal or lobbying work for us, and the contract ended in December 2017,\" AT&T said.\nThe company did not say how much it had paid Cohen, who was the president's personal lawyer at the time.\nAT&T is in the midst of pursuing "
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_011277__msg_001__row_000042.txt:8-16:1200",
+   "file_path": "HOUSE_OVERSIGHT_011277__msg_001__row_000042.txt",
+   "content": "—25-40% and stocks still cheap vs. discretionary.\n• Price action and sentiment keeps us constructive, we like the long and would expect US financials to benefit from any beta chase into year end.\n• How to play it? We still like \"appearing\" call spreads on XLF\no Buy a 6 month 105% call with a short 110% call that knock in if XLF trades above 115% during the life of the trade for 1.75% premium cost\n• Gross max payoff if knock-in is triggered: 2.8x (5.0%/1.75%)\n• Gross max payoff if knock-in is not triggered: 5.6x (9.9%/1.75%) — you have upside up to 114.9%\n\nEmail metadata: Ens, Amand emailed Jeffrey Epstein on 2016-12-09 15:46:19. Subject: \"Financials: buy XLF call spreads\". Other recipients: "
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_011280__msg_000__row_000026.txt:13-20:2400",
+   "file_path": "HOUSE_OVERSIGHT_011280__msg_000__row_000026.txt",
+   "content": "n)\nTrades Gaining Momentum: Finance-Related Assets vs. S&P 500\nIn the period since the US presidential election, the three top-performing S&P sectors and industry groups have all been finance-related (Banks, Financials, Diversified Financials)\nSource: Kensho Technologies\nThe Flow Show, Michael Hartnett, 11/18. Violent rotation: record equity ETF inflow, record financials inflow, biggest bond outflow in 3.5 yrs, record EM debt outflow.\n\nEmail metadata: Ens, Amanda emailed Jeffrey Epstein on 2016-11-22 14:15:00. Subject: \"Financials: buy XLF call spreads\". Other recipients: Richard Kahn.\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_026026__msg_003__row_000844.txt:1-4:0",
+   "file_path": "HOUSE_OVERSIGHT_026026__msg_003__row_000844.txt",
+   "content": "im here today flying to nw york tomow. if he is up to it ild love to sit with him , house or on plane if we wants a ride\n\nEmail metadata: Jeffrey Epstein emailed Michael Wolff on 2016-11-28 12:18:00.\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_011280__msg_001__row_000027.txt:1-4:0",
+   "file_path": "HOUSE_OVERSIGHT_011280__msg_001__row_000027.txt",
+   "content": "lets try, 250k premium\n\nEmail metadata: Jeffrey Epstein emailed Ens, Amanda; Richard Kahn on 2016-12-09 10:56:00. Subject: \"Financials: buy XLF call spreads\".\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_011280__msg_002__row_000028.txt:1-4:0",
+   "file_path": "HOUSE_OVERSIGHT_011280__msg_002__row_000028.txt",
+   "content": "Thank you Jeffrey. Notional is $14,285,000. I'll be back with final trade details.\n\nEmail metadata: Ens, Amanda emailed Jeffrey Epstein on 2016-12-09 16:03:45. Subject: \"Financials: buy XLF call spreads\".\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_011904__msg_000__row_000013.txt:1-8:0",
+   "file_path": "HOUSE_OVERSIGHT_011904__msg_000__row_000013.txt",
+   "content": "Let's do a men of the world conference.\nKevin spacey\nBill Clinton\nAl franken\nWoody Allen\n\nEmail metadata: Lawrence Krauss emailed Jeffrey Epstein on 2018-04-05 22:16:55.\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_011904__msg_001__row_000014.txt:1-4:0",
+   "file_path": "HOUSE_OVERSIGHT_011904__msg_001__row_000014.txt",
+   "content": "Enjoy.\n\nEmail metadata: Lawrence Krauss emailed Jeffrey Epstein on 2018-04-05 14:04:00.\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_011904__msg_002__row_000015.txt:65-88:1200",
+   "file_path": "HOUSE_OVERSIGHT_011904__msg_002__row_000015.txt",
+   "content": "\nPatricia Evangelista\nPaula Politi\nPerri Peltz\nRobin Roberts\nRonan Farrow, honorary female\nRula Jebreal\nSade Baderinwa\nSally Yates\nSam Jayaraman\nSheila Nevins\nSophie Gregoire Trudeau\nStephanie Mehta\nSunitha Krishnan\nDr. Suzanne Barakat\nTamara Chergoleishvili\nTerry Crews\nTopeka Sam\nViola Davis\nYevgenia Albats\nZainab Salbi\n\nEmail metadata: Jeffrey Epstein emailed Tina Brown on 2018-04-05 13:41:00.\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_016218__msg_000__row_000030.txt:10-15:1200",
+   "file_path": "HOUSE_OVERSIGHT_016218__msg_000__row_000030.txt",
+   "content": "d paid Cohen, who was the president's personal lawyer at the time.\nAT&T is in the midst of pursuing an $85 billion acquisition of Time Warner. The U.S. Justice Department has sued to block that deal.\nIn a report on Cohen's company, Avenatti's law firm said that Novartis in late 2017 and early 2018 made four separate payments to Essential Consultants totaling nearly $400,000.\n\"Following these payments, reports surfaced that Mr. Trump took a dinner with the incoming CEO of Novartis before Mr. Trump's speech at the World Economic Forum in Davos, Switzerland in late January 2018,\" Avenatti's report said.\nThat CEO, Vas Narasimhan, was joined with a group of other companies' executives at that din"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_011277__msg_001__row_000042.txt:5-10:600",
+   "file_path": "HOUSE_OVERSIGHT_011277__msg_001__row_000042.txt",
+   "content": "y bullish\n3) Sentiment on growth: Also bullish\n4) Sentiment on corporate tax rate cuts: buyside more bullish than sellside. In 1986, bank stocks exploded upward (outperforming the S&P) after Reagan's tax reform bill passed the Senate; and 2) in 2003, the last time we saw personal tax cuts, loan growth industry wide accelerated in 2003 and 2004.\n• Biggest Pushback on owning sector at current levels: Too far too fast: BKX +18.00% post election: Valuation coming into question and Q4 has typically been a seasonally weak qtr. Bulls defend valuation on '18ests with potential upside to 2018 [PS from —25-40% and stocks still cheap vs. discretionary.\n• Price action and sentiment keeps us constructive"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_011907__msg_000__row_000005.txt:1-4:0",
+   "file_path": "HOUSE_OVERSIGHT_011907__msg_000__row_000005.txt",
+   "content": "More bad news for our friend\n\nEmail metadata: Nicholas Ribis emailed Jeffrey Epstein on 2019-05-07 13:53:22.\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_011280__msg_000__row_000026.txt:12-15:1800",
+   "file_path": "HOUSE_OVERSIGHT_011280__msg_000__row_000026.txt",
+   "content": "or and are UW this sector in all regions.\nFuture of Financials conference hosted 90 public and private companies at our Future of Financials conference. We are raising our price objectives across most of our names. Three primary reasons why we think there is upside remaining after the recent rally: 1) an improved outlook on both activity levels and interest rates, driving revenue upside; 2) potentially lower regulatory burden, particularly as new supervisory leadership can come with the new administration; and 3) relatively lighter positioning in US financials vs. other sectors. (Erika Najarian)\nTrades Gaining Momentum: Finance-Related Assets vs. S&P 500\nIn the period since the US presidenti"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_012044__msg_000__row_000016.txt:13-18:2400",
+   "file_path": "HOUSE_OVERSIGHT_012044__msg_000__row_000016.txt",
+   "content": "n)\nIn the period since the US presidential election, the three top-performing S&P sectors and industry groups have all been finance-related (Banks, Financials, Diversified Financials)\nThe Flow Show, Michael Hartnett, 11/18. Violent rotation: record equity ETF inflow, record financials inflow, biggest bond outflow in 3.5 yrs, record EM debt outflow.\n\nEmail metadata: Ens, Amanda emailed Jeffrey Epstein on 2016-11-22 14:15:00. Subject: \"Financials: buy XLF call spreads\". Other recipients: Rich Kahn.\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_012044__msg_001__row_000017.txt:1-4:0",
+   "file_path": "HOUSE_OVERSIGHT_012044__msg_001__row_000017.txt",
+   "content": "lets try, 250k premium\n\nEmail metadata: Jeffrey Epstein emailed Ens, Amanda on 2016-12-09 15:56:27. Subject: \"Financials: buy XLF call spreads\".\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_026078__msg_003__row_000877.txt:1-4:0",
+   "file_path": "HOUSE_OVERSIGHT_026078__msg_003__row_000877.txt",
+   "content": "much to do around the trump trip. I hope you are enjoying.\n\nEmail metadata: Jeffrey Epstein emailed Jeffrey Epstein on 2017-05-14 21:35:00.\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_012102__msg_000__row_000001.txt:1-4:0",
+   "file_path": "HOUSE_OVERSIGHT_012102__msg_000__row_000001.txt",
+   "content": "https://www.nytimes.com/2019/05/06/us/politics/trump-inauguration-stephanie-winston-wolkoff.html?action=click&module=Top%20Stories&pgtype=Homepage\n\nEmail metadata: Jeffrey Epstein emailed Nicholas Ribis on 2019-05-07 04:29:00.\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_026764__msg_005__row_001606.txt:1-4:0",
+   "file_path": "HOUSE_OVERSIGHT_026764__msg_005__row_001606.txt",
+   "content": "don't you want to see what the depreciation rules are.? it depends on what you intend to do with it/? where do you stand with the renovations and the sale of the S\n\nEmail metadata: Jeffrey Epstein emailed Barry J. Cohen; Melanie Spinel! on 2017-10-02 15:42:00. Subject: \"G650 profit model\".\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_012684__msg_000__row_000035.txt:18-24:3600",
+   "file_path": "HOUSE_OVERSIGHT_012684__msg_000__row_000035.txt",
+   "content": "to help save their business.\nThe Trump organization had been working closely with Kluge and Moses on the deal, but how the partnership will play out - if they would have a future role at what would be Trump's vineyard - remained unclear Wednesday.\n\"They've been working together with the objective of trying to preserve the vineyard for the benefit of the Virginia wine industry,\" Goldman said. \"If it all comes together, it may provide them an opportunity to continue to stay involved in their life's work.\"\nYanda reported from Charlottesville. Staff researcher Magda Jean-Louis also contributed to this report.\n\nEmail metadata: Jeffrey Epstein emailed Jeffrey Epstein on 2011-02-17 18:19:01. Subjec"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_026455__msg_005__row_001487.txt:1-4:0",
+   "file_path": "HOUSE_OVERSIGHT_026455__msg_005__row_001487.txt",
+   "content": "don't you want to see what the depreciation rules are.? it depends on what you intend to do with it/? where do you stand with the renovations and the sale of the 5\n\nEmail metadata: Jeffrey Epstein emailed Barry J. Cohen <>; Melanie Spinella <> on 2017-10-02 15:42:00. Subject: \"Fwd: Plane management\".\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_012898__msg_000__row_000002.txt:1-5:0",
+   "file_path": "HOUSE_OVERSIGHT_012898__msg_000__row_000002.txt",
+   "content": "Farmer Jaffe is suing Donald Trump!\nhttp://www.mypalmbeachpost.com/news/business/lawsuit-lobbed-against-trumps-ownership-of-former-/nXjjQ/?icmp=pbp_internallink_invitationbox_apr2013_pbpstubtomypbp_launch\n\nEmail metadata: Tonja Haddad Coleman emailed Jeffrey Epstein on 2013-05-13 22:28:30. Subject: \"Farmer Jaffe is suing Donald Trump!\". Other recipients: Darren Indyke, Debbie Fein.\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_026216__msg_001__row_001163.txt:1-4:0",
+   "file_path": "HOUSE_OVERSIGHT_026216__msg_001__row_001163.txt",
+   "content": "dont you want to see what the depreciation rules are. ? it depends on what you intend to do with it/ ? where do you stand with the renovations and the sale of the 5\n\nEmail metadata: Jeffrey Epstein emailed Barry J. Cohen on 2017-10-02 15:42:00. Subject: \"Plane management\". Other recipients: Melanie Spinella.\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_013460__msg_000__row_000051.txt:24-28:6600",
+   "file_path": "HOUSE_OVERSIGHT_013460__msg_000__row_000051.txt",
+   "content": "rices of second-line TB drugs.\nThis was thanks to a growing worldwide campaign for treating AIDS wherever it occurred. Jim Kim had often said that the world's response to AIDS and TB would define the moral standing of his generation. In 2003, a new director general took over at WHO, and he asked Jim to serve as his senior adviser. Meanwhile, the example of Zanmi Lasante [PIH's Haiti-based project] was growing, and Cange had become a favorite destination for global health policy makers and American politicians.\n\nEmail metadata: Boris Nikolic emailed Jeffrey Epstein on 2012-03-23 19:10:58. Subject: \"FW: World Bank Nominee\".\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_026086__msg_009__row_001020.txt:1-4:0",
+   "file_path": "HOUSE_OVERSIGHT_026086__msg_009__row_001020.txt",
+   "content": "much to do around the trump trip. I hope you are enjoying.\n\nEmail metadata: Jeffrey Epstein emailed <MMIIIIIMIMI> on 2017-05-14 21:35:00.\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_013484__msg_000__row_000024.txt:1-4:0",
+   "file_path": "HOUSE_OVERSIGHT_013484__msg_000__row_000024.txt",
+   "content": "Same shit. Peter doesn't even attend. I will tell him that he should stop them using his name.\n\nEmail metadata: Ian Osborne emailed Jeffrey Epstein on 2012-11-28 17:55:14. Subject: \"Fwd: Invite to Dialog 2014 (16 months away)\".\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_026083__msg_007__row_000994.txt:1-4:0",
+   "file_path": "HOUSE_OVERSIGHT_026083__msg_007__row_000994.txt",
+   "content": "much to do around the trump trip. I hope you are enjoying.\n\nEmail metadata: Jeffrey Epstein emailed <IMMIIIIIMIMI> on 2017-05-14 21:35:00.\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_026221__msg_008__row_001295.txt:1-4:0",
+   "file_path": "HOUSE_OVERSIGHT_026221__msg_008__row_001295.txt",
+   "content": "On our to-do list, but back of the envelope, we satisfied ourselves that after depreciation, we would show a profit. (In part because Apollo charter payments factor in depreciation.)\n\nEmail metadata: Barry J. Cohen emailed Jeffrey Epstein on 2017-10-02 21:17:38. Subject: \"Plane management\".\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_014310__msg_000__row_000009.txt:5-12:600",
+   "file_path": "HOUSE_OVERSIGHT_014310__msg_000__row_000009.txt",
+   "content": "s if rates continue to move sharply\nFor investors long equities, we look at ways to cheapen protecting from downside risks in the event of further bond market volatility catalysed by Trump policy uncertainty\n• Buy an SPX Apr-17 95% put conditional on US 10Y CMS > 2.5% at maturity for 0.87%\nO 70% discount vs. vanilla\nO CMS ref. 2.11%, SPX ref. 2,164.2\n\nEmail metadata: Ens, Amanda emailed Jeffrey Epstein on 2016-11-15 14:44:06. Subject: \"SPX put contingent on higher rates\". Other recipients: Richard Kahn.\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_026033__msg_009__row_000903.txt:1-4:0",
+   "file_path": "HOUSE_OVERSIGHT_026033__msg_009__row_000903.txt",
+   "content": "They came back to New York yesterday. He would like to meet, tho wary of being seen, etc. I will work it out.\n\nEmail metadata: Michael Wolff emailed Jeffrey Epstein on 2016-11-29 08:19:00.\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_014312__msg_000__row_000043.txt:9-12:2400",
+   "file_path": "HOUSE_OVERSIGHT_014312__msg_000__row_000043.txt",
+   "content": "l flowing into the economy to drive growth. Not only does that mean that the E is likely too low (meaning that the P/E is not as high as it seems) but it could help improve ROE's as well which could increase the multiple of that higher E investors are willing to pay. Note that while ROEs could go higher, it's unlikely that they can get back to the peaks...\n\nEmail metadata: Ens, Amanda emailed Jeffrey Epstein on 2016-11-11 16:04:00. Subject: \"Financials trade for Monday\". Other recipients: Richard Kahn.\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_026173__msg_000__row_001134.txt:1-4:0",
+   "file_path": "HOUSE_OVERSIGHT_026173__msg_000__row_001134.txt",
+   "content": "very well .. safe travel\n\nEmail metadata: Sheikh emailed Jeffrey Epstein on 2017-09-22 02:43:24.\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_014312__msg_001__row_000044.txt:7-10:1200",
+   "file_path": "HOUSE_OVERSIGHT_014312__msg_001__row_000044.txt",
+   "content": "of 2.0x, Global valuations are reasonable. Also, Risk is near all-time lows in terms of PE in most regions. Now that macro and earnings data have triggered the beginning of a rotation, Value becomes very relevant.\n\nEmail metadata: Ens, Amanda emailed Jeffrey Epstein on 2016-11-14 12:05:00. Subject: \"Financials trade for Monday\". Other recipients: Richard Kahn.\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_026764__msg_000__row_001601.txt:1-4:0",
+   "file_path": "HOUSE_OVERSIGHT_026764__msg_000__row_001601.txt",
+   "content": "You asked for this a while back. It's not particularly self-explanatory. Joe V reviewed it with Ruth Wimer and Dave Deyoe, our aviation and aviation tax counsel at MWE. Let either of us know if you'd like to go over it.\n\nEmail metadata: Barry J. Cohen emailed Jeffrey Epstein on 2017-10-23 14:43:33. Subject: \"G650 profit model\". Other recipients: Joseph Vinciguerra.\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_014312__msg_002__row_000045.txt:6-9:1200",
+   "file_path": "HOUSE_OVERSIGHT_014312__msg_002__row_000045.txt",
+   "content": "ervisory leadership can come with the new administration; and 3) relatively lighter positioning in US financials vs. other sectors. (Erika Najarian)\n\nEmail metadata: Ens, Amanda emailed Jeffrey Epstein on 2016-11-17 18:05:47. Subject: \"Financials trade for Monday\". Other recipients: Richard Kahn.\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_028847__msg_002__row_001787.txt:1-4:0",
+   "file_path": "HOUSE_OVERSIGHT_028847__msg_002__row_001787.txt",
+   "content": "Flying to LA. Will try to call when I land.11AM Pacific or so.\n\nEmail metadata: Joi Ito [ emailed Jeffrey Epstein on 2014-04-27 14:34:04. Subject: \"Re: NYTimes: Sanctions Revive Search for Secret Putin Fortune\".\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_026218__msg_002__row_001168.txt:1-4:0",
+   "file_path": "HOUSE_OVERSIGHT_026218__msg_002__row_001168.txt",
+   "content": "GV is in inspection and going well. Not sure what renovations you mean? On depreciation, we think we cannot use accelerated due to foreign travel preponderance, and obviously can't use bonus because not new. We think we are stuck with straight-line depreciation which will be passive. Are you saying that Jet vs. EJM could hinge on the type of plane usage? Not sure I follow that.\n\nEmail metadata: Barry J. Cohen emailed Jeffrey Epstein on 2017-10-02 16:13:00. Subject: \"Plane management\".\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_014516__msg_000__row_000003.txt:1-4:0",
+   "file_path": "HOUSE_OVERSIGHT_014516__msg_000__row_000003.txt",
+   "content": "(no extracted message body available)\n\nEmail metadata: Richard Kahn emailed Jeffrey Epstein on 2016-12-15 17:40:04. Subject: \"Fwd: 2016 Election: Tax Changes Expected\".\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_026237__msg_002__row_001451.txt:1-4:0",
+   "file_path": "HOUSE_OVERSIGHT_026237__msg_002__row_001451.txt",
+   "content": "i m ok.. still waiting for new york trip .. taking the family to dubai for new year\n\nEmail metadata: <REDACTED> emailed Jeffrey Epstein on 2017-12-22 07:03:00.\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_029180__msg_005__row_002181.txt:1-5:0",
+   "file_path": "HOUSE_OVERSIGHT_029180__msg_005__row_002181.txt",
+   "content": "Hi Jakob\nThere has been a complication. The Gottingen event had to be cancelled so that means I now do not have an air ticket to Germany. I am going to check whether I can arrange anything in the Uk which might cover part of the cost for a new ticket. In the meantime I thought I should let you know and ask whether it is possible to cover part or all of the cost for a ticket.\n\nEmail metadata: Lawrence Krauss emailed Jakob Kollhofer on 2018-08-17 16:37:00. Subject: \"Fwd: October 19, Heidelberg\".\n"
+  },
+  {
+   "chunk_id": "HOUSE_OVERSIGHT_014523__msg_000__row_000018.txt:1-4:0",
+   "file_path": "HOUSE_OVERSIGHT_014523__msg_000__row_000018.txt",
+   "content": "attached are equity healthcare ideas\n\nEmail metadata: Richard Kahn emailed Jeffrey Epstein on 2016-12-15 17:46:20. Subject: \"Fwd: US Healthcare Year Ahead...Buy ACAD, AGN, ANTM, CELG, CVS, DHR, EW, EVHC, RARE, REGN, WBA\".\n"
+  }
+ ]
+}

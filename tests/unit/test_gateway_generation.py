@@ -65,7 +65,7 @@ class _GatewayHandler(BaseHTTPRequestHandler):
         body = json.dumps(
             {
                 "id": "resp-nonstream",
-                "choices": [{"message": {"role": "assistant", "content": "Hello gateway"}}],
+                "choices": [{"message": {"role": "assistant", "content": "Hello gateway"}, "finish_reason": "stop"}],
                 "usage": {"prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6},
             }
         ).encode()
@@ -119,6 +119,7 @@ async def test_nonstream_uses_one_authenticated_openai_compatible_request() -> N
     assert result.provider_response_id == "resp-nonstream"
     assert result.debug_trace_id == "trace-nonstream"
     assert result.usage == {"prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6}
+    assert result.finish_reason == "stop"
     assert len(_GatewayHandler.requests) == 1
     request = _GatewayHandler.requests[0]
     assert request["path"] == "/v1/chat/completions"
@@ -126,6 +127,41 @@ async def test_nonstream_uses_one_authenticated_openai_compatible_request() -> N
     assert request["payload"]["model"] == "ragweld-local"
     assert request["payload"]["max_tokens"] == 8
     assert request["payload"]["stream"] is False
+    assert "reasoning" not in request["payload"] and "reasoning_effort" not in request["payload"]
+
+
+@pytest.mark.asyncio
+async def test_nonstream_body_fields_ride_at_the_top_level_of_the_request() -> None:
+    """A lane's reasoning control (defect D26) is a top-level body key in the upstream's own
+    protocol; the transport carries it verbatim and never lets it redefine its own keys."""
+    with _gateway_server() as base_url:
+        result = await generate_chat_text(
+            route=_route(base_url, model="openai.gpt-5.6-luna"),
+            system_prompt="You are a retrieval reranker.",
+            user_message="Which plane management company did Barry Cohen consider switching to from Jet Aviation?",
+            images=[],
+            temperature=0,
+            max_tokens=8,
+            context_chunks=[],
+            body_fields={"reasoning": {"effort": "none"}},
+        )
+        assert result.text == "Hello gateway"
+        payload = _GatewayHandler.requests[-1]["payload"]
+        assert payload["reasoning"] == {"effort": "none"}
+        assert payload["max_tokens"] == 8 and payload["model"] == "openai.gpt-5.6-luna"
+
+        with pytest.raises(ValueError, match="max_tokens"):
+            await generate_chat_text(
+                route=_route(base_url, model="openai.gpt-5.6-luna"),
+                system_prompt="You are a retrieval reranker.",
+                user_message="Which plane management company did Barry Cohen consider switching to from Jet Aviation?",
+                images=[],
+                temperature=0,
+                max_tokens=8,
+                context_chunks=[],
+                body_fields={"max_tokens": 4096},
+            )
+    assert len(_GatewayHandler.requests) == 1
 
 
 @pytest.mark.asyncio
