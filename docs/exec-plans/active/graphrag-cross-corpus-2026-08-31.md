@@ -905,3 +905,14 @@ carry S numbers; the working scratchpad with every row lives with the session an
   answer stream no longer records "retrieval-only" as its model; the monkeypatch answer-stream test is replaced by a
   real one (seeded corpus + a local gateway streaming only `[DONE]`); `Reranker.rerank()` is deleted. Round-3 gate
   and codex approval #4 in flight.
+- **Codex approval #4 (on 4ba4f3f1): BLOCK — one more P1, fixed in cf93d0a6.** A client that closed the chat stream
+  mid-answer (or a cancelled task) bypassed the failure flags and the wrapper's `finally` stored the fragment with
+  the question. Only a `done` event persists now; an exchange that never reaches one takes its question back out.
+  Proof needed a real socket: httpx's ASGI transport buffers the whole body, and a uvicorn thread inside pytest
+  crashed at shutdown, so `tests/api/live_server.py` runs the app in a uvicorn subprocess and the test reads
+  `/api/chat/history/{id}` (RED: the question plus `'The plane '`; GREEN: `[]`). P2s: failed answer streams trace
+  as `answer.error`; the untyped answer-retrieval failure is `AnswerRetrievalFailureDetail` (503) on both routes and
+  in the OpenAPI contract; the MCP answer tool returns a typed `MCPAnswerToolResult` envelope (proved on the
+  subprocess server with a real MCP session — the MCP session manager starts once per process, so a second in-process
+  lifespan cannot); the edited chat-history test uses the shared real gateway instead of `patch`. Round-4 gate and
+  codex approval #5 in flight.
