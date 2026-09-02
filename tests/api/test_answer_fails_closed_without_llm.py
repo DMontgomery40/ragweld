@@ -196,3 +196,38 @@ async def test_answer_stream_with_an_empty_provider_stream_fails_and_writes_no_c
             assert "retrieval-only" not in json.dumps(events).lower()
         finally:
             await _cleanup(pg, repo_id)
+
+
+@pytest.mark.asyncio
+async def test_a_failed_retrieval_is_a_typed_503_on_both_answer_routes_never_an_answer(
+    client: AsyncClient,
+) -> None:
+    """An indexed corpus whose stored Qdrant URL is then broken: the vector leg cannot run,
+    so both answer routes answer the typed retrieval 503 (``required_retrieval_leg_failed``)
+    and no generation happens - never an ungrounded answer, never "generation unavailable".
+    (The untyped wrapper for failures no typed error names is covered at the helper in
+    ``tests/unit/test_answer_service_retrieval.py``; it has no HTTP trigger without faults.)"""
+    pg = PostgresClient("postgresql://ignored")
+    await pg.connect()
+    repo_id = await _seeded_corpus(pg)
+    try:
+        cfg = load_config()
+        cfg.chat.litellm.enabled = True
+        cfg.chat.litellm.default_model = "openai.gpt-5.6-luna"
+        cfg.qdrant.url = "http://127.0.0.1:9"  # nothing listens on the discard port
+        await pg.upsert_corpus_config_json(repo_id, cfg.model_dump(mode="serialization"))
+        body = {**_request(repo_id), "include_vector": True, "include_sparse": True}
+
+        resp = await client.post("/api/answer", json=body)
+        assert resp.status_code == 503, resp.text
+        detail = resp.json().get("detail") or {}
+        assert detail.get("code") in {"required_retrieval_leg_failed", "dependency_unavailable"}, detail
+        assert "answer" not in resp.json()
+        assert "generation" not in json.dumps(detail).lower()
+
+        stream = await client.post("/api/answer/stream", json=body)
+        assert stream.status_code == 503, stream.text
+        detail = stream.json().get("detail") or {}
+        assert detail.get("code") in {"required_retrieval_leg_failed", "dependency_unavailable"}, detail
+    finally:
+        await _cleanup(pg, repo_id)

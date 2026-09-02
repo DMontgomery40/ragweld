@@ -28,6 +28,12 @@ from server.models.tribrid_config_model import (
     RetrievalContractMismatchDetail,
 )
 from server.chat.generation_failure import generation_unavailable_detail
+from server.dependency_errors import (
+    DependencyName,
+    is_neo4j_unavailable,
+    is_postgres_unavailable,
+    is_required_dependency_unavailable,
+)
 from server.retrieval.errors import (
     AnswerRetrievalFailedError,
     RequiredRetrievalLegError,
@@ -170,9 +176,6 @@ def register_mcp_tools(mcp: FastMCP, cfg: MCPConfig) -> None:
         if not query.strip():
             raise ValueError("Query must not be empty")
 
-        await _ensure_corpus_exists(corpus_id)
-        scoped_cfg = await load_scoped_config(repo_id=corpus_id)
-
         effective_mode: MCPMode = mode or cfg.default_mode
         include_vector, include_sparse, include_graph = _mode_to_flags(effective_mode)
         effective_top_k = int(top_k or cfg.default_top_k)
@@ -181,8 +184,11 @@ def register_mcp_tools(mcp: FastMCP, cfg: MCPConfig) -> None:
 
         t0 = time.perf_counter()
         # Every failure is a typed tool error (isError=true), never an answer without context
-        # or a "retrieval-only" text: the same boundary contract as /api/answer.
+        # or a "retrieval-only" text: the same boundary contract as /api/answer. The corpus
+        # and config lookups are inside the same guard, so a store outage there is typed too.
         try:
+            await _ensure_corpus_exists(corpus_id)
+            scoped_cfg = await load_scoped_config(repo_id=corpus_id)
             text, sources, provider_info, debug = await answer_best_effort(
                 query=query,
                 corpus_id=corpus_id,
@@ -205,7 +211,18 @@ def register_mcp_tools(mcp: FastMCP, cfg: MCPConfig) -> None:
             )
         except DependencyUnavailableError as exc:
             return _answer_tool_result(error=_dependency_error_detail(exc))
+        except ValueError:
+            raise  # "Corpus not found": the tool's own argument error, not a runtime failure
         except Exception as exc:
+            if is_required_dependency_unavailable(exc):
+                dependency: DependencyName = (
+                    "postgres" if is_postgres_unavailable(exc) else "neo4j" if is_neo4j_unavailable(exc) else "qdrant"
+                )
+                return _answer_tool_result(
+                    error=_dependency_error_detail(
+                        DependencyUnavailableError(dependency=dependency, operation="MCP answer retrieval")
+                    )
+                )
             return _answer_tool_result(error=generation_unavailable_detail(exc, operation="MCP answer generation"))
         dt_ms = (time.perf_counter() - t0) * 1000.0
 

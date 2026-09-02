@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 import uuid
@@ -16,6 +17,7 @@ from server.api.dependency_errors import (
 )
 from server.api.generation_errors import (
     ANSWER_RUNTIME_UNAVAILABLE_RESPONSES,
+    ANSWER_STREAM_RUNTIME_UNAVAILABLE_RESPONSES,
     generation_unavailable_http_exception,
 )
 from server.api.retrieval_errors import (
@@ -376,7 +378,13 @@ async def answer(request: AnswerRequest, response: Response) -> AnswerResponse:
         )
 
 
-@router.post("/answer/stream")
+async def _close_answer_trace(run_id: str, ended_at_ms: int | None) -> None:
+    trace_store = get_trace_store()
+    await trace_store.annotate(run_id, **current_trace_payload_fields())
+    await trace_store.end(run_id, ended_at_ms=ended_at_ms)
+
+
+@router.post("/answer/stream", responses=ANSWER_STREAM_RUNTIME_UNAVAILABLE_RESPONSES)
 async def answer_stream(request: AnswerRequest) -> StreamingResponse:
     if not request.query.strip():
         raise HTTPException(status_code=400, detail="Query must not be empty")
@@ -578,8 +586,11 @@ async def answer_stream(request: AnswerRequest) -> StreamingResponse:
             raise
         finally:
             if trace_enabled:
-                await trace_store.annotate(run_id, **current_trace_payload_fields())
-                await trace_store.end(run_id, ended_at_ms=ended_at_ms)
+                # Shielded: a cancellation delivered here must not leave the trace open.
+                try:
+                    await asyncio.shield(_close_answer_trace(run_id, ended_at_ms))
+                except asyncio.CancelledError:
+                    pass
             observation.finish(caught_exc)
             stream_scope.__exit__(*caught_exc)
 

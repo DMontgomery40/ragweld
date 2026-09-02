@@ -554,29 +554,6 @@ async def stream_answer_best_effort(
         }
     )
 
-    if bool(llm_used) and bool(accumulated.strip()) and float(temperature) <= float(
-        config.semantic_cache.max_temperature_for_write
-    ):
-        cache_written = await cache_service.write(
-            endpoint="answer",
-            scope_key=cache_scope_key,
-            query=query,
-            request_fingerprint=cache_request_fingerprint,
-            payload={
-                "answer": accumulated,
-                "provider": provider_info.model_dump(mode="serialization") if provider_info is not None else None,
-            },
-            cache_mode=normalized_cache_mode,
-        )
-        debug = debug.model_copy(
-            update={
-                "fusion_debug": {
-                    **(debug.fusion_debug or {}),
-                    "cache_write": bool(cache_written),
-                    "cache_namespace": "answer_generation",
-                }
-            }
-        )
 
     sources_json = [s.model_dump(mode="serialization", by_alias=True) for s in chunks]
     done_event_payload: dict[str, Any] = {
@@ -595,3 +572,22 @@ async def stream_answer_best_effort(
     done_event_payload["ended_at_ms"] = int(ended_at_ms)
 
     yield f"data: {json.dumps(done_event_payload)}\n\n"
+
+    # `done` is on the wire: only now write the semantic cache, so a client that went away
+    # mid-answer leaves nothing durable behind. The done event carried no cache_write flag
+    # for this write; a later identical request reports the hit.
+    if bool(llm_used) and bool(accumulated.strip()) and float(temperature) <= float(
+        config.semantic_cache.max_temperature_for_write
+    ):
+        await cache_service.write(
+            endpoint="answer",
+            scope_key=cache_scope_key,
+            query=query,
+            request_fingerprint=cache_request_fingerprint,
+            payload={
+                "answer": accumulated,
+                "provider": provider_info.model_dump(mode="serialization") if provider_info is not None else None,
+            },
+            cache_mode=normalized_cache_mode,
+        )
+

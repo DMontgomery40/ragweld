@@ -343,21 +343,34 @@ class TestStreamEndpoint:
 
     @pytest.mark.asyncio
     async def test_stream_returns_sse(self, chat_client: AsyncClient):
-        """Test that stream endpoint returns SSE format."""
-
-        async def mock_stream_chat_text(*args, **kwargs):
-            _ = (args, kwargs)
-            yield "Hello"
-            yield " world"
-
-        with patch("server.chat.handler.stream_chat_text", new=mock_stream_chat_text):
-            response = await chat_client.post(
-                "/api/chat/stream",
-                json={"message": "Test", "sources": {"corpus_ids": []}},
-            )
-
-            assert response.status_code == 200
-            assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
+        """The stream endpoint answers as SSE from a real (local) gateway: text deltas, then
+        the terminal `done` event."""
+        cfg = TriBridConfig()
+        cfg.chat.litellm.enabled = True
+        cfg.chat.litellm.default_model = "openai.gpt-5.6-luna"
+        with slow_delta_gateway(delay_seconds=0.05) as base_url, gateway_env(base_url):
+            cfg.chat.litellm.base_url = base_url
+            set_config(cfg)
+            try:
+                response = await chat_client.post(
+                    "/api/chat/stream",
+                    json={
+                        "message": "Which plane management company did Barry Cohen consider switching to?",
+                        "sources": {"corpus_ids": []},
+                    },
+                )
+                assert response.status_code == 200
+                assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
+                events = [
+                    json.loads(line[len("data: ") :])
+                    for line in response.text.splitlines()
+                    if line.startswith("data: ")
+                ]
+                kinds = [str(e.get("type")) for e in events]
+                assert "text" in kinds and kinds[-1] == "done", kinds
+                assert "".join(e.get("content", "") for e in events if e.get("type") == "text").startswith("The plane")
+            finally:
+                set_config(None)
 
     @pytest.mark.asyncio
     async def test_stream_with_no_provider_output_persists_no_exchange(self, chat_client: AsyncClient):
@@ -444,6 +457,71 @@ class TestStreamEndpoint:
                     assert history.status_code == 200, history.text
                     messages = history.json()
                     assert messages == [], messages
+
+
+    @pytest.mark.asyncio
+    async def test_stream_closed_after_the_last_delta_persists_and_caches_nothing(self, tmp_path: Path):
+        """The client has every content token but leaves before the terminal `done` event is
+        sent: the exchange is still unfinished, so the conversation history, the semantic
+        cache and the trace must show no completed exchange. Observed through the app's own
+        boundaries on a uvicorn subprocess: the history route, a repeat of the same question
+        (no cache hit) and the latest trace (ended)."""
+        import httpx
+
+        question = "Which plane management company did Barry Cohen consider switching to?"
+        conversation_id = f"stream-late-{uuid.uuid4().hex[:8]}"
+        with slow_delta_gateway(delay_seconds=0.1, final_delay_seconds=3.0) as base_url, gateway_env(base_url):
+            cfg = load_config()
+            cfg.chat.litellm.enabled = True
+            cfg.chat.litellm.base_url = base_url
+            cfg.chat.litellm.default_model = "openai.gpt-5.6-luna"
+            cfg.chat.recall.enabled = False
+            cfg.semantic_cache.enabled = 1
+            cfg.semantic_cache.mode = "read_write"
+            cfg.semantic_cache.min_query_chars = 1
+            config_path = tmp_path / "tribrid_config.json"
+            config_path.write_text(json.dumps(cfg.model_dump(mode="serialization")), encoding="utf-8")
+            with live_app_subprocess(
+                config_path=config_path,
+                env={"LITELLM_BASE_URL": base_url, "LITELLM_API_KEY": "pytest-fake-gateway-key"},
+            ) as live_url:
+                async with httpx.AsyncClient(base_url=live_url, timeout=60.0) as client:
+                    text_events = 0
+                    async with client.stream(
+                        "POST",
+                        "/api/chat/stream",
+                        json={"message": question, "sources": {"corpus_ids": []}, "conversation_id": conversation_id},
+                    ) as response:
+                        assert response.status_code == 200
+                        async for line in response.aiter_lines():
+                            if line.startswith("data: ") and '"text"' in line:
+                                text_events += 1
+                                if text_events == 4:
+                                    break  # every delta received; the terminator is still 3 s away
+                    assert text_events == 4
+                    await asyncio.sleep(4.5)  # past the terminator: the server side has settled
+                    history = await client.get(f"/api/chat/history/{conversation_id}")
+                    assert history.status_code == 200 and history.json() == [], history.text
+                    latest = await client.get("/api/traces/latest")
+                    assert latest.status_code == 200, latest.text
+                    trace = (latest.json() or {}).get("trace") or {}
+                    assert trace.get("ended_at_ms") is not None, trace
+                    # The same question again, read to the end: nothing was cached by the
+                    # abandoned exchange, so this is not a cache hit.
+                    again = await client.post(
+                        "/api/chat/stream",
+                        json={"message": question, "sources": {"corpus_ids": []}, "conversation_id": conversation_id},
+                    )
+                    assert again.status_code == 200
+                    events = [
+                        json.loads(line[len("data: ") :])
+                        for line in again.text.splitlines()
+                        if line.startswith("data: ")
+                    ]
+                    done = next(e for e in events if e.get("type") == "done")
+                    fusion_debug = ((done.get("debug") or {}).get("fusion_debug")) or {}
+                    assert not fusion_debug.get("cache_hit"), fusion_debug
+                    assert fusion_debug.get("cache_lookup_outcome") != "hit", fusion_debug
 
 
 class TestChatCitationsRealPipeline:

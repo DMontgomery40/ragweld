@@ -59,6 +59,13 @@ def test_stateful_api_openapi_documents_typed_dependency_503() -> None:
             "GenerationUnavailableResponse",
             "AnswerRetrievalFailureResponse",
         },
+        ("/api/answer/stream", "post"): {
+            "DependencyUnavailableResponse",
+            "RequiredRetrievalLegFailureResponse",
+            "RerankerFailureResponse",
+            "AnswerRetrievalFailureResponse",
+            "IndexDeletionIncompleteResponse",
+        },
         ("/api/chat", "post"): {
             "DependencyUnavailableResponse",
             "GenerationUnavailableResponse",

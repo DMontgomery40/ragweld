@@ -1008,27 +1008,9 @@ async def chat_stream(
         yield f"data: {json.dumps(done_event_payload)}\n\n"
         return
 
-    if provider_response_id:
-        conversation.last_provider_response_id = provider_response_id
-
-    if (
-        bool(llm_used)
-        and bool(accumulated.strip())
-        and cache_allowed
-        and float(temperature) <= float(config.semantic_cache.max_temperature_for_write)
-    ):
-        cache_written = await cache_service.write(
-            endpoint="chat",
-            scope_key=cache_scope_key,
-            query=request.message,
-            request_fingerprint=cache_request_fingerprint,
-            payload={
-                "message": accumulated,
-                "provider": provider_info.model_dump(mode="serialization") if provider_info is not None else None,
-                "provider_response_id": provider_response_id,
-            },
-            cache_mode=request_cache_mode,
-        )
+        # The semantic-cache write happens after `done` is delivered (below), so the done
+        # event cannot report it: this flag is the state at delivery time.
+        cache_written = False
         try:
             dbg = dict(getattr(fusion, "last_debug", None) or {})
             dbg.update(
@@ -1059,3 +1041,26 @@ async def chat_stream(
         "web_grounding": web_grounding.model_dump(mode="json"),
     }
     yield f"data: {json.dumps(done_event_payload)}\n\n"
+    # `done` is on the wire: only now update provider state and the semantic cache, so a
+    # client that went away mid-answer leaves nothing durable behind.
+    if provider_response_id:
+        conversation.last_provider_response_id = provider_response_id
+
+    if (
+        bool(llm_used)
+        and bool(accumulated.strip())
+        and cache_allowed
+        and float(temperature) <= float(config.semantic_cache.max_temperature_for_write)
+    ):
+        cache_written = await cache_service.write(
+            endpoint="chat",
+            scope_key=cache_scope_key,
+            query=request.message,
+            request_fingerprint=cache_request_fingerprint,
+            payload={
+                "message": accumulated,
+                "provider": provider_info.model_dump(mode="serialization") if provider_info is not None else None,
+                "provider_response_id": provider_response_id,
+            },
+            cache_mode=request_cache_mode,
+        )

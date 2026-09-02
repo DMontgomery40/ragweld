@@ -497,6 +497,13 @@ async def chat(request: ChatRequest, response: Response) -> ChatResponse:
             raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+
+async def _close_chat_trace(run_id: str, ended_at_ms: int | None) -> None:
+    trace_store = get_trace_store()
+    await trace_store.annotate(run_id, **current_trace_payload_fields())
+    await trace_store.end(run_id, ended_at_ms=ended_at_ms)
+
+
 @router.post(
     "/chat/stream",
     responses={**RETRIEVAL_RUNTIME_UNAVAILABLE_RESPONSES, 413: CHAT_RUNTIME_UNAVAILABLE_RESPONSES[413]},
@@ -571,10 +578,9 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
             },
         )
 
-    # Store the user message before streaming
-    user_msg = Message(role="user", content=request.message)
-    store.add_message(conv.id, user_msg, None)
-
+    # Nothing durable is written before the terminal `done` event is on the wire: the user
+    # message and the answer are persisted together after it, so an exchange that fails,
+    # is cancelled, or loses its client leaves no trace in the conversation history.
     handler_stream = chat_stream_handler(
         request=request,
         config=config,
@@ -587,11 +593,18 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
         first_sse = await anext(handler_stream)
     except StopAsyncIteration:
         first_sse = None
+    except asyncio.CancelledError:
+        # Cancelled while retrieval or the first provider token was pending: close the
+        # trace and the span here, because the wrapper that would has not started yet.
+        if trace_enabled:
+            try:
+                await asyncio.shield(trace_store.end(run_id))
+            except asyncio.CancelledError:
+                pass
+        setup_scope.__exit__(None, None, None)
+        observation.finish((None, None, None))
+        raise
     except Exception as e:
-        try:
-            store.remove_last_message(conv.id, role="user", content=request.message)
-        except Exception:
-            pass
         if trace_enabled:
             await trace_store.add_event(run_id, kind="chat.error", msg=str(e), data={})
             await trace_store.annotate(run_id, **current_trace_payload_fields())
@@ -619,7 +632,6 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
         ended_at_ms: int | None = None
         accumulated = ""
         query_log_appended = False
-        assistant_persisted = False
         generation_failed = False
         caught_exc: tuple[type[BaseException] | None, BaseException | None, Any] = (None, None, None)
         # This is the task that owns the rest of the request, so it attaches and detaches
@@ -652,10 +664,6 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                         # No exchange happened: the error event already told the client, and
                         # neither the failure text nor the unanswered question belongs in the
                         # durable history (Recall would index it as a conversation).
-                        try:
-                            store.remove_last_message(conv.id, role="user", content=request.message)
-                        except Exception:
-                            pass
                         if trace_enabled:
                             await trace_store.add_event(
                                 run_id,
@@ -689,53 +697,6 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                         yield f"data: {json.dumps(payload)}\n\n"
                         continue
 
-                    # Persist assistant message now that we have full content.
-                    assistant_msg = Message(role="assistant", content=accumulated)
-                    provider_id: str | None = None
-                    raw_provider_id = payload.get("provider_response_id")
-                    if isinstance(raw_provider_id, str) and raw_provider_id.strip():
-                        provider_id = raw_provider_id.strip()
-                    store.add_message(conv.id, assistant_msg, provider_id)
-                    assistant_persisted = True
-
-                    # Best-effort Recall indexing (only when recall_default is selected).
-                    corpus_ids = resolve_sources(request.sources)
-                    if (
-                        config.chat.recall.enabled
-                        and config.chat.recall.auto_index
-                        and (config.chat.recall.default_corpus_id in set(corpus_ids))
-                    ):
-                        async def _do_index() -> None:
-                            delay = int(config.chat.recall.index_delay_seconds or 0)
-                            if delay > 0:
-                                await asyncio.sleep(delay)
-                            pg = PostgresClient(config.indexing.postgres_url)
-                            await pg.connect()
-                            embedder = Embedder(config.embedding)
-                            configure_postgres_embedding_cache_backend(embedder, pg)
-                            try:
-                                await index_recall_conversation(
-                                    pg,
-                                    QdrantChunkStore(config),
-                                    conversation_id=conv.id,
-                                    messages=store.get_messages(conv.id),
-                                    config=config.chat.recall,
-                                    embedder=embedder,
-                                )
-                            except RetrievalContractMismatchError as e:
-                                logger.warning(
-                                    "Recall auto-index blocked by embedding contract mismatch: %s", e
-                                )
-                            except RecallConversationIdError as e:
-                                # Same as above: an unretrieved task exception would drop
-                                # this conversation out of recall with no trace.
-                                logger.warning(
-                                    "Recall auto-index skipped for conversation %s: %s",
-                                    conv.id,
-                                    e,
-                                )
-
-                        asyncio.create_task(_do_index())
 
                     # Attach debug info for frontend compatibility.
                     from server.models.chat_config import RecallPlan as RecallPlanModel
@@ -852,6 +813,54 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                         await trace_store.annotate(run_id, **current_trace_payload_fields())
 
                     yield f"data: {json.dumps(payload)}\n\n"
+                    # `done` is on the wire: persist the exchange now, both messages together,
+                    # then let Recall see the finished conversation.
+                    store.add_message(conv.id, Message(role="user", content=request.message), None)
+                    assistant_msg = Message(role="assistant", content=accumulated)
+                    provider_id: str | None = None
+                    raw_provider_id = payload.get("provider_response_id")
+                    if isinstance(raw_provider_id, str) and raw_provider_id.strip():
+                        provider_id = raw_provider_id.strip()
+                    store.add_message(conv.id, assistant_msg, provider_id)
+
+                    # Best-effort Recall indexing (only when recall_default is selected).
+                    corpus_ids = resolve_sources(request.sources)
+                    if (
+                        config.chat.recall.enabled
+                        and config.chat.recall.auto_index
+                        and (config.chat.recall.default_corpus_id in set(corpus_ids))
+                    ):
+                        async def _do_index() -> None:
+                            delay = int(config.chat.recall.index_delay_seconds or 0)
+                            if delay > 0:
+                                await asyncio.sleep(delay)
+                            pg = PostgresClient(config.indexing.postgres_url)
+                            await pg.connect()
+                            embedder = Embedder(config.embedding)
+                            configure_postgres_embedding_cache_backend(embedder, pg)
+                            try:
+                                await index_recall_conversation(
+                                    pg,
+                                    QdrantChunkStore(config),
+                                    conversation_id=conv.id,
+                                    messages=store.get_messages(conv.id),
+                                    config=config.chat.recall,
+                                    embedder=embedder,
+                                )
+                            except RetrievalContractMismatchError as e:
+                                logger.warning(
+                                    "Recall auto-index blocked by embedding contract mismatch: %s", e
+                                )
+                            except RecallConversationIdError as e:
+                                # Same as above: an unretrieved task exception would drop
+                                # this conversation out of recall with no trace.
+                                logger.warning(
+                                    "Recall auto-index skipped for conversation %s: %s",
+                                    conv.id,
+                                    e,
+                                )
+
+                        asyncio.create_task(_do_index())
                     continue
 
                 if typ == "error":
@@ -871,17 +880,14 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                 await trace_store.add_event(run_id, kind="chat.error", msg=str(e), data={})
             raise
         finally:
-            if not assistant_persisted:
-                # Only a `done` event persists an assistant message (above). Reaching here
-                # without one means the exchange did not complete, whatever was streamed:
-                # persist nothing and take the unanswered question back out of the history.
-                try:
-                    store.remove_last_message(conv.id, role="user", content=request.message)
-                except Exception:
-                    pass
+            # Nothing was persisted before `done`, so an exchange that never reached it has
+            # nothing to roll back. The trace close-out is shielded: a second cancellation
+            # delivered here must not leave the trace open or the span unfinished.
             if trace_enabled:
-                await trace_store.annotate(run_id, **current_trace_payload_fields())
-                await trace_store.end(run_id, ended_at_ms=ended_at_ms)
+                try:
+                    await asyncio.shield(_close_chat_trace(run_id, ended_at_ms))
+                except asyncio.CancelledError:
+                    pass
             observation.finish(caught_exc)
             stream_scope.__exit__(*caught_exc)
 

@@ -66,6 +66,7 @@ class _SlowDeltaGateway(BaseHTTPRequestHandler):
 
     deltas: tuple[str, ...] = ("The plane ", "management ", "company was ", "Jet Aviation.")
     delay_seconds: float = 0.4
+    final_delay_seconds: float = 0.0
     requests: list[dict] = []
 
     def log_message(self, _format: str, *_args: object) -> None:
@@ -94,6 +95,8 @@ class _SlowDeltaGateway(BaseHTTPRequestHandler):
                 self.wfile.write(f"data: {json.dumps(chunk)}\n\n".encode())
                 self.wfile.flush()
                 time.sleep(type(self).delay_seconds)
+            if type(self).final_delay_seconds > 0:
+                time.sleep(type(self).final_delay_seconds)
             self.wfile.write(b"data: [DONE]\n\n")
             self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError):
@@ -106,8 +109,11 @@ def slow_delta_requests() -> list[dict]:
 
 
 @contextmanager
-def slow_delta_gateway(*, delay_seconds: float = 0.4) -> Iterator[str]:
+def slow_delta_gateway(*, delay_seconds: float = 0.4, final_delay_seconds: float = 0.0) -> Iterator[str]:
+    """``final_delay_seconds`` holds the terminator back after the last delta, opening the
+    window in which a client has every content token but the exchange is not finished."""
     _SlowDeltaGateway.delay_seconds = delay_seconds
+    _SlowDeltaGateway.final_delay_seconds = final_delay_seconds
     _SlowDeltaGateway.requests = []
     server = ThreadingHTTPServer(("127.0.0.1", 0), _SlowDeltaGateway)
     thread = threading.Thread(target=server.serve_forever, daemon=True)

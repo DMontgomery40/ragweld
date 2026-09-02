@@ -43,6 +43,23 @@ CHAT_RUNTIME_UNAVAILABLE_RESPONSES: dict[int | str, dict[str, Any]] = {
 
 # /api/answer: everything the chat lane can fail on except the prompt-budget 413, which the
 # answer lane reports as a generation failure.
+ANSWER_STREAM_RUNTIME_UNAVAILABLE_RESPONSES: dict[int | str, dict[str, Any]] = {
+    503: {
+        "model": (
+            DependencyUnavailableResponse
+            | RequiredRetrievalLegFailureResponse
+            | RerankerFailureResponse
+            | AnswerRetrievalFailureResponse
+            | IndexDeletionIncompleteResponse
+        ),
+        "description": (
+            "Answer storage, retrieval or the configured reranker is unavailable before the stream "
+            "starts, or the corpus is being de-indexed; generation failures arrive in-band as the "
+            "stream's typed error event."
+        ),
+    },
+}
+
 ANSWER_RUNTIME_UNAVAILABLE_RESPONSES: dict[int | str, dict[str, Any]] = {
     503: {
         "model": (
