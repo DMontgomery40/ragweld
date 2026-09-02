@@ -46,6 +46,7 @@
 | Config | `/api/config` | PUT | Replace config |
 | Config | `/api/config/{section}` | PATCH | Sectional patch, e.g., `fusion` |
 | Config | `/api/config/reset` | POST | Reset to defaults |
+| Config | `/api/config/readiness` | GET | Integration and dependency readiness (rendered on **Admin → Dependencies**) |
 | Secrets | `/api/secrets/check` | GET | Check provider keys (never returns values) |
 | Index | `/api/index` | POST | Start indexing |
 | Index | `/api/index/{corpus_id}/status` | GET | Per-corpus status |

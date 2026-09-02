@@ -51,6 +51,9 @@
 | `mcp.default_top_k` | 20 | Default top_k for search/answer tools |
 | `mcp.default_mode` | `tribrid` | Retrieval mode when not provided |
 
+!!! note "The workbench probe runs on your configured defaults"
+    The **Infrastructure → MCP** probe card calls the mounted `search` tool through a real client session with **no overrides**, so what it reports is exactly what an MCP client gets: this deployment's `mcp.default_mode` and `mcp.default_top_k` (defaults `tribrid` and `20`). The card renders both values from live config instead of a hardcoded number, and the probe result line labels the transport URL it echoes as the **in-process** address — the address an external MCP client actually dials is the advertised URL from the status card (`mcp.public_base_url` plus the mount path).
+
 ## Status Endpoint
 
 === "Python"

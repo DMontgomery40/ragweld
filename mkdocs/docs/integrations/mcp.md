@@ -38,6 +38,9 @@
 !!! tip "The advertised URL comes from config"
     `GET /api/mcp/status` reports the connect URL as `mcp.public_base_url` plus the mount path; behind a proxy, set `public_base_url` to the public origin and add its host to `mcp.allowed_hosts`. See [MCP](../mcp.md) for the full field list.
 
+!!! tip "The probe shows the client-facing defaults"
+    The **Infrastructure → MCP** probe card runs the `search` tool with no mode or Top-K override, so it exercises this deployment's `mcp.default_mode` and `mcp.default_top_k` rather than a hardcoded `top_k=5`. Its result line marks the transport URL it echoes as the **in-process** address; the URL an external client actually dials is the advertised `mcp.public_base_url` + mount path above.
+
 ## Configuration (Selected)
 
 | Field | Default | Description |

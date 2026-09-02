@@ -215,6 +215,28 @@ async function patchFusion() {
 !!! note "UI numeric controls are clamped to the same model"
     Every numeric config control in the UI is a clamped `NumberField` whose advertised min/max match the Pydantic field it writes — the UI cannot accept a value the `PATCH /api/config/{section}` would reject, and a bound the model does not have is caught by a test against the model itself (`tests/unit/test_clean_start_defaults.py`) rather than surfacing later as an unattributed `422`. If you tighten a `ge`/`le` in Pydantic, regenerate the TypeScript types and the UI clamp follows automatically.
 
+## Integration readiness (`GET /api/config/readiness`)
+
+**Admin → Dependencies** renders `GET /api/config/readiness`: one `IntegrationReadiness` row per registered integration contract (`server/config_control_plane.py`), each with a `state`, the config paths and secrets it requires, failing checks, and — when it is not ready — the **surfaces it currently blocks**. `blocked_surfaces` is what an operator reads as "what stops working right now", so two contracts were tightened to say exactly that and no more:
+
+- **MLflow blocks `training` only.** MLflow is the training lane's run/artifact truth (Learning Reranker and Learning Agent runs). The eval lane scores with Ragas and Promptfoo and imports nothing from MLflow, so an unready MLflow server no longer claims to block eval. A source-scan test (`tests/unit/test_config_control_plane.py`) keeps that claim true: if the eval lane ever starts using MLflow, the contract must change with it.
+- **vLLM blocks chat and benchmark only when they actually route through it.** Chat and the benchmark answer through whichever generation lane is selected. With the LiteLLM gateway enabled and a cloud chat model, an off or unreachable vLLM blocks only its own serving lane (`runtime`). With the gateway disabled — or with the chat default model pinned to the local serving alias (`ragweld-local`, which is itself a gateway route onto the vLLM lane) — chat and the benchmark fall back to the serving lane, and the readiness row lists them as blocked.
+
+*Concept diagram (the vLLM `blocked_surfaces` decision only — the full service map is on the [generated runtime-topology page](reference/architecture/runtime-topology.md)):*
+
+```mermaid
+flowchart TB
+    VR["vLLM readiness probe\n(chat.vllm.enabled + base_url)"]
+    VR --> UP{"vLLM serving lane up?"}
+    UP -->|"yes"| READY["state = ready\nnothing blocked"]
+    UP -->|"no"| GW{"chat.litellm.enabled and\nchat default model is not\nthe local serving alias?"}
+    GW -->|"yes"| ONLY["blocked_surfaces = [runtime]\nchat + benchmark answer through the gateway"]
+    GW -->|"no"| CHAT["blocked_surfaces = [runtime, chat, benchmark]\nchat + benchmark fall back to the serving lane"]
+```
+
+!!! tip "If you're not sure what a blocked surface means"
+    Read the row's `operator_hint` first — it names the fix (enable the lane, set the missing config path, or bring the dependency up). A surface that is *not* listed is not affected by that integration's state; that is the whole point of the narrowed contracts.
+
 ## How numeric fields behave in the UI
 
 Every numeric config control in the workbench is one component: `web/src/components/ui/NumberField.tsx`. It exists so the question "what happens when I type a value past the bound?" has exactly one answer on every surface — Chat settings, the RAG subtabs, both training studios, Eval run settings, Data Quality, Grafana config. And like every config edit in the workbench, its commit is **staged**: the edit lands in the working config and nothing reaches the server until the footer's **Apply** button writes the whole document.
