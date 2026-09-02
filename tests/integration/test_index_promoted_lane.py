@@ -164,7 +164,9 @@ async def test_index_search_and_delete_on_promoted_lane(
         cfg.graph_search.enabled = True
         cfg.graph_indexing.enabled = True
         cfg.graph_indexing.build_lexical_graph = True
-        cfg.graph_indexing.semantic_kg_llm_model = "deepseek.deepseek-v4-flash"
+        cfg.graph_indexing.semantic_kg_llm_model = os.environ.get(
+            "GRAPH_E2E_KG_MODEL", "openai.gpt-5.6-luna"
+        )
         cfg.chat.litellm.enabled = True
         cfg.semantic_cache.enabled = False
         cfg.chunking.chunking_strategy = "fixed_chars"

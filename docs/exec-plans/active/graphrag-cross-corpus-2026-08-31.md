@@ -548,6 +548,22 @@ everything below live in `output/task8-graphrag-acceptance/click-ledger-2026-09-
   writer id changes; the code corpus is rebuilt after deploy and the Epstein/NASA graphs are rebuilt on the same
   code.
 
+- **D22 (investigated, change reverted):** the Task 8 full gate failed the real end-to-end
+  `test_index_search_and_delete_on_promoted_lane` (KG model `deepseek.deepseek-v4-flash`) with `LLM response has
+  improper format`: a probe of the official extractor on the failing chunk showed DeepSeek answering the D9
+  `reasoning_effort` binding with `"embedding_properties": null` on every node in 1 of 3 attempts (pydantic
+  `dict_type`), and 3 of 3 clean without the knob. Commit `910d6f58` therefore bound the knob to OpenAI routes only
+  (DeepSeek review `gen-1788315853-jPkHunHXSBdQ5tgMmWPL` PASS on that premise). Live evidence then contradicted the
+  premise: without the knob DeepSeek derived schema proposals with no relationship types in 2 of 3 runs (typed 422
+  `graph_schema_unusable`, `test_real_full_apollo_pdf_schema_proposal_fits_the_public_edge_window`), and through
+  LiteLLM/OpenRouter `reasoning_effort` is honoured for reasoning-capable models of every provider. `910d6f58` is
+  reverted (`414a61bb`, code and tests restored to the reviewed D9 state) and the live GraphRAG suites default to
+  the operator's `openai.gpt-5.6-luna` (override `GRAPH_E2E_KG_MODEL`); with Luna the four live files pass twice in
+  a row (19 tests each round). The DeepSeek instability (structured-output nondeterminism against the official
+  `Neo4jGraph` schema and empty proposals) stays recorded here as an observation for the non-default lane; it is
+  not a Ragweld code defect and the operator's standing KG alias is Luna. The revert + pins were reviewed
+  (verdict id below in the click ledger / commit message).
+
 ### Final precommit GitNexus scope
 
 - Task 8 uncommitted range: HIGH risk across 55 files, 99 indexed symbols, eight affected flows. The named flows are `start_index` persisted/config resolution, mechanical docs automation helpers, and `RetrievalSubtab` config/readiness loading.

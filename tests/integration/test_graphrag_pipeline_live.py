@@ -115,7 +115,7 @@ async def test_semantic_and_code_files_use_scoped_official_writer_contract(
     code_repo = f"__staging__pipeline-code__{code_run}"
     cfg, driver, database = _driver_and_database("pipeline-live")
     cfg.graph_indexing.semantic_kg_llm_model = os.environ.get(
-        "GRAPH_E2E_KG_MODEL", "deepseek.deepseek-v4-flash"
+        "GRAPH_E2E_KG_MODEL", "openai.gpt-5.6-luna"
     )
     await asyncio.to_thread(warm_gateway_catalog)
     route = _resolve_semantic_kg_route(cfg)
@@ -401,7 +401,7 @@ async def test_full_index_promotes_the_approved_official_pipeline_generation(
         combined_fixture,
         encoding="utf-8",
     )
-    model_alias = os.environ.get("GRAPH_E2E_KG_MODEL", "deepseek.deepseek-v4-flash")
+    model_alias = os.environ.get("GRAPH_E2E_KG_MODEL", "openai.gpt-5.6-luna")
     pg = PostgresClient(require_env("POSTGRES_DSN"))
     await pg.connect()
     created = await client.post(

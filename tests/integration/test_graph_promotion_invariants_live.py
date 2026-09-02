@@ -259,7 +259,7 @@ async def test_real_empty_semantic_run_is_refused_then_authenticated_chunk_only_
         cfg.graph_indexing.enabled = True
         cfg.graph_indexing.build_code_graph = False
         cfg.graph_indexing.semantic_kg_llm_model = os.environ.get(
-            "GRAPH_E2E_KG_MODEL", "deepseek.deepseek-v4-flash"
+            "GRAPH_E2E_KG_MODEL", "openai.gpt-5.6-luna"
         )
         cfg.chat.litellm.enabled = True
         await pg.upsert_corpus_config_json(corpus_id, cfg.model_dump(mode="serialization"))
