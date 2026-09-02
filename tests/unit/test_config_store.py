@@ -272,3 +272,39 @@ async def test_clear_cache_does_not_replace_lock_while_held() -> None:
         first_lock.release()
 
     assert second_lock is first_lock
+
+
+@pytest.mark.asyncio
+async def test_production_scope_keeps_corpus_embedding_overrides() -> None:
+    """S18 (2026-09-02 drive): a corpus's embedding settings are its own index contract.
+
+    In production mode the store reconciled ``embedding.*`` to the deployment globals on
+    every read and save, while the index job honoured the corpus's saved value. A PATCH
+    of ``embedding_backend=deterministic`` answered 200, the first run embedded
+    deterministically, the config API read back ``provider``, and the next non-forced run
+    refused with "stored=deterministic, config=provider". What an operator saves on a
+    corpus applies to that corpus; the deployment owns URLs and default models, not the
+    corpus's embedding contract.
+    """
+    global_cfg = _production_global_config()
+    global_cfg.embedding.embedding_backend = "provider"
+    global_cfg.embedding.embedding_type = "huggingface"
+    scoped_cfg = _legacy_scoped_config()
+    scoped_cfg.ui.runtime_mode = "production"
+    scoped_cfg.embedding.embedding_backend = "deterministic"
+    postgres = _SnapshotPostgres(scoped_cfg.model_dump())
+    store = ConfigStore("postgresql://unused")
+    store._cache[None] = global_cfg
+    store._postgres = postgres  # type: ignore[assignment]
+
+    scoped = await store.get(repo_id="pytest_embedding_override")
+    assert scoped.embedding.embedding_backend == "deterministic"
+    # The deployment-owned values still reconcile; the corpus's embedding choice does not.
+    assert scoped.ui.grafana_base_url == "https://ragweld-grafana.dtmont.com"
+    for _repo_id, payload in postgres.upserts:
+        assert payload["embedding"]["embedding_backend"] == "deterministic"  # type: ignore[index]
+
+    scoped.embedding.embedding_backend = "deterministic"
+    saved = await store.save(scoped, repo_id="pytest_embedding_override")
+    assert saved.embedding.embedding_backend == "deterministic"
+    assert postgres.upserts[-1][1]["embedding"]["embedding_backend"] == "deterministic"  # type: ignore[index]

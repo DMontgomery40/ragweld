@@ -94,10 +94,12 @@ _PRODUCTION_SCOPED_GLOBAL_PATHS: tuple[str, ...] = (
     "chat.vllm.enabled",
     "chat.web",
     "synthetic.generator.max_tokens",
-    "embedding.embedding_backend",
-    "embedding.embedding_type",
-    "embedding.embedding_model",
-    "embedding.embedding_dim",
+    # Not embedding.*: a corpus's embedding settings are its own index contract (the
+    # generation records them and the mismatch guard enforces them), and the index job
+    # reads the corpus's saved value. Reconciling them to the deployment globals here
+    # made a corpus-scoped save answer 200 and read back the global, so the first run
+    # embedded one way and the next non-forced run refused "stored=..., config=..."
+    # (2026-09-02 drive, S18). The deployment owns URLs and default models, not that.
     "ui.chat_default_model",
     "ui.runtime_mode",
     "ui.open_browser",
