@@ -959,3 +959,19 @@ carry S numbers; the working scratchpad with every row lives with the session an
   whole exchange (repeat served from the generation cache, provider request count stays 1 — RED on the previous
   ordering), and leaving with every delta before `done` is asserted atomic-or-nothing (a race with the disconnect
   listener, not a side). Two stability runs: 40 passed each. Round-8 gate and codex approval #9 in flight.
+- **Codex approval #9 (on 70fb7ad3): BLOCK — the P1 is now a consistency-model demand, not a defect fix.** With the
+  single shielded commit in place, codex requires *transactional* atomicity across the three stores an exchange
+  touches (the in-memory conversation store, Postgres for the generation cache, the JSONL query record): a cache or
+  log failure inside the block leaves messages without cache/log, and `asyncio.shield` is not a transaction. That
+  is true and it is a redesign (a write-ahead journal, or one durable record with the others derived), which is the
+  operator's decision. Its P2s are fixed in 99491015: MCP config-file errors no longer typed as Postgres outages, the
+  atomicity test's query-record oracle (a cache-served repeat records its own query), store capability marks on the
+  real-corpus tests, the last placeholder texts, the EOF line, and an answer-stream regression (a client that reads
+  `done` and leaves finds the answer cached; the repeat reaches the provider zero more times). 38 passed on the
+  touched suites, mypy clean. Round-9 gate in flight; **no tenth review launched** — the remaining P1 needs the
+  operator's call before more rounds.
+- **Where this leaves the batch (HEAD 99491015, nine codex rounds):** every substitution codex found is closed and
+  proven — configured reranker failures, generation failures on every route and the MCP tools, interrupted or
+  client-closed streams, cancellation during priming, trace close-out, the write ordering around `done`, and the
+  chat suite runs on real retrieval and a real local gateway. Open by design decision: cross-store transactional
+  commit (codex's remaining P1). Still not pushed or deployed; LXC100 runs ec71b669.
