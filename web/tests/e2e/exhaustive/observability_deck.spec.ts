@@ -45,24 +45,46 @@ function attentionLabels(operatorHint: string): string[] {
  * These run against the live API and the real backends it is configured with.
  */
 test.describe('Observability operator deck', () => {
-  test('a card\'s evidence stays inside its card, however long the identifier is', async ({ page, baseURL }) => {
-    // The Grafana Command Center prints live identifiers (the Qdrant generation name, trace and
+  test('a card\'s evidence stays inside its card, however long the identifier is', async ({ page, baseURL, request }) => {
+    // The Grafana Command Center prints live identifiers (a Qdrant generation name, trace and
     // run ids) as single unbroken tokens. With `overflow-wrap: normal` the retrieval card's
     // generation name ran past its own card and painted over the neighbouring Evals and
     // Benchmark cards on the live deployment (drive finding S43: scrollWidth 568 in a 198px
     // card). Every evidence line must wrap inside its card.
-    // The deck scopes to the active corpus from storage, not to a query parameter, and the long
-    // identifier only appears for a corpus with a promoted Qdrant generation.
-    await page.addInitScript(() => {
-      localStorage.setItem('tribrid_active_corpus', 'epstein-files-public');
-      localStorage.setItem('tribrid_active_repo', 'epstein-files-public');
-    });
+    //
+    // The long token only exists for a corpus with a promoted generation, so the test asks the
+    // API which corpus has one instead of naming a deployment's corpus; without that the
+    // assertion is vacuous.
+    const corpora = await request.get(`${API_BASE}/corpora`);
+    expect(corpora.ok(), `GET /api/corpora -> ${corpora.status()}`).toBeTruthy();
+    const ids = (await corpora.json()) as { corpus_id?: string }[];
+    let scoped = '';
+    for (const row of ids) {
+      const id = String(row.corpus_id || '').trim();
+      if (!id) continue;
+      const status = await request.get(`${API_BASE}/observability/status?corpus_id=${encodeURIComponent(id)}`);
+      if (!status.ok()) continue;
+      if ((await status.text()).includes('ragweld_chunks_')) {
+        scoped = id;
+        break;
+      }
+    }
+    test.skip(!scoped, 'no corpus on this deployment has a promoted Qdrant generation to name');
+
+    // The deck scopes to the active corpus from storage, not to a query parameter.
+    await page.addInitScript((corpusId) => {
+      localStorage.setItem('tribrid_active_corpus', corpusId);
+      localStorage.setItem('tribrid_active_repo', corpusId);
+    }, scoped);
     await page.goto(new URL('/web/grafana?subtab=overview', baseURL).toString(), {
       waitUntil: 'domcontentloaded',
     });
-    await expect(page.getByTestId('obs-chip-corpus')).toHaveText('corpus=epstein-files-public', { timeout: 60_000 });
+    await expect(page.getByTestId('obs-chip-corpus')).toHaveText(`corpus=${scoped}`, { timeout: 60_000 });
     await expect(page.locator('.obs-card-metric').first()).toBeVisible({ timeout: 60_000 });
-    await expect(page.locator('.obs-card-metric', { hasText: 'ragweld_chunks_' }).first()).toBeVisible({ timeout: 60_000 });
+    await expect(
+      page.locator('.obs-card-metric', { hasText: 'ragweld_chunks_' }).first(),
+      'the generation name must be on screen, or this test proves nothing'
+    ).toBeVisible({ timeout: 60_000 });
 
     const overflowing = await page.evaluate(() => {
       const selectors = ['.obs-card-metric', '.obs-card-detail', '.obs-evidence-mono', '.obs-evidence-copy'];
