@@ -872,3 +872,17 @@ carry S numbers; the working scratchpad with every row lives with the session an
   (index, retrieval, cache) through gateway embedding aliases, and per-run cost contracts for Benchmark/Eval/
   Promptfoo/Synthetic runs with IDs allocated before paid work. Recorded in the session task list with the
   three verdicts (`scratchpad/codex_approval_E_plan*.out`); it needs its own exec plan.
+- **All six codex P2s fixed by two lanes (07138016 server, 38a37d25 web/MCP), each RED→GREEN on its own LXC100
+  overlay:** the S39 cap excludes the seed and a live hub graph asserts exactly `cap` related entities; a billed
+  empty reply records usage/cost/finish reason before the typed error on both paths; the reaper refuses a corpus with
+  a live index fence or fresh staging rows (judged on the DB clock) and its old test, which codified the race, was
+  corrected; the vLLM rule is keyed on `select_provider_route`'s real refusal (gateway on + local alias); the MCP
+  probe/status/card report the config the mounted tools closed over with a restart-pending line when the persisted
+  defaults differ; the chat trace notice derives the conversation's run ids from the stored session. **Final gate on
+  38a37d25:** 2,069 passed / 21 skipped (pytest unit+api), web unit 21/21, `tsc`, `validate_types.py`,
+  `check_banned.py` clean; the one overlay failure (`test_local_generation_models_are_current_everywhere` shells out
+  to `git ls-files`) passes 12/12 in a real git clone of the same HEAD. Codex approval #2 in flight; nothing pushed or
+  deployed until it returns APPROVE.
+- **Process trap recorded:** staging by path swept a lane's half-landed hunk of `server/api/config.py` into the P1
+  commit while the definition it imported was still uncommitted; HEAD was inconsistent for one gate run. Inspect a
+  staged file's diff for foreign hunks while lanes are live.
