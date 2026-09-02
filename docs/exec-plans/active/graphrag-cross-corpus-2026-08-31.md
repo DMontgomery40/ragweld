@@ -839,3 +839,23 @@ carry S numbers; the working scratchpad with every row lives with the session an
   before work proceeds; the first pass covers 87561a37..ec71b669. Queued after this closes: an audit that run and
   indexing cost is recorded through the connected telemetry (Langfuse, LiteLLM, OTel) rather than hand-rolled, and
   shows correctly in Grafana.
+- **Codex approval #1 (gpt-5.6-sol, xhigh, ~40 min) over 87561a37..ec71b669: BLOCK.** Two P1s that three earlier
+  reviews and my own audit missed: (a) `Reranker.try_rerank` caught every exception and *skipped* configured lanes
+  (missing trained model, missing Cohere key, unresolvable gateway route) with `ok=True`, so fusion returned the
+  unreranked order, `/api/search` answered 200 and D26's typed errors never reached a boundary; (b) `/api/answer`
+  (+stream) turned every generation failure into a "retrieval-only" 200 assembled from the sources, blessed by
+  `test_answer_always_responds_without_llm.py`. Six P2s: the S39 cap counts the seed at distance 0 (cap=1 allows zero
+  related entities); empty reasoning replies lose cost/Langfuse/trace accounting; the S31 rule assumed a direct vLLM
+  route that `provider_router` does not have; S37's run id followed the tab, not the conversation; S40 labels the probe
+  with the live config while the mounted MCP tool keeps startup defaults; the reaper cascade ignores a live fence and
+  fresh staging rows. **P1 fix landed as 84bcdafa (local):** typed `RerankerFailedError` → `RerankerFailureDetail`
+  503 on search/answer/chat/benchmark/MCP tool/MCP probe, configured-mode skips are failures, the answer lane emits
+  the chat lane's typed error (non-stream 503, stream `error` event), the retrieval-only formatter is deleted, the
+  OpenAPI contract documents the new 503s. RED→GREEN: 4 failed → 5 passed on the P1 tests; gate 2,064 passed + mypy
+  strict clean on the touched modules; 54 passed on the contract/P1/neighbour suites after the union change. The six
+  P2s are with two lanes (`lane-server`, `lane-webmcp`); codex approval #2 follows before anything deploys.
+- **Codex on the cost-telemetry plan: BLOCK** (four P1s recorded in the task list: stream cost must come from the
+  terminal `usage.cost` with `include_cost_in_streaming_usage`, Prometheus attribution must stay a low-cardinality
+  `lane` label with run/corpus cost in Langfuse, one Langfuse emission path with proxy credentials and `traceparent`,
+  and every paid path outside `generate_chat_text` enumerated). Plan v2 drafted; implementation queued behind this
+  batch's approval.
