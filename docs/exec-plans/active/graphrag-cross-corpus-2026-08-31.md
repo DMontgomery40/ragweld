@@ -689,3 +689,11 @@ carry S numbers; the working scratchpad with every row lives with the session an
   (`missing-graph-`, `dash_status_`, `viewer-e2e-`, `pipeline-index-`, `schema-off-/required-/prompt-`) now use the
   `pytest_` prefix; 28 passed across the graph schema, graph, dashboard and document viewer suites, ruff clean, and the
   registry, Neo4j and Qdrant carried no residue after the full gate.
+- **Late agent reports (all consistent with the independent reruns above) added these open observations:** S22 a
+  private error sanitiser in `server/services/answer_service.py` should use the shared classifier; S23 ChatTab passes an
+  undeclared `traceOpen` prop; S24 two leftover `seed-*` graphs in Neo4j from an aborted promoted-lane run; S25 a further
+  list of live tests with unreapable corpus prefixes (qdrant-*, graph-*, promotion-*, scoped-lease-, backlog-repair-,
+  fence-inventory-, docs-persist-, neo4j-outage-, pipeline-*); S26 `delete_corpus_with_data` does not sweep staging
+  rows; S27 `chat.vllm.default_model` still names an MLX quant and the checked-in config disagrees with the effective
+  one on `chat.vllm.enabled`; S28 minor spec/alias footguns. The promoted-lane test's storage assertion was updated for
+  the null Neo4j size (384a83b1) before that run can pass again.
