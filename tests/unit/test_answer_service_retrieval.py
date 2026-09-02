@@ -13,6 +13,7 @@ import pytest
 
 from server.models.retrieval import ChunkMatch
 from server.models.tribrid_config_model import FusionConfig, TriBridConfig
+from server.retrieval.errors import AnswerRetrievalFailedError
 from server.services.answer_service import retrieve_best_effort
 
 QUESTION = "Which plane management company did Barry Cohen consider switching to?"
@@ -41,10 +42,14 @@ class _StoreBrokenFusion:
 
 @pytest.mark.asyncio
 async def test_an_unrecognised_retrieval_failure_propagates_instead_of_becoming_no_context() -> None:
-    with pytest.raises(LookupError, match="sparse generation"):
+    """The failure leaves as a RETRIEVAL error carrying the sanitised reason, so the route
+    reports retrieval (never "generation unavailable") and never answers without context."""
+    with pytest.raises(AnswerRetrievalFailedError, match="sparse generation") as excinfo:
         await retrieve_best_effort(
             query=QUESTION,
             corpus_id="epstein-files-public",
             config=TriBridConfig(),
             fusion=_StoreBrokenFusion(),
         )
+    assert isinstance(excinfo.value.__cause__, LookupError)
+    assert "sparse generation" in excinfo.value.reason

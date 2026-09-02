@@ -354,31 +354,35 @@ class TestStreamEndpoint:
             assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
 
     @pytest.mark.asyncio
-    async def test_stream_stores_user_message(self, chat_client: AsyncClient):
-        """Test that streaming stores user message before streaming."""
+    async def test_stream_with_no_provider_output_persists_no_exchange(self, chat_client: AsyncClient):
+        """A provider that streams nothing is a failed generation: the stream reports it and
+        the durable history keeps neither an assistant message built from the failure text nor
+        the unanswered question (the old behaviour stored both, and Recall indexed them)."""
 
         async def mock_stream_chat_text(*args, **kwargs):
             _ = (args, kwargs)
             if False:  # pragma: no cover
                 yield ""
 
+        question = "Which plane management company did Barry Cohen consider switching to?"
         with patch("server.chat.handler.stream_chat_text", new=mock_stream_chat_text):
             response = await chat_client.post(
                 "/api/chat/stream",
                 json={
-                    "message": "Stream test message",
+                    "message": question,
                     "sources": {"corpus_ids": []},
                     "conversation_id": "stream-conv",
                 },
             )
 
             assert response.status_code == 200
+            body = response.text
+            assert '"type": "error"' in body or '"type":"error"' in body
+            assert "Error: LLM stream produced no content" not in body
 
             store = get_conversation_store()
             messages = store.get_messages("stream-conv")
-            assert len(messages) == 2
-            assert messages[0].content == "Stream test message"
-            assert messages[0].role == "user"
+            assert [m.role for m in messages] == []
 
 class TestChatCitationsRealPipeline:
     """Exercise the real rag pipeline without external API calls.

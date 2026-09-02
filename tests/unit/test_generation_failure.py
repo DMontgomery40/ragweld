@@ -138,7 +138,8 @@ def test_answer_route_error_paths_redact_like_the_chat_path() -> None:
     from server.services import answer_service
 
     assert answer_service.generation_unavailable_detail is generation_unavailable_detail
-    assert not hasattr(answer_service, "safe_error_message")
+    # The retrieval-failure reason goes through the same shared sanitiser, never a private copy.
+    assert answer_service.safe_error_message is safe_error_message
     raw = RuntimeError(
         f"{SPEND_LIMIT_REASON} Authorization: Bearer sk-or-v1-0123456789abcdefghij\nnext line"
     )

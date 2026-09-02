@@ -962,12 +962,9 @@ async def chat_stream(
             yield f"data: {json.dumps({'type': 'text', 'content': delta})}\n\n"
 
         if not accumulated.strip():
-            # Avoid "silent" blank assistant bubbles when a provider streams no text (or a test stub yields nothing).
-            msg = "Error: LLM stream produced no content (check provider compatibility/config)"
-            accumulated = msg
-            llm_used = False
-            llm_error = "empty_stream"
-            yield f"data: {json.dumps({'type': 'text', 'content': msg})}\n\n"
+            # A provider that streams no text is a failed generation, reported through the
+            # same typed error event as every other one, never as an assistant message.
+            raise RuntimeError("LLM stream produced no content (check provider compatibility/config)")
     except PromptBudgetError:
         # The transport refuses before any network I/O and before the first delta is
         # yielded, so nothing has been streamed yet: let the API map it to the typed 413.

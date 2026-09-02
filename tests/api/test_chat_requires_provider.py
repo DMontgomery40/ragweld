@@ -14,6 +14,7 @@ import pytest
 from httpx import AsyncClient
 
 from server.api.chat import set_config, set_fusion
+from server.services.conversation_store import get_conversation_store
 from server.chat.generation_failure import GENERATION_FAILURE_HINTS
 from server.models.retrieval import ChunkMatch
 from server.models.tribrid_config_model import FusionConfig, TriBridConfig
@@ -125,10 +126,11 @@ async def test_chat_stream_emits_error_event_without_providers(
         set_config(providerless_chat_config)
         set_fusion(providerless_fusion)
 
+        question = "Which plane management company did Barry Cohen consider switching to?"
         response = await client.post(
             "/api/chat/stream",
             json={
-                "message": "hello",
+                "message": question,
                 "stream": True,
                 "sources": {"corpus_ids": ["test-repo"]},
             },
@@ -154,6 +156,14 @@ async def test_chat_stream_emits_error_event_without_providers(
         assert done_event.get("llm_used") is False
         assert isinstance(done_event.get("llm_error"), str) and str(done_event["llm_error"]).strip()
         assert "retrieval-only" not in body.lower()
+        # No exchange happened, so the durable history keeps neither an assistant message
+        # built from the failure text nor the unanswered question (Recall would index both).
+        assert not [event for event in events if event.get("type") == "text"], events
+        conversation_id = str(done_event.get("conversation_id") or "")
+        assert conversation_id
+        persisted = get_conversation_store().get_messages(conversation_id)
+        assert [m.role for m in persisted if m.role == "assistant"] == []
+        assert [m.content for m in persisted if m.role == "user" and m.content == question] == []
 
         # The in-stream error event carries the typed generation-failure detail
         # so the UI can render a structured error card instead of raw prose.

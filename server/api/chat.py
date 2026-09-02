@@ -620,6 +620,8 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
         accumulated = ""
         query_log_appended = False
         assistant_persisted = False
+        generation_failed = False
+        exchange_failed = False
         caught_exc: tuple[type[BaseException] | None, BaseException | None, Any] = (None, None, None)
         # This is the task that owns the rest of the request, so it attaches and detaches
         # the span itself rather than inheriting a token from the endpoint coroutine.
@@ -646,6 +648,26 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
 
                 if typ == "done":
                     ended_at_ms = int(time.time() * 1000)
+
+                    if generation_failed or payload.get("llm_used") is False:
+                        # No exchange happened: the error event already told the client, and
+                        # neither the failure text nor the unanswered question belongs in the
+                        # durable history (Recall would index it as a conversation).
+                        exchange_failed = True
+                        try:
+                            store.remove_last_message(conv.id, role="user", content=request.message)
+                        except Exception:
+                            pass
+                        if trace_enabled:
+                            await trace_store.add_event(
+                                run_id,
+                                kind="chat.error",
+                                msg=str(payload.get("llm_error") or "generation failed"),
+                                data={"kind": "generation"},
+                            )
+                            await trace_store.annotate(run_id, **current_trace_payload_fields())
+                        yield f"data: {json.dumps(payload)}\n\n"
+                        continue
 
                     # Persist assistant message now that we have full content.
                     assistant_msg = Message(role="assistant", content=accumulated)
@@ -813,9 +835,8 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                     continue
 
                 if typ == "error":
-                    raw_message = payload.get("message")
-                    if isinstance(raw_message, str) and raw_message.strip():
-                        accumulated = accumulated.strip() or f"Error: {raw_message.strip()}"
+                    # The failure is the client's to render; nothing stands in for the answer.
+                    generation_failed = True
                     yield sse
                     continue
 
@@ -826,8 +847,8 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                 await trace_store.add_event(run_id, kind="chat.error", msg=str(e), data={})
             raise
         finally:
-            if not assistant_persisted:
-                if accumulated.strip():
+            if not assistant_persisted and not exchange_failed:
+                if accumulated.strip() and not generation_failed:
                     try:
                         store.add_message(conv.id, Message(role="assistant", content=accumulated), None)
                         assistant_persisted = True

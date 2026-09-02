@@ -46,7 +46,7 @@ async def test_reranker_none_passthrough() -> None:
     reranker = Reranker(config)
 
     chunks = [make_chunk("c1", score=0.9), make_chunk("c2", score=0.8), make_chunk("c3", score=0.7)]
-    out = await reranker.rerank("How often is the Aurora salinity sensor array calibrated?", chunks)
+    out = (await reranker.try_rerank("How often is the Aurora salinity sensor array calibrated?", chunks)).chunks
 
     assert [c.chunk_id for c in out] == ["c1", "c2", "c3"]
     assert [c.score for c in out] == [0.9, 0.8, 0.7]
@@ -100,8 +100,8 @@ async def _assert_cohere_fails_closed() -> None:
 async def test_reranker_empty_input() -> None:
     config = RerankingConfig(reranker_mode="none")
     reranker = Reranker(config)
-    out = await reranker.rerank("Which team owns the Aurora incident playbook escalation steps?", [])
-    assert out == []
+    res = await reranker.try_rerank("Which team owns the Aurora incident playbook escalation steps?", [])
+    assert res.ok is True and res.chunks == []
 
 
 

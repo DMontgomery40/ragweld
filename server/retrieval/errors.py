@@ -130,3 +130,15 @@ class SparseContractMismatchError(RetrievalContractMismatchError):
                 "(bm25_k1/bm25_b/bm25_tokenizer/bm25_stemmer_lang) to match the existing index contract."
             ),
         )
+
+
+class AnswerRetrievalFailedError(RuntimeError):
+    """Retrieval for an answer failed for a reason no typed retrieval error names.
+
+    It carries the sanitised reason so the boundary reports a retrieval failure, not a
+    generation one, and never substitutes an ungrounded answer.
+    """
+
+    def __init__(self, *, reason: str) -> None:
+        self.reason = str(reason or "").strip() or "retrieval failed without a reason"
+        super().__init__(f"Answer retrieval failed: {self.reason}")

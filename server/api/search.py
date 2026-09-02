@@ -39,6 +39,7 @@ from server.observability.runtime import (
 )
 from server.retrieval.cache import CacheMode
 from server.retrieval.errors import (
+    AnswerRetrievalFailedError,
     RequiredRetrievalLegError,
     RerankerFailedError,
     RetrievalContractMismatchError,
@@ -156,8 +157,16 @@ async def search(request: SearchRequest, response: Response) -> SearchResponse:
                 await trace_store.end(run_id)
             raise reranker_failed_http_exception(e) from e
         except RequiredRetrievalLegError as e:
+            if trace_enabled:
+                await trace_store.add_event(run_id, kind="search.error", msg=str(e), data={"kind": "retrieval"})
+                await trace_store.annotate(run_id, **current_trace_payload_fields())
+                await trace_store.end(run_id)
             raise required_retrieval_leg_http_exception(e) from e
         except Exception as e:
+            if trace_enabled:
+                await trace_store.add_event(run_id, kind="search.error", msg=str(e), data={})
+                await trace_store.annotate(run_id, **current_trace_payload_fields())
+                await trace_store.end(run_id)
             raise_required_dependency_unavailable_if_applicable(e, boundary="Search retrieval")
             raise
         dt_ms = (time.perf_counter() - t0) * 1000.0
@@ -301,7 +310,17 @@ async def answer(request: AnswerRequest, response: Response) -> AnswerResponse:
                 await trace_store.end(run_id)
             raise reranker_failed_http_exception(e) from e
         except RequiredRetrievalLegError as e:
+            if trace_enabled:
+                await trace_store.add_event(run_id, kind="answer.error", msg=str(e), data={"kind": "retrieval"})
+                await trace_store.annotate(run_id, **current_trace_payload_fields())
+                await trace_store.end(run_id)
             raise required_retrieval_leg_http_exception(e) from e
+        except AnswerRetrievalFailedError as e:
+            if trace_enabled:
+                await trace_store.add_event(run_id, kind="answer.error", msg=str(e), data={"kind": "retrieval"})
+                await trace_store.annotate(run_id, **current_trace_payload_fields())
+                await trace_store.end(run_id)
+            raise HTTPException(status_code=500, detail=f"Answer retrieval failed: {e.reason}") from e
         except Exception as e:
             if trace_enabled:
                 await trace_store.add_event(run_id, kind="answer.error", msg=str(e), data={})
@@ -335,7 +354,7 @@ async def answer(request: AnswerRequest, response: Response) -> AnswerResponse:
                 data={
                     "sources_count": len(sources),
                     "latency_ms": float(dt_ms),
-                    "model": str(provider_info.model) if provider_info is not None else "retrieval-only",
+                    "model": str(provider_info.model) if provider_info is not None else "",
                 },
             )
             await trace_store.annotate(run_id, **current_trace_payload_fields())
@@ -447,6 +466,14 @@ async def answer_stream(request: AnswerRequest) -> StreamingResponse:
         setup_scope.__exit__(type(e), e, e.__traceback__)
         observation.finish((type(e), e, e.__traceback__))
         raise required_retrieval_leg_http_exception(e) from e
+    except AnswerRetrievalFailedError as e:
+        if trace_enabled:
+            await trace_store.add_event(run_id, kind="answer.error", msg=str(e), data={"kind": "retrieval"})
+            await trace_store.annotate(run_id, **current_trace_payload_fields())
+            await trace_store.end(run_id)
+        setup_scope.__exit__(type(e), e, e.__traceback__)
+        observation.finish((type(e), e, e.__traceback__))
+        raise HTTPException(status_code=500, detail=f"Answer retrieval failed: {e.reason}") from e
     except Exception as e:
         if trace_enabled:
             await trace_store.add_event(run_id, kind="answer.error", msg=str(e), data={})
@@ -455,7 +482,7 @@ async def answer_stream(request: AnswerRequest) -> StreamingResponse:
         setup_scope.__exit__(type(e), e, e.__traceback__)
         observation.finish((type(e), e, e.__traceback__))
         raise_required_dependency_unavailable_if_applicable(e, boundary="Streaming answer retrieval")
-        raise HTTPException(status_code=500, detail="Streaming answer generation failed") from e
+        raise HTTPException(status_code=500, detail="Streaming answer retrieval failed") from e
 
     async def wrapped_stream() -> AsyncIterator[str]:
         ended_at_ms: int | None = None
@@ -533,7 +560,7 @@ async def answer_stream(request: AnswerRequest) -> StreamingResponse:
                         data={
                             "sources_count": len(payload.get("sources") or []),
                             "latency_ms": float(max(0, ended_at_ms - started_at_ms)),
-                            "model": str(provider_obj.model) if provider_obj is not None else "retrieval-only",
+                            "model": str(provider_obj.model) if provider_obj is not None else "",
                         },
                     )
                     await trace_store.annotate(run_id, **current_trace_payload_fields())
