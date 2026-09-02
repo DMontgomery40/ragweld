@@ -21,6 +21,7 @@ from server.gateway_catalog import (
     gateway_rows,
     gateway_rows_by_alias,
     gateway_rows_snapshot,
+    gateway_upstream_for_alias,
     load_catalog,
     render_litellm_config,
     warm_gateway_catalog,
@@ -280,3 +281,14 @@ def test_gateway_rows_require_a_positive_context_window(context: int | None) -> 
         row["context"] = context
     with pytest.raises(GatewayCatalogError, match="positive context window"):
         gateway_rows({"models": [_local_row(), row]})
+
+
+def test_gateway_upstream_for_alias_reads_the_warmed_snapshot_and_fails_closed() -> None:
+    """Follow-up finding D25: the extraction LLM chooses its reasoning transport from the
+    alias's LiteLLM upstream, so the lookup must answer from the warmed snapshot (event-loop
+    safe) and refuse an alias the catalog does not serve rather than guess a protocol."""
+    warm_gateway_catalog(CATALOG_PATH)
+    assert gateway_upstream_for_alias("openai.gpt-5.6-luna", CATALOG_PATH) == "openrouter/openai/gpt-5.6-luna"
+    assert gateway_upstream_for_alias("ragweld-local", CATALOG_PATH).startswith("openai/")
+    with pytest.raises(RuntimeError, match="not in the loaded generation catalog"):
+        gateway_upstream_for_alias("nope.not-an-alias", CATALOG_PATH)

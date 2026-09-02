@@ -314,6 +314,19 @@ def gateway_rows_snapshot(path: Path = CATALOG_PATH) -> dict[str, GatewayRow]:
         return dict(cached[2]) if cached is not None else {}
 
 
+def gateway_upstream_for_alias(alias: str, path: Path = CATALOG_PATH) -> str:
+    """The LiteLLM upstream (``openrouter/<model>`` or ``openai/ragweld-local``) behind an alias.
+
+    Reads the warmed in-memory snapshot only; an alias the catalog does not serve fails
+    closed, because the caller is about to choose a request protocol from the answer.
+    """
+    key = str(alias or "").strip()
+    row = gateway_rows_snapshot(path).get(key)
+    if row is None:
+        raise RuntimeError(f"Gateway alias {key!r} is not in the loaded generation catalog")
+    return row.upstream
+
+
 def warm_gateway_catalog(path: Path = CATALOG_PATH) -> int:
     """Load the catalog into the in-memory snapshot (blocking). Returns the alias count."""
 

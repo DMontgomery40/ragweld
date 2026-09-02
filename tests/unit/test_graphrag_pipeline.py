@@ -21,6 +21,7 @@ from server.indexing.graphrag_pipeline import (
     extraction_prompt_template,
     fold_duplicate_node_ids,
     lexical_graph_config,
+    reasoning_model_params,
     require_run_id,
     require_staging_graph_id,
     resolution_property_for_policy,
@@ -142,6 +143,7 @@ def test_semantic_pipeline_refuses_an_incomplete_route_before_driver_use(
             route_model=model,
             route_base_url=base_url,
             route_api_key=api_key,
+            route_upstream="openrouter/openai/gpt-5.6-luna",
             max_concurrency=1,
             llm_timeout_s=30,
             reasoning_effort="medium",
@@ -175,11 +177,13 @@ def test_semantic_extraction_llm_binds_the_operator_timeout_and_reasoning_effort
         route_model="openai.gpt-5.6-luna",
         route_base_url="http://127.0.0.1:54000/v1",
         route_api_key="not-a-real-key",
+        route_upstream="openrouter/openai/gpt-5.6-luna",
         llm_timeout_s=5,
         reasoning_effort="xhigh",
     )
     assert llm.model_name == "openai.gpt-5.6-luna"
-    assert llm.model_params == {"temperature": 0, "reasoning_effort": "xhigh"}
+    # OpenRouter upstream: the effort travels as OpenRouter's native reasoning object (D25).
+    assert llm.model_params == {"temperature": 0, "extra_body": {"reasoning": {"effort": "xhigh"}}}
     assert float(llm.async_client.timeout) == 5.0
     assert float(llm.client.timeout) == 5.0
     assert str(llm.async_client.base_url).rstrip("/") == "http://127.0.0.1:54000/v1"
@@ -196,6 +200,7 @@ def test_semantic_extraction_llm_refuses_a_zero_timeout_or_blank_effort(
             route_model="openai.gpt-5.6-luna",
             route_base_url="http://127.0.0.1:54000/v1",
             route_api_key="not-a-real-key",
+            route_upstream="openrouter/openai/gpt-5.6-luna",
             llm_timeout_s=timeout_s,
             reasoning_effort=effort,
         )
@@ -343,6 +348,7 @@ def test_semantic_extractor_carries_the_operator_template_and_structured_output(
         route_model="openai.gpt-5.6-luna",
         route_base_url="http://127.0.0.1:54000/v1",
         route_api_key="not-a-real-key",
+        route_upstream="openrouter/openai/gpt-5.6-luna",
         llm_timeout_s=30,
         reasoning_effort="medium",
     )
@@ -354,3 +360,32 @@ def test_semantic_extractor_carries_the_operator_template_and_structured_output(
     assert extractor.use_structured_output is True
     assert extractor.max_concurrency == 3
     assert extractor.create_lexical_graph is True
+
+
+@pytest.mark.parametrize(
+    ("upstream", "expected"),
+    [
+        (
+            "openrouter/google/gemini-3.5-flash-lite",
+            {"temperature": 0, "extra_body": {"reasoning": {"effort": "medium"}}},
+        ),
+        ("openrouter/openai/gpt-5.6-luna", {"temperature": 0, "extra_body": {"reasoning": {"effort": "medium"}}}),
+        ("openai/ragweld-local", {"temperature": 0, "reasoning_effort": "medium"}),
+    ],
+)
+def test_reasoning_effort_travels_in_the_upstreams_own_protocol(upstream: str, expected: dict) -> None:
+    """Follow-up finding D25: LiteLLM 1.94 only maps the OpenAI ``reasoning_effort`` parameter
+    onto OpenRouter for models its own capability map knows, so every 2026 alias it does not
+    know (Gemini 3.5/3.7 Flash among them) answered a semantic run with a 400
+    ``UnsupportedParamsError`` and zero chunks extracted. OpenRouter's native ``reasoning``
+    object passes LiteLLM untouched in ``extra_body`` and is honoured by every reasoning-capable
+    model there (measured: Gemini 3.5 Flash Lite reported 112 reasoning tokens, Luna answered
+    unchanged). An OpenAI-compatible upstream (the local vLLM lane) keeps the OpenAI parameter.
+    """
+    assert reasoning_model_params(reasoning_effort="medium", route_upstream=upstream) == expected
+
+
+@pytest.mark.parametrize("upstream", ["", "   "])
+def test_reasoning_effort_refuses_a_route_without_an_upstream(upstream: str) -> None:
+    with pytest.raises(RuntimeError, match="upstream"):
+        reasoning_model_params(reasoning_effort="medium", route_upstream=upstream)

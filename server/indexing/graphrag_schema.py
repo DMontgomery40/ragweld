@@ -19,6 +19,7 @@ from neo4j_graphrag.components.schema import (
 )
 from neo4j_graphrag.llm import OpenAILLM
 
+from server.indexing.graphrag_pipeline import reasoning_model_params
 from server.models.index import Chunk, GraphSchemaProposal, GraphSchemaSample
 
 _GRAPH_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
@@ -218,6 +219,7 @@ async def derive_graph_schema_proposal(
     route_model: str,
     route_base_url: str,
     route_api_key: str,
+    route_upstream: str,
     reasoning_effort: str,
     input_fingerprint: str,
 ) -> GraphSchemaProposal:
@@ -228,12 +230,13 @@ async def derive_graph_schema_proposal(
         f"## {chunk.file_path} lines {chunk.start_line}-{chunk.end_line}\n{chunk.content[:6000]}"
         for chunk in sample
     )
-    effort = str(reasoning_effort or "").strip()
-    if not effort:
-        raise RuntimeError("GraphRAG schema proposal requires a reasoning effort")
+    # The proposal deliberately carries the effort but no per-chunk timeout (D9); the
+    # effort travels in the upstream's protocol like every extraction call (D25).
     llm = OpenAILLM(
         model_name=route_model,
-        model_params={"temperature": 0, "reasoning_effort": effort},
+        model_params=reasoning_model_params(
+            reasoning_effort=reasoning_effort, route_upstream=route_upstream
+        ),
         api_key=route_api_key,
         base_url=route_base_url,
     )

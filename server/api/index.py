@@ -37,6 +37,7 @@ from server.api.dependency_errors import (
 from server.chat.provider_router import ProviderRoute, select_provider_route
 from server.db.neo4j import Neo4jClient
 from server.db.postgres import PostgresClient
+from server.gateway_catalog import gateway_upstream_for_alias
 from server.graph.communities import detect_leiden_communities
 from server.indexing.chunker import Chunker
 from server.indexing.embedder import Embedder, configure_postgres_embedding_cache_backend
@@ -2044,6 +2045,7 @@ async def _run_index(
                     route_model=str(route.model or "").strip(),
                     route_base_url=str(route.base_url or "").strip(),
                     route_api_key=str(route.api_key or "").strip(),
+                    route_upstream=gateway_upstream_for_alias(str(route.model or "").strip()),
                     max_concurrency=max(1, int(cfg.indexing.indexing_workers)),
                     llm_timeout_s=int(cfg.graph_indexing.semantic_kg_llm_timeout_s),
                     reasoning_effort=str(cfg.graph_indexing.semantic_kg_reasoning_effort),
@@ -4241,6 +4243,7 @@ async def build_proposal_from_corpus(
         route_model=str(route.model or "").strip(),
         route_base_url=str(route.base_url or "").strip(),
         route_api_key=str(route.api_key or "").strip(),
+        route_upstream=gateway_upstream_for_alias(str(route.model or "").strip()),
         reasoning_effort=str(cfg.graph_indexing.semantic_kg_reasoning_effort),
         input_fingerprint=fingerprint,
     )
