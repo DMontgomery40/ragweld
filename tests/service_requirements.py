@@ -66,6 +66,12 @@ def postgres_dsn_from_env(env: Mapping[str, str] | None = None) -> str | None:
     return f"postgresql://{user}:{password}@{host}:{port}/{database}"
 
 
+def qdrant_url_from_env(env: Mapping[str, str] | None = None) -> str:
+    """The Qdrant base URL the harness talks to: ``QDRANT_URL`` or the Compose default."""
+    values = os.environ if env is None else env
+    return str(values.get("QDRANT_URL") or "http://127.0.0.1:56333").rstrip("/")
+
+
 def require_env(name: str) -> str:
     """Return env var `name`, or `pytest.skip` with the exact missing variable.
 
@@ -188,8 +194,7 @@ def probe_qdrant(
     *,
     timeout_seconds: float = 1.0,
 ) -> ServiceCapability:
-    values = os.environ if env is None else env
-    url = str(values.get("QDRANT_URL") or "http://127.0.0.1:56333").rstrip("/")
+    url = qdrant_url_from_env(env)
     try:
         response = httpx.get(f"{url}/readyz", timeout=timeout_seconds)
         ok = response.status_code < 500

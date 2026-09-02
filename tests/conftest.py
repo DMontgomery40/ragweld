@@ -69,26 +69,41 @@ def cleanup_private_test_config() -> Generator[None, None, None]:
 
 @pytest.fixture(scope="session", autouse=True)
 def reap_leaked_test_corpora() -> Generator[None, None, None]:
-    """Delete stale test corpora from the live registry at session start and end.
+    """Delete stale test corpora and their store residue at session start and end.
 
     API tests that create corpora leak them into the operator's registry when a
-    run aborts. This reaps rows with a recognized test-corpus prefix that are old
-    enough that no concurrent session can still own them, with a Postgres-only
-    cascade (no Neo4j credentials, so it never 503s the way `DELETE /api/corpora`
-    would). It is best-effort and never fails the session; an unconfigured or
-    unreachable Postgres simply reaps nothing.
+    run aborts, and the Qdrant collections and staged Neo4j generations they
+    indexed outlive even a deleted row. This reaps registry rows with a
+    recognized test-corpus prefix that are old enough that no concurrent session
+    can still own them (a Postgres-only cascade, never `DELETE /api/corpora`),
+    then the Neo4j and Qdrant residue of test corpora that have no registry row
+    at all. It is best-effort and never fails the session; an unconfigured or
+    unreachable store simply reaps nothing there.
     """
-    from tests.corpus_reaper import reap_quietly
+    from tests.corpus_reaper import ReapReport, reap_quietly
 
-    started = reap_quietly()
-    if started:
-        print(f"\n[corpus-reaper] session start: reaped {len(started)} stale test corpora: {started}")
+    def _announce(moment: str, report: ReapReport) -> None:
+        if report.corpora:
+            print(
+                f"\n[corpus-reaper] {moment}: reaped {len(report.corpora)} stale test "
+                f"corpora: {report.corpora}"
+            )
+        if report.neo4j:
+            print(
+                f"\n[corpus-reaper] {moment}: deleted {len(report.neo4j)} orphan Neo4j test "
+                f"generations: {report.neo4j}"
+            )
+        if report.qdrant:
+            print(
+                f"\n[corpus-reaper] {moment}: deleted {len(report.qdrant)} orphan Qdrant test "
+                f"collections: {report.qdrant}"
+            )
+
+    _announce("session start", reap_quietly())
     try:
         yield
     finally:
-        ended = reap_quietly()
-        if ended:
-            print(f"\n[corpus-reaper] session end: reaped {len(ended)} stale test corpora: {ended}")
+        _announce("session end", reap_quietly())
 
 
 @pytest.fixture(scope="session")

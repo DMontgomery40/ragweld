@@ -127,10 +127,32 @@ async def _wait_fence_released(
     )
 
 
+async def _delete_neo4j_residue(corpus_id: str) -> None:
+    """Best-effort failure-path cleanup of the corpus's graph and every staged generation.
+
+    The API delete does this on the happy path; a test that dies before it would
+    otherwise leave the Neo4j side of the corpus behind for the session reaper.
+    """
+    cfg = load_config()
+    neo4j = Neo4jClient(
+        cfg.graph_storage.neo4j_uri,
+        cfg.graph_storage.neo4j_user,
+        cfg.graph_storage.resolve_password(),
+        database=cfg.graph_storage.resolve_database(corpus_id),
+    )
+    with contextlib.suppress(Exception):
+        await neo4j.connect()
+        try:
+            await neo4j.delete_staged_graphs(corpus_id)
+            await neo4j.delete_graph(corpus_id)
+        finally:
+            await neo4j.disconnect()
+
+
 async def test_index_search_and_delete_on_promoted_lane(
     client: AsyncClient, tmp_path: Path
 ) -> None:
-    corpus_id = f"promoted-lane-{uuid.uuid4().hex[:8]}"
+    corpus_id = f"pytest_promoted_lane_{uuid.uuid4().hex[:8]}"
     corpus_root = tmp_path / "promoted-corpus"
     shutil.copytree(_CORPUS_PATH, corpus_root)
     (corpus_root / "graph-facts.md").write_text(
@@ -215,6 +237,16 @@ async def test_index_search_and_delete_on_promoted_lane(
         final = await _wait_for_index(client, corpus_id)
         assert final["status"] == "complete", final
         await _wait_fence_released(pg, corpus_id)
+        # The run summary records the extraction measurement the next estimate for
+        # this corpus reuses: the gateway alias that ran it and the wall time the
+        # workers spent inside the extraction calls.
+        first_run = await client.get(f"/api/index/{corpus_id}/runs/latest")
+        assert first_run.status_code == 200, first_run.text
+        extraction = (first_run.json().get("graph_metadata") or {}).get("extraction") or {}
+        assert float(extraction.get("worker_seconds") or 0.0) > 0, first_run.json()
+        assert extraction.get("llm_model_alias") == cfg.graph_indexing.semantic_kg_llm_model, (
+            extraction
+        )
 
         # The fence is durable, not process-local: a fence written by ANOTHER worker
         # (nothing in this process's task map) refuses both a new run and a
@@ -853,6 +885,7 @@ async def test_index_search_and_delete_on_promoted_lane(
             await qdrant.delete_corpus(corpus_id)
         except Exception:
             pass
+        await _delete_neo4j_residue(corpus_id)
         try:
             await pg.delete_corpus_with_data(corpus_id)
         finally:
@@ -869,7 +902,7 @@ async def test_only_the_manifest_run_id_proves_a_commit_and_reclaim_never_drops_
     to reclaim; reclaim drops the run's own staged graph but NEVER a collection
     the manifest names (live or retained), and clears the backlog entry.
     """
-    corpus_id = f"retained-id-{uuid.uuid4().hex[:8]}"
+    corpus_id = f"pytest_retained_id_{uuid.uuid4().hex[:8]}"
     pg = PostgresClient(require_env("POSTGRES_DSN"))
     cfg = load_config()
     qdrant = QdrantChunkStore(cfg)

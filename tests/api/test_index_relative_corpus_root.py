@@ -10,6 +10,7 @@ subsystems.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import uuid
 from collections.abc import Generator
@@ -19,7 +20,10 @@ import pytest
 from httpx import AsyncClient
 
 import server.api.index as index_api
+from server.config import load_config
+from server.db.neo4j import Neo4jClient
 from server.db.postgres import PostgresClient
+from server.retrieval.qdrant_store import QdrantChunkStore
 
 pytestmark = pytest.mark.requires_postgres
 
@@ -63,6 +67,7 @@ def test_the_resolved_root_is_what_the_run_and_the_registry_are_given(elsewhere_
     assert Path(carried.repo_path).parent.parent == index_api._RUNTIME_ROOT.resolve()
 
 
+@pytest.mark.requires_qdrant
 @pytest.mark.asyncio
 async def test_a_run_on_a_relative_registry_path_walks_the_resolved_root(
     client: AsyncClient, tmp_path, elsewhere_cwd
@@ -74,7 +79,7 @@ async def test_a_run_on_a_relative_registry_path_walks_the_resolved_root(
     registered with a path relative to the PROJECT root, a real directory is materialised there,
     and the run is driven through the API the operator uses.
     """
-    repo_id = f"relroot_{uuid.uuid4().hex[:10]}"
+    repo_id = f"pytest_relroot_{uuid.uuid4().hex[:10]}"
     relative = Path("data") / "index_relroot_fixtures" / repo_id
     absolute = (index_api._RUNTIME_ROOT / relative).resolve()
     absolute.mkdir(parents=True, exist_ok=True)
@@ -138,6 +143,24 @@ async def test_a_run_on_a_relative_registry_path_walks_the_resolved_root(
             await pg2.delete_corpus_with_data(repo_id)
         finally:
             await pg2.disconnect()
+        # The run indexed for real: the Qdrant generations (and any Neo4j residue)
+        # go too, or a failure above leaves them behind for the session reaper.
+        cfg = load_config()
+        with contextlib.suppress(Exception):
+            await QdrantChunkStore(cfg).delete_corpus(repo_id)
+        neo4j = Neo4jClient(
+            cfg.graph_storage.neo4j_uri,
+            cfg.graph_storage.neo4j_user,
+            cfg.graph_storage.resolve_password(),
+            database=cfg.graph_storage.resolve_database(repo_id),
+        )
+        with contextlib.suppress(Exception):
+            await neo4j.connect()
+            try:
+                await neo4j.delete_staged_graphs(repo_id)
+                await neo4j.delete_graph(repo_id)
+            finally:
+                await neo4j.disconnect()
         for child in sorted(absolute.rglob("*"), reverse=True):
             child.unlink() if child.is_file() else child.rmdir()
         absolute.rmdir()
