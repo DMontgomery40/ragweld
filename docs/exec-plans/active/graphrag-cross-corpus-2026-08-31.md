@@ -584,3 +584,108 @@ everything below live in `output/task8-graphrag-acceptance/click-ledger-2026-09-
 
 - Task 8 uncommitted range: HIGH risk across 55 files, 99 indexed symbols, eight affected flows. The named flows are `start_index` persisted/config resolution, mechanical docs automation helpers, and `RetrievalSubtab` config/readiness loading.
 - Complete approved-plan range from `e38cb6ba`: CRITICAL risk across 126 files, 637 indexed symbols, and 38 affected flows. The named paths are the expected proposal/estimate/status/start, search/benchmark/eval fusion, Postgres schema metadata, and Graph Explorer/config consumers already bounded by Tasks 1-7 reviews and the fresh full gate.
+
+## Follow-up session (2026-09-02, Claude/Fable): the five recorded follow-ups plus a live GUI drive
+
+Status: in progress. The Task 8 closeout left D13, D15, D19, D20 and D23 as follow-ups; the operator ruled
+that they are part of finishing, so each was root-caused and fixed with RED->GREEN tests on the LXC100 overlay
+`/tmp/ragweld-followups`. Findings made on the way carry new numbers (D24, D25, D26) and the GUI drive's rows
+carry S numbers; the working scratchpad with every row lives with the session and its outcome is summarised here.
+
+- **D13 (fixed, d48f2d01):** the estimator's `_SEMANTIC_KG_CALLS_PER_SECOND = 1.0` quoted ~12 min for the Epstein
+  rebuild whose previous execution took 2 h 07 min. `GraphExtractionTelemetry` now records `llm_model_alias`,
+  `workers` and `worker_seconds` (wall time inside every per-file extraction call, summed over workers); the
+  estimate reuses the corpus's last complete semantic run under the same alias
+  (`worker_seconds / succeeded_chunks`, 10 s per chunk on Epstein, 6.8 s on NASA) and otherwise a 10 s default,
+  naming the source in its assumption string. Unit suite `tests/unit/test_index_estimate_semantic_kg.py`
+  (RED: ImportError); the live promoted-lane run asserts the recorded measurement.
+- **D15 (root-caused and fixed, d48f2d01):** measured on LXC100 with the default cloud window
+  (`openai.gpt-4.1-nano`, 50 candidates x 700 chars): 5.7-10.4 s at idle, 6.3-7.1 s beside four concurrent Luna
+  extraction calls, 6.3-6.9 s under full CPU saturation (`output/task8-graphrag-acceptance/2026-09-02-D15-*.log`).
+  Concurrent load added a tenth; the retired 10 s default sat inside the idle spread of the prompt it had to
+  score. Default 30 s; `_upgrade_raw_config` migrates a persisted 10 the way the retired generation budget was.
+  The ReadTimeout came from `nasa-apollo-11`'s own per-corpus cloud reranker config (mode cloud), still in place.
+  Observation D26: with a reasoning model as the rerank alias the `24 x docs + 64` output budget is consumed by
+  reasoning and the content comes back empty (`GatewayRerankParseError`, Gemini 3.7 Flash 3/3, Luna 1/3);
+  `google.gemini-3.5-flash-lite` scored the same window in 2.7-2.9 s with valid JSON 3/3. Not changed: the
+  reranker alias is the operator's choice; recorded for the config page.
+- **D19 and its cause D24 (fixed, d48f2d01):** `system_prompts.semantic_kg_extraction` was editable on the System
+  Prompts page but never read; the official pipeline ran the library's default `ERExtractionTemplate`, which
+  says nothing about names. The operator prompt is now the extractor's template (`extraction_prompt_template`
+  validates `{schema}`/`{text}`; an unformattable template is a typed 422 `graph_extraction_prompt_invalid`
+  before the schema gate and the fence); the LAW default is the official template plus naming rules (subject
+  lines for emails, never OCR fragments, bare numbers or redaction markers); a persisted prompt equal to the
+  retired default is dropped on load (sha256-pinned, `server.config.drop_retired_prompt_defaults`, shared by the
+  flat loader, the deploy renderer and the config store). Probe on the 52 Epstein chunks that produced noisy
+  names, same Luna route: library template 146 entities / 37 noisy names, LAW template 82 / 4
+  (`output/task8-graphrag-acceptance/2026-09-02-D19-naming-rules-probe.log`). All four live corpus configs carry
+  the retired text and migrate at the next load. The Epstein rebuild under the new template is owed (blocked, see
+  below).
+- **D23 (done, e0cc2e95):** `server/indexing/official_graphrag.py` moved to `tests/official_graphrag.py`; the
+  docs-autopilot source lists cite `server/indexing/graphrag_pipeline.py`.
+- **D25 (fixed, 72561ec5):** found while comparing KG aliases at the operator's request: the extraction LLM bound
+  the effort as the OpenAI `reasoning_effort` parameter, which LiteLLM 1.94 maps onto OpenRouter only for models
+  its own capability map knows; Gemini 3.5 Flash Lite and 3.7 Flash answered every chunk with
+  `400 UnsupportedParamsError` (52/52 failed). OpenRouter's native `reasoning` object in `extra_body` passes LiteLLM
+  untouched and is honoured (Gemini 3.5 Flash Lite reported 112 reasoning tokens; Luna unchanged with either form).
+  `reasoning_model_params` keys the transport on the alias's upstream (`openrouter/` -> `extra_body.reasoning`,
+  OpenAI-compatible local lane -> `reasoning_effort`); the schema proposal deriver uses the same helper.
+- **Review loop:** batch D13/D15/D19/D23/D24 reviewed by DeepSeek V4 Flash `gen-1788338515-1yVkflum2SAvrQzPfB3f`
+  (14,179 prompt + 504 completion tokens, $0.00105): **PASS**, no P1/P2 (`/root/fable-followups-logs/batch1-review.json`).
+  The D25 review request could not be served: at ~08:5x UTC the gateway's OpenRouter key hit its weekly spending
+  limit (`Key limit exceeded (weekly limit)`, $10 cap, $10.06 used; `GET /auth/key` shows `limit_remaining: 0`).
+- **Blocked by the key limit (operator action: raise the weekly limit on the OpenRouter key):** the D25 external
+  review, the six-alias extraction comparison (Gemini 3.5 Flash Lite / 3.7 Flash / Luna / DeepSeek V4 Flash /
+  Haiku 4.5 / GLM 5.3 Flash, script `d19_probe.py`), the Epstein rebuild under the new template, every live chat
+  answer, and the paid steps of the D20 and promoted-lane suites.
+- **D20 and S1/S2:** in progress by two subagents (chat active-corpus mismatch notice + `thread=new` deep link;
+  reaper store-residue sweep + test corpus prefix rename); recorded below when they land.
+- **S1/S2 (fixed, 0d405d08):** the live registry carried a leaked pytest corpus (`promoted-lane-94d47a9c`, deleted
+  through the API at 08:1x UTC) and the stores held residue of older aborted runs (four `__staging__promoted-lane-*`
+  Neo4j generations, three `ragweld_chunks_relroot_*` Qdrant collections). The promoted-lane and relative-root tests
+  now use the `pytest_` prefix and clean Neo4j/Qdrant on their failure path; the session reaper sweeps store residue
+  whose corpus has a test prefix and no registry row (the "no row" rail keeps a concurrent session's corpus safe).
+  22 tests (unit prefixes, cascade parity, live Neo4j+Qdrant sweep) green on the overlay; the one-off live sweep removed
+  exactly the seven items above and left every operator generation and collection in place.
+- **D20 (implemented, verified 6/7):** a used conversation whose Sources exclude the page's active corpus now shows a
+  notice with two explicit moves ("Add <corpus>" appends to Sources and persists; "New chat about <corpus>" starts a
+  fresh thread), and `/chat?corpus=X&thread=new` (the Get Started links) lands in a fresh thread scoped to X without
+  touching the used one; a used thread is still never rewritten silently (M-03/B-04 kept). Three new Playwright cases
+  in `chat_corpus_scope.spec.ts` plus the three non-paid existing ones pass on the overlay (6 passed, 2.4 min); the
+  seventh, the one paid send, fails on the gateway's weekly-limit 403 (Expected 2 / Received 1). Commit follows with
+  the chat-surface fixes of the drive wave (same files).
+- **GUI drive (deployed 6f43ee12, 09:0x-09:4x UTC), findings and their state:** S3 (config lost-update) refuted;
+  S5 Neo4j store "0 B", S7 health chip per page, S14 incidents chip `||` fallthrough: fix wave in progress;
+  S6/S8 copy and subtab alias, S9 chat error card hides the gateway reason, S10 routing trace panel does not follow a
+  failed run, S12 wizard stuck on a deleted corpus: fix wave in progress; S11 Benchmark pre-selects the dead local lane,
+  S16 Learning Agent Studio describes the Mac-era MLX lane: fix wave in progress; S15 (`?corpus=` silently reads the
+  global config) and S17 (overlay tests write the live global config through upgrade-on-load; the documented render
+  source clobbers operator global edits) recorded as open observations.
+- **Drive fix wave (47cfe1c1 server, 2134f9d9 web) deployed to LXC100 at ~10:2x UTC from a git bundle (origin/main
+  withheld, 9 commits behind).** Merged-tree gate on the overlay before deploy: types in sync, banned scan, runtime
+  capability catalog (443 rows) and docs ownership green, ruff/mypy clean, 206 passed across the changed Python suites
+  (the promoted-lane Luna run 403s on the key limit), web lint/tsc clean, node:test unit suite 10/10, Playwright 48/58
+  (the ten: three typed-capability assertions that needed the new server, four paid sends, one pre-existing S18, one
+  stale "Repo" header expectation updated). After deploy the same live-API specs pass 23/24 (the one is the paid send).
+  Live proof on https://ragweld.dtmont.com: Dashboard storage "n/a" with the Neo4j 5 reason (S5); deck chip
+  `incidents=0` and the Learning Agent line "training backend mlx_qwen3 is not available on this host" (S14, S16);
+  health chip "OK · just now" on RAG pages (S7); "Corpus Indexing" header (S6); the Start-indexing dialog quotes
+  ~112 min (67-214 min) for the Epstein rebuild instead of ~12 (D13); a live chat send under the exhausted key renders
+  `failure_kind=spend_limit` with "The provider key's spending limit is exhausted; raise it or wait for the reset" and
+  the sanitised gateway reason (S9), and the Routing Trace panel follows the failed run (S10); every corpus config
+  migrated to the 30 s timeout and the new extraction template (D15, D24).
+- **Open after this session:** S15 (`?corpus=` API scope alias), S17 (overlay tests write the live global config;
+  render source), S18 (production-scope embedding globals vs corpus override, breaks the onboarding spec), S19
+  (extraction template not offered on the Indexing card), D26 (reasoning models as rerank alias), the Epstein rebuild
+  under the new template, the six-alias extraction comparison and the D25 external review (all three wait on the
+  OpenRouter weekly limit), and the origin push.
+- **Full Python gate on the merged tree (LXC100 overlay, config path pointed at a copy, 10:35-10:45 UTC):** 2,073 passed,
+  23 skipped, 8 failed; every failure is a live suite that needs a paid gateway call (benchmark grounding, the real
+  semantic promotion-invariant run, the three schema-proposal live tests, the two GraphRAG pipeline live tests, the
+  promoted-lane run), each refused by the key limit. GitNexus `detect_changes` against `origin/main`: 66 changed
+  symbols across 92 files, no affected flow beyond the config-loader and chat/dashboard paths already named above.
+  Gate logs: `/root/fable-followups-logs/` on LXC100 (merged_gate.log, pw-postdeploy.log, full_gate.log, probes).
+- **Test corpus prefix sweep:** the remaining live-store suites that named corpora outside the reaper's match set
+  (`missing-graph-`, `dash_status_`, `viewer-e2e-`, `pipeline-index-`, `schema-off-/required-/prompt-`) now use the
+  `pytest_` prefix; 28 passed across the graph schema, graph, dashboard and document viewer suites, ruff clean, and the
+  registry, Neo4j and Qdrant carried no residue after the full gate.
