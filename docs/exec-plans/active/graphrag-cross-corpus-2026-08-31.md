@@ -796,3 +796,21 @@ carry S numbers; the working scratchpad with every row lives with the session an
   upstream's own 400 names the cause, and relabelling it a budget error would be a lie. Its P2 on the `40n+256` rerank
   budget stands as a note: measured 1,008 tokens for 50 candidates leaves 2x headroom, and overflow is the typed budget
   error, not a silent truncation.
+- **More drive fixes while the D19 run indexed (each RED→GREEN against the live API):** S40/S34 the MCP probe sent a
+  hardcoded `top_k=5` while `mcp.default_top_k` is 20 and printed the in-process ASGI address as if it were the
+  endpoint an MCP client dials; the probe now runs on the deployment's own defaults and the card reads them from the
+  live config (M12 in `curious_user_p1_fixes.spec.ts` asserts both). S31 the Dependencies cards claimed an unready
+  vLLM blocks chat and the benchmark and that MLflow blocks eval; the vLLM row computes its blocked surfaces from the
+  resolved chat lane (the local alias is itself a gateway route, so the rule reads `chat.litellm.default_model` too)
+  and MLflow's contract drops the eval claim behind a source scan. S37 the chat Routing Trace panel showed the corpus's
+  most recent run (a search or an MCP probe) as if the conversation had produced it; it now says so.
+- **S38 diagnosed, not separately fixed:** LiteLLM served 402 aliases while the catalog has 403, and the two it served
+  that the catalog does not know (`anthropic.claude-opus-4.8-fast`, `anthropic.claude-opus-5-fast`) are exactly the
+  drift S42 caused. The deployed `infra/litellm-config.yaml` predates the catalog refresh, so the warning stops when
+  this deploy carries the regenerated file and the gateway container restarts.
+- **S32 recorded for the operator:** `epstein-files-public`, a document corpus, carries the code-corpus chunk-summary
+  exclusion defaults (`docs`, `data`, `models`, `reports`, `assets`, `public`, `web/dist`, `gui`, ...). Several of those
+  directory names are plausible in a document corpus, so summaries can be skipped silently. Changing the default
+  changes indexing semantics for existing corpora, so it is the operator's call, not a fix to make mid-session.
+- **Final pre-deploy gate on the merged tree:** 2,062 python tests pass (`tests/unit` + `tests/api`, 21 skipped) with
+  the single known overlay artifact, and the web unit runner passes 16/16.
