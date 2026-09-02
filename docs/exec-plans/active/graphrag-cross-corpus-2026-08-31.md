@@ -2,7 +2,7 @@
 
 Date started: 2026-08-31
 
-Status: active
+Status: complete (2026-09-02; Task 8 closed by the Fable session continuing Codex thread 01a0592d)
 
 Plan: `docs/superpowers/plans/2026-08-31-neo4j-graphrag-cross-corpus.md`
 
@@ -302,14 +302,14 @@ This table is the completion authority for Task 8. `Pending` may become `Proves`
 | GDS 2.13 deployment | Task 7 PASS, deployed `gds.version()`=`2.13.x`, Neo4j/APOC/GDS readiness, deployment marker | Proves: `/api/ready` true with Neo4j 5.26.20 + GDS 2.13.7 on every deploy (8a4d20c9, c8df2373, b452d435); NASA 215, code 479, negative-fixture 3 Leiden communities written live |
 | Weighted deterministic Leiden, including code | Task 7 semantic/code/failure live tests plus nonzero NASA/Epstein/code `communityPath`/`communityId`, counts, derived API/UI after reload | Isolated proves; deployed pending |
 | Dead-surface replacement | Repo search, live Neo4j zero obsolete ontology/vector/embedding state, config/generated UI absence | Proves: repo audit 2026-09-01 (no `IN_CHUNK` writer, `graph_entity_hits`, `IN_COMMUNITY`, `Community` nodes, NetworkX/Louvain; removed config names only in migration strip lists); live store: 0 `Community` nodes, 0 `IN_COMMUNITY`/`IN_CHUNK` edges, 0 chunk embeddings, 0 cross-generation edges, 0 leftover GDS projections; regenerated contract bundle no longer carries `semantic_kg_allowed_entity_types` |
-| Per-task and final DeepSeek reviews | Recorded PASS for Tasks 1-7 plus final complete spec-to-main integration PASS after full gate | Tasks 1-7 prove; final pending |
-| Full LXC quality gate | Exact Task 8 surfaces: dependency sync, generators, docs ownership, Ruff, mypy, complete 1,989-test collection, TS/build, headed policy/explorer | Proves predeploy through bounded batches; live GDS browser row deferred to postdeploy |
-| Push/deploy parity | Mac `HEAD`, `origin/main`, LXC `HEAD`, deployment marker and serving runtime hash identical; clean one-worktree state | Proves for 8a4d20c9, c8df2373 and b452d435 (all four hashes identical at each deploy, `/api/ready` true); the five later commits (0f79a7c3, 17f208b9, f1b613db, 27e28df6, 6d59e05e) are pushed and await the post-Epstein deploy |
+| Per-task and final DeepSeek reviews | Recorded PASS for Tasks 1-7 plus final complete spec-to-main integration PASS after full gate | Proves: Tasks 1–7 PASS (Codex), D1–D18 and the D22 revert PASS (this session), final spec-to-main integration review `gen-1788318252` PASS after the fresh full gate (2026-09-02) |
+| Full LXC quality gate | Exact Task 8 surfaces: dependency sync, generators, docs ownership, Ruff, mypy, complete 1,989-test collection, TS/build, headed policy/explorer | Proves: 2026-09-02 on the deployed checkout copy (HOME set, git checkout) — docs ownership, banned patterns, generated types, runtime-capability catalog (443 rows), `tsc`, strict `mypy server` (167 files) clean; full `pytest -vv` at the deployed `1c2ea4e7`: **2,020 passed, 4 skipped, 0 failed in 13:22** (the earlier run at `910d6f58` had the single DeepSeek-lane flake that D22/its revert closed); `ruff check .` carries one pre-existing I001 in `scripts/generate_types.py` |
+| Push/deploy parity | Mac `HEAD`, `origin/main`, LXC `HEAD`, deployment marker and serving runtime hash identical; clean one-worktree state | Proves: runtime code `1c2ea4e7` = Mac `HEAD` = `origin/main` = LXC100 `/opt/ragweld` = `/etc/ragweld/deployment-commit`, clean checkout, `/api/ready` true; the closing docs-only commit is deployed with the same sequence and its hash is recorded in the click ledger; one branch / one worktree on both machines |
 | NASA visible rebuild and drive | Screenshot/click ledger: visible schema review/approve/cost/run telemetry/reload, three node types, two neighborhoods, all controls, community, graph search/debug | Pending |
 | Epstein visible rebuild and drive | Same complete screenshot/click/search/debug ledger with flight/communication question | Pending |
 | `ragweld_code` visible rebuild and drive | Visible code policy/AST types/weights/run telemetry, same full Explorer/search/reload ledger | Pending |
 | Deferred Recall Intelligence Graph | Spec section 15 is the owned enterprise RBAC/Kubernetes/GCP roadmap phase and explicitly covers needs/misses/transitions, prompt/cache opportunities, role/team aggregates, tenant isolation, consent, de-identification, retention/deletion, audit, invalidation, anti-surveillance | Proves; roadmap audit complete |
-| Final completion audit | Every row above classified `Proves`, with run ids, store counts, screenshot paths/timestamps, hashes, and no active/staged work | Pending |
+| Final completion audit | Every row above classified `Proves`, with run ids, store counts, screenshot paths/timestamps, hashes, and no active/staged work | Proves: every row above classified with run ids (`3054ecc2`, `ca5b8d92`, `43efdd0a`), store counts, screenshot paths and timestamps in `output/task8-graphrag-acceptance/click-ledger-2026-09-01.md` (127+ evidence files), hashes above; no active run, no staged generation, no overlay left on LXC100 |
 
 ### Predeployment full-gate evidence
 
@@ -563,6 +563,22 @@ everything below live in `output/task8-graphrag-acceptance/click-ledger-2026-09-
   `Neo4jGraph` schema and empty proposals) stays recorded here as an observation for the non-default lane; it is
   not a Ragweld code defect and the operator's standing KG alias is Luna. The revert + pins were reviewed
   (verdict id below in the click ledger / commit message).
+
+### Final DeepSeek integration review (2026-09-02, spec-to-main at 1c2ea4e7)
+
+- Packet: ordered commit list e38cb6ba → 1c2ea4e7 (25 commits, autopilot/catalog excluded), every recorded verdict id
+  (Tasks 1–7, D1–D22 and the D22 revert), the fresh LXC100 gate output, deployment parity, the live corpus/store
+  audit, the frozen matrix, and the complete `server/` + `web/src` diff (386 KB, ~95k tokens; tests/scripts/docs
+  omitted from the packet because each was reviewed per task).
+- First attempt with the complete diff including tests/docs (718 KB, 185,752 prompt tokens) returned reasoning
+  only after 24,000 completion tokens: `gen-1788318041-8bR6LAfUfIaQeHqyVgsB`, `$0.03086776`, counted as a
+  non-review per the loop rule.
+- `gen-1788318252-3eCZTkDofzHlvOuU9UmI` (`deepseek.deepseek-v4-flash`, 94,839 prompt + 5,070 completion = 99,909
+  tokens, 4,857 of them reasoning, `$0.01469706`): **VERDICT: PASS** — every traceability row satisfied, the D1–D18
+  fixes compose without regression, no hidden fallback / dual path / contract drift, gate and matrix consistent;
+  no P1/P2. Its one remark: `write_lexical_graph_with_graphrag` and `_count_semantic_edges` in
+  `server/indexing/official_graphrag.py` have no production callers (test-facing helper, present before this plan)
+  — recorded as observation D23 for a later relocation into `tests/`, not a gate item.
 
 ### Final precommit GitNexus scope
 

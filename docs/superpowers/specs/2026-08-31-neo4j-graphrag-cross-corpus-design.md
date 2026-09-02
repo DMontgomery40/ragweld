@@ -1,6 +1,6 @@
 # Neo4j GraphRAG cross-corpus replacement — design
 
-Date: 2026-08-31 · Status: approved 2026-08-31, awaiting implementation-plan approval
+Date: 2026-08-31 · Status: implemented and accepted 2026-09-02 (plan `docs/superpowers/plans/2026-08-31-neo4j-graphrag-cross-corpus.md`, ledger `docs/exec-plans/active/graphrag-cross-corpus-2026-08-31.md`; section 15 stays a deferred roadmap phase)
 Review basis: live LXC100 evidence, real browser inspection, current Ragweld source, Neo4j GraphRAG/GDS documentation and source, and a read-only high-reasoning Fable adversarial review (`AGREE WITH CORRECTIONS`)
 
 ## 1. Outcome

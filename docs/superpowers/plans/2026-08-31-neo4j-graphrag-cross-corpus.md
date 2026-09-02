@@ -1,5 +1,7 @@
 # Neo4j GraphRAG Cross-Corpus Replacement Implementation Plan
 
+Status: complete (2026-09-02). Execution ledger: `docs/exec-plans/active/graphrag-cross-corpus-2026-08-31.md`; browser evidence: `output/task8-graphrag-acceptance/` (gitignored, on the Mac).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Repository rules override the generic worktree/subagent recommendation: use the one existing `main` worktree on the Mac and the one existing `/opt/ragweld` checkout on LXC100; do not create a branch, worktree, or subagent.
 
 **Goal:** Replace Ragweld's chunk-only fake graph lane with a corpus-scoped, schema-reviewed Neo4j GraphRAG pipeline whose Qdrant-seeded traversal, resolved entities, fail-closed promotion, GDS Leiden communities, UI, and live browser behavior work honestly across NASA, Epstein, and code corpora.
@@ -1223,7 +1225,7 @@ cd web && npm run lint && npm run build && npx playwright test tests/e2e/exhaust
 
 Record exact counts and failures. Fix root causes, rerun the failed family, then rerun this complete gate. No skip caused by unavailable gateway/store counts as green.
 
-- [ ] **Step 3: Obtain final DeepSeek V4 Flash integration PASS**
+- [x] **Step 3: Obtain final DeepSeek V4 Flash integration PASS**
 
 Submit the complete spec-to-main diff, all task review verdicts, full gate output, remaining dead-symbol searches, deployment diff, and acceptance matrix. Resolve every substantiated P1/P2, rerun impacted tests/full gate, and get PASS.
 
@@ -1246,11 +1248,11 @@ In the authenticated in-app browser:
 
 No direct API start call satisfies this step.
 
-- [ ] **Step 6: Rebuild Epstein and code through visible controls**
+- [x] **Step 6: Rebuild Epstein and code through visible controls**
 
 Repeat the complete visible flow for `epstein-files-public`. For `ragweld_code`, visibly select code policy, confirm AST types/weights, index, and observe resolution/community telemetry. Ensure no run is active before restart/deploy actions.
 
-- [ ] **Step 7: Perform the full Graph Explorer drive on all three corpora**
+- [x] **Step 7: Perform the full Graph Explorer drive on all three corpora**
 
 For each corpus, visibly:
 
@@ -1268,7 +1270,7 @@ For every graph-including search, the visible debug disclosure must not contain 
 
 Use real corpus questions, including Apollo sensor/calibration content and Epstein flight/communication records. Record screenshot path, timestamp, corpus, visible action, expected result, and actual result for every step.
 
-- [ ] **Step 8: Perform visible negative promotion proof**
+- [x] **Step 8: Perform visible negative promotion proof**
 
 Use a safe temporary external corpus whose approved extraction is forced into one invariant failure through the test-only fixture path. Start it through visible controls, observe the typed failure and operator hint, verify no completed badge/promoted generation appears after reload, then delete the temporary corpus through visible UI. Do not mutate NASA/Epstein/code active generations for the negative proof.
 
@@ -1276,11 +1278,11 @@ Use a safe temporary external corpus whose approved extraction is forced into on
 
 Require zero production hits for obsolete names/settings (`IN_CHUNK`, Neo4j chunk vector index, `graph_entity_hits`, heuristic semantic KG, Community nodes/IN_COMMUNITY, NetworkX community code). Query live Neo4j for zero obsolete relationships/nodes on new generations, zero cross-generation edges/memberships, and no chunk embeddings. Verify one Mac branch/worktree, one LXC branch/worktree, clean status, no active index, no abandoned staging generation/projection, and healthy backups.
 
-- [ ] **Step 10: Close docs and the deferred Recall Intelligence roadmap note**
+- [x] **Step 10: Close docs and the deferred Recall Intelligence roadmap note**
 
 Confirm the approved spec's section 15 remains explicit in the enterprise RBAC/Kubernetes/GCP plan: repeated needs, misses, exploration transitions, prompt/cache opportunities, role/team aggregates, tenant boundaries, consent, de-identification, retention/deletion, audit, cache invalidation, and anti-surveillance constraints. Mark implementation plan/spec complete only when the evidence matrix has no missing/weak row.
 
-- [ ] **Step 11: Completion audit and goal close**
+- [x] **Step 11: Completion audit and goal close**
 
 Re-read the active goal, spec, plan, every DeepSeek verdict, full gate, deployment parity, store queries, and browser ledger. For each requirement classify evidence as proves/contradicts/incomplete/missing. Continue work on every incomplete or missing row. Only when all rows prove completion, mark the goal complete and report the final deployed commit, review verdicts, test counts, reindex run ids, graph counts, and browser evidence locations.
 
