@@ -72,6 +72,8 @@ async def _delete_corpus_staging_rows(conn: asyncpg.Connection, repo_id: str) ->
     ``__``, so the remainder after the corpus's staging prefix must be free of
     ``__``: corpus ``a`` never sweeps the staging rows of corpus ``a__b``.
     """
+    # Local import: server.indexing.generations imports PostgresClient from this module,
+    # so a module-level import here would be a cycle.
     from server.indexing.generations import staging_repo_id
 
     staging_prefix = staging_repo_id(repo_id, "")
