@@ -38,7 +38,10 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add data/models.json web/public/models.json
+          # The refresh regenerates the catalog, its web mirror AND the gateway config
+          # (write_catalog_trio); staging only the JSON left the generated YAML behind and
+          # broke the lockstep test on main.
+          git add data/models.json web/public/models.json infra/litellm-config.yaml
           if git diff --cached --quiet; then
             echo "No catalog changes to commit."
             exit 0

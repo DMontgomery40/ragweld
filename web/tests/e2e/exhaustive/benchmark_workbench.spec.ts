@@ -25,6 +25,15 @@ async function liveLocalLane(request: APIRequestContext): Promise<{ lane: LocalL
   return { lane: lane!, selectable: lane!.enabled === true && probe?.ok === true };
 }
 
+/** The alias this corpus answers with: the configured LiteLLM default while that lane is on. */
+async function answeringAlias(request: APIRequestContext): Promise<string> {
+  const response = await request.get(`${API_BASE}/config`);
+  expect(response.ok(), `GET /api/config -> ${response.status()}`).toBeTruthy();
+  const config = (await response.json()) as { chat?: { litellm?: { enabled?: boolean; default_model?: string } } };
+  const litellm = config.chat?.litellm;
+  return litellm?.enabled ? String(litellm.default_model || '').trim() : '';
+}
+
 test.describe.serial('benchmark workbench (read-only)', () => {
   test('S11: the default selection only pre-checks the local lane when this host serves it', async ({ page, request }) => {
     const { lane, selectable } = await liveLocalLane(request);
@@ -39,8 +48,21 @@ test.describe.serial('benchmark workbench (read-only)', () => {
       .getByTestId('benchmark-model-list')
       .locator('label:has(input[type="checkbox"]:checked)')
       .evaluateAll((els) => els.map((el) => String(el.getAttribute('data-alias') || '')));
-    const expected = aliases.filter((alias) => selectable || alias !== lane.alias).slice(0, 2);
-    expect(checkedAliases, `defaults follow the page order, skipping ${lane.alias} unless its lane is live`).toEqual(expected);
+    // S41: the alias this corpus answers with (the configured LiteLLM default while that lane
+    // is on) is one of the two defaults, and page order fills the other. Display order alone
+    // pre-checked whichever two aliases sort first in the catalog. The checked labels come back
+    // in DOM order, so the comparison is by set, not by position.
+    const answering = await answeringAlias(request);
+    const serving = (alias: string): boolean => selectable || alias !== lane.alias;
+    const anchor = answering && aliases.includes(answering) && serving(answering) ? [answering] : [];
+    const expected = [...anchor, ...aliases.filter((alias) => serving(alias) && !anchor.includes(alias))].slice(0, 2);
+    expect(
+      [...checkedAliases].sort(),
+      `defaults are the answering alias (${answering || 'none configured'}) plus page order, skipping ${lane.alias} unless its lane is live`
+    ).toEqual([...expected].sort());
+    if (anchor.length) {
+      expect(checkedAliases, 'the corpus answers with this alias, so a first run must compare it').toContain(answering);
+    }
 
     const localRow = rows.filter({ has: page.locator(`[data-alias="${lane.alias}"]`) }).or(page.locator(`[data-testid="benchmark-model-row"][data-alias="${lane.alias}"]`));
     if (await localRow.count()) {

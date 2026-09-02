@@ -55,6 +55,14 @@ model_list:
   litellm_params:
     model: openrouter/anthropic/claude-fable-5
     api_key: os.environ/OPENROUTER_API_KEY
+- model_name: anthropic.claude-fable-5.1
+  litellm_params:
+    model: openrouter/anthropic/claude-fable-5.1
+    api_key: os.environ/OPENROUTER_API_KEY
+- model_name: anthropic.claude-fable-5.1.batch
+  litellm_params:
+    model: openrouter/anthropic/claude-fable-5.1:batch
+    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: anthropic.claude-fable-5.batch
   litellm_params:
     model: openrouter/anthropic/claude-fable-5:batch
@@ -107,10 +115,6 @@ model_list:
   litellm_params:
     model: openrouter/anthropic/claude-opus-4.8
     api_key: os.environ/OPENROUTER_API_KEY
-- model_name: anthropic.claude-opus-4.8-fast
-  litellm_params:
-    model: openrouter/anthropic/claude-opus-4.8-fast
-    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: anthropic.claude-opus-4.8.batch
   litellm_params:
     model: openrouter/anthropic/claude-opus-4.8:batch
@@ -118,10 +122,6 @@ model_list:
 - model_name: anthropic.claude-opus-5
   litellm_params:
     model: openrouter/anthropic/claude-opus-5
-    api_key: os.environ/OPENROUTER_API_KEY
-- model_name: anthropic.claude-opus-5-fast
-  litellm_params:
-    model: openrouter/anthropic/claude-opus-5-fast
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: anthropic.claude-opus-5.batch
   litellm_params:
@@ -466,6 +466,10 @@ model_list:
 - model_name: inception.mercury-2
   litellm_params:
     model: openrouter/inception/mercury-2
+    api_key: os.environ/OPENROUTER_API_KEY
+- model_name: inception.mercury-2.5-preview
+  litellm_params:
+    model: openrouter/inception/mercury-2.5-preview
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: inclusionai.ling-3.0-flash
   litellm_params:

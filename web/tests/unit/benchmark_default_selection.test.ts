@@ -64,14 +64,14 @@ test('a disabled local lane is never a default; the next two ordered candidates 
   const lane = localLaneState(capabilities(false), readiness(true, 'disabled by configuration'));
   assert.equal(lane.enabled, false);
   assert.equal(lane.reachable, false, 'readiness ok=true for a disabled lane means "not required", not "serving"');
-  assert.deepEqual(defaultBenchmarkSelection(ORDERED, lane), ['litellm:aion-labs.aion-2.0', 'litellm:aion-labs.aion-3.0']);
+  assert.deepEqual(defaultBenchmarkSelection(ORDERED, lane, {}), ['litellm:aion-labs.aion-2.0', 'litellm:aion-labs.aion-3.0']);
   assert.equal(describeLocalLane(lane), 'vLLM lane disabled on this host');
 });
 
 test('an enabled, reachable local lane is the first default', () => {
   const lane = localLaneState(capabilities(true), readiness(true, 'reachable'));
   assert.equal(lane.reachable, true);
-  assert.deepEqual(defaultBenchmarkSelection(ORDERED, lane), ['litellm:ragweld-local', 'litellm:aion-labs.aion-2.0']);
+  assert.deepEqual(defaultBenchmarkSelection(ORDERED, lane, {}), ['litellm:ragweld-local', 'litellm:aion-labs.aion-2.0']);
   assert.equal(describeLocalLane(lane), 'vLLM lane on');
 });
 
@@ -79,14 +79,14 @@ test('an enabled lane whose serving probe fails is skipped like a disabled one',
   const lane = localLaneState(capabilities(true), readiness(false, 'unreachable'));
   assert.equal(lane.enabled, true);
   assert.equal(lane.reachable, false);
-  assert.deepEqual(defaultBenchmarkSelection(ORDERED, lane), ['litellm:aion-labs.aion-2.0', 'litellm:aion-labs.aion-3.0']);
+  assert.deepEqual(defaultBenchmarkSelection(ORDERED, lane, {}), ['litellm:aion-labs.aion-2.0', 'litellm:aion-labs.aion-3.0']);
   assert.equal(describeLocalLane(lane), 'vLLM lane enabled but not serving');
 });
 
 test('without a readiness answer the lane is not proven serving, so it is skipped', () => {
   const lane = localLaneState(capabilities(true), null);
   assert.equal(lane.reachable, false);
-  assert.deepEqual(defaultBenchmarkSelection(ORDERED, lane), ['litellm:aion-labs.aion-2.0', 'litellm:aion-labs.aion-3.0']);
+  assert.deepEqual(defaultBenchmarkSelection(ORDERED, lane, {}), ['litellm:aion-labs.aion-2.0', 'litellm:aion-labs.aion-3.0']);
 });
 
 test('the lane alias comes from capabilities, not from a name baked into the page', () => {
@@ -94,12 +94,49 @@ test('the lane alias comes from capabilities, not from a name baked into the pag
   caps.generation!.local_serving!.alias = 'ragweld-house';
   const rows = [model('ragweld-house', 'ragweld', 'House lane'), ...ORDERED.slice(1)];
   const lane = localLaneState(caps, readiness(true, 'disabled by configuration'));
-  assert.deepEqual(defaultBenchmarkSelection(rows, lane), ['litellm:aion-labs.aion-2.0', 'litellm:aion-labs.aion-3.0']);
+  assert.deepEqual(defaultBenchmarkSelection(rows, lane, {}), ['litellm:aion-labs.aion-2.0', 'litellm:aion-labs.aion-3.0']);
 });
 
 test('selection honours the requested count, skips blank and duplicate values, and never pads', () => {
   const lane = localLaneState(capabilities(false), readiness(true, 'disabled by configuration'));
   const rows = [ORDERED[0], { ...ORDERED[1], override: '', id: '' }, ORDERED[2], ORDERED[2], ORDERED[3]];
-  assert.deepEqual(defaultBenchmarkSelection(rows, lane, 3), ['litellm:aion-labs.aion-3.0', 'litellm:openai.gpt-5.6-luna']);
-  assert.deepEqual(defaultBenchmarkSelection([ORDERED[0]], lane), []);
+  assert.deepEqual(defaultBenchmarkSelection(rows, lane, { count: 3 }), ['litellm:aion-labs.aion-3.0', 'litellm:openai.gpt-5.6-luna']);
+  assert.deepEqual(defaultBenchmarkSelection([ORDERED[0]], lane, {}), []);
+});
+
+// S41: a first benchmark must compare the alias this corpus actually answers with, not the
+// two rows that happen to sort first in the catalog (which preselected two AionLabs models
+// on the live deployment). The anchor is chat.litellm.default_model, matched the way the
+// chat picker matches it (model id or catalog model), and the second slot is filled from
+// display order.
+test('the answering alias is the first default, and display order fills the rest', () => {
+  const lane = localLaneState(capabilities(false), readiness(false, 'disabled'));
+  assert.deepEqual(defaultBenchmarkSelection(ORDERED, lane, { answeringAlias: 'openai.gpt-5.6-luna' }), [
+    'litellm:openai.gpt-5.6-luna',
+    'litellm:aion-labs.aion-2.0',
+  ]);
+});
+
+test('an answering alias absent from the catalog leaves the display order untouched', () => {
+  const lane = localLaneState(capabilities(false), readiness(false, 'disabled'));
+  assert.deepEqual(defaultBenchmarkSelection(ORDERED, lane, { answeringAlias: 'openai.gpt-9.9-nope' }), [
+    'litellm:aion-labs.aion-2.0',
+    'litellm:aion-labs.aion-3.0',
+  ]);
+});
+
+test('the answering alias is never the local lane while that lane is not serving', () => {
+  const lane = localLaneState(capabilities(true), readiness(false, 'not serving'));
+  assert.deepEqual(defaultBenchmarkSelection(ORDERED, lane, { answeringAlias: 'ragweld-local' }), [
+    'litellm:aion-labs.aion-2.0',
+    'litellm:aion-labs.aion-3.0',
+  ]);
+});
+
+test('a serving local lane named by the config is the first default', () => {
+  const lane = localLaneState(capabilities(true), readiness(true, 'serving'));
+  assert.deepEqual(defaultBenchmarkSelection(ORDERED, lane, { answeringAlias: 'ragweld-local' }), [
+    'litellm:ragweld-local',
+    'litellm:aion-labs.aion-2.0',
+  ]);
 });

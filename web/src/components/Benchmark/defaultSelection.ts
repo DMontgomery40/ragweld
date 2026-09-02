@@ -38,21 +38,60 @@ export function localLaneState(capabilities: RuntimeCapabilitiesResponse, readin
   };
 }
 
+export type BenchmarkDefaultOptions = {
+  /**
+   * The gateway alias this corpus answers with (`chat.litellm.default_model` while the
+   * LiteLLM lane is on), matched against a row's model id or catalog model exactly as the
+   * chat picker matches it. Empty when the deployment names none.
+   */
+  answeringAlias?: string;
+  /** How many rows to preselect (the run gate still requires at least two). */
+  count?: number;
+};
+
+/** The row this corpus answers with, or `undefined` when the catalog does not serve that alias. */
+export function answeringModel(orderedModels: ChatModelInfo[], answeringAlias: string): ChatModelInfo | undefined {
+  const alias = String(answeringAlias || '').trim();
+  if (!alias) return undefined;
+  return orderedModels.find(
+    (model) => String(model.id || '').trim() === alias || String(model.catalog_model || '').trim() === alias
+  );
+}
+
 /**
- * The first `count` distinct rows of `orderedModels` (the page's display order), skipping
- * the local alias unless its lane is reachable. Returns fewer than `count` values when the
- * list is too short; the run gate still requires at least two.
+ * The rows a first benchmark starts with: the alias this corpus answers with, then the
+ * page's display order.
+ *
+ * Display order alone preselected the two rows that happen to sort first in the catalog
+ * (two AionLabs models on this deployment), so the first run compared two aliases the
+ * operator had never chosen (S41). Anchoring on the answering alias makes the comparison
+ * "what this corpus answers with, against the next candidate". The local serving row is
+ * skipped unless its lane is reachable, whether it is the anchor or a filler (S11).
+ * Returns fewer than `count` values when the list is too short.
  */
-export function defaultBenchmarkSelection(orderedModels: ChatModelInfo[], lane: LocalLaneState, count = 2): string[] {
+export function defaultBenchmarkSelection(
+  orderedModels: ChatModelInfo[],
+  lane: LocalLaneState,
+  options: BenchmarkDefaultOptions = {}
+): string[] {
+  const count = Number.isFinite(options.count) ? Number(options.count) : 2;
   const values: string[] = [];
+  const servesLane = (model: ChatModelInfo): boolean =>
+    !lane.alias || String(model.id || '').trim() !== lane.alias || lane.reachable;
+
+  const anchor = answeringModel(orderedModels, String(options.answeringAlias || ''));
+  if (anchor && servesLane(anchor)) {
+    const value = toModelValue(anchor);
+    if (value) values.push(value);
+  }
   for (const model of orderedModels) {
+    if (values.length >= count) break;
     const value = toModelValue(model);
     if (!value || values.includes(value)) continue;
-    if (lane.alias && String(model.id || '').trim() === lane.alias && !lane.reachable) continue;
+    if (!servesLane(model)) continue;
     values.push(value);
-    if (values.length >= count) break;
   }
-  return values;
+  return values.slice(0, Math.max(0, count));
 }
 
 /** Short operator-facing state for the local row's detail line. */

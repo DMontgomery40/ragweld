@@ -3747,6 +3747,7 @@ export function IndexingSubtab() {
                   <PromptLink promptKey="code_enrichment">Edit Code Enrichment Prompt</PromptLink>
                   <PromptLink promptKey="lightweight_chunk_summaries">Edit Lightweight Summary Prompt</PromptLink>
                   <PromptLink promptKey="semantic_chunk_summaries">Edit Summary Prompt</PromptLink>
+                  <PromptLink promptKey="semantic_kg_extraction">Edit Semantic KG Extraction Prompt</PromptLink>
                 </div>
               </div>
             </div>

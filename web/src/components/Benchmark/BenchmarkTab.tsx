@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useAPI, useRuntimeCapabilities } from '@/hooks';
+import { useAPI, useConfig, useRuntimeCapabilities } from '@/hooks';
 import { withCorpusScope } from '@/api/client';
 import { getReadiness } from '@/api/dashboard';
 import { Button } from '@/components/ui/Button';
@@ -51,6 +51,7 @@ function groundingState(run: BenchmarkRun): { grounded: boolean; ungroundedModel
 
 export default function BenchmarkTab() {
   const { api } = useAPI();
+  const { config } = useConfig();
 
   const [availableModels, setAvailableModels] = useState<ChatModelInfo[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
@@ -89,6 +90,13 @@ export default function BenchmarkTab() {
       mounted = false;
     };
   }, []);
+  // The alias this corpus answers with, resolved the way the chat picker resolves it: the
+  // configured LiteLLM default while that lane is on. It anchors the default selection so a
+  // first benchmark compares the corpus's own answer model, not the catalog's first rows (S41).
+  const answeringAlias = useMemo(
+    () => (config?.chat?.litellm?.enabled ? String(config?.chat?.litellm?.default_model || '').trim() : ''),
+    [config?.chat?.litellm?.enabled, config?.chat?.litellm?.default_model]
+  );
   const localLane = useMemo(
     () => (capabilities ? localLaneState(capabilities, readiness) : null),
     [capabilities, readiness]
@@ -181,9 +189,12 @@ export default function BenchmarkTab() {
     if (initSelectionRef.current) return;
     if (orderedModels.length < 2) return;
     if (!localLane || !readinessSettled) return;
+    // The answering alias is config truth, and this effect runs once: initialising before the
+    // config has loaded would anchor on nothing and never re-run (S41).
+    if (!config) return;
     initSelectionRef.current = true;
-    setSelectedModels(defaultBenchmarkSelection(orderedModels, localLane));
-  }, [orderedModels, localLane, readinessSettled]);
+    setSelectedModels(defaultBenchmarkSelection(orderedModels, localLane, { answeringAlias }));
+  }, [answeringAlias, config, orderedModels, localLane, readinessSettled]);
 
   const splitResults = useMemo(() => {
     return (runResult?.results || []).map((r) => ({

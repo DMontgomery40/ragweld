@@ -117,6 +117,19 @@ test('the Graph card is named for everything it still holds', async ({ page }) =
   await expect(page.getByText('Prompt Templates')).toBeVisible();
 });
 
+test('the Graph card links the semantic KG extraction prompt it runs', async ({ page }) => {
+  // The card that chooses the semantic policy offered the enrichment and summary
+  // prompts but not the extraction template that policy sends to the model; the
+  // operator had to know it lives under Eval Analysis > System Prompts (drive S19).
+  await openTab(page);
+  await openCard(page, 'enrichment');
+  const link = page.getByRole('button', { name: 'Edit Semantic KG Extraction Prompt' });
+  await expect(link).toBeVisible();
+  await link.click();
+  await expect(page).toHaveURL(/prompt=semantic_kg_extraction/);
+  await expect(page.getByText('Semantic KG Extraction', { exact: false }).first()).toBeVisible();
+});
+
 test('the page header is corpus-first, not "Code Indexing"', async ({ page }) => {
   // Every corpus (an email corpus included) was headed "Code Indexing"; the product
   // is corpus-first and the settings below are per corpus (2026-09-02 drive, S6).
