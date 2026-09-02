@@ -421,7 +421,7 @@ def semantic_extraction_llm(
     route_base_url: str,
     route_api_key: str,
     llm_timeout_s: int,
-    reasoning_effort: str,
+    reasoning_effort: str | None,
 ) -> OpenAILLM:
     """The official OpenAILLM for semantic extraction, carrying the operator's controls.
 
@@ -438,12 +438,19 @@ def semantic_extraction_llm(
         raise RuntimeError("GraphRAG semantic extraction requires an authenticated route")
     if int(llm_timeout_s) <= 0:
         raise RuntimeError("GraphRAG semantic extraction requires a positive per-chunk timeout")
-    effort = str(reasoning_effort or "").strip()
-    if not effort:
-        raise RuntimeError("GraphRAG semantic extraction requires a reasoning effort")
+    model_params: dict[str, Any] = {"temperature": 0}
+    if reasoning_effort is not None:
+        # ``reasoning_effort`` is OpenAI's request knob. Callers pass None for routes
+        # whose provider does not define it: DeepSeek answered it with
+        # ``embedding_properties: null`` nodes that the official extractor rejects
+        # (Task 8 drive defect D22).
+        effort = str(reasoning_effort).strip()
+        if not effort:
+            raise RuntimeError("GraphRAG semantic extraction requires a reasoning effort")
+        model_params["reasoning_effort"] = effort
     return OpenAILLM(
         model_name=str(route_model).strip(),
-        model_params={"temperature": 0, "reasoning_effort": effort},
+        model_params=model_params,
         api_key=str(route_api_key).strip(),
         base_url=str(route_base_url).strip(),
         timeout=float(int(llm_timeout_s)),
@@ -461,7 +468,7 @@ def build_semantic_pipeline(
     route_api_key: str,
     max_concurrency: int,
     llm_timeout_s: int,
-    reasoning_effort: str,
+    reasoning_effort: str | None,
 ) -> Pipeline:
     llm = semantic_extraction_llm(
         route_model=route_model,

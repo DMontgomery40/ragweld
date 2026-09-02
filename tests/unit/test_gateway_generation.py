@@ -9,9 +9,11 @@ from typing import Any
 
 import pytest
 
+from server.api.index import _semantic_kg_reasoning_effort
 from server.chat.generation import generate_chat_text, stream_chat_text
 from server.chat.provider_router import ProviderRoute
 from server.gateway_catalog import warm_gateway_catalog
+from server.models.tribrid_config_model import TriBridConfig
 
 FAIL_ONCE_KEY = "fail-once-key"
 
@@ -270,3 +272,16 @@ async def test_image_bearing_requests_do_not_stall_the_event_loop() -> None:
     sent = [req for req in _GatewayHandler.requests if req["payload"].get("messages")]
     assert len(sent) == 2
     assert all(len(req["payload"]["messages"][1]["content"]) == 6 for req in sent)  # text + 5 images
+
+
+def test_semantic_kg_reasoning_effort_only_reaches_openai_routes() -> None:
+    """Task 8 drive defect D22: the operator's reasoning effort is bound for OpenAI aliases and
+    withheld from every other provider and from unknown aliases, because the knob is OpenAI's
+    and DeepSeek answered it with output the official extractor rejects."""
+    warm_gateway_catalog()
+    cfg = TriBridConfig()
+    cfg.graph_indexing.semantic_kg_reasoning_effort = "xhigh"
+    assert _semantic_kg_reasoning_effort(cfg, "openai.gpt-5.6-luna") == "xhigh"
+    assert _semantic_kg_reasoning_effort(cfg, "deepseek.deepseek-v4-flash") is None
+    assert _semantic_kg_reasoning_effort(cfg, "z-ai.glm-5.3-flash") is None
+    assert _semantic_kg_reasoning_effort(cfg, "no.such-alias") is None

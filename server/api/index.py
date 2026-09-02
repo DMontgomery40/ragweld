@@ -1188,6 +1188,21 @@ def _resolve_semantic_kg_route(cfg: TriBridConfig) -> ProviderRoute:
     return route
 
 
+def _semantic_kg_reasoning_effort(cfg: TriBridConfig, route_model: str) -> str | None:
+    """The operator's reasoning effort for OpenAI routes, None for every other provider.
+
+    ``reasoning_effort`` is an OpenAI request parameter; other providers answer it
+    with different output shapes (Task 8 drive defect D22: DeepSeek returned
+    ``embedding_properties: null`` nodes that the official extractor rejects), so the
+    knob only reaches routes whose catalog provider is ``openai``.
+    """
+    spec = _gateway_model_spec(str(route_model or "").strip())
+    provider = str((spec or {}).get("provider") or "").strip().lower()
+    if provider != "openai":
+        return None
+    return str(cfg.graph_indexing.semantic_kg_reasoning_effort)
+
+
 def _gateway_model_spec(alias: str) -> dict[str, Any] | None:
     """The catalog row served under one gateway alias, or None when the alias is unknown.
 
@@ -1996,7 +2011,7 @@ async def _run_index(
                     route_api_key=str(route.api_key or "").strip(),
                     max_concurrency=max(1, int(cfg.indexing.indexing_workers)),
                     llm_timeout_s=int(cfg.graph_indexing.semantic_kg_llm_timeout_s),
-                    reasoning_effort=str(cfg.graph_indexing.semantic_kg_reasoning_effort),
+                    reasoning_effort=_semantic_kg_reasoning_effort(cfg, str(route.model or "")),
                 )
             else:
                 code_writer = await asyncio.to_thread(
@@ -4177,7 +4192,7 @@ async def build_proposal_from_corpus(
         route_model=str(route.model or "").strip(),
         route_base_url=str(route.base_url or "").strip(),
         route_api_key=str(route.api_key or "").strip(),
-        reasoning_effort=str(cfg.graph_indexing.semantic_kg_reasoning_effort),
+        reasoning_effort=_semantic_kg_reasoning_effort(cfg, str(route.model or "")),
         input_fingerprint=fingerprint,
     )
 
