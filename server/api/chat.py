@@ -674,6 +674,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                             await trace_store.annotate(run_id, **current_trace_payload_fields())
                         # Retrieval did happen: the query and its sources stay linked to this run
                         # for feedback and triplet mining, which do not need an answer.
+                        yield f"data: {json.dumps(payload)}\n\n"
                         if not query_log_appended:
                             raw_sources = payload.get("sources") or []
                             top_paths = [
@@ -694,7 +695,6 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                                 query_log_appended = True
                             except Exception:
                                 pass
-                        yield f"data: {json.dumps(payload)}\n\n"
                         continue
 
 
@@ -777,20 +777,6 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                     )
                     payload["debug"] = debug.model_dump(mode="serialization", by_alias=True)
 
-                    if not query_log_appended:
-                        try:
-                            await _append_chat_query_log_entry(
-                                config=config,
-                                fusion=fusion,
-                                event_id=run_id,
-                                conversation_id=conv.id,
-                                corpus_ids=resolve_sources(request.sources),
-                                query=request.message,
-                                top_paths=[s.file_path for s in src_objs[:5]],
-                            )
-                            query_log_appended = True
-                        except Exception:
-                            pass
 
                     if trace_enabled:
                         await trace_store.add_event(
@@ -813,7 +799,23 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                         await trace_store.annotate(run_id, **current_trace_payload_fields())
 
                     yield f"data: {json.dumps(payload)}\n\n"
-                    # `done` is on the wire: persist the exchange now, both messages together,
+                    # `done` is on the wire: only now does the exchange exist. The query/source
+                    # record for feedback and triplet mining, then the messages, then Recall.
+                    if not query_log_appended:
+                        try:
+                            await _append_chat_query_log_entry(
+                                config=config,
+                                fusion=fusion,
+                                event_id=run_id,
+                                conversation_id=conv.id,
+                                corpus_ids=resolve_sources(request.sources),
+                                query=request.message,
+                                top_paths=[s.file_path for s in src_objs[:5]],
+                            )
+                            query_log_appended = True
+                        except Exception:
+                            pass
+                    # Persist the exchange now, both messages together,
                     # then let Recall see the finished conversation.
                     store.add_message(conv.id, Message(role="user", content=request.message), None)
                     assistant_msg = Message(role="assistant", content=accumulated)

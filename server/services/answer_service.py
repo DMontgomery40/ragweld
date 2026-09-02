@@ -590,4 +590,3 @@ async def stream_answer_best_effort(
             },
             cache_mode=normalized_cache_mode,
         )
-

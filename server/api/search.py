@@ -449,6 +449,17 @@ async def answer_stream(request: AnswerRequest) -> StreamingResponse:
             top_k=int(request.top_k),
             cache_mode=request_cache_mode,
         )
+    except asyncio.CancelledError:
+        # Cancelled while retrieval was pending: the wrapper that would close the trace and
+        # the span has not started yet, so close them here and re-raise.
+        if trace_enabled:
+            try:
+                await asyncio.shield(trace_store.end(run_id))
+            except asyncio.CancelledError:
+                pass
+        setup_scope.__exit__(None, None, None)
+        observation.finish((None, None, None))
+        raise
     except RetrievalContractMismatchError as e:
         if trace_enabled:
             await trace_store.add_event(run_id, kind="answer.error", msg=str(e), data={"code": e.code})

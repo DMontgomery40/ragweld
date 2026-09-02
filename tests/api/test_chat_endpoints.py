@@ -4,15 +4,17 @@ import uuid
 """Tests for chat API endpoints with PydanticAI integration."""
 
 import json
-from unittest.mock import AsyncMock, patch
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
-from tests.api.fake_gateway import empty_stream_gateway, gateway_env, slow_delta_gateway
+from tests.api.fake_gateway import completion_gateway, empty_stream_gateway, gateway_env, slow_delta_gateway
 from tests.api.live_server import live_app_subprocess
 from server.config import load_config
+from server.retrieval.qdrant_store import QdrantChunkStore
+from server.models.index import Chunk
+from server.db.postgres import PostgresClient
 from server.api.chat import set_config, set_fusion
 from server.gateway_catalog import warm_gateway_catalog
 from server.main import app
@@ -254,14 +256,11 @@ class TestChatEndpointWithMockedLLM:
     @pytest.mark.asyncio
     async def test_chat_creates_conversation(self, chat_client: AsyncClient):
         """Test that chat creates a new conversation when none provided."""
-        with patch(
-            "server.chat.handler.generate_chat_text",
-            new=AsyncMock(return_value=("Test response", "resp_123")),
-        ):
+        with completion_gateway("Test response") as base_url, gateway_env(base_url):
 
             response = await chat_client.post(
                 "/api/chat",
-                json={"message": "Hello", "sources": {"corpus_ids": []}},
+                json={"message": "Who arranged Barry Cohen's October 2017 flights?", "sources": {"corpus_ids": []}},
             )
 
             assert response.status_code == 200
@@ -280,15 +279,12 @@ class TestChatEndpointWithMockedLLM:
         store = get_conversation_store()
         store.get_or_create("existing-conv")
 
-        with patch(
-            "server.chat.handler.generate_chat_text",
-            new=AsyncMock(return_value=("Response 1", "resp_1")),
-        ):
+        with completion_gateway("Response 1") as base_url, gateway_env(base_url):
 
             response = await chat_client.post(
                 "/api/chat",
                 json={
-                    "message": "Hello",
+                    "message": "Who arranged Barry Cohen's October 2017 flights?",
                     "sources": {"corpus_ids": []},
                     "conversation_id": "existing-conv",
                 },
@@ -300,10 +296,7 @@ class TestChatEndpointWithMockedLLM:
     @pytest.mark.asyncio
     async def test_chat_stores_messages(self, chat_client: AsyncClient):
         """Test that chat stores user and assistant messages."""
-        with patch(
-            "server.chat.handler.generate_chat_text",
-            new=AsyncMock(return_value=("Assistant says hi", "resp_456")),
-        ):
+        with completion_gateway("Assistant says hi") as base_url, gateway_env(base_url):
 
             response = await chat_client.post(
                 "/api/chat",
@@ -323,10 +316,7 @@ class TestChatEndpointWithMockedLLM:
     @pytest.mark.asyncio
     async def test_chat_returns_sources(self, chat_client: AsyncClient, mock_chunks: list[ChunkMatch]):
         """Test that chat returns sources from retrieval."""
-        with patch(
-            "server.chat.handler.generate_chat_text",
-            new=AsyncMock(return_value=("Response with sources", "resp_789")),
-        ):
+        with completion_gateway("Response with sources") as base_url, gateway_env(base_url):
 
             response = await chat_client.post(
                 "/api/chat",
@@ -470,6 +460,10 @@ class TestStreamEndpoint:
 
         question = "Which plane management company did Barry Cohen consider switching to?"
         conversation_id = f"stream-late-{uuid.uuid4().hex[:8]}"
+        corpus_id = f"pytest_stream_late_{uuid.uuid4().hex[:8]}"
+        query_log = tmp_path / "queries.jsonl"
+        pg = PostgresClient("postgresql://ignored")
+        await pg.connect()
         with slow_delta_gateway(delay_seconds=0.1, final_delay_seconds=3.0) as base_url, gateway_env(base_url):
             cfg = load_config()
             cfg.chat.litellm.enabled = True
@@ -479,8 +473,26 @@ class TestStreamEndpoint:
             cfg.semantic_cache.enabled = 1
             cfg.semantic_cache.mode = "read_write"
             cfg.semantic_cache.min_query_chars = 1
+            cfg.tracing.tribrid_log_path = str(query_log)
             config_path = tmp_path / "tribrid_config.json"
             config_path.write_text(json.dumps(cfg.model_dump(mode="serialization")), encoding="utf-8")
+            # A real corpus with retrievable chunks, so retrieval runs and has a query record to write.
+            await pg.upsert_corpus(corpus_id, name=corpus_id, root_path=".")
+            await pg.upsert_corpus_config_json(corpus_id, cfg.model_dump(mode="serialization"))
+            chunk = Chunk(
+                chunk_id="c1",
+                content="Barry Cohen considered switching plane management to Jet Aviation in 2017",
+                file_path="emails/cohen-2017.txt",
+                start_line=1,
+                end_line=1,
+                language="text",
+                token_count=12,
+                embedding=None,
+                summary=None,
+                metadata={"kind": "unit_test"},
+            )
+            await pg.upsert_chunks(corpus_id, [chunk])
+            await QdrantChunkStore(cfg).upsert_chunks(corpus_id, [chunk], embedding_dim=int(cfg.embedding.embedding_dim), pg=pg)
             with live_app_subprocess(
                 config_path=config_path,
                 env={"LITELLM_BASE_URL": base_url, "LITELLM_API_KEY": "pytest-fake-gateway-key"},
@@ -490,7 +502,7 @@ class TestStreamEndpoint:
                     async with client.stream(
                         "POST",
                         "/api/chat/stream",
-                        json={"message": question, "sources": {"corpus_ids": []}, "conversation_id": conversation_id},
+                        json={"message": question, "sources": {"corpus_ids": [corpus_id]}, "conversation_id": conversation_id},
                     ) as response:
                         assert response.status_code == 200
                         async for line in response.aiter_lines():
@@ -502,6 +514,9 @@ class TestStreamEndpoint:
                     await asyncio.sleep(4.5)  # past the terminator: the server side has settled
                     history = await client.get(f"/api/chat/history/{conversation_id}")
                     assert history.status_code == 200 and history.json() == [], history.text
+                    # The query/source record for feedback mining is written only after `done`.
+                    logged = query_log.read_text(encoding="utf-8") if query_log.exists() else ""
+                    assert question not in logged, logged
                     latest = await client.get("/api/traces/latest")
                     assert latest.status_code == 200, latest.text
                     trace = (latest.json() or {}).get("trace") or {}
@@ -510,9 +525,13 @@ class TestStreamEndpoint:
                     # abandoned exchange, so this is not a cache hit.
                     again = await client.post(
                         "/api/chat/stream",
-                        json={"message": question, "sources": {"corpus_ids": []}, "conversation_id": conversation_id},
+                        json={"message": question, "sources": {"corpus_ids": [corpus_id]}, "conversation_id": conversation_id},
                     )
                     assert again.status_code == 200
+                    # The completed exchange is the one the query log records.
+                    await asyncio.sleep(0.5)
+                    logged = query_log.read_text(encoding="utf-8") if query_log.exists() else ""
+                    assert logged.count(question) == 1, logged
                     events = [
                         json.loads(line[len("data: ") :])
                         for line in again.text.splitlines()
@@ -522,6 +541,14 @@ class TestStreamEndpoint:
                     fusion_debug = ((done.get("debug") or {}).get("fusion_debug")) or {}
                     assert not fusion_debug.get("cache_hit"), fusion_debug
                     assert fusion_debug.get("cache_lookup_outcome") != "hit", fusion_debug
+        try:
+            await QdrantChunkStore(load_config()).delete_corpus(corpus_id)
+        except Exception:
+            pass
+        try:
+            await pg.delete_corpus(corpus_id)
+        except Exception:
+            pass
 
 
 class TestChatCitationsRealPipeline:
@@ -537,10 +564,7 @@ class TestChatCitationsRealPipeline:
     ):
         _ = monkeypatch
 
-        with patch(
-            "server.chat.handler.generate_chat_text",
-            new=AsyncMock(return_value=("Assistant says hi", "resp_test")),
-        ):
+        with completion_gateway("Config persistence lives in server/services/config_store.py.") as base_url, gateway_env(base_url):
             response = await chat_client.post(
                 "/api/chat",
                 json={
@@ -556,7 +580,7 @@ class TestChatCitationsRealPipeline:
         data = response.json()
         assert data["conversation_id"]
         assert data["message"]["role"] == "assistant"
-        assert data["message"]["content"] == "Assistant says hi"
+        assert data["message"]["content"] == "Config persistence lives in server/services/config_store.py."
         assert isinstance(data["sources"], list)
         assert len(data["sources"]) >= 1
         assert data["sources"][0]["file_path"] == "src/main.py"
@@ -574,14 +598,14 @@ class TestChatCitationsRealPipeline:
     ):
         _ = monkeypatch
 
-        payload = {"message": "Test", "sources": {"corpus_ids": ["test-repo"]}, "conversation_id": "stream-conv-2"}
+        payload = {
+            "message": "Which plane management company did Barry Cohen consider switching to?",
+            "sources": {"corpus_ids": ["test-repo"]},
+            "conversation_id": "stream-conv-2",
+        }
 
         body = ""
-        async def mock_stream_chat_text(*args, **kwargs):
-            _ = (args, kwargs)
-            yield "Streamed response"
-
-        with patch("server.chat.handler.stream_chat_text", new=mock_stream_chat_text):
+        with completion_gateway() as base_url, gateway_env(base_url):
             async with chat_client.stream("POST", "/api/chat/stream", json=payload) as resp:
                 assert resp.status_code == 200
                 assert resp.headers["content-type"].startswith("text/event-stream")
@@ -625,14 +649,10 @@ class TestTraceEndpoint:
 
     @pytest.mark.asyncio
     async def test_traces_latest_by_run_id(self, chat_client: AsyncClient):
-        with patch(
-            "server.chat.handler.generate_chat_text",
-            new=AsyncMock(return_value=("Trace response", "resp_trace")),
-        ):
-
+        with completion_gateway("Barry Cohen's October 2017 flights were arranged through Jeffrey Epstein's office.") as base_url, gateway_env(base_url):
             resp = await chat_client.post(
                 "/api/chat",
-                json={"message": "Hello", "sources": {"corpus_ids": []}},
+                json={"message": "Who arranged Barry Cohen's October 2017 flights?", "sources": {"corpus_ids": []}},
             )
             assert resp.status_code == 200
             run_id = resp.json().get("run_id")

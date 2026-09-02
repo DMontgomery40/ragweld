@@ -133,15 +133,16 @@ def register_mcp_tools(mcp: FastMCP, cfg: MCPConfig) -> None:
         if not query.strip():
             raise ValueError("Query must not be empty")
 
-        await _ensure_corpus_exists(corpus_id)
-        scoped_cfg = await load_scoped_config(repo_id=corpus_id)
-
         effective_mode: MCPMode = mode or cfg.default_mode
         include_vector, include_sparse, include_graph = _mode_to_flags(effective_mode)
         effective_top_k = int(top_k or cfg.default_top_k)
 
         fusion = TriBridFusion()
+        # The corpus and config lookups sit under the same typed guard as retrieval, so a
+        # store outage there is the typed dependency error, not FastMCP's generic text.
         try:
+            await _ensure_corpus_exists(corpus_id)
+            scoped_cfg = await load_scoped_config(repo_id=corpus_id)
             rows = await fusion.search(
                 [corpus_id],
                 query,
@@ -163,6 +164,19 @@ def register_mcp_tools(mcp: FastMCP, cfg: MCPConfig) -> None:
             return _search_tool_result(error=RerankerFailureDetail.model_validate(exc.to_detail()))
         except DependencyUnavailableError as exc:
             return _search_tool_result(error=_dependency_error_detail(exc))
+        except ValueError:
+            raise  # "Corpus not found": the tool's own argument error, not a runtime failure
+        except Exception as exc:
+            if is_required_dependency_unavailable(exc):
+                dependency: DependencyName = (
+                    "postgres" if is_postgres_unavailable(exc) else "neo4j" if is_neo4j_unavailable(exc) else "qdrant"
+                )
+                return _search_tool_result(
+                    error=_dependency_error_detail(
+                        DependencyUnavailableError(dependency=dependency, operation="MCP search retrieval")
+                    )
+                )
+            raise
         return _search_tool_result(rows=rows)
 
     @mcp.tool()

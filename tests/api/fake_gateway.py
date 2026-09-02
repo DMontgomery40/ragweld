@@ -125,3 +125,56 @@ def slow_delta_gateway(*, delay_seconds: float = 0.4, final_delay_seconds: float
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+
+
+class _CompletionGateway(BaseHTTPRequestHandler):
+    """A non-stream OpenAI-compatible completion with fixed text (set by ``completion_gateway``)."""
+
+    text: str = "The plane management company was Jet Aviation."
+
+    def log_message(self, _format: str, *_args: object) -> None:
+        return
+
+    def do_POST(self) -> None:  # noqa: N802 - stdlib handler contract
+        length = int(self.headers.get("Content-Length") or "0")
+        payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+        if payload.get("stream"):
+            body_lines = [
+                "data: " + json.dumps({"id": "chatcmpl-fixed", "object": "chat.completion.chunk",
+                                       "choices": [{"index": 0, "delta": {"content": type(self).text}, "finish_reason": None}]}),
+                "data: [DONE]",
+            ]
+            body = ("\n\n".join(body_lines) + "\n\n").encode()
+            content_type = "text/event-stream"
+        else:
+            body = json.dumps(
+                {
+                    "id": "chatcmpl-fixed",
+                    "object": "chat.completion",
+                    "model": payload.get("model") or "fixed",
+                    "choices": [{"index": 0, "message": {"role": "assistant", "content": type(self).text}, "finish_reason": "stop"}],
+                    "usage": {"prompt_tokens": 20, "completion_tokens": 9, "total_tokens": 29},
+                }
+            ).encode()
+            content_type = "application/json"
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+@contextmanager
+def completion_gateway(text: str = "The plane management company was Jet Aviation.") -> Iterator[str]:
+    """A gateway that answers every request (stream or not) with ``text``."""
+    _CompletionGateway.text = text
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _CompletionGateway)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        host, port = server.server_address
+        yield f"http://{host}:{port}/v1"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)

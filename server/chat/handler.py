@@ -878,8 +878,6 @@ async def chat_stream(
         cached_provider_id = hit.payload.get("provider_response_id")
         provider_response_id = str(cached_provider_id).strip() if isinstance(cached_provider_id, str) else None
         if cached_text:
-            if provider_response_id:
-                conversation.last_provider_response_id = provider_response_id
             try:
                 dbg = dict(getattr(fusion, "last_debug", None) or {})
                 dbg.update(
@@ -914,6 +912,9 @@ async def chat_stream(
                 "web_grounding": WebGroundingMetadata().model_dump(mode="json"),
             }
             yield f"data: {json.dumps(done_payload)}\n\n"
+            # `done` is on the wire: only now does the hit become this conversation's last response.
+            if provider_response_id:
+                conversation.last_provider_response_id = provider_response_id
             return
 
     def _capture_provider_response_id(val: str) -> None:
