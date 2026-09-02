@@ -44,6 +44,11 @@
 !!! note "Graph counters in the chat debug footer"
     The dev/debug footer under an assistant message renders the message's own `ChatDebugInfo`. When that message's retrieval included the graph leg, it now discloses the leg's own accounting verbatim — `graph_enabled`, `graph_qdrant_seed_chunks` (the dense Qdrant seeds that fed the traversal), `graph_relationship_expansion_hits` (relationship-expansion hits), and `graph_hydrated_chunks` (chunks hydrated back from Postgres). The line renders only when `graph_enabled` is a boolean on the message, and the retired `graph_entity_hits` figure is never shown. Note that traversal credits only **non-seed** chunks: a search whose seed set already spans the whole corpus can legitimately report zero hydrated chunks beyond its seeds.
 
+!!! note "A failed generation says why — and is traceable like a success"
+    When the gateway cannot complete generation, the typed `generation_unavailable` detail carries `failure_kind` (`spend_limit`, `auth`, `upstream_unreachable`, `gateway_unreachable`, or `gateway`), a `gateway_reason` (the provider's own words, sanitised server-side: secrets, bearer tokens and key-bearing URLs removed), and an `operator_hint` chosen from that classification — an exhausted provider spending limit no longer sends you to check keys and aliases that are fine. The chat stream's in-band `error` event and the non-stream HTTP paths (chat, eval) share one classifier (`server/chat/generation_failure.py`), so the same refusal reads the same everywhere.
+
+    A failed send also carries the run the server had already recorded: the stream's terminal `done` event follows the `error` event, and the UI publishes the run id, timing, and trace headers exactly like a successful answer — the Routing Trace panel follows the failed run instead of the previous successful one, and the error card's Details list the failure class, the sanitised reason, and the run id. See [UI tour](manual/ui.md).
+
 ```mermaid
 flowchart LR
     Req["ChatRequest"] --> API

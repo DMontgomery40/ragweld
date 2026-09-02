@@ -48,13 +48,15 @@ When the global config has `ui.runtime_mode=production`:
     | Generation models and limits | `generation.gen_model`, `generation.enrich_model`, `generation.gen_max_tokens` |
     | Chat | `chat.max_tokens`, `chat.litellm.default_model`, `chat.multimodal.vision_model_override`, `chat.vllm.enabled`, `chat.web` |
     | Synthetic generation | `synthetic.generator.max_tokens` |
-    | Embedding provider | `embedding.embedding_backend`, `embedding.embedding_type`, `embedding.embedding_model`, `embedding.embedding_dim` |
     | UI defaults | `ui.chat_default_model`, `ui.runtime_mode`, `ui.open_browser`, `ui.grafana_base_url` |
     | Observability endpoints | `tracing.langfuse_base_url`, `tracing.langfuse_public_base_url`, `tracing.faro_base_url`, `tracing.trace_store_path` |
     | Training/eval endpoints and judges | `training.ragweld_agent_flyte_admin_base_url`, `training.ragweld_agent_flyte_console_base_url`, `training.ragweld_agent_flyte_callback_base_url`, `training.ragweld_agent_mlflow_tracking_url`, `training.ragweld_agent_mlflow_console_base_url`, `evaluation.ragas_judge_model`, `evaluation.promptfoo_grader_model` |
 
 !!! warning "Don't hand-edit these paths per corpus in production"
-    The values are reconciled away on the next read. Change them in the **global** config (or the deployment environment) instead. Corpus-specific tuning that is *not* on the list — retrieval, fusion, chunking, recall gates — remains fully corpus-scoped.
+    The values are reconciled away on the next read. Change them in the **global** config (or the deployment environment) instead. Corpus-specific tuning that is *not* on the list — retrieval, fusion, chunking, recall gates, embedding — remains fully corpus-scoped.
+
+!!! note "Embedding settings are never production-scoped"
+    `embedding.*` was once reconciled to the deployment globals here; it no longer is. A corpus's embedding settings are its own index contract — the generation records them and the mismatch guard enforces them, and the index job reads the corpus's saved value — so reconciling them made a corpus-scoped save answer `200` and read back the global, and the next non-forced run refused with `stored=..., config=...`. What you save on a corpus applies to that corpus; the deployment owns URLs and default models, not the embedding contract.
 
 !!! note "Concrete production aliases"
     The Proxmox production render (`deploy/proxmox/render_config.py`) sets `chat.litellm.default_model` and `ui.chat_default_model` to `z-ai.glm-5.3-flash`, while keeping `chat.multimodal.vision_model_override` on `openai.gpt-5.6-terra`. Two things follow from this split:

@@ -120,6 +120,8 @@ A handful of chat behaviors changed so the thread never lies to you:
 - **One prompt system.** Exactly one of the four state prompts (Direct / RAG / Recall / RAG+Recall) is sent, chosen by whether RAG and/or Recall context is present; the legacy base+suffix fallback composition is gone. Set them in **Chat → Settings**.
 - **One markdown renderer.** Assistant answers (and onboarding answers) render through a single GFM renderer — tables, bold, inline code, fenced code with syntax highlighting, and nested lists all render, and wide content wraps inside the pane instead of growing it sideways.
 - **The debug footer discloses the graph leg.** When a message's retrieval ran the graph leg, its debug footer shows the leg's own counters — `graph_enabled`, `graph_qdrant_seed_chunks`, `graph_relationship_expansion_hits`, `graph_hydrated_chunks` — read straight from the chat debug contract (`ChatDebugInfo`), and never the retired entity-hit figure. See [Chat models](../api_models_chat.md).
+- **A failed answer says why, and the trace follows it.** When generation fails, the error card classifies the gateway's sanitised reason (`spend limit`, `rejected key`, `serving lane not running`, `gateway unreachable`) and shows it in **Details** together with the run id; the Routing Trace panel follows the failed run instead of the previous successful one. See [Chat models](../api_models_chat.md).
+- **A used thread never lies about its corpus.** Opening Chat with an active corpus (`?corpus=`) that is not in the conversation's Sources shows a notice — the next answer would search elsewhere — with two honest moves: **Add <corpus>** to this thread's Sources, or **New chat about <corpus>**. A `?thread=new` deep link (what Get Started's *Open Chat* uses) opens a fresh conversation scoped to the URL corpus and leaves the used thread alone.
 
 ### Top-bar health pill: the /api/ready breakdown in one click
 
@@ -130,6 +132,7 @@ Clicking the pill is no longer a no-op: it opens a **component-status popover** 
 - **A 503 is a status, not an error.** `/api/ready` answers `200` when every required dependency is ready and `503` — with the same payload shape — when one is not, so the popover can always show *which* dependency is the problem instead of a generic failure. See [Health, Readiness, and Metrics API](../api_health.md).
 - **Escape closes the popover** and returns focus to the pill; a click outside dismisses it too.
 - **Open System Status** closes the popover and lands on **Dashboard → System Status** for the detailed view.
+- **The first reading is not gated on visibility.** A page opened in a background tab (or an automation tab, which browsers report as hidden) gets one health probe at mount, so its pill never sits at "— · not checked yet" while the Dashboard reads OK. Only the recurring 30-second poll follows tab visibility.
 
 *Concept diagram (the pill's data path only — the full service map is on the [generated runtime-topology page](../reference/architecture/runtime-topology.md)):*
 
@@ -188,7 +191,7 @@ The UI is organized into top-level tabs. Here’s the practical meaning of each:
 | Admin | Basic/advanced/raw configuration + dependency and secret readiness | `/web/admin?subtab=basic` |
 
 !!! note "Subtab routes changed recently"
-    Grafana's subtabs are now **Overview**, **Dashboards**, **Incidents**, and **Config**; Admin's are **Basic**, **Advanced**, **Raw**, and **Dependencies** (secret readiness lives under Dependencies). A bookmark pointing at an old `?subtab=` value is corrected with a toast naming what changed.
+    Grafana's subtabs are now **Overview**, **Dashboards**, **Incidents**, and **Config**; Admin's are **Basic**, **Advanced**, **Raw**, and **Dependencies** (secret readiness lives under Dependencies); RAG's Reranker subtab id is now `reranker` (it used to be `reranker-config`, so `?subtab=reranker` — the slug the label suggests — bounced to Data Quality). A bookmark pointing at an old `?subtab=` value is corrected with a toast naming what changed, and `?subtab=reranker-config` still lands on the Reranker tab.
 
 !!! note "Startup load: Dashboard → Storage is lazy-loaded"
     To keep first paint cheap and avoid unnecessary database IO, ragweld does not fetch storage/indexing metrics until you open the Storage subtab.
@@ -246,6 +249,7 @@ The Storage subtab shows one tile per storage component, in two deliberately dif
 
 - **Byte tiles** (chunks, vectors, indexes, Postgres totals) carry a `% of total` share line and a background fill bar, because they are slices of a real byte total and the shares sum to roughly 100%.
 - **Count tiles** (Qdrant points, keywords) show only the tally — `1,315 points`, `247 keywords`. A count has no share of a byte total, so a percentage would always read 0.0% and the fill bar would be meaningless; neither is rendered.
+- **An unmeasured store is "n/a" with the reason.** The Neo4j store tile reads `n/a` — Neo4j 5 exposes no store-size procedure and the data volume is not host-readable — with no share line and no fill bar, and it contributes nothing to the byte total. A zero would read as a measured empty graph beside thousands of nodes; see [Index Dashboard models](../api_models_extra.md).
 
 Byte figures are labelled in binary units (KiB / MiB / GiB) here and on **Dashboard → System Status**, because both divide by 1024 — the two subtabs agree on the same number under the same label.
 
@@ -294,5 +298,6 @@ A handful of workbench-shell behaviors changed recently; none change any workflo
 - **Admin → Dependencies loads out loud.** The readiness probe can take ~25 s on a cold cache, so the panel shows a spinner with an elapsed counter, skeleton cards, and a "still working" note past ~8 seconds instead of a bare sentence that reads as a hung page.
 - **The dock has one set of controls.** When nothing is docked, **Dock Chat** / **Dock Current** / **Choose…** live in the dock header and the empty body is guidance text — the duplicate control set in the empty body is gone. Docking the page you are on (which moves the main view to Chat) now announces it with a one-click undo toast instead of silently relocating the page.
 - **The settings rail links, it doesn't duplicate.** The rail's old "Quick Model Switcher" — a second copy of generation/embedding/reranker assignment with its own Apply button — is gone; it now links to **RAG → Retrieval**, the single surface that assigns models. Long lineage/eval ids render middle-truncated with a one-click **copy full id** control.
+- **The wizard follows a corpus that still exists.** Steps 3 and 4 now name the corpus they act on (`This step works on <name> (<corpus_id>)`), and a persisted wizard corpus the registry no longer has — deleted while the wizard kept its id — is replaced by the active corpus (or cleared), instead of greying the steps out over a corpus that no longer exists while the corpus in the URL is indexed and ready. *Open Chat* at the end deep-links into a fresh conversation scoped to that corpus (`?thread=new`).
 - **Get Started lays out by its pane, not the window.** The wizard's container keys its layout to the width of its own pane (`#tab-start` is a CSS size container), so it renders readably both as the main page and when swapped into the narrow dock pane — navigating to Get Started while another tab is docked no longer wraps step headings and warnings one character per line. Swapping tabs between the main pane and the dock is intentional behavior; the wizard just stays legible through it.
 ```

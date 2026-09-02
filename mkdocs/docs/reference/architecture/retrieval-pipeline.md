@@ -33,7 +33,7 @@ flowchart TB
     shape["Dedup / MMR / neighbours\ndedup_by=chunk_id\nmax_chunks_per_file=3\nneighbor_window=1\nenable_mmr=False\nmmr_lambda=0.7\nchunk_summary_search_enabled=True"]
     end
     subgraph s_rerank["Reranking (server/retrieval/rerank.py, gateway_reranker.py)"]
-    rerank["Reranker\nreranker_mode=none\nreranker_cloud_provider=litellm\nreranker_cloud_model=openai.gpt-4.1-nano\nreranker_cloud_top_n=50\ntribrid_reranker_alpha=0.7\ntribrid_reranker_topn=50\nreranker_timeout=10"]
+    rerank["Reranker\nreranker_mode=none\nreranker_cloud_provider=litellm\nreranker_cloud_model=openai.gpt-4.1-nano\nreranker_cloud_top_n=50\ntribrid_reranker_alpha=0.7\ntribrid_reranker_topn=50\nreranker_timeout=30"]
     end
     subgraph s_out["Answer"]
     conf["Confidence gate\nconf_top1=0.62\nconf_avg5=0.55\nconf_any=0.55\nfallback_confidence=0.55\nfinal_k=10\neval_final_k=5"]
@@ -226,7 +226,7 @@ flowchart TB
 | `tribrid_reranker_maxlen` | `512` | Max token length for reranker |
 | `tribrid_reranker_reload_on_change` | `False` | Hot-reload on model change |
 | `tribrid_reranker_reload_period_sec` | `60` | Reload check period (seconds) |
-| `reranker_timeout` | `10` | Reranker API timeout (seconds) |
+| `reranker_timeout` | `30` | Reranker API timeout (seconds). The default cloud window (50 candidates x 700 chars) takes 6-10 s through the gateway at idle; 30 s leaves headroom over the slowest idle call (Task 8 drive observation D15). |
 | `rerank_input_snippet_chars` | `700` | Snippet chars for reranking input |
 
 ### `hydration`

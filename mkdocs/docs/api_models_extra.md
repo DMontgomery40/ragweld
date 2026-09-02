@@ -37,12 +37,15 @@
 
 | Model | Fields |
 |-------|--------|
-| `DashboardIndexStorageBreakdown` | `chunks_bytes`, `embeddings_bytes`, `pgvector_index_bytes`, `bm25_index_bytes`, `neo4j_store_bytes`, `total_storage_bytes` |
+| `DashboardIndexStorageBreakdown` | `chunks_bytes`, `chunk_summaries_bytes`, `qdrant_points`, `qdrant_dense_vector_bytes`, `neo4j_store_bytes` (nullable when unmeasured), `neo4j_store_note`, `postgres_total_bytes`, `total_storage_bytes` |
 | `DashboardIndexCosts` | `total_tokens`, `embedding_cost`, `semantic_kg_cost`, `figure_description_cost`, `figures_described`, `total_cost` |
 | `DashboardIndexStatusResponse` | `lines`, `metadata`, `running`, `progress`, `current_file` |
 
 !!! note "Figure spend is read off the latest committed run"
     `figure_description_cost` and `figures_described` come from the latest **committed** indexing run summary, not the newest summary on disk: starting a re-index writes an `indexing` summary (zero figures, by design) immediately, and the cost card must keep reporting the live generation’s spend while that run is in flight — and keep it if that run errors. The figure cost is a ceiling: the run record prices the full completion budget per figure, so a real description spent less. `total_cost` sums exactly the phases that apply and is `null` when any applicable component has no known price — an unpriced component makes the total unknown rather than silently counting as zero.
+
+!!! note "An unmeasured store is null with a reason, never a measured-looking zero"
+    Neo4j 5 Community exposes no store-size source — `dbms.queryJmx` is gone in Neo4j 5, APOC core has no `apoc.monitor.store`, `SHOW DATABASES` carries no size column, and the data volume is a root-owned Docker volume the API process cannot read. When no measurement source exists, `neo4j_store_bytes` is `null` with `neo4j_store_note` saying why, the store contributes nothing to `total_storage_bytes`, and both Dashboard panels render the tile as `n/a` instead of a measured-looking `0 B (0.0% of total)` beside a graph of thousands of nodes.
 
 ```mermaid
 flowchart LR

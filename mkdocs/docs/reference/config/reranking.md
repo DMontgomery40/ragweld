@@ -40,7 +40,7 @@
 | `reranking.reranker_cloud_provider` | `RERANKER_CLOUD_PROVIDER` | `str` | `"litellm"` | pattern=^(litellm\|cohere)$ | Cloud reranker provider when mode=cloud: 'litellm' scores candidates listwise through a LiteLLM gateway alias (no local model, no extra credential); 'cohere' calls the Cohere rerank API (COHERE_API_KEY). |
 | `reranking.reranker_cloud_top_n` | `RERANKER_CLOUD_TOP_N` | `int` | `50` | ≥ 1, ≤ 200 | Number of candidates to rerank (cloud mode) |
 | `reranking.reranker_mode` | `RERANKER_MODE` | `str` | `"none"` | pattern=^(cloud\|learning\|none)$ | Reranker mode: 'cloud' (LiteLLM gateway alias or Cohere API), 'learning' (MLX Qwen3 LoRA learning reranker), 'none' (disabled). Stale values such as 'local'/'hf' fail validation and must be migrated. |
-| `reranking.reranker_timeout` | `RERANKER_TIMEOUT` | `int` | `10` | ≥ 5, ≤ 60 | Reranker API timeout (seconds) |
+| `reranking.reranker_timeout` | `RERANKER_TIMEOUT` | `int` | `30` | ≥ 5, ≤ 60 | Reranker API timeout (seconds). The default cloud window (50 candidates x 700 chars) takes 6-10 s through the gateway at idle; 30 s leaves headroom over the slowest idle call (Task 8 drive observation D15). |
 | `reranking.tribrid_reranker_alpha` | `TRIBRID_RERANKER_ALPHA` | `float` | `0.7` | ≥ 0.0, ≤ 1.0 | Blend weight for reranker scores |
 | `reranking.tribrid_reranker_batch` | `TRIBRID_RERANKER_BATCH` | `int` | `16` | ≥ 1, ≤ 128 | Reranker batch size |
 | `reranking.tribrid_reranker_maxlen` | `TRIBRID_RERANKER_MAXLEN` | `int` | `512` | ≥ 128, ≤ 2048 | Max token length for reranker |

@@ -40,7 +40,10 @@
 | `reranking.reranker_cloud_provider` | `cohere` \| `voyage` \| `jina` |
 | `reranking.reranker_cloud_model` | Provider-scoped model id |
 | `reranking.tribrid_reranker_topn` | Candidates to rerank |
-| `reranking.reranker_timeout` | Timeout for API calls |
+| `reranking.reranker_timeout` | Timeout for API calls (default 30 s — see the note below) |
+
+!!! note "The default timeout is now 30 s (was 10 s)"
+    The default cloud window (50 candidates × 700 chars) takes 6–10 s through the gateway at idle, so the retired 10 s default sat inside the idle spread of the very call it had to score and failed chats with a gateway ReadTimeout. A persisted config still carrying `10` — the retired default, which the config page stored verbatim — is migrated to 30 on load (`server/services/config_store.py`); an operator-set value like `12` is kept. Tune the value from your alias's real p95, not from a guess.
 
 !!! note "Configured vs Active on `/api/reranker/info`"
     Reranker config is **corpus-scoped**, and `GET /api/reranker/info?corpus_id=...` now resolves the same scoped config the mode selector writes — calling it without a corpus reports the global config. The response carries an authoritative `active` flag plus an `active_reason` sentence computed server-side: `active=true` means reranking will actually run for that corpus (cloud mode with provider and model set, or a learning adapter promoted), and `active=false` says why not (mode `none`, cloud selected but nothing configured, or learning selected with no adapter promoted under `models/learning-reranker-active`). The **RAG → Reranker** card shows both lines — `Configured: … · Active: yes/no` with the reason underneath — so the page can no longer say CLOUD in the mode selector while the runtime is silently disabled.

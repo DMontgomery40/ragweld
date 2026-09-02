@@ -110,6 +110,9 @@ flowchart LR
 !!! tip "Semantic KG cost is priced through the gateway alias"
     `semantic_kg_cost_usd` resolves its model through the same `gateway_alias` lookup the figure price uses — the alias the run would actually call (`graph_indexing.semantic_kg_llm_model`, else the gateway default). A catalog `model` id such as `z-ai/glm-5.3-flash` is not an alias (aliases may not contain a `/`), so resolving by model id would price nothing at all; the default `ragweld-local` alias is a real, priced catalog row at $0/$0, so a default-config corpus reports a true zero rather than an unknown total.
 
+!!! note "The semantic KG time estimate is calibrated from the corpus's last run"
+    The semantic KG wall-clock estimate used to model one extraction call per second per worker — it quoted ~12 minutes for a 3,126-chunk rebuild that actually took 2 h 07 min. The model is now seconds **per chunk per worker**: a reasoning-model gateway round-trip costs roughly 10 s by default, and when the corpus's last complete semantic run ran the same extraction alias, the estimate reuses that run's measured rate instead (`GraphExtractionTelemetry.worker_seconds` divided by `succeeded_chunks`, recorded on the run summary). The assumption line names its source either way — `measured on run <id> with <alias>` or `default; no completed run with this model to measure from` — and the parallelism is capped at 8 concurrent extraction calls however many `indexing.indexing_workers` you set.
+
 === "Python"
 ```python
 import httpx

@@ -43,6 +43,7 @@
 | No results from graph | Neo4j empty or disconnected | Rebuild graph, check credentials |
 | Validation error on `/api/config` | Field constraints violated | Adjust values to allowed ranges |
 | Slow queries | High `max_hops`, large `top_k` | Reduce hops, tune indexes |
+| Chat fails with `generation_unavailable` | Gateway or provider refusal | Read the error card's failure class and sanitised reason; the operator hint names the fix (spending limit, rejected key, serving lane down, gateway unreachable) |
 
 ```mermaid
 flowchart TB
