@@ -916,3 +916,16 @@ carry S numbers; the working scratchpad with every row lives with the session an
   subprocess server with a real MCP session — the MCP session manager starts once per process, so a second in-process
   lifespan cannot); the edited chat-history test uses the shared real gateway instead of `patch`. Round-4 gate and
   codex approval #5 in flight.
+- **Codex approval #5 (on f486e363): BLOCK — three P1s on the ordering of durable writes, fixed in 5747b465 with one
+  rule: nothing durable precedes delivery of the `done` event.** The chat stream had persisted the user message
+  before streaming and rolled it back by tail-matching (defeatable by a concurrent stream in the same conversation),
+  a cancellation during priming bypassed cleanup, and the semantic cache / conversation / Recall writes ran before the
+  client had `done`. Both messages now persist together after `done` is yielded, Recall starts after it, both stream
+  handlers write their cache after `done` (the event reports no cache write), priming cancellation closes the trace
+  and span, and both wrappers' close-out is shielded. `/api/answer/stream` documents its retrieval 503s; the MCP
+  answer tool's lookups sit under the typed guard. Tests on the uvicorn subprocess: a late disconnect (every delta
+  received, terminator held back 3 s, cache read_write on) leaves an empty history, an ended trace and no cache hit
+  on the repeated question; the SSE test runs on the real local gateway; a seeded corpus whose store is then broken
+  fails closed on both answer routes without a generation call (a first attempt with an unindexed corpus produced a
+  paid, ungrounded Luna answer — an empty index is a legitimate empty result, not a failure). Round-5 gate and codex
+  approval #6 in flight.
