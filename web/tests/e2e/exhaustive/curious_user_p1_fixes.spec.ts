@@ -169,8 +169,11 @@ test.describe.serial('curious-user drive P1 fixes on an isolated corpus', () => 
     expect(deadCalls()).toEqual([]);
   });
 
-  test('M12: the MCP subtab lists registered tools and probes real retrieval', async ({ page, baseURL }) => {
+  test('M12: the MCP subtab lists registered tools and probes real retrieval', async ({ page, baseURL, request }) => {
     await activateCorpusInBrowser(page, corpus.corpusId);
+    const mcpConfig = (await (await request.get(`${API_BASE}/config`)).json()) as { mcp?: { default_top_k?: number } };
+    const configuredTopK = Number(mcpConfig.mcp?.default_top_k ?? 0);
+    expect(configuredTopK).toBeGreaterThan(0);
     const deadCalls = trackRequests(page, (url) => /\/api\/mcp\/(http\/|test|rag_search)/.test(url));
     await gotoWeb(page, baseURL, 'infrastructure?subtab=mcp');
     await expect(page.getByTestId('mcp-tool-search')).toBeVisible({ timeout: 60_000 });
@@ -178,13 +181,20 @@ test.describe.serial('curious-user drive P1 fixes on an isolated corpus', () => 
     await expect(page.getByTestId('mcp-tool-list_corpora')).toBeVisible();
     await expect(page.getByTestId('mcp-http-url')).toContainText('/mcp/');
     await expect(page.getByTestId('mcp-error')).toHaveCount(0);
+    // S40: the card described a top_k the probe does not use.
+    const probeCard = page.getByTestId('mcp-probe');
+    await expect(probeCard).toContainText(`top_k=${configuredTopK}`);
     await page.getByTestId('mcp-probe-question').fill(REAL_QUESTION);
     await page.getByTestId('mcp-probe-run').click();
     const results = page.getByTestId('mcp-probe-results');
     await expect(results).toBeVisible({ timeout: 60_000 });
     await expect(results).toContainText('sensor-calibration.md');
+    // S34: the URL the probe reports is the in-process ASGI address, not the address an
+    // MCP client dials, and the line has to say so.
+    await expect(results).toContainText('in-process transport');
     await expect(results).toContainText('/mcp/');
     await expect(results).toContainText('tool search');
+    await expect(results).toContainText(`top_k ${configuredTopK}`);
     await expect(results).toContainText('mode tribrid');
     expect(deadCalls()).toEqual([]);
   });

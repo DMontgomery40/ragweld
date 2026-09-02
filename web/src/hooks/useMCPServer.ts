@@ -43,7 +43,9 @@ export function useMCPServer() {
     async (question: string, corpusId: string) => {
       setState((s) => ({ ...s, probing: true, error: null }));
       try {
-        const probe = await service.probeSearch({ question, corpus_id: corpusId, top_k: 5 });
+        // No mode or top_k override: the probe has to show what an MCP client gets, which is
+        // this deployment's mcp.default_mode / mcp.default_top_k (S40).
+        const probe = await service.probeSearch({ question, corpus_id: corpusId });
         setState((s) => ({ ...s, probe, probeQuestion: question, probing: false }));
         return probe;
       } catch (e) {

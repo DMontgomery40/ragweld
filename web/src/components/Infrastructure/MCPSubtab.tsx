@@ -6,6 +6,7 @@
 import { useState } from 'react';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { StatusIndicator } from '@/components/ui/StatusIndicator';
+import { useConfig } from '@/hooks/useConfig';
 import { useMCPServer } from '@/hooks/useMCPServer';
 import { useRepoStore } from '@/stores/useRepoStore';
 
@@ -13,7 +14,13 @@ export function MCPSubtab() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [question, setQuestion] = useState('');
   const { status, probe, probeQuestion, loading, probing, error, refresh, probeSearch } = useMCPServer();
+  const { config } = useConfig();
   const activeRepo = useRepoStore((s) => s.activeRepo);
+  // The probe sends no mode or top_k, so it runs on the configured defaults. The card used to
+  // name a literal top_k=5 while `mcp.default_top_k` was 20, which is the number the result line
+  // then printed (S40).
+  const defaultMode = config?.mcp?.default_mode ?? null;
+  const defaultTopK = config?.mcp?.default_top_k ?? null;
 
   const refreshAndStamp = async () => {
     await refresh();
@@ -173,8 +180,10 @@ export function MCPSubtab() {
       <div style={{ background: 'var(--bg-elev1)', border: '1px solid var(--line)', borderRadius: '8px', padding: '14px' }} data-testid="mcp-probe">
         <div style={{ fontSize: '13px', fontWeight: 800, color: 'var(--fg)', marginBottom: '6px' }}>Probe the search tool</div>
         <div style={{ fontSize: '13px', color: 'var(--fg-muted)', marginBottom: '10px' }}>
-          Calls the MCP <span className="mono">search</span> tool through a real client session on the mounted transport
-          (<span className="mono">mcp.default_mode</span>, <span className="mono">top_k=5</span>), against the active corpus
+          Calls the MCP <span className="mono">search</span> tool through a real client session on the mounted transport,
+          on this deployment&rsquo;s defaults (
+          <span className="mono">mode={defaultMode ?? 'mcp.default_mode'}</span>,{' '}
+          <span className="mono">top_k={defaultTopK ?? 'mcp.default_top_k'}</span>), against the active corpus
           {activeRepo ? <> (<span className="mono">{activeRepo}</span>)</> : ' (select a corpus first)'}. Ask a real question about the
           corpus — every query is reranker training signal.
         </div>
@@ -205,8 +214,9 @@ export function MCPSubtab() {
         {probe ? (
           <div style={{ marginTop: '12px' }} data-testid="mcp-probe-results">
             <div style={{ fontSize: '12.5px', color: 'var(--fg-muted)', marginBottom: '6px' }}>
-              {probe.results?.length ?? 0} result{(probe.results?.length ?? 0) === 1 ? '' : 's'} for “{probeQuestion}” via{' '}
-              <span className="mono">{probe.transport_url}</span> · tool <span className="mono">{probe.tool}</span> · mode{' '}
+              {probe.results?.length ?? 0} result{(probe.results?.length ?? 0) === 1 ? '' : 's'} for “{probeQuestion}” via the
+              in-process transport <span className="mono">{probe.transport_url}</span> (the address an MCP client dials is
+              above) · tool <span className="mono">{probe.tool}</span> · mode{' '}
               <span className="mono">{probe.mode}</span> · top_k {probe.top_k}
             </div>
             {probe.results?.length ? (
