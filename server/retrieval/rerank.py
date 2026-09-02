@@ -21,6 +21,7 @@ from server.observability.metrics import (
     RERANKER_SKIPPED_TOTAL,
 )
 from server.reranker.artifacts import resolve_project_path
+from server.retrieval.errors import RerankerFailedError
 from server.retrieval.gateway_reranker import resolve_rerank_route, score_candidates
 from server.retrieval.mlx_qwen3 import get_mlx_qwen3_reranker, mlx_is_available
 from server.training.artifact_store import resolve_active_artifact_dir
@@ -125,7 +126,14 @@ class Reranker:
         self._gateway_route: ProviderRoute | None = None
 
     async def rerank(self, query: str, chunks: list[ChunkMatch]) -> list[ChunkMatch]:
+        """Rerank or raise: a configured lane that could not run never hands back the input order."""
         res = await self.try_rerank(query, chunks)
+        if not res.ok:
+            mode = str(self.config.reranker_mode or "none").strip().lower()
+            raise RerankerFailedError(
+                mode=mode if mode in {"learning", "cloud"} else "cloud",  # type: ignore[arg-type]
+                reason=str(res.error or "reranker failed"),
+            )
         return res.chunks
 
     async def try_rerank(self, query: str, chunks: list[ChunkMatch]) -> RerankResult:

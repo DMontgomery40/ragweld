@@ -465,6 +465,10 @@ async def chat(request: ChatRequest, response: Response) -> ChatResponse:
                 await trace_store.end(run_id)
             raise retrieval_contract_mismatch_http_exception(e) from e
         except RerankerFailedError as e:
+            if trace_enabled:
+                await trace_store.add_event(run_id, kind="chat.error", msg=str(e), data={"kind": "reranker"})
+                await trace_store.annotate(run_id, **current_trace_payload_fields())
+                await trace_store.end(run_id)
             raise reranker_failed_http_exception(e) from e
         except RequiredRetrievalLegError as e:
             if trace_enabled:
@@ -598,6 +602,8 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
             raise prompt_budget_http_exception(e, operation="Chat stream generation") from e
         if isinstance(e, RetrievalContractMismatchError):
             raise retrieval_contract_mismatch_http_exception(e) from e
+        if isinstance(e, RerankerFailedError):
+            raise reranker_failed_http_exception(e) from e
         if isinstance(e, RequiredRetrievalLegError):
             raise required_retrieval_leg_http_exception(e) from e
         raise_required_dependency_unavailable_if_applicable(e, boundary="Chat stream retrieval")

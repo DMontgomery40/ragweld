@@ -150,6 +150,10 @@ async def search(request: SearchRequest, response: Response) -> SearchResponse:
                 await trace_store.end(run_id)
             raise retrieval_contract_mismatch_http_exception(e) from e
         except RerankerFailedError as e:
+            if trace_enabled:
+                await trace_store.add_event(run_id, kind="search.error", msg=str(e), data={"kind": "reranker"})
+                await trace_store.annotate(run_id, **current_trace_payload_fields())
+                await trace_store.end(run_id)
             raise reranker_failed_http_exception(e) from e
         except RequiredRetrievalLegError as e:
             raise required_retrieval_leg_http_exception(e) from e
@@ -291,6 +295,10 @@ async def answer(request: AnswerRequest, response: Response) -> AnswerResponse:
                 await trace_store.end(run_id)
             raise retrieval_contract_mismatch_http_exception(e) from e
         except RerankerFailedError as e:
+            if trace_enabled:
+                await trace_store.add_event(run_id, kind="answer.error", msg=str(e), data={"kind": "reranker"})
+                await trace_store.annotate(run_id, **current_trace_payload_fields())
+                await trace_store.end(run_id)
             raise reranker_failed_http_exception(e) from e
         except RequiredRetrievalLegError as e:
             raise required_retrieval_leg_http_exception(e) from e
@@ -333,7 +341,9 @@ async def answer(request: AnswerRequest, response: Response) -> AnswerResponse:
             await trace_store.annotate(run_id, **current_trace_payload_fields())
             await trace_store.end(run_id, ended_at_ms=int(time.time() * 1000))
 
-        model = provider_info.model if (provider_info is not None and debug.llm_used) else "retrieval-only"
+        if provider_info is None or not debug.llm_used:
+            raise HTTPException(status_code=500, detail="Answer completed without a generation provider")
+        model = provider_info.model
 
         return AnswerResponse(
             query=request.query,
@@ -420,6 +430,12 @@ async def answer_stream(request: AnswerRequest) -> StreamingResponse:
         observation.finish((type(e), e, e.__traceback__))
         raise retrieval_contract_mismatch_http_exception(e) from e
     except RerankerFailedError as e:
+        if trace_enabled:
+            await trace_store.add_event(run_id, kind="answer.error", msg=str(e), data={"kind": "reranker"})
+            await trace_store.annotate(run_id, **current_trace_payload_fields())
+            await trace_store.end(run_id)
+        setup_scope.__exit__(type(e), e, e.__traceback__)
+        observation.finish((type(e), e, e.__traceback__))
         raise reranker_failed_http_exception(e) from e
     except RequiredRetrievalLegError as e:
         # Same close-out as its two sibling branches: the generator never runs on any of

@@ -168,7 +168,7 @@ async def test_nonstream_uses_one_authenticated_openai_compatible_request() -> N
         result = await generate_chat_text(
             route=_route(base_url),
             system_prompt="System",
-            user_message="Hello",
+            user_message="Which flights did Jeffrey Epstein arrange for Barry Cohen in October 2017?",
             images=[],
             temperature=0,
             max_tokens=8,
@@ -235,7 +235,7 @@ async def test_stream_emits_deltas_usage_id_and_trace() -> None:
             async for delta in stream_chat_text(
                 route=_route(base_url),
                 system_prompt="System",
-                user_message="Hello",
+                user_message="Which flights did Jeffrey Epstein arrange for Barry Cohen in October 2017?",
                 images=[],
                 temperature=0,
                 max_tokens=8,
@@ -261,7 +261,7 @@ async def test_gateway_failure_is_not_retried_or_fallback_routed() -> None:
             await generate_chat_text(
                 route=_route(base_url, api_key=FAIL_ONCE_KEY),
                 system_prompt="System",
-                user_message="Hello",
+                user_message="Which flights did Jeffrey Epstein arrange for Barry Cohen in October 2017?",
                 images=[],
                 temperature=0,
                 max_tokens=8,
@@ -280,7 +280,7 @@ async def test_streaming_gateway_failure_reads_and_reports_error_body() -> None:
                 async for delta in stream_chat_text(
                     route=_route(base_url, api_key=FAIL_ONCE_KEY),
                     system_prompt="System",
-                    user_message="Hello",
+                    user_message="Which flights did Jeffrey Epstein arrange for Barry Cohen in October 2017?",
                     images=[],
                     temperature=0,
                     max_tokens=8,

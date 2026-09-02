@@ -105,6 +105,15 @@ async def test_search_fails_closed_when_the_configured_cloud_reranker_cannot_run
         answer = await client.post("/api/answer", json=_search_body(repo_id))
         assert answer.status_code == 503, answer.text
         assert (answer.json().get("detail") or {}).get("code") == "reranker_failed"
+        # Chat, non-stream and stream: retrieval runs before the first SSE byte, so both are
+        # the same typed 503, not a generic 500 and not an answer over the unreranked list.
+        chat_body = {"message": QUESTION, "sources": {"corpus_ids": [repo_id]}}
+        chat = await client.post("/api/chat", json=chat_body)
+        assert chat.status_code == 503, chat.text
+        assert (chat.json().get("detail") or {}).get("code") == "reranker_failed"
+        stream = await client.post("/api/chat/stream", json=chat_body)
+        assert stream.status_code == 503, stream.text
+        assert (stream.json().get("detail") or {}).get("code") == "reranker_failed"
     finally:
         await _cleanup(pg, repo_id)
 

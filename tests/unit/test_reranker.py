@@ -2,12 +2,28 @@
 
 from __future__ import annotations
 
+import os
+from collections.abc import Iterator
+from contextlib import contextmanager
+
 import pytest
 from pydantic import ValidationError
 
 from server.models.retrieval import ChunkMatch
 from server.models.tribrid_config_model import RerankingConfig, TriBridConfig
 from server.retrieval.rerank import Reranker
+
+
+@contextmanager
+def _without_env(*names: str) -> Iterator[None]:
+    """Run with the named variables absent from the real process environment, then restore them."""
+    saved = {name: os.environ.pop(name, None) for name in names}
+    try:
+        yield
+    finally:
+        for name, value in saved.items():
+            if value is not None:
+                os.environ[name] = value
 
 
 def make_chunk(chunk_id: str, *, score: float, content: str | None = None) -> ChunkMatch:
@@ -54,8 +70,12 @@ async def test_reranker_learning_missing_trained_model_fails_closed() -> None:
 
 
 @pytest.mark.asyncio
-async def test_reranker_cloud_missing_api_key_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("COHERE_API_KEY", raising=False)
+async def test_reranker_cloud_missing_api_key_fails_closed() -> None:
+    with _without_env("COHERE_API_KEY"):
+        await _assert_cohere_fails_closed()
+
+
+async def _assert_cohere_fails_closed() -> None:
 
     config = RerankingConfig(
         reranker_mode="cloud",
@@ -86,10 +106,14 @@ async def test_reranker_empty_input() -> None:
 
 
 @pytest.mark.asyncio
-async def test_reranker_cloud_litellm_without_a_gateway_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_reranker_cloud_litellm_without_a_gateway_fails_closed() -> None:
     """No authenticated gateway in the test process: the configured gateway reranker fails
     with the resolution reason, never fakes scores and never skips to the fusion order."""
-    monkeypatch.delenv("LITELLM_API_KEY", raising=False)
+    with _without_env("LITELLM_API_KEY"):
+        await _assert_litellm_fails_closed()
+
+
+async def _assert_litellm_fails_closed() -> None:
     config = RerankingConfig(
         reranker_mode="cloud",
         reranker_cloud_provider="litellm",

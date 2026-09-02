@@ -51,7 +51,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from server.db.postgres import _coerce_jsonb_dict, _delete_corpus_staging_rows
-from server.indexing.generations import STAGING_REPO_PREFIX, IndexRunFence
+from server.indexing.generations import STAGING_REPO_PREFIX, IndexRunFence, staging_repo_id
 from server.models.tribrid_config_model import IndexingConfig
 from server.retrieval.qdrant_store import _COLLECTION_PREFIX, corpus_collection_prefix
 
@@ -141,7 +141,21 @@ def _row_created_at(value: object) -> datetime | None:
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
-def _index_fence_is_held(meta: object, *, now: datetime) -> bool:
+def _corpus_lease_seconds(config_json: object) -> int:
+    """The corpus's own ``indexing.index_run_lease_seconds`` when its stored config carries one.
+
+    The fence is judged against the lease the run heartbeats under; a corpus configured
+    with a longer lease heartbeats less often, and the default lease would call it dead.
+    """
+    try:
+        raw = _coerce_jsonb_dict(config_json).get("indexing") or {}
+        value = int(raw.get("index_run_lease_seconds") or 0)
+    except Exception:
+        value = 0
+    return value if value > 0 else INDEX_FENCE_LEASE_SECONDS
+
+
+def _index_fence_is_held(meta: object, *, now: datetime, lease_seconds: int = INDEX_FENCE_LEASE_SECONDS) -> bool:
     """True when ``corpora.meta`` carries an index-run fence whose lease has not expired.
 
     The same durable fence and the same ``IndexRunFence.is_stale`` predicate the API's
@@ -155,7 +169,7 @@ def _index_fence_is_held(meta: object, *, now: datetime) -> bool:
         return False
     try:
         fence = IndexRunFence.model_validate(raw)
-        return not fence.is_stale(now=now, lease_seconds=INDEX_FENCE_LEASE_SECONDS)
+        return not fence.is_stale(now=now, lease_seconds=int(lease_seconds))
     except Exception:
         return True
 
@@ -200,6 +214,8 @@ async def reap_stale_test_corpora(
         db_now = await conn.fetchval("SELECT now();")
         cutoff = db_now - timedelta(seconds=max_age_seconds)
         rows = await conn.fetch("SELECT repo_id, created_at, meta FROM corpora;")
+        lease_rows = await conn.fetch("SELECT repo_id, config FROM corpus_configs;")
+        lease_by_corpus = {str(r["repo_id"]): _corpus_lease_seconds(r["config"]) for r in lease_rows}
         # One pass over the registry: the aged-out candidates, and the corpora a run is
         # still staging into (a fresh staging row means a live run, whatever its parent's age).
         candidates: list[tuple[str, object]] = []
@@ -221,12 +237,39 @@ async def reap_stale_test_corpora(
         for repo_id, meta in candidates:
             if repo_id in staged_into_now:
                 continue  # a run is writing a generation into it right now
-            if _index_fence_is_held(meta, now=db_now):
+            if _index_fence_is_held(
+                meta, now=db_now, lease_seconds=lease_by_corpus.get(repo_id, INDEX_FENCE_LEASE_SECONDS)
+            ):
                 continue  # a live index run holds the fence; its session outlived the age rail
             stale.append(repo_id)
 
         for repo_id in stale:
             async with conn.transaction():
+                # Eligibility was read outside this transaction: lock the row and judge it again
+                # right before the cascade, so a run that took the fence or staged a fresh
+                # generation in between is not deleted under it.
+                locked = await conn.fetchrow(
+                    "SELECT meta FROM corpora WHERE repo_id = $1 FOR UPDATE;", repo_id
+                )
+                if locked is None:
+                    continue  # already gone
+                now_locked = await conn.fetchval("SELECT now();")
+                if _index_fence_is_held(
+                    locked["meta"],
+                    now=now_locked,
+                    lease_seconds=lease_by_corpus.get(repo_id, INDEX_FENCE_LEASE_SECONDS),
+                ):
+                    continue
+                freshest_staging = _row_created_at(
+                    await conn.fetchval(
+                        "SELECT max(created_at) FROM corpora WHERE starts_with(repo_id, $1);",
+                        staging_repo_id(repo_id, ""),
+                    )
+                )
+                if freshest_staging is not None and freshest_staging > now_locked - timedelta(
+                    seconds=max_age_seconds
+                ):
+                    continue
                 await _delete_corpus_staging_rows(conn, repo_id)
                 await conn.execute("DELETE FROM chunk_summaries_last_build WHERE repo_id = $1;", repo_id)
                 await conn.execute("DELETE FROM chunk_summaries WHERE repo_id = $1;", repo_id)

@@ -8,14 +8,13 @@ from typing import Any, cast
 
 from server.chat.context_formatter import format_context_for_llm
 from server.chat.generation import GenerationResult, generate_chat_text, stream_chat_text
-from server.chat.generation_failure import generation_unavailable_detail, safe_error_message
+from server.chat.generation_failure import generation_unavailable_detail
 from server.chat.prompt_builder import get_system_prompt
 from server.chat.provider_router import select_provider_route
-from server.dependency_errors import is_required_dependency_unavailable
 from server.models.retrieval import ChunkMatch
 from server.models.tribrid_config_model import ChatDebugInfo, ChatProviderInfo, TriBridConfig
 from server.retrieval.cache import CacheMode, SemanticCacheService
-from server.retrieval.errors import RequiredRetrievalLegError, RerankerFailedError, RetrievalContractMismatchError
+
 from server.services.rag import FusionProtocol, build_chat_debug_info
 
 
@@ -62,28 +61,17 @@ async def _fusion_search_with_cache(
     cache_mode: str | CacheMode,
     cache_namespace: str,
 ) -> list[ChunkMatch]:
-    try:
-        return await fusion.search(
-            [str(corpus_id)],
-            query,
-            config.fusion,
-            include_vector=bool(include_vector),
-            include_sparse=bool(include_sparse),
-            include_graph=bool(include_graph),
-            top_k=top_k,
-            cache_mode=_normalize_cache_mode(cache_mode),
-            cache_namespace=str(cache_namespace or "search"),
-        )
-    except TypeError:
-        return await fusion.search(
-            [str(corpus_id)],
-            query,
-            config.fusion,
-            include_vector=bool(include_vector),
-            include_sparse=bool(include_sparse),
-            include_graph=bool(include_graph),
-            top_k=top_k,
-        )
+    return await fusion.search(
+        [str(corpus_id)],
+        query,
+        config.fusion,
+        include_vector=bool(include_vector),
+        include_sparse=bool(include_sparse),
+        include_graph=bool(include_graph),
+        top_k=top_k,
+        cache_mode=_normalize_cache_mode(cache_mode),
+        cache_namespace=str(cache_namespace or "search"),
+    )
 
 
 async def retrieve_best_effort(
@@ -101,33 +89,22 @@ async def retrieve_best_effort(
     if not query.strip() or not str(corpus_id or "").strip():
         return ([], {"retrieval_error": "Missing query or corpus_id"})
 
-    try:
-        chunks = await _fusion_search_with_cache(
-            fusion=fusion,
-            corpus_id=corpus_id,
-            query=query,
-            config=config,
-            include_vector=bool(include_vector),
-            include_sparse=bool(include_sparse),
-            include_graph=bool(include_graph),
-            top_k=top_k,
-            cache_mode=cache_mode,
-            cache_namespace="answer_retrieval",
-        )
-        retrieval_debug: dict[str, Any] = getattr(fusion, "last_debug", None) or {}
-        return (chunks, retrieval_debug)
-    except (RetrievalContractMismatchError, RequiredRetrievalLegError, RerankerFailedError):
-        raise
-    except Exception as e:
-        if is_required_dependency_unavailable(e):
-            raise
-        return (
-            [],
-            {
-                "retrieval_error": safe_error_message(e),
-                "retrieval_error_kind": type(e).__name__,
-            },
-        )
+    # Retrieval either succeeds or raises: a retrieval failure turned into "no context" would
+    # let generation answer ungrounded with a 200, which is the substitution this lane forbids.
+    chunks = await _fusion_search_with_cache(
+        fusion=fusion,
+        corpus_id=corpus_id,
+        query=query,
+        config=config,
+        include_vector=bool(include_vector),
+        include_sparse=bool(include_sparse),
+        include_graph=bool(include_graph),
+        top_k=top_k,
+        cache_mode=cache_mode,
+        cache_namespace="answer_retrieval",
+    )
+    retrieval_debug: dict[str, Any] = getattr(fusion, "last_debug", None) or {}
+    return (chunks, retrieval_debug)
 
 
 async def answer_best_effort(

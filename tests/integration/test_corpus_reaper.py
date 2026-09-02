@@ -28,6 +28,7 @@ import pytest
 
 from server.db.postgres import PostgresClient
 from server.indexing.generations import IndexRunFence, staging_repo_id
+from server.models.tribrid_config_model import TriBridConfig
 from tests.corpus_reaper import (
     INDEX_FENCE_LEASE_SECONDS,
     REAP_MAX_AGE_SECONDS,
@@ -245,6 +246,49 @@ async def test_reaper_spares_an_aged_corpus_whose_index_fence_is_still_leased() 
         await _write_index_fence(
             dsn, corpus, _fence(run_id=run_id, heartbeat_at=dead, started_at=dead)
         )
+        reaped = await reap_stale_test_corpora(dsn)
+        assert corpus in reaped, reaped
+        assert await _present(dsn, [corpus]) == set()
+    finally:
+        with contextlib.suppress(Exception):
+            await pg.delete_corpus_with_data(corpus)
+        await pg.disconnect()
+
+
+@pytest.mark.requires_postgres
+@pytest.mark.asyncio
+async def test_reaper_judges_the_fence_against_the_corpus_s_own_lease() -> None:
+    """A corpus configured with a longer ``indexing.index_run_lease_seconds`` heartbeats less
+    often; judged against the default lease its live fence would read as dead and the run
+    would be reaped under it. The reaper reads the corpus's stored config and uses that lease."""
+    dsn = require_env("POSTGRES_DSN")
+    pg = PostgresClient(dsn)
+    await pg.connect()
+
+    suffix = uuid.uuid4().hex[:8]
+    corpus = f"{TEST_CORPUS_PREFIX}reaper_lease_{suffix}"
+    old = datetime.now(UTC) - timedelta(seconds=REAP_MAX_AGE_SECONDS + 3600)
+    configured_lease = INDEX_FENCE_LEASE_SECONDS * 6
+    try:
+        await pg.upsert_corpus(corpus, name=corpus, root_path=".")
+        await _set_created_at(dsn, corpus, old)
+        cfg = TriBridConfig()
+        cfg.indexing.index_run_lease_seconds = configured_lease
+        await pg.upsert_corpus_config_json(corpus, cfg.model_dump(mode="serialization"))
+        db_now = await _database_now(dsn)
+        run_id = uuid.uuid4().hex
+
+        # Dead under the default lease, alive under the corpus's configured one.
+        heartbeat = db_now - timedelta(seconds=INDEX_FENCE_LEASE_SECONDS + 60)
+        await _write_index_fence(
+            dsn, corpus, _fence(run_id=run_id, heartbeat_at=heartbeat, started_at=heartbeat)
+        )
+        assert corpus not in await reap_stale_test_corpora(dsn)
+        assert await _present(dsn, [corpus]) == {corpus}
+
+        # Older than even the configured lease: the worker is gone.
+        dead = db_now - timedelta(seconds=configured_lease + 60)
+        await _write_index_fence(dsn, corpus, _fence(run_id=run_id, heartbeat_at=dead, started_at=dead))
         reaped = await reap_stale_test_corpora(dsn)
         assert corpus in reaped, reaped
         assert await _present(dsn, [corpus]) == set()

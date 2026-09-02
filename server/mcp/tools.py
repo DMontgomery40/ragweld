@@ -171,7 +171,7 @@ def register_mcp_tools(mcp: FastMCP, cfg: MCPConfig) -> None:
             query=query,
             answer=text,
             sources=sources,
-            model=(provider_info.model if (provider_info is not None and debug.llm_used) else "retrieval-only"),
+            model=provider_info.model if provider_info is not None else "",
             tokens_used=0,
             latency_ms=float(dt_ms),
             debug=debug,
