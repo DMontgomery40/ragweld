@@ -49,27 +49,33 @@ def test_stateful_api_openapi_documents_typed_dependency_503() -> None:
             "DependencyUnavailableResponse",
             "RequiredRetrievalLegFailureResponse",
             "IndexDeletionIncompleteResponse",
+            "RerankerFailureResponse",
         },
         ("/api/answer", "post"): {
             "DependencyUnavailableResponse",
             "RequiredRetrievalLegFailureResponse",
             "IndexDeletionIncompleteResponse",
+            "RerankerFailureResponse",
+            "GenerationUnavailableResponse",
         },
         ("/api/chat", "post"): {
             "DependencyUnavailableResponse",
             "GenerationUnavailableResponse",
             "RequiredRetrievalLegFailureResponse",
             "IndexDeletionIncompleteResponse",
+            "RerankerFailureResponse",
         },
         ("/api/chat/stream", "post"): {
             "DependencyUnavailableResponse",
             "RequiredRetrievalLegFailureResponse",
             "IndexDeletionIncompleteResponse",
+            "RerankerFailureResponse",
         },
         ("/api/mcp/probe", "post"): {
             "DependencyUnavailableResponse",
             "RequiredRetrievalLegFailureResponse",
             "IndexDeletionIncompleteResponse",
+            "RerankerFailureResponse",
         },
         ("/api/index", "post"): {
             "DependencyUnavailableResponse",

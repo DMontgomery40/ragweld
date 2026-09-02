@@ -2302,6 +2302,21 @@ export interface RerankDebugInfo {
   config_corpus_id?: string | null; // default: None
 }
 
+/** Public error detail returned when a configured reranker cannot rerank (HTTP 503). */
+export interface RerankerFailureDetail {
+  code?: "reranker_failed"; // default: "reranker_failed"
+  /** Configured reranker mode that failed */
+  mode: "learning" | "cloud";
+  /** Stable, non-sensitive failure summary */
+  message: string;
+  /** Sanitised reason from the reranker lane (no secrets, no raw payloads) */
+  reason: string;
+  /** Whether the caller may retry after remediation */
+  retryable?: boolean; // default: True
+  /** High-signal next step for the operator */
+  operator_hint: string;
+}
+
 /** Best-effort result payload embedded in /api/reranker/status. */
 export interface RerankerLegacyTaskResult {
   /** Whether the task succeeded */
@@ -4376,6 +4391,16 @@ export interface MCPStatusResponse {
   details?: string[];
   /** Tools registered on the embedded Streamable HTTP server (empty when the transport is disabled). */
   tools?: MCPToolInfo[];
+  /** Retrieval mode the MOUNTED `search`/`answer` tools apply when a call sends no `mode`. Captured when this process built the MCP server; null when no server is built in this process. */
+  default_mode?: string | null;
+  /** Result count the MOUNTED tools apply when a call sends no `top_k`. Captured when this process built the MCP server; null when no server is built in this process. */
+  default_top_k?: number | null;
+  /** `config.mcp.default_mode` as persisted right now (what a restart would mount). */
+  config_default_mode?: string | null;
+  /** `config.mcp.default_top_k` as persisted right now (what a restart would mount). */
+  config_default_top_k?: number | null;
+  /** True when the persisted MCP tool defaults differ from the ones the mounted tools captured, so the API must be restarted before an MCP client sees the new values. */
+  defaults_restart_pending?: boolean;
 }
 
 /** Response payload for GET /api/models. */
@@ -4642,6 +4667,11 @@ export interface RerankerEvaluateResponse {
   operator_hint?: string | null;
   /** Proxy metrics dict (if ok) */
   metrics?: Record<string, number> | null;
+}
+
+/** FastAPI response envelope for a configured-reranker failure. */
+export interface RerankerFailureResponse {
+  detail: RerankerFailureDetail;
 }
 
 /** Response payload for GET /api/reranker/info (no secrets). */

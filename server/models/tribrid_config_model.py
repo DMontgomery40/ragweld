@@ -470,6 +470,42 @@ class MCPStatusResponse(BaseModel):
         default_factory=list,
         description="Tools registered on the embedded Streamable HTTP server (empty when the transport is disabled).",
     )
+    # What the MOUNTED tools do, versus what config now says they should do. The FastMCP
+    # singleton captures `mcp.default_mode` / `mcp.default_top_k` when the process builds it,
+    # so an operator's later edit does not reach a tool call until a restart. Reporting only
+    # the persisted config described a deployment that does not exist yet (S40).
+    default_mode: str | None = Field(
+        default=None,
+        description=(
+            "Retrieval mode the MOUNTED `search`/`answer` tools apply when a call sends no "
+            "`mode`. Captured when this process built the MCP server; null when no server is "
+            "built in this process."
+        ),
+    )
+    default_top_k: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Result count the MOUNTED tools apply when a call sends no `top_k`. Captured when "
+            "this process built the MCP server; null when no server is built in this process."
+        ),
+    )
+    config_default_mode: str | None = Field(
+        default=None,
+        description="`config.mcp.default_mode` as persisted right now (what a restart would mount).",
+    )
+    config_default_top_k: int | None = Field(
+        default=None,
+        ge=1,
+        description="`config.mcp.default_top_k` as persisted right now (what a restart would mount).",
+    )
+    defaults_restart_pending: bool = Field(
+        default=False,
+        description=(
+            "True when the persisted MCP tool defaults differ from the ones the mounted tools "
+            "captured, so the API must be restarted before an MCP client sees the new values."
+        ),
+    )
 
 
 class MCPConfig(BaseModel):
@@ -745,6 +781,23 @@ class RequiredRetrievalLegFailureResponse(BaseModel):
     detail: RequiredRetrievalLegFailureDetail
 
 
+class RerankerFailureDetail(BaseModel):
+    """Public error detail returned when a configured reranker cannot rerank (HTTP 503)."""
+
+    code: Literal["reranker_failed"] = "reranker_failed"
+    mode: Literal["learning", "cloud"] = Field(description="Configured reranker mode that failed")
+    message: str = Field(description="Stable, non-sensitive failure summary")
+    reason: str = Field(description="Sanitised reason from the reranker lane (no secrets, no raw payloads)")
+    retryable: bool = Field(default=True, description="Whether the caller may retry after remediation")
+    operator_hint: str = Field(description="High-signal next step for the operator")
+
+
+class RerankerFailureResponse(BaseModel):
+    """FastAPI response envelope for a configured-reranker failure."""
+
+    detail: RerankerFailureDetail
+
+
 class RetrievalContractMismatchDetail(BaseModel):
     """Public error detail returned when a stored index contract blocks a retrieval request."""
 
@@ -772,6 +825,7 @@ class MCPSearchToolResult(BaseModel):
     error: (
         DependencyUnavailableDetail
         | RequiredRetrievalLegFailureDetail
+        | RerankerFailureDetail
         | RetrievalContractMismatchDetail
         | None
     ) = Field(default=None, description="Typed retrieval failure returned with isError=true.")

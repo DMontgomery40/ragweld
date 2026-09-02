@@ -30,6 +30,34 @@ class RequiredRetrievalLegError(RuntimeError):
         }
 
 
+class RerankerFailedError(RuntimeError):
+    """A configured reranker (learning or cloud) could not rerank the candidates.
+
+    Reranking is an operator choice; when it is on, an unranked list is not a
+    degraded answer but a different one, so the failure reaches the request
+    boundary instead of falling back to the fusion order.
+    """
+
+    def __init__(self, *, mode: Literal["learning", "cloud"], reason: str) -> None:
+        self.mode = mode
+        self.reason = str(reason or "").strip() or "reranker failed without a reason"
+        super().__init__(f"Configured {mode} reranker failed: {self.reason}")
+
+    def to_detail(self) -> dict[str, Any]:
+        return {
+            "code": "reranker_failed",
+            "mode": self.mode,
+            "message": f"The configured {self.mode} reranker could not rerank the candidates.",
+            "reason": self.reason,
+            "retryable": True,
+            "operator_hint": (
+                "Fix the reranker lane named by the reason (reranking.reranker_mode, "
+                "reranking.reranker_cloud_model, the gateway route or the trained adapter) or set "
+                "reranking.reranker_mode to none. Ragweld did not substitute the unreranked fusion order."
+            ),
+        }
+
+
 class RetrievalContractMismatchError(RuntimeError):
     def __init__(
         self,

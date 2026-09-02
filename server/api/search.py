@@ -14,7 +14,12 @@ from server.api.dependency_errors import (
     raise_postgres_unavailable_if_applicable,
     raise_required_dependency_unavailable_if_applicable,
 )
+from server.api.generation_errors import (
+    ANSWER_RUNTIME_UNAVAILABLE_RESPONSES,
+    generation_unavailable_http_exception,
+)
 from server.api.retrieval_errors import (
+    reranker_failed_http_exception,
     RETRIEVAL_RUNTIME_UNAVAILABLE_RESPONSES,
     required_retrieval_leg_http_exception,
     retrieval_contract_mismatch_http_exception,
@@ -33,7 +38,11 @@ from server.observability.runtime import (
     update_route_summary,
 )
 from server.retrieval.cache import CacheMode
-from server.retrieval.errors import RequiredRetrievalLegError, RetrievalContractMismatchError
+from server.retrieval.errors import (
+    RequiredRetrievalLegError,
+    RerankerFailedError,
+    RetrievalContractMismatchError,
+)
 from server.retrieval.fusion import TriBridFusion
 from server.services.answer_service import (
     answer_best_effort,
@@ -140,6 +149,8 @@ async def search(request: SearchRequest, response: Response) -> SearchResponse:
                 await trace_store.annotate(run_id, **current_trace_payload_fields())
                 await trace_store.end(run_id)
             raise retrieval_contract_mismatch_http_exception(e) from e
+        except RerankerFailedError as e:
+            raise reranker_failed_http_exception(e) from e
         except RequiredRetrievalLegError as e:
             raise required_retrieval_leg_http_exception(e) from e
         except Exception as e:
@@ -212,7 +223,7 @@ async def search(request: SearchRequest, response: Response) -> SearchResponse:
         )
 
 
-@router.post("/answer", response_model=AnswerResponse)
+@router.post("/answer", response_model=AnswerResponse, responses=ANSWER_RUNTIME_UNAVAILABLE_RESPONSES)
 async def answer(request: AnswerRequest, response: Response) -> AnswerResponse:
     if not request.query.strip():
         raise HTTPException(status_code=400, detail="Query must not be empty")
@@ -279,6 +290,8 @@ async def answer(request: AnswerRequest, response: Response) -> AnswerResponse:
                 await trace_store.annotate(run_id, **current_trace_payload_fields())
                 await trace_store.end(run_id)
             raise retrieval_contract_mismatch_http_exception(e) from e
+        except RerankerFailedError as e:
+            raise reranker_failed_http_exception(e) from e
         except RequiredRetrievalLegError as e:
             raise required_retrieval_leg_http_exception(e) from e
         except Exception as e:
@@ -287,7 +300,9 @@ async def answer(request: AnswerRequest, response: Response) -> AnswerResponse:
                 await trace_store.annotate(run_id, **current_trace_payload_fields())
                 await trace_store.end(run_id)
             raise_required_dependency_unavailable_if_applicable(e, boundary="Answer retrieval")
-            raise HTTPException(status_code=500, detail="Answer generation failed") from e
+            # Generation failed after retrieval: the same typed 503 the chat lane raises,
+            # never a "retrieval-only" 200 assembled from the sources.
+            raise generation_unavailable_http_exception(e, operation="Answer generation") from e
 
         dt_ms = (time.perf_counter() - t0) * 1000.0
 
@@ -404,6 +419,8 @@ async def answer_stream(request: AnswerRequest) -> StreamingResponse:
         setup_scope.__exit__(type(e), e, e.__traceback__)
         observation.finish((type(e), e, e.__traceback__))
         raise retrieval_contract_mismatch_http_exception(e) from e
+    except RerankerFailedError as e:
+        raise reranker_failed_http_exception(e) from e
     except RequiredRetrievalLegError as e:
         # Same close-out as its two sibling branches: the generator never runs on any of
         # them, so this is the only place that can end the span and the trace.

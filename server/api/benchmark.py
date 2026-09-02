@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from server.api.dependency_errors import raise_required_dependency_unavailable_if_applicable
 from server.api.retrieval_errors import (
+    reranker_failed_http_exception,
     RETRIEVAL_RUNTIME_UNAVAILABLE_RESPONSES,
     required_retrieval_leg_http_exception,
     retrieval_contract_mismatch_http_exception,
@@ -30,7 +31,11 @@ from server.models.tribrid_config_model import (
 )
 from server.observability import metrics
 from server.observability.ml_quality import build_benchmark_observability_summary
-from server.retrieval.errors import RequiredRetrievalLegError, RetrievalContractMismatchError
+from server.retrieval.errors import (
+    RequiredRetrievalLegError,
+    RerankerFailedError,
+    RetrievalContractMismatchError,
+)
 from server.retrieval.fusion import TriBridFusion
 from server.services.config_store import CorpusNotFoundError
 from server.services.config_store import get_config as load_scoped_config
@@ -130,6 +135,8 @@ async def benchmark_run(
             raise
         except RetrievalContractMismatchError as exc:
             raise retrieval_contract_mismatch_http_exception(exc) from exc
+        except RerankerFailedError as exc:
+            raise reranker_failed_http_exception(exc) from exc
         except RequiredRetrievalLegError as exc:
             raise required_retrieval_leg_http_exception(exc) from exc
         except Exception as exc:

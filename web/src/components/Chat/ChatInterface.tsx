@@ -492,6 +492,9 @@ function StructuredErrorCard({
   // the hint above is chosen from these, so the operator can check the classification.
   if (error.failure_kind) detailEntries.push(['failure class', error.failure_kind]);
   if (error.gateway_reason) detailEntries.push(['reason', error.gateway_reason]);
+  // A configured reranker that failed (reranker_failed): which lane and the sanitised reason.
+  if (error.mode) detailEntries.push(['reranker', error.mode]);
+  if (error.reason) detailEntries.push(['reason', error.reason]);
   if (runId) detailEntries.push(['run id', runId]);
   if (error.corpus_id) detailEntries.push(['corpus', error.corpus_id]);
   if (error.dependency) detailEntries.push(['dependency', error.dependency]);

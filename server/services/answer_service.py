@@ -8,44 +8,16 @@ from typing import Any, cast
 
 from server.chat.context_formatter import format_context_for_llm
 from server.chat.generation import GenerationResult, generate_chat_text, stream_chat_text
-from server.chat.generation_failure import safe_error_message
+from server.chat.generation_failure import generation_unavailable_detail, safe_error_message
 from server.chat.prompt_builder import get_system_prompt
 from server.chat.provider_router import select_provider_route
 from server.dependency_errors import is_required_dependency_unavailable
 from server.models.retrieval import ChunkMatch
 from server.models.tribrid_config_model import ChatDebugInfo, ChatProviderInfo, TriBridConfig
 from server.retrieval.cache import CacheMode, SemanticCacheService
-from server.retrieval.errors import RequiredRetrievalLegError, RetrievalContractMismatchError
+from server.retrieval.errors import RequiredRetrievalLegError, RerankerFailedError, RetrievalContractMismatchError
 from server.services.rag import FusionProtocol, build_chat_debug_info
 
-
-def _format_retrieval_only_answer(*, query: str, corpus_id: str, chunks: list[ChunkMatch]) -> str:
-    # Deterministic, LLM-free fallback that still gives the user something actionable.
-    if not chunks:
-        return (
-            "No LLM is available and retrieval returned no matches.\n\n"
-            f"Query: {query}\n"
-            f"Corpus: {corpus_id}\n"
-            "Tip: verify the corpus is indexed and that at least one retrieval leg is enabled."
-        )
-
-    lines: list[str] = [
-        "No LLM is available. Returning retrieval-only results.",
-        "",
-        f"Query: {query}",
-        f"Corpus: {corpus_id}",
-        "",
-        "Top matching sources:",
-    ]
-    for i, ch in enumerate(chunks[: min(len(chunks), 8)]):
-        loc = f"{ch.file_path}:{int(ch.start_line)}-{int(ch.end_line)}"
-        score = f"{float(ch.score):.4f}" if ch.score is not None else "0.0000"
-        snippet = (ch.content or "").strip()
-        snippet = re.sub(r"\\s+", " ", snippet)[:220]
-        lines.append(f"{i+1}. {loc} (score {score})")
-        if snippet:
-            lines.append(f"   {snippet}")
-    return "\n".join(lines).strip()
 
 
 def _normalize_cache_mode(cache_mode: str | CacheMode | None) -> CacheMode:
@@ -144,7 +116,7 @@ async def retrieve_best_effort(
         )
         retrieval_debug: dict[str, Any] = getattr(fusion, "last_debug", None) or {}
         return (chunks, retrieval_debug)
-    except (RetrievalContractMismatchError, RequiredRetrievalLegError):
+    except (RetrievalContractMismatchError, RequiredRetrievalLegError, RerankerFailedError):
         raise
     except Exception as e:
         if is_required_dependency_unavailable(e):
@@ -312,10 +284,10 @@ async def answer_best_effort(
         answer_text = (generation.text or "").strip()
         if not answer_text:
             raise RuntimeError("LLM returned an empty response")
-    except Exception as e:
-        llm_used = False
-        llm_error = safe_error_message(e)
-        answer_text = _format_retrieval_only_answer(query=query, corpus_id=corpus_id, chunks=chunks)
+    except Exception:
+        # No "retrieval-only" substitute: a generation failure leaves this function as the
+        # exception it is, and the API maps it to the typed 503 the chat lane raises.
+        raise
 
     debug = build_chat_debug_info(
         config=config,
@@ -550,17 +522,25 @@ async def stream_answer_best_effort(
             yield f"data: {json.dumps({'type': 'text', 'content': delta})}\n\n"
 
         if not accumulated.strip():
-            msg = "Error: LLM stream produced no content (check provider compatibility/config)"
-            accumulated = msg
-            llm_used = False
-            llm_error = "empty_stream"
-            yield f"data: {json.dumps({'type': 'text', 'content': msg})}\n\n"
+            raise RuntimeError("LLM stream produced no content (check provider compatibility/config)")
     except Exception as e:
+        # The same typed error event the chat stream emits; no prose stands in for the
+        # answer and nothing reaches the semantic cache (llm_used stays False below).
         llm_used = False
-        llm_error = safe_error_message(e)
-        msg = _format_retrieval_only_answer(query=query, corpus_id=corpus_id, chunks=chunks)
-        accumulated = msg
-        yield f"data: {json.dumps({'type': 'text', 'content': msg})}\n\n"
+        error_detail = generation_unavailable_detail(e, operation="Answer stream generation")
+        llm_error = error_detail.gateway_reason
+        accumulated = ""
+        yield (
+            "data: "
+            + json.dumps(
+                {
+                    "type": "error",
+                    "message": llm_error,
+                    "detail": error_detail.model_dump(mode="json"),
+                }
+            )
+            + "\n\n"
+        )
 
     ended_at_ms = int(time.time() * 1000)
     debug = build_chat_debug_info(

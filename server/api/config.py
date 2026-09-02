@@ -52,6 +52,7 @@ from server.models.tribrid_config_model import (
     ModelValidationResult,
     ModelValidationWarning,
     RequiredRetrievalLegFailureDetail,
+    RerankerFailureDetail,
     RetrievalContractMismatchDetail,
     TriBridConfig,
 )
@@ -767,8 +768,12 @@ async def mcp_status(request: Request) -> MCPStatusResponse:
         )
 
     # Python Streamable HTTP transport is embedded under cfg.mcp.mount_path (same FastAPI app).
+    # `config_mcp` is what a restart would mount; `mounted_tool_config()` is what the tools run
+    # on right now. The two are reported side by side because they can legitimately disagree.
+    config_mcp: MCPConfig | None = None
     try:
         cfg = load_global_config()
+        config_mcp = cfg.mcp
         if cfg.mcp.enabled:
             if python_stdio_available:
                 # `host`/`port` describe the hop this request arrived on; they are reported
@@ -857,12 +862,35 @@ async def mcp_status(request: Request) -> MCPStatusResponse:
     except Exception as e:
         details.append(f"Error resolving MCP HTTP status: {e}")
 
+    from server.mcp.server import mounted_tool_config
+
+    mounted_mcp = mounted_tool_config()
+    restart_pending = bool(
+        mounted_mcp is not None
+        and config_mcp is not None
+        and (
+            str(mounted_mcp.default_mode) != str(config_mcp.default_mode)
+            or int(mounted_mcp.default_top_k) != int(config_mcp.default_top_k)
+        )
+    )
+    if restart_pending and mounted_mcp is not None and config_mcp is not None:
+        details.append(
+            f"The mounted MCP tools still answer on mode={mounted_mcp.default_mode}, "
+            f"top_k={mounted_mcp.default_top_k} (captured when this process started); "
+            f"config.mcp now says mode={config_mcp.default_mode}, "
+            f"top_k={config_mcp.default_top_k}. Restart the API to mount the new defaults."
+        )
     return MCPStatusResponse(
         python_http=python_http,
         node_http=None,
         python_stdio_available=python_stdio_available,
         details=details,
         tools=tools,
+        default_mode=str(mounted_mcp.default_mode) if mounted_mcp is not None else None,
+        default_top_k=int(mounted_mcp.default_top_k) if mounted_mcp is not None else None,
+        config_default_mode=str(config_mcp.default_mode) if config_mcp is not None else None,
+        config_default_top_k=int(config_mcp.default_top_k) if config_mcp is not None else None,
+        defaults_restart_pending=restart_pending,
     )
 
 
@@ -896,7 +924,7 @@ async def mcp_probe(
     from mcp.client.streamable_http import streamable_http_client
     from mcp.types import TextContent
 
-    from server.mcp.server import mounted_state
+    from server.mcp.server import mounted_state, mounted_tool_config
 
     corpus_id = str(payload.corpus_id or scope.resolved_repo_id or "").strip()
     if not corpus_id:
@@ -909,6 +937,15 @@ async def mcp_probe(
         raise HTTPException(
             status_code=503,
             detail="The MCP Streamable HTTP transport is not mounted in this process",
+        )
+    # The tools close over the config captured when this process built the MCP server, so the
+    # response describes THAT, never the persisted config: reporting `load_global_config()`
+    # labelled the probe with defaults the tool had not been given yet (S40/P2-B).
+    mounted_mcp = mounted_tool_config()
+    if mounted_mcp is None:
+        raise HTTPException(
+            status_code=503,
+            detail="The MCP server has not been built in this process, so it has no tool defaults",
         )
 
     cfg = load_global_config()
@@ -928,8 +965,8 @@ async def mcp_probe(
         raise
     if corpus is None:
         raise HTTPException(status_code=404, detail=f"Corpus not found: {corpus_id}")
-    resolved_mode = str(payload.mode or cfg.mcp.default_mode)
-    resolved_top_k = int(payload.top_k or cfg.mcp.default_top_k)
+    resolved_mode = str(payload.mode or mounted_mcp.default_mode)
+    resolved_top_k = int(payload.top_k or mounted_mcp.default_top_k)
     host = request.url.hostname or "127.0.0.1"
     port = request.url.port or (443 if request.url.scheme == "https" else 80)
     transport_url = f"http://{host}:{port}{mount_path.rstrip('/')}/"
@@ -972,6 +1009,9 @@ async def mcp_probe(
             if code == "required_retrieval_leg_failed":
                 leg_failure = RequiredRetrievalLegFailureDetail.model_validate(raw_error)
                 raise HTTPException(status_code=503, detail=leg_failure.model_dump(mode="json"))
+            if code == "reranker_failed":
+                rerank_failure = RerankerFailureDetail.model_validate(raw_error)
+                raise HTTPException(status_code=503, detail=rerank_failure.model_dump(mode="json"))
             if code in {"embedding_contract_mismatch", "sparse_contract_mismatch"}:
                 mismatch = RetrievalContractMismatchDetail.model_validate(raw_error)
                 raise HTTPException(status_code=409, detail=mismatch.model_dump(mode="json"))

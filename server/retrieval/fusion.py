@@ -45,11 +45,13 @@ from server.observability.metrics import (
     VECTOR_LEG_LATENCY_SECONDS,
 )
 from server.observability.runtime import stage_span
+from server.chat.generation_failure import safe_error_message
 from server.retrieval.cache import CacheEndpoint, CacheMode, SemanticCacheService
 from server.retrieval.contracts import contract_hash
 from server.retrieval.errors import (
     EmbeddingContractMismatchError,
     RequiredRetrievalLegError,
+    RerankerFailedError,
     SparseContractMismatchError,
 )
 from server.retrieval.graphrag_retriever import retrieve_graph_chunks
@@ -1011,7 +1013,10 @@ class TriBridFusion:
                     weights=[config.vector_weight, config.sparse_weight, config.graph_weight],
                 )
 
-        # Optional reranking stage (best-effort; never fails the search).
+        # Reranking stage. A configured reranker (learning/cloud) that fails takes the
+        # request down as the typed reranker_failed error: the unreranked fusion order is
+        # a different answer, not a degraded one, and D26's typed budget/content errors
+        # must reach the request boundary rather than a debug flag.
         rerank_ok = True
         rerank_error: str | None = None
         rerank_applied = False
@@ -1045,6 +1050,19 @@ class TriBridFusion:
                 rerank_ok = False
                 rerank_error = str(e)
                 SEARCH_STAGE_ERRORS_TOTAL.labels(stage="rerank").inc()
+            if not rerank_ok and rerank_mode in {"learning", "cloud"}:
+                self.last_debug = {
+                    **debug,
+                    "rerank_enabled": True,
+                    "rerank_mode": rerank_mode,
+                    "rerank_ok": False,
+                    "rerank_applied": False,
+                    "rerank_error": rerank_error,
+                }
+                raise RerankerFailedError(
+                    mode=rerank_mode,  # type: ignore[arg-type]
+                    reason=safe_error_message(RuntimeError(rerank_error or "reranker failed")),
+                )
 
         debug.update(
             {

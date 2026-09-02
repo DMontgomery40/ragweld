@@ -21,9 +21,14 @@ from server.models.tribrid_config_model import (
     MCPConfig,
     MCPSearchToolResult,
     RequiredRetrievalLegFailureDetail,
+    RerankerFailureDetail,
     RetrievalContractMismatchDetail,
 )
-from server.retrieval.errors import RequiredRetrievalLegError, RetrievalContractMismatchError
+from server.retrieval.errors import (
+    RequiredRetrievalLegError,
+    RerankerFailedError,
+    RetrievalContractMismatchError,
+)
 from server.retrieval.fusion import TriBridFusion
 from server.services.answer_service import answer_best_effort
 from server.services.config_store import get_config as load_scoped_config
@@ -37,6 +42,7 @@ def _search_tool_result(
     error: (
         DependencyUnavailableDetail
         | RequiredRetrievalLegFailureDetail
+        | RerankerFailureDetail
         | RetrievalContractMismatchDetail
         | None
     ) = None,
@@ -121,6 +127,8 @@ def register_mcp_tools(mcp: FastMCP, cfg: MCPConfig) -> None:
             return _search_tool_result(
                 error=RequiredRetrievalLegFailureDetail.model_validate(exc.to_detail())
             )
+        except RerankerFailedError as exc:
+            return _search_tool_result(error=RerankerFailureDetail.model_validate(exc.to_detail()))
         except DependencyUnavailableError as exc:
             return _search_tool_result(error=_dependency_error_detail(exc))
         return _search_tool_result(rows=rows)

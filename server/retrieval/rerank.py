@@ -171,12 +171,20 @@ class Reranker:
                 model_id = str(self.trained_model_path or "").strip()
                 if not model_id:
                     RERANKER_SKIPPED_TOTAL.labels(mode=mode, reason="missing_trained_model").inc()
-                    _RUNTIME.last_ok = True
+                    # Configured reranking that cannot run is a failure, not a skip: the
+                    # unreranked order is a different answer (fail closed at the boundary).
+                    reason = "reranking.reranker_mode=learning has no trained model path (training.trained_model_path)"
+                    _RUNTIME.last_ok = False
                     _RUNTIME.last_applied = False
                     _RUNTIME.last_candidates_reranked = 0
                     _RUNTIME.last_skipped_reason = "missing_trained_model"
+                    _RUNTIME.last_error = reason
                     return RerankResult(
-                        chunks=chunks, ok=True, applied=False, skipped_reason="missing_trained_model"
+                        chunks=chunks,
+                        ok=False,
+                        applied=False,
+                        error=reason,
+                        skipped_reason="missing_trained_model",
                     )
 
                 with RERANKER_LATENCY_SECONDS.labels(mode=mode).time():
@@ -195,12 +203,18 @@ class Reranker:
                 if provider == "cohere":
                     if not os.getenv("COHERE_API_KEY"):
                         RERANKER_SKIPPED_TOTAL.labels(mode=mode, reason="missing_api_key").inc()
-                        _RUNTIME.last_ok = True
+                        reason = "reranking.reranker_cloud_provider=cohere needs COHERE_API_KEY"
+                        _RUNTIME.last_ok = False
                         _RUNTIME.last_applied = False
                         _RUNTIME.last_candidates_reranked = 0
                         _RUNTIME.last_skipped_reason = "missing_api_key"
+                        _RUNTIME.last_error = reason
                         return RerankResult(
-                            chunks=chunks, ok=True, applied=False, skipped_reason="missing_api_key"
+                            chunks=chunks,
+                            ok=False,
+                            applied=False,
+                            error=reason,
+                            skipped_reason="missing_api_key",
                         )
                 elif provider == "litellm":
                     unavailable = self._resolve_gateway_route()
@@ -220,12 +234,17 @@ class Reranker:
                                 sort_keys=True,
                             )
                         )
-                        _RUNTIME.last_ok = True
+                        _RUNTIME.last_ok = False
                         _RUNTIME.last_applied = False
                         _RUNTIME.last_candidates_reranked = 0
                         _RUNTIME.last_skipped_reason = "gateway_unavailable"
+                        _RUNTIME.last_error = unavailable
                         return RerankResult(
-                            chunks=chunks, ok=True, applied=False, skipped_reason="gateway_unavailable"
+                            chunks=chunks,
+                            ok=False,
+                            applied=False,
+                            error=unavailable,
+                            skipped_reason="gateway_unavailable",
                         )
 
                 with RERANKER_LATENCY_SECONDS.labels(mode=mode).time():

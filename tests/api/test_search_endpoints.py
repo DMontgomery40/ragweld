@@ -1,5 +1,6 @@
 """API tests for search endpoints."""
 
+import json
 import pytest
 from httpx import AsyncClient
 
@@ -293,7 +294,7 @@ async def test_answer_stream_empty_provider_output_is_not_cached(client: AsyncCl
     response = await client.post(
         "/api/answer/stream",
         json={
-            "query": "empty stream",
+            "query": "Which module owns the session refresh path?",
             "repo_id": "test-repo",
             "include_vector": False,
             "include_sparse": False,
@@ -302,6 +303,21 @@ async def test_answer_stream_empty_provider_output_is_not_cached(client: AsyncCl
     )
 
     assert response.status_code == 200
-    assert "Error: LLM stream produced no content" in response.text
-    assert '"llm_used": false' in response.text
+    # An empty provider stream is a generation failure, not an answer: the stream carries
+    # the typed error event the chat lane emits, no prose stands in for the answer, and
+    # nothing is written to the semantic cache.
+    events = [
+        json.loads(line[len("data: ") :])
+        for line in response.text.splitlines()
+        if line.startswith("data: ")
+    ]
+    kinds = [str(e.get("type")) for e in events]
+    assert "error" in kinds, kinds
+    error = next(e for e in events if e.get("type") == "error")
+    assert (error.get("detail") or {}).get("operation") == "Answer stream generation"
+    assert (error.get("detail") or {}).get("failure_kind")
+    assert "text" not in kinds, kinds
+    done = next(e for e in events if e.get("type") == "done")
+    assert (done.get("debug") or {}).get("llm_used") is False
+    assert "retrieval-only" not in response.text.lower()
     assert cache_writes == []

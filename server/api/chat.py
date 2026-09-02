@@ -19,6 +19,7 @@ from server.api.generation_errors import (
     prompt_budget_http_exception,
 )
 from server.api.retrieval_errors import (
+    reranker_failed_http_exception,
     RETRIEVAL_RUNTIME_UNAVAILABLE_RESPONSES,
     required_retrieval_leg_http_exception,
     retrieval_contract_mismatch_http_exception,
@@ -56,7 +57,11 @@ from server.observability.runtime import (
     start_streaming_observation,
     update_route_summary,
 )
-from server.retrieval.errors import RequiredRetrievalLegError, RetrievalContractMismatchError
+from server.retrieval.errors import (
+    RequiredRetrievalLegError,
+    RerankerFailedError,
+    RetrievalContractMismatchError,
+)
 from server.retrieval.fusion import TriBridFusion
 from server.retrieval.qdrant_store import QdrantChunkStore
 from server.services.config_store import CorpusNotFoundError
@@ -459,6 +464,8 @@ async def chat(request: ChatRequest, response: Response) -> ChatResponse:
                 await trace_store.annotate(run_id, **current_trace_payload_fields())
                 await trace_store.end(run_id)
             raise retrieval_contract_mismatch_http_exception(e) from e
+        except RerankerFailedError as e:
+            raise reranker_failed_http_exception(e) from e
         except RequiredRetrievalLegError as e:
             if trace_enabled:
                 await trace_store.add_event(run_id, kind="chat.error", msg=str(e), data={"kind": "retrieval"})

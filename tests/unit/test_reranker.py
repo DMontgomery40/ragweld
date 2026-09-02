@@ -37,22 +37,24 @@ async def test_reranker_none_passthrough() -> None:
 
 
 @pytest.mark.asyncio
-async def test_reranker_learning_missing_trained_model_reports_skipped() -> None:
+async def test_reranker_learning_missing_trained_model_fails_closed() -> None:
+    """A configured learning reranker with no trained model is a failure the request
+    surfaces as ``reranker_failed``, never a silent skip to the fusion order."""
     config = RerankingConfig(reranker_mode="learning")
     reranker = Reranker(config)
 
     chunks = [make_chunk("c1", score=0.9), make_chunk("c2", score=0.8)]
     res = await reranker.try_rerank("Which team owns the Aurora incident playbook escalation steps?", chunks)
 
-    assert res.ok is True
+    assert res.ok is False
     assert res.applied is False
     assert res.skipped_reason == "missing_trained_model"
-    assert res.error is None
+    assert res.error and "trained model" in res.error
     assert [c.chunk_id for c in res.chunks] == ["c1", "c2"]
 
 
 @pytest.mark.asyncio
-async def test_reranker_cloud_missing_api_key_reports_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_reranker_cloud_missing_api_key_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("COHERE_API_KEY", raising=False)
 
     config = RerankingConfig(
@@ -67,10 +69,10 @@ async def test_reranker_cloud_missing_api_key_reports_skipped(monkeypatch: pytes
     chunks = [make_chunk("c1", score=0.9), make_chunk("c2", score=0.8)]
     res = await reranker.try_rerank("Which team owns the Aurora incident playbook escalation steps?", chunks)
 
-    assert res.ok is True
+    assert res.ok is False
     assert res.applied is False
     assert res.skipped_reason == "missing_api_key"
-    assert res.error is None
+    assert res.error and "COHERE_API_KEY" in res.error
     assert [c.chunk_id for c in res.chunks] == ["c1", "c2"]
 
 
@@ -84,8 +86,9 @@ async def test_reranker_empty_input() -> None:
 
 
 @pytest.mark.asyncio
-async def test_reranker_cloud_litellm_without_a_gateway_reports_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No authenticated gateway in the test process: the gateway provider skips, never fakes scores."""
+async def test_reranker_cloud_litellm_without_a_gateway_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No authenticated gateway in the test process: the configured gateway reranker fails
+    with the resolution reason, never fakes scores and never skips to the fusion order."""
     monkeypatch.delenv("LITELLM_API_KEY", raising=False)
     config = RerankingConfig(
         reranker_mode="cloud",
@@ -99,10 +102,10 @@ async def test_reranker_cloud_litellm_without_a_gateway_reports_skipped(monkeypa
     chunks = [make_chunk("c1", score=0.9), make_chunk("c2", score=0.8)]
     res = await reranker.try_rerank("Which plane management company did Barry Cohen consider switching to?", chunks)
 
-    assert res.ok is True
+    assert res.ok is False
     assert res.applied is False
     assert res.skipped_reason == "gateway_unavailable"
-    assert res.error is None
+    assert res.error
     assert [c.chunk_id for c in res.chunks] == ["c1", "c2"]
 
 

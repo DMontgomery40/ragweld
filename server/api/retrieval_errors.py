@@ -12,10 +12,16 @@ from server.models.tribrid_config_model import (
     DependencyUnavailableResponse,
     RequiredRetrievalLegFailureDetail,
     RequiredRetrievalLegFailureResponse,
+    RerankerFailureDetail,
+    RerankerFailureResponse,
     RetrievalContractMismatchDetail,
     RetrievalContractMismatchResponse,
 )
-from server.retrieval.errors import RequiredRetrievalLegError, RetrievalContractMismatchError
+from server.retrieval.errors import (
+    RequiredRetrievalLegError,
+    RerankerFailedError,
+    RetrievalContractMismatchError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -24,11 +30,12 @@ RETRIEVAL_RUNTIME_UNAVAILABLE_RESPONSES: dict[int | str, dict[str, Any]] = {
         "model": (
             DependencyUnavailableResponse
             | RequiredRetrievalLegFailureResponse
+            | RerankerFailureResponse
             | IndexDeletionIncompleteResponse
         ),
         "description": (
-            "A required storage dependency or requested retrieval leg is unavailable, or the corpus "
-            "is being de-indexed and its external cleanup has not completed."
+            "A required storage dependency or requested retrieval leg is unavailable, the configured "
+            "reranker failed, or the corpus is being de-indexed and its external cleanup has not completed."
         ),
     },
     409: {
@@ -49,6 +56,17 @@ def required_retrieval_leg_http_exception(exc: RequiredRetrievalLegError) -> HTT
             "operation": exc.operation,
             "operator_hint": detail.operator_hint,
         },
+    )
+    return HTTPException(status_code=503, detail=detail.model_dump(mode="json"))
+
+
+def reranker_failed_http_exception(exc: RerankerFailedError) -> HTTPException:
+    """Translate a configured-reranker failure into its validated 503 boundary shape."""
+
+    detail = RerankerFailureDetail.model_validate(exc.to_detail())
+    logger.error(
+        "Configured reranker failed",
+        extra={"mode": detail.mode, "reason": detail.reason, "operator_hint": detail.operator_hint},
     )
     return HTTPException(status_code=503, detail=detail.model_dump(mode="json"))
 

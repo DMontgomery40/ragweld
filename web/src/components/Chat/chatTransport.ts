@@ -8,6 +8,7 @@ import type {
   ImageAttachment,
   RecallIntensity,
   RequiredRetrievalLegFailureDetail,
+  RerankerFailureDetail,
   RetrievalContractMismatchDetail,
   WebGroundingMetadata,
 } from '@/types/generated';
@@ -89,6 +90,7 @@ export type ChatStructuredErrorDetail = Partial<
     Omit<GenerationUnavailableDetail, 'code'> &
     Omit<PromptBudgetExceededDetail, 'code'> &
     Omit<RequiredRetrievalLegFailureDetail, 'code'> &
+    Omit<RerankerFailureDetail, 'code'> &
     Omit<RetrievalContractMismatchDetail, 'code'>
 > & { code: string };
 
