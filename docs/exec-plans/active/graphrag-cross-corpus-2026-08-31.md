@@ -291,23 +291,23 @@ This table is the completion authority for Task 8. `Pending` may become `Proves`
 | Requirement | Exact required proof | State |
 |---|---|---|
 | Neo4j GraphRAG 1.19 source contract | Task 1 PASS plus full-gate installed-version/import contract (`test_neo4j_graphrag_119_contract.py`) | Proves; fresh full gate passed |
-| One external semantic/code policy and truthful defaults | Task 2 PASS, full `test_graph_policy.py`/config/API gate, visible NASA/Epstein semantic badges and code badge | Proves: Task 2 PASS + gate; live NASA/Epstein pages show `policy: semantic` badges and the code page shows the **Code AST graph** badge with the AST weights (click ledger 00:12 09-02, `2026-09-02-code-indexing-ast-policy-weights.jpg`) |
+| One external semantic/code policy and truthful defaults | Task 2 PASS, full `test_graph_policy.py`/config/API gate, visible NASA/Epstein semantic badges and code badge | Automated proves; live pending |
 | Recall exclusion | Policy/API tests plus live Recall UI showing excluded graph policy with no graph start path | Proves: live Indexing page for `recall_default` shows "Excluded internal corpus", graph toggle disabled, no semantic settings or Generate control (2026-09-01 20:18 UTC, `2026-09-01-recall-01-excluded-policy.jpg`) |
-| Reviewed per-corpus schema proposal and persistence | Task 3 PASS, live NASA and Epstein visible generate/expand/approve dialogs, schema hash in run metadata and after reload | Proves: Task 3 PASS; live NASA Luna proposal generated/expanded/approved with the cost dialog (`2026-09-02-nasa-luna-proposal-expanded.jpg`, `…-cost-dialog.jpg`), Epstein proposal reused with hash `ee12e83e…`; both hashes persist in `runs/latest` and on reload (`…-reload-promoted.jpg` for both corpora) |
-| Correct official lexical names | Full live GraphRAG/store query: `FROM_DOCUMENT`, `NEXT_CHUNK`, `FROM_CHUNK`; zero `IN_CHUNK` | Proves: store audit 01:22 09-02 on the three promoted generations shows only `FROM_DOCUMENT`/`NEXT_CHUNK`/`FROM_CHUNK` plus schema/AST edges, `IN_CHUNK` = 0 store-wide |
+| Reviewed per-corpus schema proposal and persistence | Task 3 PASS, live NASA and Epstein visible generate/expand/approve dialogs, schema hash in run metadata and after reload | Automated proves; live pending |
+| Correct official lexical names | Full live GraphRAG/store query: `FROM_DOCUMENT`, `NEXT_CHUNK`, `FROM_CHUNK`; zero `IN_CHUNK` | Automated proves; live pending |
 | Official Pipeline and scoped writer | Task 4 PASS, full gate, promoted per-corpus graph metadata/store scoping | Proves; fresh live/batched gate passed |
-| Exact-match scoped entity resolution | Task 5 PASS, live run resolution telemetry and zero duplicate groups/cross-generation edges | Proves: Task 5 PASS; live run records `ca5b8d92` (8,956 → 3,003, merged 5,953, duplicate groups 0), `3054ecc2` (306 → 162, merged 144, 0), `43efdd0a` (6,242 → 6,242, merged 0 under the `entity_id` key, 0); zero edges leave any generation; 83 distinct `__init__` entities in the code graph (D7) |
-| Fail-closed promotion and RED matrix | Task 5 mutation matrix plus Task 8 visible temporary-corpus refusal, operator hint, no promoted generation/completed badge after reload | Proves: Task 5 mutation matrix + D14 live test; visible negative proof on `task8-negative-graphrag` (5 s timeout → `Request timed out.` / `extraction_failure`, `PROMOTION REFUSED` after reload, corpus deleted through the registry dialog: click ledger 21:48–21:53 09-01); the real Epstein D12 refusal and the code D14 refusal also left the previous generations active |
-| Qdrant-seeded traversal and no double credit | Task 6 PASS, retained-generation collision test, live graph search debug fields/API equality and no `fusion_graph_entity_hits` | Proves: Task 6 PASS; live chat footers and Routing Trace disclose `fusion_graph_qdrant_seed_chunks` / `…relationship_expansion_hits` / `…hydrated_chunks` per corpus (NASA 30/30/30, code 30/30/30, Epstein 30/30/30) matching the recorded `/api/search` payloads (6/6/6 each, JSONs in the evidence dir); `fusion_graph_entity_hits` absent everywhere |
+| Exact-match scoped entity resolution | Task 5 PASS, live run resolution telemetry and zero duplicate groups/cross-generation edges | Automated proves; live pending |
+| Fail-closed promotion and RED matrix | Task 5 mutation matrix plus Task 8 visible temporary-corpus refusal, operator hint, no promoted generation/completed badge after reload | Automated proves; visible negative pending |
+| Qdrant-seeded traversal and no double credit | Task 6 PASS, retained-generation collision test, live graph search debug fields/API equality and no `fusion_graph_entity_hits` | Automated proves; live pending |
 | GDS 2.13 deployment | Task 7 PASS, deployed `gds.version()`=`2.13.x`, Neo4j/APOC/GDS readiness, deployment marker | Proves: `/api/ready` true with Neo4j 5.26.20 + GDS 2.13.7 on every deploy (8a4d20c9, c8df2373, b452d435); NASA 215, code 479, negative-fixture 3 Leiden communities written live |
-| Weighted deterministic Leiden, including code | Task 7 semantic/code/failure live tests plus nonzero NASA/Epstein/code `communityPath`/`communityId`, counts, derived API/UI after reload | Proves: deployed runs report `gds-leiden-2.13` communities — NASA 105 (modularity 0.889), Epstein 1,142 (0.608), code 276 (0.835) — and the explorer lists/derives them after reload on every corpus (community drives in the click ledger) |
+| Weighted deterministic Leiden, including code | Task 7 semantic/code/failure live tests plus nonzero NASA/Epstein/code `communityPath`/`communityId`, counts, derived API/UI after reload | Isolated proves; deployed pending |
 | Dead-surface replacement | Repo search, live Neo4j zero obsolete ontology/vector/embedding state, config/generated UI absence | Proves: repo audit 2026-09-01 (no `IN_CHUNK` writer, `graph_entity_hits`, `IN_COMMUNITY`, `Community` nodes, NetworkX/Louvain; removed config names only in migration strip lists); live store: 0 `Community` nodes, 0 `IN_COMMUNITY`/`IN_CHUNK` edges, 0 chunk embeddings, 0 cross-generation edges, 0 leftover GDS projections; regenerated contract bundle no longer carries `semantic_kg_allowed_entity_types` |
 | Per-task and final DeepSeek reviews | Recorded PASS for Tasks 1-7 plus final complete spec-to-main integration PASS after full gate | Tasks 1-7 prove; final pending |
 | Full LXC quality gate | Exact Task 8 surfaces: dependency sync, generators, docs ownership, Ruff, mypy, complete 1,989-test collection, TS/build, headed policy/explorer | Proves predeploy through bounded batches; live GDS browser row deferred to postdeploy |
 | Push/deploy parity | Mac `HEAD`, `origin/main`, LXC `HEAD`, deployment marker and serving runtime hash identical; clean one-worktree state | Proves for 8a4d20c9, c8df2373 and b452d435 (all four hashes identical at each deploy, `/api/ready` true); the five later commits (0f79a7c3, 17f208b9, f1b613db, 27e28df6, 6d59e05e) are pushed and await the post-Epstein deploy |
-| NASA visible rebuild and drive | Screenshot/click ledger: visible schema review/approve/cost/run telemetry/reload, three node types, two neighborhoods, all controls, community, graph search/debug | Proves: Luna rebuild through visible controls (alias change, proposal review, cost dialog, run `3054ecc2`, reload) and the explorer drive (initial graph, three node types, two neighbourhoods, zoom/pan/fit, hops, type/relation filters, community, name search, table properties/provenance, hard reload) — click ledger 22:04–22:26 09-01 and 00:16–01:17 09-02, screenshots `2026-09-01-nasa-explorer-*.jpg`, `2026-09-02-nasa-*.jpg`; chat graph question with footer disclosure 22:01 09-01 |
-| Epstein visible rebuild and drive | Same complete screenshot/click/search/debug ledger with flight/communication question | Proves: force rebuild through visible controls (run `ca5b8d92`, D2 panel proof, reload), explorer drive 00:27–00:30 09-02 (`2026-09-02-epstein-explorer-*.jpg`), visible flight/communication chat question with footer + trace disclosure 01:19 09-02 (`2026-09-02-chat-epstein-graph-footer-30-30-30.jpg`) and the recorded `/api/search` JSON |
-| `ragweld_code` visible rebuild and drive | Visible code policy/AST types/weights/run telemetry, same full Explorer/search/reload ledger | Proves: visible code policy/AST weights, Index Now dialog, run `43efdd0a` (telemetry: 6,242 entities, 0 merged, 276 communities), explorer drive 00:19–00:27 09-02 (`2026-09-02-code-explorer-*.jpg`) incl. hop limit 22 vs 104 nodes, filters, community, provenance/properties, reload; `/api/search` JSON |
+| NASA visible rebuild and drive | Screenshot/click ledger: visible schema review/approve/cost/run telemetry/reload, three node types, two neighborhoods, all controls, community, graph search/debug | Pending |
+| Epstein visible rebuild and drive | Same complete screenshot/click/search/debug ledger with flight/communication question | Pending |
+| `ragweld_code` visible rebuild and drive | Visible code policy/AST types/weights/run telemetry, same full Explorer/search/reload ledger | Pending |
 | Deferred Recall Intelligence Graph | Spec section 15 is the owned enterprise RBAC/Kubernetes/GCP roadmap phase and explicitly covers needs/misses/transitions, prompt/cache opportunities, role/team aggregates, tenant isolation, consent, de-identification, retention/deletion, audit, invalidation, anti-surveillance | Proves; roadmap audit complete |
 | Final completion audit | Every row above classified `Proves`, with run ids, store counts, screenshot paths/timestamps, hashes, and no active/staged work | Pending |
 
@@ -547,34 +547,6 @@ everything below live in `output/task8-graphrag-acceptance/click-ledger-2026-09-
   `start_index`); detect-changes: critical, 6 files, 9 symbols, 289 affected. Proceeding because only the Document
   writer id changes; the code corpus is rebuilt after deploy and the Epstein/NASA graphs are rebuilt on the same
   code.
-
-- **Observations recorded, not fixed (D13, D15, D19, D20, D21):** D13 the pre-run estimate dialog predicts ~12 min for
-  a semantic run that takes ~2 h (per-token model, not per-gateway-call at four workers); D15 the cloud reranker
-  hit a LiteLLM `ReadTimeout` while the Epstein extraction held four concurrent Luna calls on the same gateway
-  (the chat answered unreranked with a visible toast); D19 Luna named many Epstein `Email` entities with OCR-noise
-  fragments because `name` is free text and `subject` was typed optional; D20 the URL corpus parameter does not
-  change an existing chat conversation's Sources (per-conversation setting, visible in the Sources picker); D21
-  the Docling PDF conversion runs inside the API process, and starting the NASA rebuild on a process that had
-  grown to 3.5 GiB over the Epstein run drove pve1 into full swap (load 500+, public health 530, chat 502) —
-  recovered from pve1 with a run stop and an API restart, then retried on a fresh process; the click ledger holds
-  the timeline. These are product/ops follow-ups outside the Task 8 gates.
-
-- **D22 (fixed):** the Task 8 full gate failed the real end-to-end
-  `test_index_search_and_delete_on_promoted_lane` (KG model `deepseek.deepseek-v4-flash`) with
-  `LLM response has improper format`, the official extractor's rejection of a structured-output reply. A probe of
-  `LLMEntityRelationExtractor(use_structured_output=True)` on the failing chunk through the gateway: with the D9
-  binding `model_params={"temperature": 0, "reasoning_effort": "medium"}` DeepSeek answered 1 of 3 attempts with
-  `"embedding_properties": null` on every node (pydantic `dict_type` error); with `{"temperature": 0}` 3 of 3
-  validated. `reasoning_effort` is OpenAI's request parameter (the config field says so). Fix:
-  `_semantic_kg_reasoning_effort(cfg, route_model)` in `server/api/index.py` binds the operator's effort only when
-  the catalog row for the route alias has `provider == "openai"`, else `None`; `semantic_extraction_llm` and
-  `derive_graph_schema_proposal` take `str | None` and omit the parameter for `None` (blank still refused). RED:
-  `ImportError`; GREEN on LXC100: 40 unit tests (incl. the catalog-backed provider test and the `None` binding
-  test), ruff, mypy, live `test_graph_schema_proposal_live.py` + `test_graphrag_pipeline_live.py`. DeepSeek V4
-  Flash review `gen-1788315853-jPkHunHXSBdQ5tgMmWPL` (3,277 prompt + 1,225 completion = 4,502 tokens,
-  `$0.00080178`): **PASS** (P2 remarks are confirmations; a per-model capability flag is noted as a possible future
-  refinement, not required). The promoted-lane test then passed once and was refused once more at promotion with a
-  code the `-q` output elided; a verbose repeat loop is capturing it (recorded below under D23 when known).
 
 ### Final precommit GitNexus scope
 

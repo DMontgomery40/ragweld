@@ -218,7 +218,7 @@ async def derive_graph_schema_proposal(
     route_model: str,
     route_base_url: str,
     route_api_key: str,
-    reasoning_effort: str | None,
+    reasoning_effort: str,
     input_fingerprint: str,
 ) -> GraphSchemaProposal:
     sample = select_schema_chunks(chunks, corpus_id=corpus_id)
@@ -228,16 +228,12 @@ async def derive_graph_schema_proposal(
         f"## {chunk.file_path} lines {chunk.start_line}-{chunk.end_line}\n{chunk.content[:6000]}"
         for chunk in sample
     )
-    model_params: dict[str, Any] = {"temperature": 0}
-    if reasoning_effort is not None:
-        # OpenAI's knob only; None for every other provider (Task 8 drive defect D22).
-        effort = str(reasoning_effort).strip()
-        if not effort:
-            raise RuntimeError("GraphRAG schema proposal requires a reasoning effort")
-        model_params["reasoning_effort"] = effort
+    effort = str(reasoning_effort or "").strip()
+    if not effort:
+        raise RuntimeError("GraphRAG schema proposal requires a reasoning effort")
     llm = OpenAILLM(
         model_name=route_model,
-        model_params=model_params,
+        model_params={"temperature": 0, "reasoning_effort": effort},
         api_key=route_api_key,
         base_url=route_base_url,
     )

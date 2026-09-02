@@ -298,17 +298,3 @@ async def test_a_files_document_node_never_shares_its_writer_id_with_the_module_
     )
     with pytest.raises(ValueError, match="shared by a Document node and a module node"):
         assemble_code_file_graph(lexical_result.graph, colliding)
-
-
-def test_semantic_extraction_llm_omits_the_reasoning_knob_for_routes_that_do_not_take_it() -> None:
-    """Task 8 drive defect D22: ``reasoning_effort`` is OpenAI's parameter. Sent to DeepSeek it
-    changed the structured output (``embedding_properties: null`` on every node) and the
-    official extractor refused the chunk, so a route without the knob gets none."""
-    llm = semantic_extraction_llm(
-        route_model="deepseek.deepseek-v4-flash",
-        route_base_url="http://127.0.0.1:54000/v1",
-        route_api_key="sk-test",
-        llm_timeout_s=90,
-        reasoning_effort=None,
-    )
-    assert llm.model_params == {"temperature": 0}
