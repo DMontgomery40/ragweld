@@ -1743,6 +1743,16 @@ async def _resolve_dashboard_repo_id(scope: CorpusScope) -> str:
     )
 
 
+# Neo4j 5 Community exposes no store-size source: `dbms.queryJmx` is gone in Neo4j 5, APOC
+# core has no `apoc.monitor.store`, `SHOW DATABASES` carries no size column, and the data
+# volume is a root-owned Docker volume the API process cannot read. The dashboard says so
+# instead of printing a zero (S5).
+NEO4J_STORE_UNMEASURED_NOTE = (
+    "Not measured: Neo4j 5 exposes no store-size procedure and the data volume is not "
+    "host-readable."
+)
+
+
 async def _compute_dashboard_storage_breakdown(*, repo_id: str) -> DashboardIndexStorageBreakdown:
     """Compute a dashboard-friendly storage breakdown (bytes) for a corpus."""
     cfg = await load_scoped_config(repo_id=repo_id)
@@ -1770,36 +1780,20 @@ async def _compute_dashboard_storage_breakdown(*, repo_id: str) -> DashboardInde
         qdrant_points = 0
         qdrant_dense_vector_bytes = 0
 
-    # Neo4j (store size via JMX)
-    neo4j_store_bytes = 0
-    try:
-        db_name = cfg.graph_storage.resolve_database(repo_id)
-        neo4j = Neo4jClient(
-            cfg.graph_storage.neo4j_uri,
-            cfg.graph_storage.neo4j_user,
-            cfg.graph_storage.resolve_password(),
-            database=db_name,
-        )
-        await neo4j.connect()
-        try:
-            neo4j_store_bytes = int(await neo4j.get_store_size_bytes())
-        finally:
-            await neo4j.disconnect()
-    except Exception:
-        # Graph layer is optional; never fail dashboard rendering for missing graph.
-        neo4j_store_bytes = 0
-
+    # Neo4j: unmeasured, and the breakdown says so (NEO4J_STORE_UNMEASURED_NOTE). It used to
+    # render as a measured-looking "0 B (0.0% of total)" beside a graph of thousands of nodes.
     chunks_bytes = int(breakdown.get("chunks_bytes") or 0)
     chunk_summaries_bytes = int(breakdown.get("chunk_summaries_bytes") or 0)
     postgres_total = chunks_bytes + chunk_summaries_bytes
-    total_storage = postgres_total + qdrant_dense_vector_bytes + int(neo4j_store_bytes or 0)
+    total_storage = postgres_total + qdrant_dense_vector_bytes
 
     return DashboardIndexStorageBreakdown(
         chunks_bytes=chunks_bytes,
         chunk_summaries_bytes=chunk_summaries_bytes,
         qdrant_points=qdrant_points,
         qdrant_dense_vector_bytes=qdrant_dense_vector_bytes,
-        neo4j_store_bytes=int(neo4j_store_bytes or 0),
+        neo4j_store_bytes=None,
+        neo4j_store_note=NEO4J_STORE_UNMEASURED_NOTE,
         postgres_total_bytes=postgres_total,
         total_storage_bytes=total_storage,
     )

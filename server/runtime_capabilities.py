@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from server.gateway_catalog import LOCAL_GATEWAY_ALIAS
 from server.models.tribrid_config_model import (
     ChatProviderInfo,
     ChunkingRuntimeCapabilities,
@@ -9,12 +10,16 @@ from server.models.tribrid_config_model import (
     EmbeddingRuntimeProviderCapability,
     GenerationRuntimeCapabilities,
     IndexingRuntimeCapabilities,
+    LearningAgentRuntimeCapability,
+    LocalServingRuntimeCapability,
     RerankerRuntimeCapabilities,
     RuntimeCapabilitiesResponse,
     RuntimeOption,
     SearchRuntimeCapabilities,
+    TrainingRuntimeCapabilities,
     TriBridConfig,
 )
+from server.retrieval.mlx_qwen3 import mlx_is_available
 
 EMBEDDING_BACKEND_OPTIONS: tuple[RuntimeOption, ...] = (
     RuntimeOption(
@@ -221,16 +226,99 @@ _RERANKER_CATALOG_ONLY_REASON = (
 )
 
 
-def build_runtime_capabilities_response() -> RuntimeCapabilitiesResponse:
-    return build_runtime_capabilities_response_for_config(TriBridConfig())
+LOCAL_SERVING_BACKEND: RuntimeOption = GENERATION_SERVING_BACKEND_OPTIONS[0]
+
+# Learning Agent execution backends that run in-process on the API host, with the
+# runtime they need there. Anything else (unsloth) executes inside a Flyte task image.
+_HOST_EXECUTED_TRAINING_BACKENDS: dict[str, str] = {"mlx_qwen3": "MLX (mlx + mlx_lm)"}
 
 
-def build_runtime_capabilities_response_for_config(config: TriBridConfig) -> RuntimeCapabilitiesResponse:
+def local_serving_runtime_capability(config: TriBridConfig) -> LocalServingRuntimeCapability:
+    """The local generation lane exactly as the effective config switches it on this host."""
+    vllm = config.chat.vllm
+    return LocalServingRuntimeCapability(
+        alias=LOCAL_GATEWAY_ALIAS,
+        backend=LOCAL_SERVING_BACKEND.id,
+        backend_label=LOCAL_SERVING_BACKEND.label,
+        enabled=bool(vllm.enabled),
+        model=str(vllm.default_model or "").strip(),
+    )
+
+
+def learning_agent_runtime_capability(
+    config: TriBridConfig, *, mlx_available: bool
+) -> LearningAgentRuntimeCapability:
+    """Resolve the configured Learning Agent execution backend against this host.
+
+    ``mlx_available`` is the probe result for the MLX runtime, passed in so the
+    resolution itself is pure; callers use :func:`mlx_is_available` for the real host.
+    """
+    training = config.training
+    backend = str(training.ragweld_agent_backend or "").strip()
+    base_model = str(training.ragweld_agent_base_model or "").strip()
+    artifact_path = str(training.ragweld_agent_model_path or "").strip()
+
+    if backend == "unsloth":
+        return LearningAgentRuntimeCapability(
+            execution_backend=backend,
+            execution_locus="flyte_task",
+            host_available=False,
+            availability_detail=(
+                "Unsloth executes inside the Flyte task image, not on this host; "
+                "the Training Control Plane reports lane readiness."
+            ),
+            base_model=base_model,
+            artifact_path=artifact_path,
+        )
+
+    runtime_label = _HOST_EXECUTED_TRAINING_BACKENDS.get(backend)
+    if runtime_label is None:
+        return LearningAgentRuntimeCapability(
+            execution_backend=backend,
+            execution_locus="host",
+            host_available=False,
+            availability_detail=(
+                f"Training backend {backend or '(unset)'} is not a supported execution backend; "
+                "runs will fail closed."
+            ),
+            base_model=base_model,
+            artifact_path=artifact_path,
+        )
+
+    if mlx_available:
+        detail = f"Training backend {backend} runs on this host ({runtime_label} is importable)."
+    else:
+        detail = f"Training backend {backend} is not available on this host; runs will fail closed."
+    return LearningAgentRuntimeCapability(
+        execution_backend=backend,
+        execution_locus="host",
+        host_available=mlx_available,
+        availability_detail=detail,
+        base_model=base_model,
+        artifact_path=artifact_path,
+    )
+
+
+def build_runtime_capabilities_response(*, mlx_available: bool | None = None) -> RuntimeCapabilitiesResponse:
+    return build_runtime_capabilities_response_for_config(TriBridConfig(), mlx_available=mlx_available)
+
+
+def build_runtime_capabilities_response_for_config(
+    config: TriBridConfig, *, mlx_available: bool | None = None
+) -> RuntimeCapabilitiesResponse:
+    """Build the capability matrix for ``config`` on this host.
+
+    ``mlx_available`` defaults to the real MLX probe (a cached child-process import);
+    pass it explicitly to describe a hypothetical host without probing. Blocking on the
+    first probe; call from a worker thread inside async handlers.
+    """
+    mlx_present = mlx_is_available() if mlx_available is None else bool(mlx_available)
     return RuntimeCapabilitiesResponse(
         generation=GenerationRuntimeCapabilities(
             routing_backends=list(GENERATION_ROUTING_BACKEND_OPTIONS),
             serving_backends=list(GENERATION_SERVING_BACKEND_OPTIONS),
             default_route=_default_generation_route(config),
+            local_serving=local_serving_runtime_capability(config),
         ),
         embedding=EmbeddingRuntimeCapabilities(
             backends=list(EMBEDDING_BACKEND_OPTIONS),
@@ -250,6 +338,9 @@ def build_runtime_capabilities_response_for_config(config: TriBridConfig) -> Run
             vector_backends=list(SEARCH_VECTOR_BACKEND_OPTIONS),
             sparse_backends=list(SEARCH_SPARSE_BACKEND_OPTIONS),
             graph_backends=list(SEARCH_GRAPH_BACKEND_OPTIONS),
+        ),
+        training=TrainingRuntimeCapabilities(
+            learning_agent=learning_agent_runtime_capability(config, mlx_available=mlx_present),
         ),
     )
 

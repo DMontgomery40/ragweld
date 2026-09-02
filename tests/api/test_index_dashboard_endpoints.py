@@ -264,3 +264,37 @@ async def test_dashboard_status_and_stats_are_404_for_an_unregistered_corpus(
 
     stats = await client.get("/api/index/stats", params={"corpus_id": missing})
     assert stats.status_code == 404, stats.text
+
+
+@pytest.mark.asyncio
+async def test_the_neo4j_store_is_reported_as_unmeasured_not_zero(client: AsyncClient) -> None:
+    """Neo4j 5 Community has no store-size source, so the dashboard says so instead of "0 B".
+
+    `dbms.queryJmx` is gone in Neo4j 5, APOC core has no `apoc.monitor.store`, `SHOW DATABASES`
+    carries no size column, and the data volume is not readable from the API process. Both
+    dashboard endpoints report the store as unmeasured (null bytes plus the reason) and leave it
+    out of the storage total rather than adding a measured-looking zero to it.
+    """
+    corpus_id = f"pytest_dash_neo4j_{uuid.uuid4().hex[:10]}"
+    await _register(corpus_id)
+    await _seed_chunk(corpus_id)
+    try:
+        stats = await client.get("/api/index/stats", params={"corpus_id": corpus_id})
+        assert stats.status_code == 200, stats.text
+        payload = stats.json()
+        storage = payload["storage_breakdown"]
+        assert storage["neo4j_store_bytes"] is None, storage
+        assert "no store-size procedure" in str(storage["neo4j_store_note"]), storage
+        assert int(storage["total_storage_bytes"]) == int(storage["postgres_total_bytes"]) + int(
+            storage["qdrant_dense_vector_bytes"]
+        )
+        assert int(payload["total_storage"]) == int(storage["total_storage_bytes"])
+
+        status = await client.get("/api/index/status", params={"corpus_id": corpus_id})
+        assert status.status_code == 200, status.text
+        metadata = status.json()["metadata"]
+        assert metadata["storage_breakdown"]["neo4j_store_bytes"] is None, metadata
+        assert metadata["storage_breakdown"]["neo4j_store_note"] == storage["neo4j_store_note"]
+        assert int(metadata["total_storage"]) == int(storage["total_storage_bytes"])
+    finally:
+        await _drop(corpus_id)

@@ -56,8 +56,12 @@ class DashboardIndexStorageBreakdown(BaseModel):
     """Storage breakdown for the Dashboard index summary (bytes).
 
     NOTE:
-    - Postgres and Neo4j values are measured; the Qdrant dense-vector figure is
-      an estimate because Qdrant does not expose per-collection disk usage.
+    - Postgres values are measured; the Qdrant dense-vector figure is an estimate
+      because Qdrant does not expose per-collection disk usage.
+    - The Neo4j store is reported as unmeasured (``neo4j_store_bytes`` null plus
+      ``neo4j_store_note`` saying why) when no measurement source exists; an
+      unmeasured store contributes nothing to ``total_storage_bytes``. A breakdown
+      is built from real readings, never from defaults.
     """
 
     chunks_bytes: int = Field(
@@ -80,22 +84,40 @@ class DashboardIndexStorageBreakdown(BaseModel):
         ge=0,
         description="Estimated bytes of dense vectors in Qdrant (dense points x dimensions x 4 bytes).",
     )
-    neo4j_store_bytes: int = Field(
-        default=0,
+    neo4j_store_bytes: int | None = Field(
         ge=0,
-        description="Total Neo4j store size for the resolved database (bytes).",
+        description=(
+            "Total Neo4j store size for the resolved database (bytes), or null when the "
+            "store could not be measured (see neo4j_store_note)."
+        ),
+    )
+    neo4j_store_note: str | None = Field(
+        default=None,
+        description=(
+            "Why neo4j_store_bytes is null (required when it is); null for a measured store."
+        ),
     )
 
     postgres_total_bytes: int = Field(
-        default=0,
         ge=0,
         description="Total Postgres bytes (chunk rows + chunk summaries).",
     )
     total_storage_bytes: int = Field(
-        default=0,
         ge=0,
-        description="Total storage bytes across Postgres + Qdrant (estimate) + Neo4j.",
+        description=(
+            "Total storage bytes across Postgres + Qdrant (estimate) + Neo4j when measured; "
+            "an unmeasured Neo4j store contributes nothing."
+        ),
     )
+
+    @model_validator(mode="after")
+    def _unmeasured_store_says_why(self) -> DashboardIndexStorageBreakdown:
+        note = (self.neo4j_store_note or "").strip()
+        if self.neo4j_store_bytes is None and not note:
+            raise ValueError("neo4j_store_note is required when neo4j_store_bytes is null (unmeasured)")
+        if self.neo4j_store_bytes is not None and note:
+            raise ValueError("neo4j_store_note must be null for a measured neo4j_store_bytes")
+        return self
 
 
 class DashboardEmbeddingConfigSummary(BaseModel):
@@ -162,12 +184,15 @@ class DashboardIndexStatusMetadata(BaseModel):
     )
     costs: DashboardIndexCosts | None = Field(default=None, description="Indexing cost summary.")
     storage_breakdown: DashboardIndexStorageBreakdown = Field(
-        default_factory=DashboardIndexStorageBreakdown,
         description="Storage breakdown (bytes) for major components.",
     )
 
     keywords_count: int = Field(default=0, ge=0, description="Number of keywords for this corpus (if generated).")
-    total_storage: int = Field(default=0, ge=0, description="Total storage bytes (Postgres + Neo4j).")
+    total_storage: int = Field(
+        default=0,
+        ge=0,
+        description="Total storage bytes (Postgres + Qdrant estimate + Neo4j when measured).",
+    )
 
 
 class DashboardIndexStatusResponse(BaseModel):
@@ -194,11 +219,14 @@ class DashboardIndexStatsResponse(BaseModel):
         serialization_alias="corpus_id",
     )
     storage_breakdown: DashboardIndexStorageBreakdown = Field(
-        default_factory=DashboardIndexStorageBreakdown,
         description="Storage breakdown (bytes) for major components.",
     )
     keywords_count: int = Field(default=0, ge=0, description="Number of keywords for this corpus (if generated).")
-    total_storage: int = Field(default=0, ge=0, description="Total storage bytes (Postgres + Neo4j).")
+    total_storage: int = Field(
+        default=0,
+        ge=0,
+        description="Total storage bytes (Postgres + Qdrant estimate + Neo4j when measured).",
+    )
 
 
 class DevStackStatusResponse(BaseModel):
@@ -755,6 +783,9 @@ class MCPSearchToolResult(BaseModel):
         return self
 
 
+GenerationFailureKind = Literal["spend_limit", "auth", "upstream_unreachable", "gateway_unreachable", "gateway"]
+
+
 class GenerationUnavailableDetail(BaseModel):
     """Public error detail returned when the generation gateway cannot complete."""
 
@@ -762,7 +793,17 @@ class GenerationUnavailableDetail(BaseModel):
     operation: str = Field(description="Generation operation that could not complete")
     message: str = Field(description="Stable, non-sensitive failure summary")
     retryable: bool = Field(default=True, description="Whether the caller may retry after remediation")
-    operator_hint: str = Field(description="High-signal next step for the operator")
+    operator_hint: str = Field(description="High-signal next step for the operator, chosen from failure_kind")
+    failure_kind: GenerationFailureKind = Field(
+        description=(
+            "Why generation could not complete, classified from the sanitised reason: a provider key "
+            "spending limit, a rejected key, an unreachable serving lane behind the gateway, an unreachable "
+            "gateway, or an unclassified gateway failure"
+        )
+    )
+    gateway_reason: str = Field(
+        description="Sanitised reason the gateway or provider returned (secrets and URLs removed, truncated)"
+    )
 
 
 class GenerationUnavailableResponse(BaseModel):
@@ -1853,9 +1894,10 @@ class ObservabilityStatusResponse(BaseModel):
         description="Useful external links for the current observability config.",
     )
     catalog_path: str = Field(default="/api/observability/catalog", description="Catalog endpoint for dashboard/workbench surfaces.")
-    incidents_path: str = Field(default="/api/observability/incidents", description="Incident-feed endpoint for operators.")
-    incident_count: int = Field(default=0, ge=0, description="Incident count surfaced alongside this status snapshot.")
-    critical_incident_count: int = Field(default=0, ge=0, description="Critical incident count for the current snapshot.")
+    incidents_path: str = Field(
+        default="/api/observability/incidents",
+        description="Incident-feed endpoint for operators; the feed's total_count is the only incident count.",
+    )
     operator_hint: str | None = Field(default=None, description="High-signal next-step guidance for operators.")
 
 
@@ -2054,6 +2096,53 @@ class SearchRuntimeCapabilities(BaseModel):
     graph_backends: list[RuntimeOption] = Field(default_factory=list, description="Graph search backends.")
 
 
+class LocalServingRuntimeCapability(BaseModel):
+    """The self-hosted generation lane behind the local gateway alias, as configured on this host.
+
+    The catalog row names the alias and pricing only; which serving backend fronts it and
+    whether that lane is switched on come from here, so operator surfaces never claim a
+    backend the host does not run.
+    """
+
+    alias: str = Field(default="ragweld-local", description="Gateway alias of the local serving row.")
+    backend: str = Field(default="vllm", description="Serving backend id (one of generation.serving_backends).")
+    backend_label: str = Field(default="vLLM", description="Human-readable serving backend label.")
+    enabled: bool = Field(
+        default=False,
+        description="Whether chat.vllm.enabled switches the local lane on in the effective config.",
+    )
+    model: str = Field(default="", description="Model the local serving backend is configured to serve.")
+
+
+class LearningAgentRuntimeCapability(BaseModel):
+    """Where and whether Learning Agent training can execute for the configured backend."""
+
+    execution_backend: str = Field(default="", description="Configured training.ragweld_agent_backend.")
+    execution_locus: Literal["host", "flyte_task"] = Field(
+        default="host",
+        description="host: the API host runs training in-process; flyte_task: a Flyte task image runs it.",
+    )
+    host_available: bool = Field(
+        default=False,
+        description="For host-executed backends: whether the backend runtime imports on this host.",
+    )
+    availability_detail: str = Field(
+        default="",
+        description="Operator-facing sentence stating the real training lane for this host.",
+    )
+    base_model: str = Field(default="", description="Configured training.ragweld_agent_base_model.")
+    artifact_path: str = Field(default="", description="Configured training.ragweld_agent_model_path.")
+
+
+class TrainingRuntimeCapabilities(BaseModel):
+    """Runtime capability matrix for training lanes."""
+
+    learning_agent: LearningAgentRuntimeCapability = Field(
+        default_factory=LearningAgentRuntimeCapability,
+        description="Learning Agent execution lane resolved against this host.",
+    )
+
+
 class GenerationRuntimeCapabilities(BaseModel):
     """Runtime capability matrix for generation routing and serving."""
 
@@ -2069,6 +2158,10 @@ class GenerationRuntimeCapabilities(BaseModel):
         default=None,
         description="Provider route selected by the current config/env for a default chat request.",
     )
+    local_serving: LocalServingRuntimeCapability = Field(
+        default_factory=LocalServingRuntimeCapability,
+        description="The self-hosted lane behind the local gateway alias on this host.",
+    )
 
 
 class RuntimeCapabilitiesResponse(BaseModel):
@@ -2080,6 +2173,7 @@ class RuntimeCapabilitiesResponse(BaseModel):
     chunking: ChunkingRuntimeCapabilities = Field(default_factory=ChunkingRuntimeCapabilities)
     indexing: IndexingRuntimeCapabilities = Field(default_factory=IndexingRuntimeCapabilities)
     search: SearchRuntimeCapabilities = Field(default_factory=SearchRuntimeCapabilities)
+    training: TrainingRuntimeCapabilities = Field(default_factory=TrainingRuntimeCapabilities)
 
 
 class SecretRequirement(BaseModel):

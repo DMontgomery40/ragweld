@@ -9,6 +9,7 @@ import pytest
 
 from server.api.agent import _resume_mlflow_tracking
 from server.models.tribrid_config_model import AgentTrainRun, TriBridConfig
+from server.retrieval.mlx_qwen3 import mlx_is_available
 from server.training.control_plane import (
     build_agent_control_plane_status,
     build_agent_run_links,
@@ -276,3 +277,31 @@ async def test_agent_control_plane_flyte_requires_callback_and_registered_launch
         assert "mlx_qwen3" in str(status.operator_hint)
     finally:
         server.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mlx_available", [True, False])
+async def test_agent_control_plane_hint_names_the_training_lane_this_host_really_has(mlx_available: bool) -> None:
+    """The deck's Learning Agent line must not advertise host execution the host cannot do."""
+    cfg = TriBridConfig()
+
+    status = await build_agent_control_plane_status(cfg, mlx_available=mlx_available)
+    hint = str(status.operator_hint or "")
+
+    assert status.execution_backend == "mlx_qwen3"
+    assert "runs use the local training lane without an orchestrator" in hint
+    if mlx_available:
+        assert "training executes on the host mlx_qwen3 backend" in hint
+        assert "fail closed" not in hint
+    else:
+        assert "training backend mlx_qwen3 is not available on this host; runs will fail closed" in hint
+        assert "executes on the host" not in hint
+
+
+@pytest.mark.asyncio
+async def test_agent_control_plane_default_probe_matches_the_real_mlx_runtime_on_this_host() -> None:
+    status = await build_agent_control_plane_status(TriBridConfig())
+    hint = str(status.operator_hint or "")
+
+    expected = "training executes on the host mlx_qwen3 backend" if mlx_is_available() else "runs will fail closed"
+    assert expected in hint

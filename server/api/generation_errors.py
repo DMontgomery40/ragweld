@@ -5,13 +5,13 @@ from typing import Any
 
 from fastapi import HTTPException
 
+from server.chat.generation_failure import generation_unavailable_detail
 from server.chat.prompt_budget import PromptBudgetError, prompt_budget_exceeded_detail
 from server.models.index import (
     IndexDeletionIncompleteResponse,
 )
 from server.models.tribrid_config_model import (
     DependencyUnavailableResponse,
-    GenerationUnavailableDetail,
     GenerationUnavailableResponse,
     PromptBudgetExceededResponse,
     RequiredRetrievalLegFailureResponse,
@@ -49,18 +49,15 @@ def prompt_budget_http_exception(exc: PromptBudgetError, *, operation: str) -> H
 
 
 def generation_unavailable_http_exception(exc: BaseException, *, operation: str) -> HTTPException:
-    detail = GenerationUnavailableDetail(
-        operation=operation,
-        message="The generation gateway could not complete the chat request.",
-        operator_hint=(
-            "Verify the scoped LiteLLM gateway, client key, and selected model alias, then retry. "
-            "Ragweld did not substitute a direct provider fallback."
-        ),
-    )
+    # Same classifier as the chat stream's in-band error event, so the non-stream chat
+    # and eval paths carry the same sanitised reason and the same operator hint.
+    detail = generation_unavailable_detail(exc, operation=operation)
     logger.error(
         "Generation gateway unavailable",
         extra={
             "operation": operation,
+            "failure_kind": detail.failure_kind,
+            "gateway_reason": detail.gateway_reason,
             "operator_hint": detail.operator_hint,
             "exception_type": type(exc).__name__,
         },

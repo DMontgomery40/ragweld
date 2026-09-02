@@ -13,6 +13,8 @@ from server.models.tribrid_config_model import (
     TrainingControlPlaneComponentStatus,
     TriBridConfig,
 )
+from server.retrieval.mlx_qwen3 import mlx_is_available
+from server.runtime_capabilities import learning_agent_runtime_capability
 from server.training.flyte_client import FlyteAdminClient, FlyteUnavailableError
 
 _TIMEOUT = httpx.Timeout(3.0, connect=2.0)
@@ -204,7 +206,14 @@ def build_agent_run_operator_hint(run: AgentTrainRun, cfg: TriBridConfig) -> str
     return None
 
 
-async def build_agent_control_plane_status(cfg: TriBridConfig) -> AgentTrainControlPlaneStatusResponse:
+async def build_agent_control_plane_status(
+    cfg: TriBridConfig, *, mlx_available: bool | None = None
+) -> AgentTrainControlPlaneStatusResponse:
+    """Resolve the Learning Agent control plane for ``cfg`` on this host.
+
+    ``mlx_available`` defaults to the real MLX probe; pass it explicitly to describe a
+    hypothetical host without probing.
+    """
     workflow_backend = str(cfg.training.ragweld_agent_workflow_backend or "local").strip() or "local"
     tracking_backend = str(cfg.training.ragweld_agent_tracking_backend or "local").strip() or "local"
     execution_backend = str(cfg.training.ragweld_agent_backend or "mlx_qwen3").strip() or "mlx_qwen3"
@@ -407,11 +416,20 @@ async def build_agent_control_plane_status(cfg: TriBridConfig) -> AgentTrainCont
             else "runs use the local training lane without an orchestrator"
         )
         tracking_text = "MLflow records runs" if tracking_backend == "mlflow" else "run truth stays in local run files"
-        execution_text = (
-            f"training executes on the host {execution_backend} backend"
-            if execution_backend != "unsloth"
-            else "Unsloth executes training"
-        )
+        if execution_backend == "unsloth":
+            execution_text = "Unsloth executes training"
+        else:
+            # Name the lane this host really has: a host-executed backend whose runtime is
+            # missing fails every run closed, and the deck must say so instead of
+            # advertising execution that cannot happen.
+            execution = learning_agent_runtime_capability(
+                cfg, mlx_available=mlx_is_available() if mlx_available is None else bool(mlx_available)
+            )
+            execution_text = (
+                f"training executes on the host {execution_backend} backend"
+                if execution.host_available
+                else f"training backend {execution_backend} is not available on this host; runs will fail closed"
+            )
         operator_hint = (
             f"Learning Agent: {workflow_text}; {tracking_text}; {execution_text}. "
             "The full target lane is workflow=flyte, tracking=mlflow, execution=unsloth (Unsloth needs a CUDA host)."

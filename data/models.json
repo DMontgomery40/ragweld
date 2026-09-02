@@ -7462,11 +7462,11 @@
       "input_per_1k": 0.0,
       "output_per_1k": 0.0,
       "base_url": "http://host.docker.internal:58080/v1",
-      "display_name": "Ragweld local (vLLM Metal)",
+      "display_name": "Ragweld local (self-hosted)",
       "gateway_alias": "ragweld-local",
       "gateway_upstream": "openai/ragweld-local",
       "supports_vision": false,
-      "notes": "Self-hosted vllm-metal serving path: the host `local-model` process started by ./start.sh (Apple Silicon Metal/MLX, --max-model-len 32768, single stream, thinking disabled via --default-chat-template-kwargs). Served name ragweld-local; containers reach it at host.docker.internal:58080.",
+      "notes": "Self-hosted serving row behind the ragweld-local alias: LiteLLM targets the host local-model server at host.docker.internal:58080 (started by ./start.sh when the local serving lane is enabled; --max-model-len 32768, single stream). Which backend serves it and whether the lane is on for this host come from /api/runtime-capabilities (generation.local_serving), never from this row. Preserved verbatim by scripts/refresh_models_catalog.py.",
       "selection_roles": [],
       "selection_status": "catalog_only",
       "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."

@@ -292,3 +292,17 @@ def test_gateway_upstream_for_alias_reads_the_warmed_snapshot_and_fails_closed()
     assert gateway_upstream_for_alias("ragweld-local", CATALOG_PATH).startswith("openai/")
     with pytest.raises(RuntimeError, match="not in the loaded generation catalog"):
         gateway_upstream_for_alias("nope.not-an-alias", CATALOG_PATH)
+
+
+def test_checked_in_local_serving_row_names_the_lane_not_a_serving_backend() -> None:
+    """Which backend fronts the local alias, and whether the lane is on, is host truth
+    (GET /api/runtime-capabilities generation.local_serving); the catalog row must not
+    claim one, or every host that does not run it lies in the model pickers."""
+    catalog = load_catalog(CATALOG_PATH)
+    row = next(item for item in catalog["models"] if item.get("gateway_alias") == LOCAL_GATEWAY_ALIAS)
+
+    assert row["display_name"] == "Ragweld local (self-hosted)"
+    for text in (str(row.get("display_name") or ""), str(row.get("notes") or "")):
+        lowered = text.lower()
+        for backend_claim in ("vllm", "metal", "mlx", "apple"):
+            assert backend_claim not in lowered, f"local row still claims a serving backend: {text!r}"

@@ -5038,14 +5038,15 @@
           },
           "total_storage": {
             "default": 0,
-            "description": "Total storage bytes (Postgres + Neo4j).",
+            "description": "Total storage bytes (Postgres + Qdrant estimate + Neo4j when measured).",
             "minimum": 0.0,
             "title": "Total Storage",
             "type": "integer"
           }
         },
         "required": [
-          "corpus_id"
+          "corpus_id",
+          "storage_breakdown"
         ],
         "title": "DashboardIndexStatsResponse",
         "type": "object"
@@ -5116,7 +5117,7 @@
           },
           "total_storage": {
             "default": 0,
-            "description": "Total storage bytes (Postgres + Neo4j).",
+            "description": "Total storage bytes (Postgres + Qdrant estimate + Neo4j when measured).",
             "minimum": 0.0,
             "title": "Total Storage",
             "type": "integer"
@@ -5125,7 +5126,8 @@
         "required": [
           "corpus_id",
           "current_repo",
-          "timestamp"
+          "timestamp",
+          "storage_breakdown"
         ],
         "title": "DashboardIndexStatusMetadata",
         "type": "object"
@@ -5189,7 +5191,7 @@
         "type": "object"
       },
       "DashboardIndexStorageBreakdown": {
-        "description": "Storage breakdown for the Dashboard index summary (bytes).\n\nNOTE:\n- Postgres and Neo4j values are measured; the Qdrant dense-vector figure is\n  an estimate because Qdrant does not expose per-collection disk usage.",
+        "description": "Storage breakdown for the Dashboard index summary (bytes).\n\nNOTE:\n- Postgres values are measured; the Qdrant dense-vector figure is an estimate\n  because Qdrant does not expose per-collection disk usage.\n- The Neo4j store is reported as unmeasured (``neo4j_store_bytes`` null plus\n  ``neo4j_store_note`` saying why) when no measurement source exists; an\n  unmeasured store contributes nothing to ``total_storage_bytes``. A breakdown\n  is built from real readings, never from defaults.",
         "properties": {
           "chunk_summaries_bytes": {
             "default": 0,
@@ -5206,14 +5208,31 @@
             "type": "integer"
           },
           "neo4j_store_bytes": {
-            "default": 0,
-            "description": "Total Neo4j store size for the resolved database (bytes).",
-            "minimum": 0.0,
-            "title": "Neo4J Store Bytes",
-            "type": "integer"
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Total Neo4j store size for the resolved database (bytes), or null when the store could not be measured (see neo4j_store_note).",
+            "title": "Neo4J Store Bytes"
+          },
+          "neo4j_store_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why neo4j_store_bytes is null (required when it is); null for a measured store.",
+            "title": "Neo4J Store Note"
           },
           "postgres_total_bytes": {
-            "default": 0,
             "description": "Total Postgres bytes (chunk rows + chunk summaries).",
             "minimum": 0.0,
             "title": "Postgres Total Bytes",
@@ -5234,13 +5253,17 @@
             "type": "integer"
           },
           "total_storage_bytes": {
-            "default": 0,
-            "description": "Total storage bytes across Postgres + Qdrant (estimate) + Neo4j.",
+            "description": "Total storage bytes across Postgres + Qdrant (estimate) + Neo4j when measured; an unmeasured Neo4j store contributes nothing.",
             "minimum": 0.0,
             "title": "Total Storage Bytes",
             "type": "integer"
           }
         },
+        "required": [
+          "neo4j_store_bytes",
+          "postgres_total_bytes",
+          "total_storage_bytes"
+        ],
         "title": "DashboardIndexStorageBreakdown",
         "type": "object"
       },
@@ -7848,6 +7871,10 @@
             ],
             "description": "Provider route selected by the current config/env for a default chat request."
           },
+          "local_serving": {
+            "$ref": "#/components/schemas/LocalServingRuntimeCapability",
+            "description": "The self-hosted lane behind the local gateway alias on this host."
+          },
           "routing_backends": {
             "description": "Gateway/routing backends that can dispatch generation requests.",
             "items": {
@@ -7877,6 +7904,23 @@
             "title": "Code",
             "type": "string"
           },
+          "failure_kind": {
+            "description": "Why generation could not complete, classified from the sanitised reason: a provider key spending limit, a rejected key, an unreachable serving lane behind the gateway, an unreachable gateway, or an unclassified gateway failure",
+            "enum": [
+              "spend_limit",
+              "auth",
+              "upstream_unreachable",
+              "gateway_unreachable",
+              "gateway"
+            ],
+            "title": "Failure Kind",
+            "type": "string"
+          },
+          "gateway_reason": {
+            "description": "Sanitised reason the gateway or provider returned (secrets and URLs removed, truncated)",
+            "title": "Gateway Reason",
+            "type": "string"
+          },
           "message": {
             "description": "Stable, non-sensitive failure summary",
             "title": "Message",
@@ -7888,7 +7932,7 @@
             "type": "string"
           },
           "operator_hint": {
-            "description": "High-signal next step for the operator",
+            "description": "High-signal next step for the operator, chosen from failure_kind",
             "title": "Operator Hint",
             "type": "string"
           },
@@ -7902,7 +7946,9 @@
         "required": [
           "operation",
           "message",
-          "operator_hint"
+          "operator_hint",
+          "failure_kind",
+          "gateway_reason"
         ],
         "title": "GenerationUnavailableDetail",
         "type": "object"
@@ -7984,6 +8030,11 @@
             "title": "From Chunk Relationships",
             "type": "integer"
           },
+          "llm_model_alias": {
+            "default": "",
+            "title": "Llm Model Alias",
+            "type": "string"
+          },
           "selected_chunks": {
             "minimum": 0.0,
             "title": "Selected Chunks",
@@ -8002,6 +8053,18 @@
           "truncated_chunks": {
             "minimum": 0.0,
             "title": "Truncated Chunks",
+            "type": "integer"
+          },
+          "worker_seconds": {
+            "default": 0.0,
+            "minimum": 0.0,
+            "title": "Worker Seconds",
+            "type": "number"
+          },
+          "workers": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Workers",
             "type": "integer"
           }
         },
@@ -10567,6 +10630,53 @@
         "title": "LayerBonusConfig",
         "type": "object"
       },
+      "LearningAgentRuntimeCapability": {
+        "description": "Where and whether Learning Agent training can execute for the configured backend.",
+        "properties": {
+          "artifact_path": {
+            "default": "",
+            "description": "Configured training.ragweld_agent_model_path.",
+            "title": "Artifact Path",
+            "type": "string"
+          },
+          "availability_detail": {
+            "default": "",
+            "description": "Operator-facing sentence stating the real training lane for this host.",
+            "title": "Availability Detail",
+            "type": "string"
+          },
+          "base_model": {
+            "default": "",
+            "description": "Configured training.ragweld_agent_base_model.",
+            "title": "Base Model",
+            "type": "string"
+          },
+          "execution_backend": {
+            "default": "",
+            "description": "Configured training.ragweld_agent_backend.",
+            "title": "Execution Backend",
+            "type": "string"
+          },
+          "execution_locus": {
+            "default": "host",
+            "description": "host: the API host runs training in-process; flyte_task: a Flyte task image runs it.",
+            "enum": [
+              "host",
+              "flyte_task"
+            ],
+            "title": "Execution Locus",
+            "type": "string"
+          },
+          "host_available": {
+            "default": false,
+            "description": "For host-executed backends: whether the backend runtime imports on this host.",
+            "title": "Host Available",
+            "type": "boolean"
+          }
+        },
+        "title": "LearningAgentRuntimeCapability",
+        "type": "object"
+      },
       "LineageAlias": {
         "description": "Mutable operator alias that points to an immutable bundle.",
         "properties": {
@@ -10956,6 +11066,43 @@
           }
         },
         "title": "LiteLLMConfig",
+        "type": "object"
+      },
+      "LocalServingRuntimeCapability": {
+        "description": "The self-hosted generation lane behind the local gateway alias, as configured on this host.\n\nThe catalog row names the alias and pricing only; which serving backend fronts it and\nwhether that lane is switched on come from here, so operator surfaces never claim a\nbackend the host does not run.",
+        "properties": {
+          "alias": {
+            "default": "ragweld-local",
+            "description": "Gateway alias of the local serving row.",
+            "title": "Alias",
+            "type": "string"
+          },
+          "backend": {
+            "default": "vllm",
+            "description": "Serving backend id (one of generation.serving_backends).",
+            "title": "Backend",
+            "type": "string"
+          },
+          "backend_label": {
+            "default": "vLLM",
+            "description": "Human-readable serving backend label.",
+            "title": "Backend Label",
+            "type": "string"
+          },
+          "enabled": {
+            "default": false,
+            "description": "Whether chat.vllm.enabled switches the local lane on in the effective config.",
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "model": {
+            "default": "",
+            "description": "Model the local serving backend is configured to serve.",
+            "title": "Model",
+            "type": "string"
+          }
+        },
+        "title": "LocalServingRuntimeCapability",
         "type": "object"
       },
       "LokiStatus": {
@@ -12696,13 +12843,6 @@
             "title": "Components",
             "type": "array"
           },
-          "critical_incident_count": {
-            "default": 0,
-            "description": "Critical incident count for the current snapshot.",
-            "minimum": 0.0,
-            "title": "Critical Incident Count",
-            "type": "integer"
-          },
           "generated_at": {
             "anyOf": [
               {
@@ -12716,16 +12856,9 @@
             "description": "When this status snapshot was generated.",
             "title": "Generated At"
           },
-          "incident_count": {
-            "default": 0,
-            "description": "Incident count surfaced alongside this status snapshot.",
-            "minimum": 0.0,
-            "title": "Incident Count",
-            "type": "integer"
-          },
           "incidents_path": {
             "default": "/api/observability/incidents",
-            "description": "Incident-feed endpoint for operators.",
+            "description": "Incident-feed endpoint for operators; the feed's total_count is the only incident count.",
             "title": "Incidents Path",
             "type": "string"
           },
@@ -16283,8 +16416,8 @@
             "type": "string"
           },
           "reranker_timeout": {
-            "default": 10,
-            "description": "Reranker API timeout (seconds)",
+            "default": 30,
+            "description": "Reranker API timeout (seconds). The default cloud window (50 candidates x 700 chars) takes 6-10 s through the gateway at idle; 30 s leaves headroom over the slowest idle call (Task 8 drive observation D15).",
             "maximum": 60.0,
             "minimum": 5.0,
             "title": "Reranker Timeout",
@@ -16613,6 +16746,9 @@
           },
           "search": {
             "$ref": "#/components/schemas/SearchRuntimeCapabilities"
+          },
+          "training": {
+            "$ref": "#/components/schemas/TrainingRuntimeCapabilities"
           }
         },
         "title": "RuntimeCapabilitiesResponse",
@@ -18172,8 +18308,8 @@
             "type": "string"
           },
           "semantic_kg_extraction": {
-            "default": "You are a semantic knowledge graph extractor.\n\nGiven one corpus chunk, extract only entities and relations explicitly grounded in that text.\n\nRules:\n- Return ONLY valid JSON (no markdown, no prose).\n- Never fabricate entities, aliases, or links.\n- Prefer exact surface forms for names (for example full person/organization names when present).\n- Do not emit file paths or line numbers as entities.\n- Keep output high-signal and deduplicated.\n\nJSON format:\n{\n  \"entities\": [\n    {\"name\": \"Alex Rivera\", \"entity_type\": \"person\"},\n    {\"name\": \"Northwind Labs\", \"entity_type\": \"org\"},\n    {\"name\": \"Denver\", \"entity_type\": \"location\"}\n  ],\n  \"relations\": [\n    {\"source\": \"Alex Rivera\", \"target\": \"Northwind Labs\", \"relation_type\": \"works_for\", \"evidence_text\": \"Alex Rivera works for Northwind Labs.\", \"confidence\": 0.92},\n    {\"source\": \"Northwind Labs\", \"target\": \"Denver\", \"relation_type\": \"located_in\", \"evidence_text\": \"Northwind Labs is located in Denver.\", \"confidence\": 0.95}\n  ]\n}\n\nAllowed entity_type values: person, org, location, event, concept\nAllowed relation_type values:\n- associated_with\n- met_with\n- communicated_with\n- works_for\n- member_of\n- founded\n- owns\n- funded\n- participated_in\n- located_in\n- references\n- related_to\n\nConstraints:\n- Extract only relations explicitly supported by the chunk text.\n- Use canonical, grounded names for source/target (no invented aliases).\n- If present, include optional \"evidence_text\" and \"confidence\" per relation.",
-            "description": "Prompt for LLM-assisted semantic KG extraction (typed entities + relations)",
+            "default": "You are a top-tier algorithm designed for extracting information in structured formats to build a knowledge graph.\n\nExtract the entities (nodes) and specify their type from the following text. Also extract the relationships between these nodes.\n\nReturn result as JSON using the following format:\n{{\"nodes\": [ {{\"id\": \"0\", \"label\": \"Person\", \"properties\": {{\"name\": \"John\"}} }}],\n\"relationships\": [{{\"type\": \"KNOWS\", \"start_node_id\": \"0\", \"end_node_id\": \"1\", \"properties\": {{\"since\": \"2024-08-01\"}} }}] }}\n\nUse only the following node and relationship types (if provided):\n{schema}\n\nNaming rules. Every node carries a \"name\" property; it is the entity's identity for merging across chunks and for display:\n- \"name\" must be an identifier a reader would recognise: a person's full name as written, an organisation's name, a place name, a document's subject line or title, a dated event.\n- Name an email or message by its subject line when the text shows one. When the subject is empty or is only reply/forward markers such as \"Re:\", \"RE: Re:\" or \"Fw:\", name it \"<sender> to <recipient>, <date>\" from the message metadata instead.\n- Never use OCR artifacts, scanner noise, bare numbers, punctuation runs, redaction bars or redaction markers such as \"<REDACTED>\", single letters or fragments such as \"-11>\", \"<=11IM11.11>\", \"777\" or \"Re:\" as a name. A redacted party is not an entity: leave it out. If the text gives an entity no readable identifier, leave that entity out rather than inventing one.\n- Copy names exactly as written (no expansions or aliases you did not read) and reuse one spelling for the same entity within the chunk.\n\nAssign a unique ID (string) to each node, and reuse it to define relationships.\nDo respect the source and target node types for relationship and the relationship direction.\n\nMake sure you adhere to the following rules to produce valid JSON objects:\n- Do not return any additional information other than the JSON in it.\n- Omit any backticks around the JSON - simply output the JSON on its own.\n- The JSON object must not wrapped into a list - it is its own JSON object.\n- Property names must be enclosed in double quotes\n\nExamples:\n{examples}\n\nInput text:\n\n{text}",
+            "description": "Template the official Neo4j GraphRAG extractor formats for every chunk during semantic KG extraction (must keep the {schema} and {text} placeholders; {examples} is optional). Carries the naming rules that keep OCR noise out of entity names.",
             "title": "Semantic Kg Extraction",
             "type": "string"
           },
@@ -19391,6 +19527,17 @@
           "label"
         ],
         "title": "TrainingControlPlaneComponentStatus",
+        "type": "object"
+      },
+      "TrainingRuntimeCapabilities": {
+        "description": "Runtime capability matrix for training lanes.",
+        "properties": {
+          "learning_agent": {
+            "$ref": "#/components/schemas/LearningAgentRuntimeCapability",
+            "description": "Learning Agent execution lane resolved against this host."
+          }
+        },
+        "title": "TrainingRuntimeCapabilities",
         "type": "object"
       },
       "TriBridConfig-Input": {

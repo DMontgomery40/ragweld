@@ -131,14 +131,8 @@ async def test_status_and_incidents_reflect_real_queries_on_the_corpus(client: A
             "detail"
         ]
         assert generation.qdrant_collection in str(retrieval["detail"])
-        assert status_payload["incident_count"] == status_payload[
-            "critical_incident_count"
-        ] == 0 or all(
-            not str(i.get("id", "")).startswith("retrieval:")
-            for i in (
-                await client.get("/api/observability/incidents", params={"corpus_id": corpus_id})
-            ).json()["incidents"]
-        )
+        # The incidents feed is the only incident count (the status snapshot carries none).
+        assert "incident_count" not in status_payload, sorted(status_payload)
         incidents = await client.get(
             "/api/observability/incidents", params={"corpus_id": corpus_id}
         )
@@ -176,7 +170,8 @@ async def test_status_and_incidents_reflect_real_queries_on_the_corpus(client: A
             "/api/observability/status", params={"corpus_id": corpus_id}
         )
         assert status_after.status_code == 200
-        assert status_after.json()["incident_count"] >= 1
+        assert "incident_count" not in status_after.json(), sorted(status_after.json())
+        assert int(incidents.json()["total_count"]) >= 1
         retrieval_after = _component(status_after.json(), "haystack_docling_qdrant")
         assert "empty or wiped" in str(retrieval_after["detail"]), retrieval_after["detail"]
         broken = await client.post(

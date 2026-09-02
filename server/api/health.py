@@ -253,7 +253,7 @@ async def readiness_check(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> ReadinessSt
                 vllm_status.operator_hint = "Restart the host local-model server on the configured model (./start.sh) or fix chat.vllm.default_model / the catalog ragweld-local row."
             else:
                 vllm_status.error = "vLLM model serving is unavailable."
-                vllm_status.operator_hint = "Start the host local-model server (./start.sh, or its vllm-metal serve command) and wait for model loading to complete."
+                vllm_status.operator_hint = "Start the host local-model server (./start.sh) on chat.vllm.default_model and wait for model loading to complete, or disable chat.vllm on hosts that do not serve a local model."
 
     status = ReadinessStatus(
         ready=ready,

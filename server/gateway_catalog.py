@@ -50,8 +50,10 @@ META_ROUTER_PROVIDER = "openrouter"  # openrouter/auto, openrouter/free, ... res
 LOCAL_GATEWAY_ALIAS = "ragweld-local"
 LOCAL_GATEWAY_PROVIDER = "ragweld"
 LOCAL_GATEWAY_UPSTREAM = "openai/ragweld-local"
-# The LiteLLM container reaches the host vllm-metal `local-model` process
-# (started by ./start.sh) through the Docker host gateway.
+# The LiteLLM container reaches the host `local-model` serving process (started by
+# ./start.sh when chat.vllm is enabled) through the Docker host gateway. Which backend
+# serves it, and whether the lane is on, is runtime truth (/api/runtime-capabilities
+# generation.local_serving), never a property of the catalog row.
 LOCAL_GATEWAY_BASE_URL = "http://host.docker.internal:58080/v1"
 
 GENERATED_HEADER = (

@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import re
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -12,6 +11,7 @@ from typing import Any, cast
 
 from server.chat.context_formatter import format_context_for_llm
 from server.chat.generation import GenerationResult, generate_chat_text, stream_chat_text
+from server.chat.generation_failure import generation_unavailable_detail, safe_error_message
 from server.chat.prompt_budget import (
     PromptBudgetError,
     fit_context_to_budget,
@@ -30,7 +30,6 @@ from server.models.tribrid_config_model import (
     ChatProviderInfo,
     ChatRequest,
     ChatWebConfig,
-    GenerationUnavailableDetail,
     TriBridConfig,
     WebGroundingMetadata,
 )
@@ -38,15 +37,6 @@ from server.observability.costing import usage_total_tokens
 from server.retrieval.cache import CacheMode, SemanticCacheService
 from server.services.conversation_store import Conversation
 from server.services.rag import FusionProtocol
-
-
-def _safe_error_message(e: Exception, *, max_len: int = 400) -> str:
-    # Best-effort redaction; keep debugging useful without leaking secrets.
-    msg = str(e) or type(e).__name__
-    msg = re.sub(r"(sk-[A-Za-z0-9_\\-]{10,})", "sk-REDACTED", msg)
-    msg = re.sub(r"(Bearer\\s+)[A-Za-z0-9_.\\-]{10,}", r"\\1REDACTED", msg)
-    msg = msg.replace("\n", " ").replace("\r", " ").strip()
-    return msg[: int(max_len)]
 
 
 def _normalize_cache_mode(cache_mode: str | CacheMode | None) -> CacheMode:
@@ -602,7 +592,7 @@ async def chat_once(
         raise
     except Exception as e:
         llm_used = False
-        llm_error = _safe_error_message(e)
+        llm_error = safe_error_message(e)
         raise ChatGenerationError(llm_error) from e
 
     # Update in-memory conversation continuity (best-effort for local providers)
@@ -984,15 +974,10 @@ async def chat_stream(
         raise
     except Exception as e:
         llm_used = False
-        llm_error = _safe_error_message(e)
-        error_detail = GenerationUnavailableDetail(
-            operation="Chat stream generation",
-            message="The generation gateway could not complete the chat request.",
-            operator_hint=(
-                "Verify the scoped LiteLLM gateway, client key, and selected model alias, then retry. "
-                "Ragweld did not substitute a direct provider fallback."
-            ),
-        )
+        # One classifier for every generation surface: the card carries the sanitised
+        # provider reason and a hint chosen from it (spend limit, rejected key, lane down).
+        error_detail = generation_unavailable_detail(e, operation="Chat stream generation")
+        llm_error = error_detail.gateway_reason
         yield (
             "data: "
             + json.dumps(

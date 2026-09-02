@@ -59,6 +59,29 @@ async def test_observability_status_reports_missing_otlp_endpoint(client: AsyncC
 
 
 @pytest.mark.asyncio
+async def test_observability_status_carries_no_incident_counter_of_its_own(client: AsyncClient) -> None:
+    """The incidents feed is the only incident count.
+
+    `/status` used to compute the incidents feed a second time just to copy two counters onto
+    the snapshot, and the Grafana deck fell through to that copy whenever the feed's own
+    `total_count` was 0 ("incidents=8" for a corpus whose feed said 0). One definition now: the
+    snapshot points at the feed and carries no counter of its own.
+    """
+    status = await client.get("/api/observability/status")
+    assert status.status_code == 200
+    payload = status.json()
+    assert "incident_count" not in payload, sorted(payload)
+    assert "critical_incident_count" not in payload, sorted(payload)
+    assert payload["incidents_path"] == "/api/observability/incidents"
+
+    incidents = await client.get("/api/observability/incidents")
+    assert incidents.status_code == 200
+    feed = incidents.json()
+    assert feed["total_count"] == len(feed["incidents"])
+    assert feed["critical_count"] == sum(1 for item in feed["incidents"] if item["severity"] == "critical")
+
+
+@pytest.mark.asyncio
 async def test_observability_status_reports_otlp_reachability_failures(client: AsyncClient) -> None:
     baseline = await client.get("/api/config")
     assert baseline.status_code == 200

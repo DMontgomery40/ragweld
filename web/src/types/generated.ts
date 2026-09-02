@@ -615,14 +615,14 @@ export interface DashboardIndexStatusMetadata {
   /** Indexing cost summary. */
   costs?: DashboardIndexCosts | null; // default: None
   /** Storage breakdown (bytes) for major components. */
-  storage_breakdown?: DashboardIndexStorageBreakdown;
+  storage_breakdown: DashboardIndexStorageBreakdown;
   /** Number of keywords for this corpus (if generated). */
   keywords_count?: number; // default: 0
-  /** Total storage bytes (Postgres + Neo4j). */
+  /** Total storage bytes (Postgres + Qdrant estimate + Neo4j when measured). */
   total_storage?: number; // default: 0
 }
 
-/** Storage breakdown for the Dashboard index summary (bytes).  NOTE: - Postgres and Neo4j values are measured; the Qdrant dense-vector figure is   an estimate because Qdrant does not expose per-collection disk usage. */
+/** Storage breakdown for the Dashboard index summary (bytes).  NOTE: - Postgres values are measured; the Qdrant dense-vector figure is an estimate   because Qdrant does not expose per-collection disk usage. - The Neo4j store is reported as unmeasured (``neo4j_store_bytes`` null plus   ``neo4j_store_note`` saying why) when no measurement source exists; an   unmeasured store contributes nothing to ``total_storage_bytes``. A breakdown   is built from real readings, never from defaults. */
 export interface DashboardIndexStorageBreakdown {
   /** Bytes used by chunk content + metadata rows in Postgres (corpus-scoped). */
   chunks_bytes?: number; // default: 0
@@ -632,12 +632,14 @@ export interface DashboardIndexStorageBreakdown {
   qdrant_points?: number; // default: 0
   /** Estimated bytes of dense vectors in Qdrant (dense points x dimensions x 4 bytes). */
   qdrant_dense_vector_bytes?: number; // default: 0
-  /** Total Neo4j store size for the resolved database (bytes). */
-  neo4j_store_bytes?: number; // default: 0
+  /** Total Neo4j store size for the resolved database (bytes), or null when the store could not be measured (see neo4j_store_note). */
+  neo4j_store_bytes: number | null;
+  /** Why neo4j_store_bytes is null (required when it is); null for a measured store. */
+  neo4j_store_note?: string | null; // default: None
   /** Total Postgres bytes (chunk rows + chunk summaries). */
-  postgres_total_bytes?: number; // default: 0
-  /** Total storage bytes across Postgres + Qdrant (estimate) + Neo4j. */
-  total_storage_bytes?: number; // default: 0
+  postgres_total_bytes: number;
+  /** Total storage bytes across Postgres + Qdrant (estimate) + Neo4j when measured; an unmeasured Neo4j store contributes nothing. */
+  total_storage_bytes: number;
 }
 
 /** Public error detail returned when a required runtime dependency is unavailable. */
@@ -1086,6 +1088,8 @@ export interface GenerationRuntimeCapabilities {
   serving_backends?: RuntimeOption[];
   /** Provider route selected by the current config/env for a default chat request. */
   default_route?: ChatProviderInfo | null; // default: None
+  /** The self-hosted lane behind the local gateway alias on this host. */
+  local_serving?: LocalServingRuntimeCapability;
 }
 
 /** Public error detail returned when the generation gateway cannot complete. */
@@ -1097,8 +1101,12 @@ export interface GenerationUnavailableDetail {
   message: string;
   /** Whether the caller may retry after remediation */
   retryable?: boolean; // default: True
-  /** High-signal next step for the operator */
+  /** High-signal next step for the operator, chosen from failure_kind */
   operator_hint: string;
+  /** Why generation could not complete, classified from the sanitised reason: a provider key spending limit, a rejected key, an unreachable serving lane behind the gateway, an unreachable gateway, or an unclassified gateway failure */
+  failure_kind: "spend_limit" | "auth" | "upstream_unreachable" | "gateway_unreachable" | "gateway";
+  /** Sanitised reason the gateway or provider returned (secrets and URLs removed, truncated) */
+  gateway_reason: string;
 }
 
 /** Best-effort git context captured when minting lineage versions. */
@@ -1551,6 +1559,22 @@ export interface LayerBonusConfig {
   intent_matrix?: Record<string, Record<string, number>>;
 }
 
+/** Where and whether Learning Agent training can execute for the configured backend. */
+export interface LearningAgentRuntimeCapability {
+  /** Configured training.ragweld_agent_backend. */
+  execution_backend?: string; // default: ""
+  /** host: the API host runs training in-process; flyte_task: a Flyte task image runs it. */
+  execution_locus?: "host" | "flyte_task"; // default: "host"
+  /** For host-executed backends: whether the backend runtime imports on this host. */
+  host_available?: boolean; // default: False
+  /** Operator-facing sentence stating the real training lane for this host. */
+  availability_detail?: string; // default: ""
+  /** Configured training.ragweld_agent_base_model. */
+  base_model?: string; // default: ""
+  /** Configured training.ragweld_agent_model_path. */
+  artifact_path?: string; // default: ""
+}
+
 /** Mutable operator alias that points to an immutable bundle. */
 export interface LineageAlias {
   /** Operator alias name. */
@@ -1646,6 +1670,20 @@ export interface LiteLLMConfig {
   enabled?: boolean; // default: True
   base_url?: string; // default: "http://127.0.0.1:54000/v1"
   default_model?: string; // default: "ragweld-local"
+}
+
+/** The self-hosted generation lane behind the local gateway alias, as configured on this host.  The catalog row names the alias and pricing only; which serving backend fronts it and whether that lane is switched on come from here, so operator surfaces never claim a backend the host does not run. */
+export interface LocalServingRuntimeCapability {
+  /** Gateway alias of the local serving row. */
+  alias?: string; // default: "ragweld-local"
+  /** Serving backend id (one of generation.serving_backends). */
+  backend?: string; // default: "vllm"
+  /** Human-readable serving backend label. */
+  backend_label?: string; // default: "vLLM"
+  /** Whether chat.vllm.enabled switches the local lane on in the effective config. */
+  enabled?: boolean; // default: False
+  /** Model the local serving backend is configured to serve. */
+  model?: string; // default: ""
 }
 
 /** Inbound MCP (Model Context Protocol) server configuration.  This config controls TriBridRAG's embedded MCP Streamable HTTP endpoint. */
@@ -3035,6 +3073,12 @@ export interface TrainingControlPlaneComponentStatus {
   links?: TraceExternalLink[];
 }
 
+/** Runtime capability matrix for training lanes. */
+export interface TrainingRuntimeCapabilities {
+  /** Learning Agent execution lane resolved against this host. */
+  learning_agent?: LearningAgentRuntimeCapability;
+}
+
 /** User interface configuration. */
 export interface UIConfig {
   /** Enable streaming responses */
@@ -3648,10 +3692,10 @@ export interface DashboardIndexStatsResponse {
   /** Corpus identifier */
   corpus_id: string;
   /** Storage breakdown (bytes) for major components. */
-  storage_breakdown?: DashboardIndexStorageBreakdown;
+  storage_breakdown: DashboardIndexStorageBreakdown;
   /** Number of keywords for this corpus (if generated). */
   keywords_count?: number;
-  /** Total storage bytes (Postgres + Neo4j). */
+  /** Total storage bytes (Postgres + Qdrant estimate + Neo4j when measured). */
   total_storage?: number;
 }
 
@@ -4436,12 +4480,8 @@ export interface ObservabilityStatusResponse {
   links?: TraceExternalLink[];
   /** Catalog endpoint for dashboard/workbench surfaces. */
   catalog_path?: string;
-  /** Incident-feed endpoint for operators. */
+  /** Incident-feed endpoint for operators; the feed's total_count is the only incident count. */
   incidents_path?: string;
-  /** Incident count surfaced alongside this status snapshot. */
-  incident_count?: number;
-  /** Critical incident count for the current snapshot. */
-  critical_incident_count?: number;
   /** High-signal next-step guidance for operators. */
   operator_hint?: string | null;
 }
@@ -4827,6 +4867,7 @@ export interface RuntimeCapabilitiesResponse {
   chunking?: ChunkingRuntimeCapabilities;
   indexing?: IndexingRuntimeCapabilities;
   search?: SearchRuntimeCapabilities;
+  training?: TrainingRuntimeCapabilities;
 }
 
 /** Request payload for tri-brid search. */

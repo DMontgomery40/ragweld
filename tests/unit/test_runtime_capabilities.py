@@ -4,14 +4,21 @@ import json
 import os
 from pathlib import Path
 
+import pytest
+
+from server.gateway_catalog import LOCAL_GATEWAY_ALIAS
 from server.models.chat_config import ChatConfig, LiteLLMConfig
+from server.models.runtime_gateway import VLLMConfig
 from server.models.tribrid_config_model import TriBridConfig
+from server.retrieval.mlx_qwen3 import mlx_is_available
 from server.runtime_capabilities import (
+    GENERATION_SERVING_BACKEND_OPTIONS,
     SUPPORTED_CHUNKING_STRATEGIES,
     SUPPORTED_PROVIDER_BACKEND_EMBEDDING_PROVIDERS,
     SUPPORTED_RERANKER_CLOUD_PROVIDERS,
     build_runtime_capabilities_response,
     build_runtime_capabilities_response_for_config,
+    learning_agent_runtime_capability,
     validate_catalog_selection_metadata,
 )
 
@@ -86,3 +93,76 @@ def test_reranker_cloud_provider_schema_pattern_matches_runtime_options() -> Non
     pattern = str(RerankingConfig.model_fields["reranker_cloud_provider"].metadata[0].pattern)
     alternatives = set(pattern.strip("^$()").split("|"))
     assert alternatives == SUPPORTED_RERANKER_CLOUD_PROVIDERS
+
+
+# ---------------------------------------------------------------------------
+# Host-truth lanes: the local serving lane and the Learning Agent training lane
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_generation_local_serving_capability_follows_the_effective_vllm_switch(enabled: bool) -> None:
+    """Operator surfaces read whether the local lane is on from here, never from the catalog row."""
+    cfg = TriBridConfig()
+    cfg.chat.vllm = VLLMConfig(enabled=enabled, default_model="Qwen/Qwen3.8-27B-Instruct")
+
+    lane = build_runtime_capabilities_response_for_config(cfg, mlx_available=False).generation.local_serving
+
+    assert lane.alias == LOCAL_GATEWAY_ALIAS
+    assert lane.enabled is enabled
+    assert lane.backend in {item.id for item in GENERATION_SERVING_BACKEND_OPTIONS}
+    assert lane.backend_label == "vLLM"
+    assert lane.model == "Qwen/Qwen3.8-27B-Instruct"
+
+
+@pytest.mark.parametrize("mlx_available", [True, False])
+def test_learning_agent_capability_states_whether_the_host_backend_exists(mlx_available: bool) -> None:
+    cfg = TriBridConfig()
+    cfg.training.ragweld_agent_backend = "mlx_qwen3"
+    cfg.training.ragweld_agent_base_model = "example-org/base-model-v9"
+    cfg.training.ragweld_agent_model_path = "models/agent-store"
+
+    lane = build_runtime_capabilities_response_for_config(cfg, mlx_available=mlx_available).training.learning_agent
+
+    assert lane.execution_backend == "mlx_qwen3"
+    assert lane.execution_locus == "host"
+    assert lane.host_available is mlx_available
+    assert lane.base_model == "example-org/base-model-v9"
+    assert lane.artifact_path == "models/agent-store"
+    if mlx_available:
+        assert "runs on this host" in lane.availability_detail
+        assert "fail closed" not in lane.availability_detail
+    else:
+        assert lane.availability_detail == (
+            "Training backend mlx_qwen3 is not available on this host; runs will fail closed."
+        )
+
+
+def test_learning_agent_capability_places_unsloth_in_the_flyte_task_not_on_the_host() -> None:
+    cfg = TriBridConfig()
+    cfg.training.ragweld_agent_backend = "unsloth"
+
+    lane = learning_agent_runtime_capability(cfg, mlx_available=True)
+
+    assert lane.execution_locus == "flyte_task"
+    assert lane.host_available is False
+    assert "Flyte task image" in lane.availability_detail
+
+
+def test_learning_agent_capability_fails_closed_on_an_unknown_backend() -> None:
+    cfg = TriBridConfig()
+    cfg.training.ragweld_agent_backend = "cuda_magic"
+
+    lane = learning_agent_runtime_capability(cfg, mlx_available=True)
+
+    assert lane.host_available is False
+    assert "not a supported execution backend" in lane.availability_detail
+    assert "fail closed" in lane.availability_detail
+
+
+def test_runtime_capabilities_default_probe_matches_the_real_mlx_runtime_on_this_host() -> None:
+    """Without an explicit probe result the surface reports what this host really has."""
+    response = build_runtime_capabilities_response()
+
+    assert response.training.learning_agent.host_available is mlx_is_available()
+    assert response.generation.local_serving.alias == LOCAL_GATEWAY_ALIAS

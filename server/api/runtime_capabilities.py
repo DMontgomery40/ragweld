@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Query
 
 from server.models.tribrid_config_model import RuntimeCapabilitiesResponse
@@ -22,4 +24,6 @@ async def get_runtime_capabilities(
         cfg = await load_scoped_config(repo_id=scope_id)
     except CorpusNotFoundError:
         cfg = await load_scoped_config(repo_id=None)
-    return build_runtime_capabilities_response_for_config(cfg)
+    # The training-lane resolution probes the MLX runtime in a child process on first
+    # use (cached afterwards); keep that off the event loop.
+    return await asyncio.to_thread(build_runtime_capabilities_response_for_config, cfg)
