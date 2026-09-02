@@ -446,7 +446,7 @@ async def test_code_entity_ids_round_trip_and_a_search_carries_its_own_edges(
             token_count=5,
             embedding=[0.1, 0.2],
         )
-        _lexical, lexical_cfg = await write_lexical_graph_with_graphrag(
+        lexical, lexical_cfg = await write_lexical_graph_with_graphrag(
             repo_id=staging,
             run_id=run_id,
             file_path="server/retrieval/rerank.py",
@@ -454,6 +454,7 @@ async def test_code_entity_ids_round_trip_and_a_search_carries_its_own_edges(
         )
         graph = Neo4jGraph(
             nodes=[
+                *lexical.nodes,
                 _code_entity(reranker, "Reranker", "class"),
                 _code_entity(rerank_init, "Reranker.__init__", "function"),
                 _code_entity(mlx_reranker, "MLXQwen3Reranker", "class"),
@@ -461,6 +462,7 @@ async def test_code_entity_ids_round_trip_and_a_search_carries_its_own_edges(
                 _code_entity(unrelated, "list_entities", "function"),
             ],
             relationships=[
+                *lexical.relationships,
                 _rel(module, reranker, relationship_type="contains"),
                 _rel(reranker, rerank_init, relationship_type="contains"),
                 # MLXQwen3Reranker matches "reranker" too but links only OUTSIDE the
@@ -469,6 +471,33 @@ async def test_code_entity_ids_round_trip_and_a_search_carries_its_own_edges(
             ],
         )
         await _write_graph(staging, run_id, graph, lexical_cfg)
+
+        # Task 8 drive defect D18: the file's Document node and its module entity are
+        # written in ONE graph, exactly like production; their writer ids must differ or
+        # the official writer copies the module's edges onto the Document and points the
+        # chunk's FROM_DOCUMENT edge at the module.
+        wiring = await neo.execute_cypher(
+            """
+            MATCH (d:Document {repo_id: $repo_id})
+            OPTIONAL MATCH (d)-[out]->()
+            WITH d, count(out) AS outgoing
+            OPTIONAL MATCH (c:Chunk {repo_id: $repo_id})-[:FROM_DOCUMENT]->(target)
+            WITH d, outgoing, collect(DISTINCT [l IN labels(target) WHERE l <> '__KGBuilder__'][0]) AS targets
+            OPTIONAL MATCH (m:__Entity__ {repo_id: $repo_id, entity_id: $module})
+            RETURN d.document_id AS document_id, d.file_path AS file_path, outgoing,
+                   targets, count(m) AS modules
+            """,
+            {"repo_id": staging, "module": module},
+        )
+        assert wiring == [
+            {
+                "document_id": "document::server/retrieval/rerank.py",
+                "file_path": "server/retrieval/rerank.py",
+                "outgoing": 0,
+                "targets": ["Document"],
+                "modules": 1,
+            }
+        ]
 
         driver = GraphDatabase.driver(
             os.environ.get("NEO4J_URI", "bolt://127.0.0.1:7687"),

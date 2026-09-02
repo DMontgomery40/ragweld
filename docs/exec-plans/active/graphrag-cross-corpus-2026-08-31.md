@@ -526,6 +526,28 @@ everything below live in `output/task8-graphrag-acceptance/click-ledger-2026-09-
   findings). detect-changes (stale index): medium, 6 files, three `GraphSubtab` flows. Deploy waits for the Epstein
   run like D14.
 
+- **D18 (fixed):** the journal showed 708 "repeated node ids … rekeyed=1" warnings from the D12 fold during the
+  code-corpus run `c58050a6`. Cypher on the active code generation `ad2236ed` (built before D12) exposed the cause:
+  the lexical `Document` node and the code `module` entity of every file share the bare file path as writer id
+  (668 collisions), and the official writer resolves relationship endpoints by `__tmp_internal_id` regardless of
+  label, so Document nodes carry 4,154 `contains`→function, 592 `contains`→class and 707 FROM_CHUNK edges copied
+  from the modules while 3,677 chunk FROM_DOCUMENT edges point at `module` entities; under D12's re-key the module
+  would instead become `<file>#2` and lose its edges. Fix: `document_node_id` (`document::<file>`) is the Document
+  writer id (`document_info` uid; the builder uses it for the chunks' FROM_DOCUMENT endpoints too, `file_path` stays
+  on the node), `assemble_code_file_graph` builds the per-file graph and refuses any shared writer id, and the
+  test-facing `official_graphrag.write_lexical_graph_with_graphrag` now calls the shared `document_info` instead of
+  building its own uid (one owner). Code entity ids are unchanged. RED: live
+  `test_code_entity_ids_round_trip…` (now writing lexical + code nodes in one graph like production) reported
+  `document_id 'server/retrieval/rerank.py', outgoing 1, modules 0`; unit test `ImportError`. GREEN on LXC100: 63
+  tests across pipeline/code-graph/schema/1.19-contract/explorer/communities/resolution/invariants/schema-proposal
+  suites, then 29 after rebuilding the module diff without format noise; ruff, mypy. DeepSeek V4 Flash review
+  `gen-1788307689-ksqVrBrVpeuv5dZmqAy8` (4,170 prompt + 1,789 completion = 5,959 tokens, `$0.00068652`): **PASS**,
+  no blockers (P3: empty-path ValueError is new but fail-fast; P2 remark on the test's hard-coded path needs no
+  change). GitNexus impact on `document_info`: CRITICAL by transitive reach (2 direct callers, depth-3 fan-out via
+  `start_index`); detect-changes: critical, 6 files, 9 symbols, 289 affected. Proceeding because only the Document
+  writer id changes; the code corpus is rebuilt after deploy and the Epstein/NASA graphs are rebuilt on the same
+  code.
+
 ### Final precommit GitNexus scope
 
 - Task 8 uncommitted range: HIGH risk across 55 files, 99 indexed symbols, eight affected flows. The named flows are `start_index` persisted/config resolution, mechanical docs automation helpers, and `RetrievalSubtab` config/readiness loading.

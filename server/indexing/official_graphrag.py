@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from neo4j_graphrag.components.lexical_graph import LexicalGraphBuilder
-from neo4j_graphrag.components.types import DocumentInfo, LexicalGraphConfig, Neo4jGraph
+from neo4j_graphrag.components.types import LexicalGraphConfig, Neo4jGraph
 
-from server.indexing.graphrag_pipeline import chunks_to_text_chunks
+from server.indexing.graphrag_pipeline import chunks_to_text_chunks, document_info
 from server.models.index import Chunk
 
 GRAPH_RAG_CHUNK_LABEL = "Chunk"
@@ -35,11 +35,8 @@ async def write_lexical_graph_with_graphrag(
     lexical = _lexical_graph_config()
     graph_result = await LexicalGraphBuilder(config=lexical).run(
         text_chunks=chunks_to_text_chunks(chunks),
-        document_info=DocumentInfo(
-            path=file_path,
-            metadata={"file_path": file_path},
-            uid=file_path,
-        ),
+        # One owner for the Document writer id (namespaced, Task 8 drive defect D18).
+        document_info=document_info(file_path),
     )
     return graph_result.graph, lexical
 

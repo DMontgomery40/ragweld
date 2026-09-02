@@ -367,11 +367,51 @@ def chunks_to_text_chunks(chunks: list[Chunk]) -> TextChunks:
     return TextChunks(chunks=rows)
 
 
+DOCUMENT_NODE_ID_PREFIX = "document::"
+
+
+def document_node_id(file_path: str) -> str:
+    """Writer id of a file's lexical ``Document`` node.
+
+    The id is namespaced so it can never equal a code ``module`` entity id, which
+    is the bare file path. The official writer matches relationship endpoints by
+    writer id regardless of label, so a shared id copied every module edge onto
+    the Document node and pointed the chunks' FROM_DOCUMENT edges at the module
+    entity (Task 8 drive defect D18).
+    """
+    path = str(file_path or "").strip()
+    if not path:
+        raise ValueError("document_node_id needs a file path")
+    return f"{DOCUMENT_NODE_ID_PREFIX}{path}"
+
+
 def document_info(file_path: str) -> DocumentInfo:
     return DocumentInfo(
         path=file_path,
         metadata={"file_path": file_path},
-        uid=file_path,
+        uid=document_node_id(file_path),
+    )
+
+
+def assemble_code_file_graph(lexical_graph: Neo4jGraph, code_graph: Neo4jGraph) -> Neo4jGraph:
+    """One file's lexical and code graphs as the single graph the writer receives.
+
+    Writer ids must be unique across both halves: the official writer creates one
+    node per id and resolves relationship endpoints by id, so a collision would
+    silently mis-wire the graph instead of failing.
+    """
+    nodes = [*lexical_graph.nodes, *code_graph.nodes]
+    owners: dict[str, str] = {}
+    for node in nodes:
+        previous = owners.get(node.id)
+        if previous is not None:
+            raise ValueError(
+                f"writer id {node.id!r} is shared by a {previous} node and a {node.label} node"
+            )
+        owners[node.id] = str(node.label)
+    return Neo4jGraph(
+        nodes=nodes,
+        relationships=[*lexical_graph.relationships, *code_graph.relationships],
     )
 
 
@@ -551,9 +591,9 @@ async def write_code_file_graph(
         code_relationships = list(code.graph.relationships)
         if deferred_relationships is not None:
             deferred_relationships.extend(code.deferred_relationships)
-    combined = Neo4jGraph(
-        nodes=[*lexical_result.graph.nodes, *code_nodes],
-        relationships=[*lexical_result.graph.relationships, *code_relationships],
+    combined = assemble_code_file_graph(
+        lexical_result.graph,
+        Neo4jGraph(nodes=code_nodes, relationships=code_relationships),
     )
     validate_no_reserved_scope_keys(combined, RESERVED_SCOPE_KEYS)
     await writer.run(combined, lexical)
@@ -595,6 +635,8 @@ __all__ = [
     "lexical_graph_config",
     "require_run_id",
     "require_staging_graph_id",
+    "assemble_code_file_graph",
+    "document_node_id",
     "fold_duplicate_node_ids",
     "resolution_property_for_policy",
     "resolve_staged_entities",

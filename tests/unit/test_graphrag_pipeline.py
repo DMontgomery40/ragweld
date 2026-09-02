@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from neo4j_graphrag.components.lexical_graph import LexicalGraphBuilder
 from neo4j_graphrag.components.types import (
     LexicalGraphConfig,
     Neo4jGraph,
@@ -8,11 +9,17 @@ from neo4j_graphrag.components.types import (
     Neo4jRelationship,
 )
 
+from server.indexing.code_graph import extract_code_graph, module_id, symbol_id
 from server.indexing.graphrag_pipeline import (
     RESERVED_SCOPE_KEYS,
     GraphScopeCollisionError,
+    assemble_code_file_graph,
     build_semantic_pipeline,
+    chunks_to_text_chunks,
+    document_info,
+    document_node_id,
     fold_duplicate_node_ids,
+    lexical_graph_config,
     require_run_id,
     require_staging_graph_id,
     resolution_property_for_policy,
@@ -21,6 +28,8 @@ from server.indexing.graphrag_pipeline import (
     stamp_graph_scope,
     validate_no_reserved_scope_keys,
 )
+from server.models.index import Chunk
+from server.models.tribrid_config_model import TriBridConfig
 
 RUN_ID = "a" * 32
 STAGING_ID = f"__staging__apollo__{RUN_ID}"
@@ -230,3 +239,62 @@ def test_unique_extracted_node_ids_pass_through_unchanged() -> None:
     folded, report = fold_duplicate_node_ids(graph)
     assert folded == graph
     assert report == {"folded_same_label": 0, "rekeyed_other_label": 0}
+
+
+async def test_a_files_document_node_never_shares_its_writer_id_with_the_module_entity(
+    tmp_path,
+) -> None:
+    """Task 8 drive defect D18: the official writer keys nodes and relationship endpoints
+    by writer id regardless of label. The lexical Document node and the code ``module``
+    entity both used the bare file path, so in the promoted code graph every Document
+    carried the module's ``contains``/FROM_CHUNK edges and 3,677 chunk FROM_DOCUMENT
+    edges pointed at module entities. The Document id is namespaced and the assembled
+    per-file graph refuses any collision instead of mis-wiring silently.
+    """
+    file_path = "pkg/mod.py"
+    assert document_node_id(file_path) != module_id(file_path)
+    assert document_info(file_path).uid == document_node_id(file_path)
+    assert document_info(file_path).metadata == {"file_path": file_path}
+
+    source = "class Thing:\n    def run(self) -> None:\n        return None\n"
+    chunks = [
+        Chunk(
+            chunk_id="pkg/mod.py:1-3:0",
+            content=source,
+            file_path=file_path,
+            start_line=1,
+            end_line=3,
+            token_count=12,
+            embedding=[0.1, 0.2],
+        )
+    ]
+    lexical = lexical_graph_config()
+    lexical_result = await LexicalGraphBuilder(config=lexical).run(
+        text_chunks=chunks_to_text_chunks(chunks), document_info=document_info(file_path)
+    )
+    code = extract_code_graph(
+        repo_id="code",
+        run_id="run-1",
+        file_path=file_path,
+        source=source,
+        language="python",
+        chunks=chunks,
+        cfg=TriBridConfig(),
+        root=tmp_path,
+    )
+    combined = assemble_code_file_graph(lexical_result.graph, code.graph)
+    ids = [node.id for node in combined.nodes]
+    assert len(ids) == len(set(ids))
+    assert document_node_id(file_path) in ids
+    assert module_id(file_path) in ids
+    assert symbol_id(file_path, "Thing") in ids
+    folded, report = fold_duplicate_node_ids(combined)
+    assert folded == combined
+    assert report == {"folded_same_label": 0, "rekeyed_other_label": 0}
+
+    colliding = Neo4jGraph(
+        nodes=[Neo4jNode(id=document_node_id(file_path), label="module", properties={})],
+        relationships=[],
+    )
+    with pytest.raises(ValueError, match="shared by a Document node and a module node"):
+        assemble_code_file_graph(lexical_result.graph, colliding)
