@@ -92,3 +92,28 @@ def test_reasoning_model_params_are_the_sdk_form_of_the_same_fields() -> None:
 def test_reasoning_body_fields_refuse_a_missing_effort_or_upstream(effort: str, upstream: str) -> None:
     with pytest.raises(RuntimeError, match="effort|upstream"):
         reasoning_body_fields(reasoning_effort=effort, route_upstream=upstream)
+
+
+@pytest.mark.parametrize(
+    "upstream",
+    [
+        "openrouter/google",
+        "openrouter/google/",
+        "openrouter//gemini-3.5-flash-lite",
+        "openrouter/",
+    ],
+)
+def test_a_malformed_openrouter_upstream_is_not_read_as_a_provider(upstream: str) -> None:
+    """``openrouter/<provider>/<model>`` is the whole shape: a truncated upstream names no
+    provider, so the floor table must not answer for it (review finding, 2026-09-02)."""
+    assert openrouter_provider(upstream) is None
+    with pytest.raises(RuntimeError, match="openrouter/<provider>/<model>"):
+        lowest_reasoning_effort(upstream)
+
+
+def test_the_provider_floor_ignores_the_case_the_upstream_is_written_in() -> None:
+    """A mandatory-reasoning provider written in any case still gets its measured floor
+    rather than the "none" every other provider takes."""
+    assert openrouter_provider("openrouter/Google/gemini-3.7-flash") == "google"
+    assert lowest_reasoning_effort("openrouter/Google/gemini-3.7-flash") == "minimal"
+    assert lowest_reasoning_effort("openrouter/Z-AI/glm-5.3-flash") == "minimal"

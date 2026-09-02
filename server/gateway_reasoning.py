@@ -32,12 +32,19 @@ MANDATORY_REASONING_LOWEST_EFFORT: dict[str, str] = {"google": "minimal", "z-ai"
 
 
 def openrouter_provider(route_upstream: str) -> str | None:
-    """The provider segment of an ``openrouter/<provider>/<model>`` upstream, else ``None``."""
+    """The provider of a whole ``openrouter/<provider>/<model>`` upstream, else ``None``.
+
+    Both segments must be there: a truncated upstream names no provider, and answering
+    for it would send a provider's measured floor to a model that is not that provider's.
+    The provider is compared in lower case because it is an identifier, not display text.
+    """
     upstream = str(route_upstream or "").strip()
     if not upstream.startswith(OPENROUTER_UPSTREAM_PREFIX):
         return None
-    provider = upstream[len(OPENROUTER_UPSTREAM_PREFIX) :].split("/", 1)[0].strip()
-    return provider or None
+    provider, _, model = upstream[len(OPENROUTER_UPSTREAM_PREFIX) :].partition("/")
+    if not provider.strip() or not model.strip():
+        return None
+    return provider.strip().lower()
 
 
 def lowest_reasoning_effort(route_upstream: str) -> str:
@@ -45,7 +52,8 @@ def lowest_reasoning_effort(route_upstream: str) -> str:
     provider = openrouter_provider(route_upstream)
     if provider is None:
         raise RuntimeError(
-            f"lowest reasoning effort is an OpenRouter protocol decision; {route_upstream!r} is not an OpenRouter upstream"
+            "lowest reasoning effort is an OpenRouter protocol decision; "
+            f"{route_upstream!r} is not an openrouter/<provider>/<model> upstream"
         )
     return MANDATORY_REASONING_LOWEST_EFFORT.get(provider, LOWEST_REASONING_EFFORT)
 
