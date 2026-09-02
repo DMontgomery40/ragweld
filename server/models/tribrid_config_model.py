@@ -6319,7 +6319,7 @@ Use only the following node and relationship types (if provided):
 Naming rules. Every node carries a "name" property; it is the entity's identity for merging across chunks and for display:
 - "name" must be an identifier a reader would recognise: a person's full name as written, an organisation's name, a place name, a document's subject line or title, a dated event.
 - Name an email or message by its subject line when the text shows one. When the subject is empty or is only reply/forward markers such as "Re:", "RE: Re:" or "Fw:", name it "<sender> to <recipient>, <date>" from the message metadata instead.
-- Never use OCR artifacts, scanner noise, bare numbers, punctuation runs, redaction bars, single letters or fragments such as "-11>", "<=11IM11.11>", "777" or "Re:" as a name. If the text gives an entity no readable identifier, leave that entity out rather than inventing one.
+- Never use OCR artifacts, scanner noise, bare numbers, punctuation runs, redaction bars or redaction markers such as "<REDACTED>", single letters or fragments such as "-11>", "<=11IM11.11>", "777" or "Re:" as a name. A redacted party is not an entity: leave it out. If the text gives an entity no readable identifier, leave that entity out rather than inventing one.
 - Copy names exactly as written (no expansions or aliases you did not read) and reuse one spelling for the same entity within the chunk.
 
 Assign a unique ID (string) to each node, and reuse it to define relationships.
