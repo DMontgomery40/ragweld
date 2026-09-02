@@ -633,6 +633,74 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
         accumulated = ""
         query_log_appended = False
         generation_failed = False
+        done_yielded = False  # the server produced the terminal event: the exchange exists
+        exchange_persisted = False
+        provider_id_for_persist: str | None = None
+        last_src_objs: list[Any] = []
+
+        def _persist_exchange(provider_id: str | None) -> None:
+            nonlocal exchange_persisted
+            if exchange_persisted:
+                return
+            store.add_message(conv.id, Message(role="user", content=request.message), None)
+            store.add_message(conv.id, Message(role="assistant", content=accumulated), provider_id)
+            exchange_persisted = True
+
+        async def _record_exchange(src_objs: list[Any]) -> None:
+            nonlocal query_log_appended
+            if not query_log_appended:
+                try:
+                    await _append_chat_query_log_entry(
+                        config=config,
+                        fusion=fusion,
+                        event_id=run_id,
+                        conversation_id=conv.id,
+                        corpus_ids=resolve_sources(request.sources),
+                        query=request.message,
+                        top_paths=[s.file_path for s in src_objs[:5]],
+                    )
+                    query_log_appended = True
+                except Exception:
+                    pass
+            # Best-effort Recall indexing (only when recall_default is selected).
+            corpus_ids = resolve_sources(request.sources)
+            if (
+                config.chat.recall.enabled
+                and config.chat.recall.auto_index
+                and (config.chat.recall.default_corpus_id in set(corpus_ids))
+            ):
+                async def _do_index() -> None:
+                    delay = int(config.chat.recall.index_delay_seconds or 0)
+                    if delay > 0:
+                        await asyncio.sleep(delay)
+                    pg = PostgresClient(config.indexing.postgres_url)
+                    await pg.connect()
+                    embedder = Embedder(config.embedding)
+                    configure_postgres_embedding_cache_backend(embedder, pg)
+                    try:
+                        await index_recall_conversation(
+                            pg,
+                            QdrantChunkStore(config),
+                            conversation_id=conv.id,
+                            messages=store.get_messages(conv.id),
+                            config=config.chat.recall,
+                            embedder=embedder,
+                        )
+                    except RetrievalContractMismatchError as e:
+                        logger.warning(
+                            "Recall auto-index blocked by embedding contract mismatch: %s", e
+                        )
+                    except RecallConversationIdError as e:
+                        # Same as above: an unretrieved task exception would drop
+                        # this conversation out of recall with no trace.
+                        logger.warning(
+                            "Recall auto-index skipped for conversation %s: %s",
+                            conv.id,
+                            e,
+                        )
+
+                asyncio.create_task(_do_index())
+
         caught_exc: tuple[type[BaseException] | None, BaseException | None, Any] = (None, None, None)
         # This is the task that owns the rest of the request, so it attaches and detaches
         # the span itself rather than inheriting a token from the endpoint coroutine.
@@ -798,71 +866,25 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                         )
                         await trace_store.annotate(run_id, **current_trace_payload_fields())
 
-                    yield f"data: {json.dumps(payload)}\n\n"
-                    # `done` is on the wire: only now does the exchange exist. The query/source
-                    # record for feedback and triplet mining, then the messages, then Recall.
-                    if not query_log_appended:
-                        try:
-                            await _append_chat_query_log_entry(
-                                config=config,
-                                fusion=fusion,
-                                event_id=run_id,
-                                conversation_id=conv.id,
-                                corpus_ids=resolve_sources(request.sources),
-                                query=request.message,
-                                top_paths=[s.file_path for s in src_objs[:5]],
-                            )
-                            query_log_appended = True
-                        except Exception:
-                            pass
-                    # Persist the exchange now, both messages together,
-                    # then let Recall see the finished conversation.
-                    store.add_message(conv.id, Message(role="user", content=request.message), None)
-                    assistant_msg = Message(role="assistant", content=accumulated)
+                    # The server has produced the terminal event: from here the exchange exists
+                    # whether or not the client stays to read it. Persist it atomically in the
+                    # order that cannot be interrupted (synchronous message writes first), then
+                    # the query/source record for feedback mining and Recall, shielded from the
+                    # cancellation a closing client causes.
                     provider_id: str | None = None
                     raw_provider_id = payload.get("provider_response_id")
                     if isinstance(raw_provider_id, str) and raw_provider_id.strip():
                         provider_id = raw_provider_id.strip()
-                    store.add_message(conv.id, assistant_msg, provider_id)
+                    provider_id_for_persist = provider_id
+                    last_src_objs = list(src_objs)
+                    done_yielded = True
+                    yield f"data: {json.dumps(payload)}\n\n"
+                    _persist_exchange(provider_id)
+                    try:
+                        await asyncio.shield(_record_exchange(src_objs))
+                    except asyncio.CancelledError:
+                        pass
 
-                    # Best-effort Recall indexing (only when recall_default is selected).
-                    corpus_ids = resolve_sources(request.sources)
-                    if (
-                        config.chat.recall.enabled
-                        and config.chat.recall.auto_index
-                        and (config.chat.recall.default_corpus_id in set(corpus_ids))
-                    ):
-                        async def _do_index() -> None:
-                            delay = int(config.chat.recall.index_delay_seconds or 0)
-                            if delay > 0:
-                                await asyncio.sleep(delay)
-                            pg = PostgresClient(config.indexing.postgres_url)
-                            await pg.connect()
-                            embedder = Embedder(config.embedding)
-                            configure_postgres_embedding_cache_backend(embedder, pg)
-                            try:
-                                await index_recall_conversation(
-                                    pg,
-                                    QdrantChunkStore(config),
-                                    conversation_id=conv.id,
-                                    messages=store.get_messages(conv.id),
-                                    config=config.chat.recall,
-                                    embedder=embedder,
-                                )
-                            except RetrievalContractMismatchError as e:
-                                logger.warning(
-                                    "Recall auto-index blocked by embedding contract mismatch: %s", e
-                                )
-                            except RecallConversationIdError as e:
-                                # Same as above: an unretrieved task exception would drop
-                                # this conversation out of recall with no trace.
-                                logger.warning(
-                                    "Recall auto-index skipped for conversation %s: %s",
-                                    conv.id,
-                                    e,
-                                )
-
-                        asyncio.create_task(_do_index())
                     continue
 
                 if typ == "error":
@@ -883,8 +905,13 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
             raise
         finally:
             # Nothing was persisted before `done`, so an exchange that never reached it has
-            # nothing to roll back. The trace close-out is shielded: a second cancellation
-            # delivered here must not leave the trace open or the span unfinished.
+            # nothing to roll back. One that did reach it exists even if the generator was
+            # closed at that yield (a client that leaves on the terminal event): persist it
+            # here, synchronously, and record it in the background. The trace close-out is
+            # shielded: a second cancellation must not leave the trace open.
+            if done_yielded and not exchange_persisted:
+                _persist_exchange(provider_id_for_persist)
+                asyncio.get_running_loop().create_task(_record_exchange(last_src_objs))
             if trace_enabled:
                 try:
                     await asyncio.shield(_close_chat_trace(run_id, ended_at_ms))

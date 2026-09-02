@@ -412,28 +412,41 @@ async def answer_stream(request: AnswerRequest) -> StreamingResponse:
     )
     setup_scope = observation.scope()
     setup_scope.__enter__()
-    apply_default_links(cfg)
-    trace_enabled = await trace_store.start(
-        run_id=run_id,
-        repo_id=request.repo_id,
-        started_at_ms=started_at_ms,
-        config=cfg,
-    )
-    if trace_enabled:
-        await trace_store.annotate(run_id, **current_trace_payload_fields())
-        await trace_store.add_event(
-            run_id,
-            kind="answer.request",
-            data={
-                "repo_id": request.repo_id,
-                "query": request.query,
-                "include_vector": bool(request.include_vector),
-                "include_sparse": bool(request.include_sparse),
-                "include_graph": bool(request.include_graph),
-                "top_k": int(request.top_k),
-                "stream": True,
-            },
+    trace_enabled = False
+    try:
+        apply_default_links(cfg)
+        trace_enabled = await trace_store.start(
+            run_id=run_id,
+            repo_id=request.repo_id,
+            started_at_ms=started_at_ms,
+            config=cfg,
         )
+        if trace_enabled:
+            await trace_store.annotate(run_id, **current_trace_payload_fields())
+            await trace_store.add_event(
+                run_id,
+                kind="answer.request",
+                data={
+                    "repo_id": request.repo_id,
+                    "query": request.query,
+                    "include_vector": bool(request.include_vector),
+                    "include_sparse": bool(request.include_sparse),
+                    "include_graph": bool(request.include_graph),
+                    "top_k": int(request.top_k),
+                    "stream": True,
+                },
+            )
+    except asyncio.CancelledError:
+        # Cancelled while the trace was being started or annotated: nothing else will close
+        # the span or the trace, so do it here and re-raise.
+        if trace_enabled:
+            try:
+                await asyncio.shield(trace_store.end(run_id))
+            except asyncio.CancelledError:
+                pass
+        setup_scope.__exit__(None, None, None)
+        observation.finish((None, None, None))
+        raise
 
     store = get_conversation_store()
     conv = store.get_or_create(None)

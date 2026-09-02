@@ -110,6 +110,12 @@ def _mode_to_flags(mode: MCPMode) -> tuple[bool, bool, bool]:
     return False, False, True
 
 
+def _is_transport_outage(exc: BaseException) -> bool:
+    """A raw driver transport failure (refused/reset/timed-out connection) from the corpus and
+    config lookups, which the API's Postgres boundary classifies as a Postgres outage too."""
+    return isinstance(exc, (ConnectionError, TimeoutError, OSError))
+
+
 async def _ensure_corpus_exists(repo_id: str) -> None:
     global_cfg = load_config()
     pg = PostgresClient(global_cfg.indexing.postgres_url)
@@ -167,9 +173,9 @@ def register_mcp_tools(mcp: FastMCP, cfg: MCPConfig) -> None:
         except ValueError:
             raise  # "Corpus not found": the tool's own argument error, not a runtime failure
         except Exception as exc:
-            if is_required_dependency_unavailable(exc):
+            if is_required_dependency_unavailable(exc) or _is_transport_outage(exc):
                 dependency: DependencyName = (
-                    "postgres" if is_postgres_unavailable(exc) else "neo4j" if is_neo4j_unavailable(exc) else "qdrant"
+                    "postgres" if is_postgres_unavailable(exc) or _is_transport_outage(exc) else "neo4j" if is_neo4j_unavailable(exc) else "qdrant"
                 )
                 return _search_tool_result(
                     error=_dependency_error_detail(
@@ -228,9 +234,9 @@ def register_mcp_tools(mcp: FastMCP, cfg: MCPConfig) -> None:
         except ValueError:
             raise  # "Corpus not found": the tool's own argument error, not a runtime failure
         except Exception as exc:
-            if is_required_dependency_unavailable(exc):
+            if is_required_dependency_unavailable(exc) or _is_transport_outage(exc):
                 dependency: DependencyName = (
-                    "postgres" if is_postgres_unavailable(exc) else "neo4j" if is_neo4j_unavailable(exc) else "qdrant"
+                    "postgres" if is_postgres_unavailable(exc) or _is_transport_outage(exc) else "neo4j" if is_neo4j_unavailable(exc) else "qdrant"
                 )
                 return _answer_tool_result(
                     error=_dependency_error_detail(

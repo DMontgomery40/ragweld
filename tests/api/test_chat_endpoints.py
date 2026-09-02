@@ -300,7 +300,7 @@ class TestChatEndpointWithMockedLLM:
 
             response = await chat_client.post(
                 "/api/chat",
-                json={"message": "User says hello", "sources": {"corpus_ids": []}},
+                json={"message": "Which plane management company did Barry Cohen consider switching to?", "sources": {"corpus_ids": []}},
             )
 
             conv_id = response.json()["conversation_id"]
@@ -309,7 +309,7 @@ class TestChatEndpointWithMockedLLM:
 
             assert len(messages) == 2
             assert messages[0].role == "user"
-            assert messages[0].content == "User says hello"
+            assert messages[0].content == "Which plane management company did Barry Cohen consider switching to?"
             assert messages[1].role == "assistant"
             assert messages[1].content == "Assistant says hi"
 
@@ -320,7 +320,7 @@ class TestChatEndpointWithMockedLLM:
 
             response = await chat_client.post(
                 "/api/chat",
-                json={"message": "How does X work?", "sources": {"corpus_ids": ["test-repo"]}},
+                json={"message": "How does Ragweld fuse the vector, sparse and graph legs?", "sources": {"corpus_ids": ["test-repo"]}},
             )
 
             assert response.status_code == 200
@@ -396,6 +396,8 @@ class TestStreamEndpoint:
             finally:
                 set_config(None)
 
+    @pytest.mark.requires_postgres
+    @pytest.mark.requires_qdrant
     @pytest.mark.asyncio
     async def test_stream_closed_by_the_client_mid_answer_persists_no_exchange(self, tmp_path: Path):
         """A client that goes away after the first delta ends the exchange without a `done`
@@ -449,6 +451,8 @@ class TestStreamEndpoint:
                     assert messages == [], messages
 
 
+    @pytest.mark.requires_postgres
+    @pytest.mark.requires_qdrant
     @pytest.mark.asyncio
     async def test_stream_closed_after_the_last_delta_persists_and_caches_nothing(self, tmp_path: Path):
         """The client has every content token but leaves before the terminal `done` event is
@@ -560,10 +564,8 @@ class TestChatCitationsRealPipeline:
 
     @pytest.mark.asyncio
     async def test_chat_collects_sources_and_passes_leg_toggles(
-        self, chat_client: AsyncClient, mock_fusion: MockFusion, monkeypatch
+        self, chat_client: AsyncClient, mock_fusion: MockFusion
     ):
-        _ = monkeypatch
-
         with completion_gateway("Config persistence lives in server/services/config_store.py.") as base_url, gateway_env(base_url):
             response = await chat_client.post(
                 "/api/chat",
@@ -594,10 +596,8 @@ class TestChatCitationsRealPipeline:
 
     @pytest.mark.asyncio
     async def test_stream_done_includes_conversation_id_and_sources(
-        self, chat_client: AsyncClient, monkeypatch
+        self, chat_client: AsyncClient
     ):
-        _ = monkeypatch
-
         payload = {
             "message": "Which plane management company did Barry Cohen consider switching to?",
             "sources": {"corpus_ids": ["test-repo"]},
