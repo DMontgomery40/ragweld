@@ -51,6 +51,8 @@
 
     A failed send also carries the run the server had already recorded: the stream's terminal `done` event follows the `error` event, and the UI publishes the run id, timing, and trace headers exactly like a successful answer — the Routing Trace panel follows the failed run instead of the previous successful one, and the error card's Details list the failure class, the sanitised reason, and the run id. See [UI tour](manual/ui.md).
 
+    The trace panel is also honest when the run it is showing did not come from this conversation: with no answer in the conversation yet, its fallback query is the corpus's most recent run — which a Retrieval-tab search, an MCP probe, or another tab can have produced — and the panel says so in place instead of presenting that run silently as this conversation's trace. See [UI tour](manual/ui.md).
+
 ```mermaid
 flowchart LR
     Req["ChatRequest"] --> API
