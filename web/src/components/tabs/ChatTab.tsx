@@ -88,6 +88,11 @@ export default function ChatTab() {
     }
   }, [api]);
 
+  // The run this conversation last produced, so the panel can say when what it is showing
+  // came from somewhere else on this corpus (an MCP probe, a Retrieval-tab search): the
+  // fallback query asks for the corpus's latest run, not the conversation's (S37).
+  const [conversationRunId, setConversationRunId] = useState<string | null>(null);
+
   // Listen for "View trace & logs" clicks from ChatInterface
   useEffect(() => {
     const onOpen = (ev: Event) => {
@@ -95,6 +100,7 @@ export default function ChatTab() {
       const runId = typeof detail.run_id === 'string' ? detail.run_id : null;
       setSubtab('ui', { replace: true });
       setSelectedRunId(runId);
+      setConversationRunId(runId);
       setTraceOpen(true);
       // Load immediately (uses run_id if present)
       void loadTrace({ runId });
@@ -111,6 +117,7 @@ export default function ChatTab() {
       const detail = (ev as CustomEvent).detail || {};
       const runId = typeof detail.run_id === 'string' ? detail.run_id : null;
       setSelectedRunId(runId);
+      setConversationRunId(runId);
       if (!traceOpen) return;
       void loadTrace({ runId });
     };
@@ -240,6 +247,15 @@ export default function ChatTab() {
             <summary style={{ cursor: 'pointer', fontWeight: 600, color: 'var(--accent-text)', fontSize: '13px' }}>
               Routing Trace {trace?.events?.length ? `(${trace.events.length} events)` : ''}
             </summary>
+            {trace && (!conversationRunId || conversationRunId !== trace.run_id) ? (
+              <div
+                data-testid="chat-trace-foreign-run"
+                style={{ marginTop: '8px', fontSize: '12px', color: 'var(--fg-muted)' }}
+              >
+                This is the most recent run on {trace.corpus_id || 'this corpus'}, not an answer from this
+                conversation. A search, an MCP probe or another tab can produce it.
+              </div>
+            ) : null}
             {trace && (
               <div
                 style={{

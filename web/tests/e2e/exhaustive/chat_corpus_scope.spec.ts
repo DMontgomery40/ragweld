@@ -527,3 +527,28 @@ test('opening another chat control dismisses the Sources popover', async ({ page
     await expect(dropdown, `Sources stayed open behind ${other}`).toHaveJSProperty('open', false);
   }
 });
+
+
+test('the trace panel says when it is showing a run this conversation did not produce', async ({
+  page,
+  request,
+}) => {
+  // S37: with no answer in this conversation yet, the panel falls back to the corpus's most
+  // recent run, which can be a Retrieval-tab search or an MCP probe. It rendered that under
+  // "Routing Trace" with nothing saying where it came from.
+  if (!corpus) throw new Error('corpus not provisioned');
+  await seedAnswerFromSearch(page, request, corpus.corpusId, 'What calibrates the salinity array?', {
+    sources: [corpus.corpusId],
+  });
+  await gotoChatWithGlobalCorpus(page, corpus.corpusId);
+  const panel = page.locator('#chat-trace');
+  await expect(panel).toBeVisible({ timeout: 60_000 });
+  // The panel follows `ui.chat_show_trace`, so it can already be open: clicking would close it.
+  if (!(await panel.evaluate((el) => (el as HTMLDetailsElement).open))) {
+    await panel.locator('summary').click();
+  }
+  await expect(panel).toHaveJSProperty('open', true);
+  const notice = page.getByTestId('chat-trace-foreign-run');
+  await expect(notice).toBeVisible({ timeout: 60_000 });
+  await expect(notice).toContainText(corpus.corpusId);
+});
