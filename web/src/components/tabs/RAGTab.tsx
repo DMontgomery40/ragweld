@@ -49,9 +49,9 @@ export default function RAGTab() {
         </ErrorBoundary>
       </div>
 
-      <div id="tab-rag-reranker-config" className={`rag-subtab-content ${activeSubtab === 'reranker-config' ? 'active' : ''}`}>
+      <div id="tab-rag-reranker" className={`rag-subtab-content ${activeSubtab === 'reranker' ? 'active' : ''}`}>
         <ErrorBoundary context="RerankerConfigSubtab">
-          {activeSubtab === 'reranker-config' ? <RerankerConfigSubtab /> : null}
+          {activeSubtab === 'reranker' ? <RerankerConfigSubtab /> : null}
         </ErrorBoundary>
       </div>
 

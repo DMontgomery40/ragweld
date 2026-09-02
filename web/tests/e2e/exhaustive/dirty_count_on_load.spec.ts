@@ -12,7 +12,7 @@ const CORPUS = process.env.CS_CORPUS ?? 'nasa-apollo-11';
 const SURFACES = [
   'rag?subtab=indexing&component=chunking',
   'rag?subtab=retrieval',
-  'rag?subtab=reranker-config',
+  'rag?subtab=reranker',
   'rag?subtab=data-quality',
   'chat?subtab=settings',
   'infrastructure?subtab=paths',

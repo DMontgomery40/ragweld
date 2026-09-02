@@ -110,6 +110,40 @@ test.describe('Observability operator deck', () => {
     }
   });
 
+  // S14: the "incidents=" chip read `incidents?.total_count || observability?.incident_count || 0`,
+  // so a loaded feed whose total_count was 0 fell through to the status snapshot's own counter
+  // (computed for a different scope): "incidents=8" on Grafana Overview while the feed for the
+  // same corpus said 0. The feed is the only definition now; the snapshot carries no counter.
+  test('the incidents chip is the incidents feed count for the deck scope, never another counter', async ({
+    page,
+    baseURL,
+    request,
+  }) => {
+    const status = await request.get(`${API_BASE}/observability/status`);
+    expect(status.status(), await status.text()).toBe(200);
+    const statusPayload = await status.json();
+    expect(statusPayload, 'the status snapshot must not carry its own incident counter').not.toHaveProperty(
+      'incident_count',
+    );
+
+    for (const route of ['grafana', 'infrastructure?subtab=monitoring']) {
+      await page.goto(new URL(route, baseURL).toString());
+      const chip = page.getByTestId('obs-chip-incidents').first();
+      await expect(chip).toBeVisible();
+      // Once loaded, the chip is a number, never a placeholder or another source's count.
+      await expect(chip).toHaveText(/^incidents=\d+$/, { timeout: 60_000 });
+
+      const scope = (await page.getByTestId('obs-chip-corpus').first().innerText()).replace(/^corpus=/, '').trim();
+      const params = scope && scope !== 'global' ? `?corpus_id=${encodeURIComponent(scope)}` : '';
+      const feed = await request.get(`${API_BASE}/observability/incidents${params}`);
+      expect(feed.status(), await feed.text()).toBe(200);
+      const total = Number((await feed.json()).total_count);
+      await expect(chip, `${route}: chip must equal the feed count for scope "${scope || 'global'}"`).toHaveText(
+        `incidents=${total}`,
+      );
+    }
+  });
+
   test('external and in-app link rows are labelled, and Grafana says it opens read-only', async ({ page, baseURL }) => {
     await page.goto(new URL('infrastructure?subtab=monitoring', baseURL).toString());
 

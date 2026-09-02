@@ -14,6 +14,9 @@ interface StorageItem {
   // fill bar it drives is just as meaningless (M-141). `isCount` marks those tiles so both the
   // percentage line and the bar are shown only for the byte tiles they actually describe.
   isCount?: boolean;
+  // A store that could not be measured is "n/a" with the reason, not "0 B (0.0% of total)": no
+  // share line, no fill bar, and it is left out of the byte total (S5, the Neo4j store).
+  note?: string;
 }
 
 export function StorageSubtab() {
@@ -58,8 +61,9 @@ export function StorageSubtab() {
         },
         {
           label: 'NEO4J STORE',
-          bytes: storage?.neo4j_store_bytes || 0,
-          size: formatBytes(storage?.neo4j_store_bytes || 0)
+          bytes: storage.neo4j_store_bytes ?? 0,
+          size: storage.neo4j_store_bytes == null ? 'n/a' : formatBytes(storage.neo4j_store_bytes),
+          note: storage.neo4j_store_bytes == null ? (storage.neo4j_store_note ?? undefined) : undefined
         },
         {
           label: 'CHUNK SUMMARIES',
@@ -188,6 +192,7 @@ export function StorageSubtab() {
                   key={idx}
                   data-testid={`storage-tile-${item.label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
                   data-count={item.isCount ? 'true' : 'false'}
+                  data-measured={item.note ? 'false' : 'true'}
                   style={{
                     background: 'var(--card-bg)',
                     border: '1px solid var(--line)',
@@ -199,7 +204,7 @@ export function StorageSubtab() {
                 >
                   {/* Background bar showing percentage -- byte tiles only; a count has no share
                       of a byte total to fill (M-141). */}
-                  {!item.isCount && (
+                  {!item.isCount && !item.note && (
                     <div
                       style={{
                         position: 'absolute',
@@ -237,7 +242,7 @@ export function StorageSubtab() {
                     >
                       {item.size}
                     </div>
-                    {totalBytes > 0 && !item.isCount && (
+                    {totalBytes > 0 && !item.isCount && !item.note && (
                       <div
                         style={{
                           color: 'var(--fg-muted)',
@@ -246,6 +251,18 @@ export function StorageSubtab() {
                         }}
                       >
                         {getPercentage(item.bytes).toFixed(1)}% of total
+                      </div>
+                    )}
+                    {item.note && (
+                      <div
+                        style={{
+                          color: 'var(--fg-muted)',
+                          fontSize: '11.5px',
+                          lineHeight: 1.4,
+                          marginTop: '4px'
+                        }}
+                      >
+                        {item.note}
                       </div>
                     )}
                   </div>

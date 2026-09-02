@@ -48,7 +48,10 @@ export default function ChatTab() {
 
   const loadTrace = useCallback(
     async (opts?: { runId?: string | null }) => {
-      const runId = (opts?.runId || selectedRunId || '').trim();
+      // An explicit null asks for the corpus's latest run; only an omitted option falls back to
+      // the remembered selection. `null || selectedRunId` used to pin the panel to the previous
+      // run whenever a caller had no run id to offer.
+      const runId = (opts && opts.runId !== undefined ? opts.runId || '' : selectedRunId || '').trim();
       const qs = new URLSearchParams();
       if (runId) qs.set('run_id', runId);
       else if (activeRepo) qs.set('repo', activeRepo);
@@ -100,12 +103,15 @@ export default function ChatTab() {
     return () => window.removeEventListener('tribrid:chat:open-trace', onOpen as EventListener);
   }, [loadTrace]);
 
-  // When a chat run completes, refresh the trace panel if open.
+  // When a chat run completes (answered or failed), the panel follows it: the run id is
+  // remembered even while the panel is closed, so opening it later shows this conversation's
+  // latest run rather than whichever run was selected before (2026-09-02 drive, S10).
   useEffect(() => {
     const onComplete = (ev: Event) => {
-      if (!traceOpen) return;
       const detail = (ev as CustomEvent).detail || {};
       const runId = typeof detail.run_id === 'string' ? detail.run_id : null;
+      setSelectedRunId(runId);
+      if (!traceOpen) return;
       void loadTrace({ runId });
     };
     window.addEventListener('tribrid:chat:run-complete', onComplete as EventListener);

@@ -17,7 +17,7 @@ export const UI_SURFACES: UISurface[] = [
   { route: '/rag', subtab: 'data-quality', label: 'RAG / Data Quality' },
   { route: '/rag', subtab: 'retrieval', label: 'RAG / Retrieval' },
   { route: '/rag', subtab: 'graph', label: 'RAG / Graph' },
-  { route: '/rag', subtab: 'reranker-config', label: 'RAG / Reranker' },
+  { route: '/rag', subtab: 'reranker', label: 'RAG / Reranker' },
   { route: '/rag', subtab: 'learning-ranker', label: 'RAG / Learning Ranker' },
   { route: '/rag', subtab: 'learning-agent', label: 'RAG / Learning Agent Studio' },
   { route: '/rag', subtab: 'indexing', label: 'RAG / Indexing' },

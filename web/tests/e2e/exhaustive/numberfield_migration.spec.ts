@@ -142,7 +142,7 @@ test('Reranker: an out-of-range input-snippet-chars clamps to the Pydantic bound
   page,
   request,
 }) => {
-  await gotoScoped(page, 'rag?subtab=reranker-config');
+  await gotoScoped(page, 'rag?subtab=reranker');
   // Not tribrid_reranker_alpha: that field only renders when reranker_mode === 'learning'
   // (RerankerConfigSubtab.tsx:252), and `provisionExhaustiveCorpus` deliberately scopes every
   // fixture corpus to reranker_mode: 'none' (cost/determinism isolation) -- picking a

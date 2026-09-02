@@ -10,7 +10,7 @@ import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { NumberField } from '@/components/ui/NumberField';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useActiveRepo } from '@/stores/useRepoStore';
-import { useConfigField } from '@/hooks';
+import { useConfigField, useRuntimeCapabilities } from '@/hooks';
 import { showToast } from '@/utils/toast';
 import { agentTrainingService, type AgentTrainRunsScope } from '@/services/AgentTrainingService';
 import type {
@@ -25,6 +25,7 @@ import { NeuralVisualizer, type TelemetryPoint } from '@/components/RerankerTrai
 import { GradientDescentViz } from '@/components/RerankerTraining/GradientDescentViz';
 import { StudioLogTerminal } from '@/components/RerankerTraining/StudioLogTerminal';
 import { ControlPlaneStatus } from './ControlPlaneStatus';
+import { describeLearningAgentLane, learningAgentLaneBlurb } from './laneSummary';
 import { RunDiff } from './RunDiff';
 import { RunOverview } from './RunOverview';
 
@@ -243,8 +244,10 @@ export function TrainingStudio() {
   const [warmupRatio, setWarmupRatio] = useConfigField<number>('training.reranker_warmup_ratio', 0.1);
   const [maxLen, setMaxLen] = useConfigField<number>('reranking.tribrid_reranker_maxlen', 512);
 
-  // Ragweld agent config (editable in inspector config tab).
-  const [ragweldBackend, setRagweldBackend] = useConfigField<string>('training.ragweld_agent_backend', 'mlx_qwen3');
+  // Ragweld agent config (editable in inspector config tab). No model or backend name is
+  // baked in here: the config always carries these fields, and the header reads the lane
+  // this host really has from runtime capabilities.
+  const [ragweldBackend, setRagweldBackend] = useConfigField<string>('training.ragweld_agent_backend', '');
   const [workflowBackend, setWorkflowBackend] = useConfigField<'local' | 'flyte'>(
     'training.ragweld_agent_workflow_backend',
     'local'
@@ -255,10 +258,16 @@ export function TrainingStudio() {
   );
   const targetLaneConfigured = workflowBackend === 'flyte' || trackingBackend === 'mlflow' || ragweldBackend === 'unsloth';
   const [targetLaneOpen, setTargetLaneOpen] = useState(targetLaneConfigured);
-  const [ragweldBaseModel, setRagweldBaseModel] = useConfigField<string>(
-    'training.ragweld_agent_base_model',
-    'mlx-community/Qwen3-4B-Instruct-2507-4bit'
-  );
+  const [ragweldBaseModel, setRagweldBaseModel] = useConfigField<string>('training.ragweld_agent_base_model', '');
+  const {
+    capabilities: runtimeCapabilities,
+    loading: runtimeCapabilitiesLoading,
+    error: runtimeCapabilitiesError,
+  } = useRuntimeCapabilities();
+  const laneSummary = useMemo(() => {
+    const lane = runtimeCapabilities?.training?.learning_agent;
+    return lane ? describeLearningAgentLane(lane) : null;
+  }, [runtimeCapabilities]);
   const [ragweldModelPath, setRagweldModelPath] = useConfigField<string>(
     'training.ragweld_agent_model_path',
     'models/learning-agent-active'
@@ -1878,11 +1887,16 @@ export function TrainingStudio() {
       <header className="training-studio-header">
         <div>
           <h2 className="studio-title">Learning Agent Studio</h2>
-          <p className="studio-subtitle">
-            Train local adapters for <span className="studio-mono">{String(ragweldBaseModel || '').trim() || 'ragweld'}</span>, promote them to{' '}
-            <span className="studio-mono">{String(ragweldModelPath || '').trim() || 'training.ragweld_agent_model_path'}</span> (the
-            training-only baseline for later runs; never served by the chat gateway), and run them through the Flyte / MLflow /
-            Unsloth control plane. Only artifacts trained on the configured base can be promoted.
+          <p
+            className={`studio-subtitle${laneSummary?.state === 'host_unavailable' ? ' studio-lane-unavailable' : ''}`}
+            data-testid="learning-agent-lane-summary"
+            data-lane-state={laneSummary ? laneSummary.state : runtimeCapabilitiesError ? 'unknown' : 'loading'}
+          >
+            {laneSummary
+              ? learningAgentLaneBlurb(laneSummary)
+              : runtimeCapabilitiesLoading
+                ? 'Resolving the training lane for this host…'
+                : `Training lane unknown: ${runtimeCapabilitiesError || 'runtime capabilities did not load'}.`}
           </p>
         </div>
 

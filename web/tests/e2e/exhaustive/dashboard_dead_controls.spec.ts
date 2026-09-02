@@ -62,6 +62,44 @@ test.describe('Top-bar health pill', () => {
     await page.keyboard.press('Escape');
     await expect(page.getByTestId('health-popover')).toHaveCount(0);
   });
+
+  // S7: every page other than the Dashboard read "— · not checked yet". The Dashboard's System
+  // Status subtab probes health on its own, while the app-wide poll that feeds the chip was gated
+  // on the tab being visible from its very first tick, so a page opened in a background tab (or
+  // driven by an automation tab, which Chrome reports as hidden) never got a first reading. The
+  // first probe now runs on mount regardless; only the recurring poll follows visibility.
+  test('a page opened in a background tab still gets one health reading', async ({ page, baseURL }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+      Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+    });
+    await page.goto(new URL('rag', baseURL).toString());
+    await page.waitForURL(/\/rag(?:\?|$)/);
+    await expect(page.locator('#tab-rag, #tab-retrieval, main').first()).toBeVisible();
+
+    const status = page.locator('#health-status');
+    await expect(status).toBeVisible();
+    await expect(status, 'the chip on a hidden RAG tab never got its first reading').toHaveText(/^(OK|Not OK) · /, {
+      timeout: 15_000,
+    });
+    await expect(status).not.toContainText('not checked yet');
+  });
+
+  test('the health reading is app-wide: it survives navigating between pages', async ({ page, baseURL }) => {
+    await page.goto(new URL('dashboard', baseURL).toString());
+    await page.waitForURL(/\/dashboard(?:\?|$)/);
+    const status = page.locator('#health-status');
+    await expect(status).toHaveText(/^(OK|Not OK) · /, { timeout: 15_000 });
+
+    // Client-side navigation through the sidebar: the store, not the page, owns the reading.
+    for (const label of ['RAG', 'Chat', 'Grafana']) {
+      const link = page.getByTestId('tab-bar').getByRole('link', { name: label, exact: true });
+      await expect(link).toBeVisible();
+      await link.click();
+      await expect(status, `chip after navigating to ${label}`).toHaveText(/^(OK|Not OK) · /);
+      await expect(status).not.toContainText('not checked yet');
+    }
+  });
 });
 
 // M-153 / A-47: with the dock empty, the header rendered Dock Current / Choose AND the empty
@@ -149,7 +187,8 @@ test.describe('Dashboard information design', () => {
 
     const headers = tracesSection.locator('thead th');
     await expect(headers).toHaveCount(3);
-    await expect(headers).toHaveText(['Timestamp', 'Query', 'Repo']);
+    // The third column is the corpus (7485b0f6 renamed the legacy "Repo" label; the product is corpus-first).
+    await expect(headers).toHaveText(['Timestamp', 'Query', 'Corpus']);
     await expect(tracesSection.locator('thead')).not.toContainText('Duration');
 
     // The rows carry a date, not a bare time-of-day, so a list that spans days cannot read as
@@ -201,6 +240,57 @@ test.describe('Dashboard information design', () => {
     const sum = pcts.reduce((acc, t) => acc + parseFloat(t), 0);
     expect(sum, `byte-tile shares summed to ${sum}`).toBeGreaterThan(99);
     expect(sum).toBeLessThan(101);
+  });
+
+  // S5: the NEO4J STORE tile read "0 B (0.0% of total)" for a corpus whose graph held 8,129
+  // nodes. Neo4j 5 Community exposes no store-size source (no dbms.queryJmx, no
+  // apoc.monitor.store, no size on SHOW DATABASES) and the data volume is not host-readable, so
+  // both dashboard panels now say "n/a" with the reason, give the tile no share of the byte
+  // total, and leave it out of the total instead of adding a measured-looking zero.
+  test('Neo4j store is reported as unmeasured, not 0 B, on both dashboard panels', async ({ page, baseURL, request }) => {
+    const provisioned = corpus;
+    expect(provisioned).not.toBeNull();
+    const corpusId = provisioned!.corpusId;
+
+    const stats = await request.get(`${API_BASE}/index/stats?corpus_id=${encodeURIComponent(corpusId)}`);
+    expect(stats.ok()).toBe(true);
+    const statsBody = (await stats.json()) as {
+      total_storage: number;
+      storage_breakdown: {
+        neo4j_store_bytes: number | null;
+        neo4j_store_note: string | null;
+        postgres_total_bytes: number;
+        qdrant_dense_vector_bytes: number;
+        total_storage_bytes: number;
+      };
+    };
+    const breakdown = statsBody.storage_breakdown;
+    // Deployment truth on this stack: the store cannot be measured, and the API says why.
+    expect(breakdown.neo4j_store_bytes, JSON.stringify(breakdown)).toBeNull();
+    expect(String(breakdown.neo4j_store_note)).toContain('store-size');
+    expect(breakdown.total_storage_bytes).toBe(breakdown.postgres_total_bytes + breakdown.qdrant_dense_vector_bytes);
+    expect(statsBody.total_storage).toBe(breakdown.total_storage_bytes);
+
+    await activateCorpusInBrowser(page, corpusId);
+    await page.goto(new URL('dashboard?subtab=storage', baseURL).toString());
+    await page.waitForURL(/\/dashboard\?subtab=storage(?:&|$)/);
+
+    const tile = page.locator('#tab-dashboard-storage').getByTestId('storage-tile-neo4j-store');
+    await expect(tile).toBeVisible();
+    await expect(tile).toHaveAttribute('data-measured', 'false');
+    await expect(tile).toContainText('n/a');
+    await expect(tile).not.toContainText('0 B');
+    await expect(tile).not.toContainText('% of total');
+    await expect(tile).toContainText(String(breakdown.neo4j_store_note));
+
+    await page.goto(new URL('dashboard?subtab=system', baseURL).toString());
+    await page.waitForURL(/\/dashboard\?subtab=system(?:&|$)/);
+    const panel = page.locator('[data-tooltip="DASHBOARD_INDEX_PANEL"]');
+    await expect(panel).toBeVisible({ timeout: 30_000 });
+    const card = panel.getByTestId('storage-card-neo4j-store');
+    await expect(card).toContainText('n/a');
+    await expect(card).not.toContainText('0 B');
+    await expect(card).toHaveAttribute('title', String(breakdown.neo4j_store_note));
   });
 
   // M-138: this card labelled the same base-1024 byte figure "MB" while the Storage subtab

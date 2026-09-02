@@ -17,6 +17,19 @@ const INDEX_TERMINAL_ID = 'onboarding-index';
 
 const STEP_TITLES = ['Welcome', 'Your corpus', 'Build indexes', 'Ask a question'];
 
+/** Which corpus steps 3 and 4 act on. The step titles never said, so a wizard stuck on a
+ * corpus that no longer existed looked like a wizard about the corpus in the URL (S12). */
+function WizardCorpusLine({ name, corpusId }: { name: string; corpusId: string }) {
+  return (
+    <div
+      data-testid="onboarding-wizard-corpus"
+      style={{ fontSize: '12.5px', color: 'var(--fg-muted)', lineHeight: 1.5, margin: '0 0 14px' }}
+    >
+      This step works on <strong style={{ color: 'var(--fg)' }}>{name}</strong> (<code>{corpusId}</code>).
+    </div>
+  );
+}
+
 function formatCitation(match: ChunkMatch): string {
   const lines = match.start_line && match.end_line ? `:${match.start_line}-${match.end_line}` : '';
   return `${match.file_path}${lines}`;
@@ -26,7 +39,7 @@ export default function StartTab() {
   const navigate = useNavigate();
   const { api } = useAPI();
   const { step, corpusId, maxStep, setStep, nextStep, prevStep, setCorpusId, reset } = useOnboarding();
-  const { repos, loadRepos, initialized, addRepo, setActiveRepo } = useRepoStore();
+  const { repos, loadRepos, initialized, activeRepo, addRepo, setActiveRepo } = useRepoStore();
   const { fetchStats, startAndStream, disconnectStream } = useIndexing();
 
   // Step 2 — corpus
@@ -58,6 +71,20 @@ export default function StartTab() {
   useEffect(() => () => disconnectStream(INDEX_TERMINAL_ID), [disconnectStream]);
 
   const corpus = useMemo(() => repos.find((r) => String(r.corpus_id) === corpusId) || null, [repos, corpusId]);
+
+  // The persisted wizard corpus can outlive the corpus itself (deleted from RAG > Indexing or
+  // the API). The wizard then greyed out steps 3 and 4 with "pick a corpus first" while the
+  // URL corpus was indexed and ready (2026-09-02 drive, S12). Once the registry is loaded, a
+  // wizard corpus the registry does not have is replaced by the active corpus (the one the
+  // page was opened on), or cleared when there is none.
+  useEffect(() => {
+    if (!initialized) return;
+    const persisted = String(corpusId || '').trim();
+    if (!persisted) return;
+    if (repos.some((r) => String(r.corpus_id) === persisted)) return;
+    const active = String(activeRepo || '').trim();
+    setCorpusId(repos.some((r) => String(r.corpus_id) === active) ? active : '');
+  }, [activeRepo, corpusId, initialized, repos, setCorpusId]);
 
   // Keep the index summary current for the chosen corpus.
   useEffect(() => {
@@ -244,7 +271,7 @@ export default function StartTab() {
   const handleNext = () => {
     if (step >= maxStep) {
       reset();
-      navigate(corpusId ? `/chat?corpus=${encodeURIComponent(corpusId)}` : '/dashboard');
+      navigate(corpusId ? `/chat?corpus=${encodeURIComponent(corpusId)}&thread=new` : '/dashboard');
       return;
     }
     nextStep();
@@ -393,6 +420,7 @@ export default function StartTab() {
           <div className="ob-step active" data-testid="onboarding-step-3">
             <div className="ob-main">
               <h2 className="ob-title">Build indexes</h2>
+              {corpus ? <WizardCorpusLine name={corpus.name} corpusId={corpus.corpus_id} /> : null}
               {!corpus ? (
                 <div className="ob-warning-box">Pick or create a corpus in the previous step first.</div>
               ) : (
@@ -445,6 +473,7 @@ export default function StartTab() {
           <div className="ob-step active" data-testid="onboarding-step-4">
             <div className="ob-main">
               <h2 className="ob-title">Ask your first question</h2>
+              {corpus ? <WizardCorpusLine name={corpus.name} corpusId={corpus.corpus_id} /> : null}
               {!corpus || !indexed ? (
                 <div className="ob-warning-box">Build the indexes in the previous step first.</div>
               ) : (
@@ -502,11 +531,11 @@ export default function StartTab() {
                   ) : null}
                   <div className="ob-actions">
                     <a
-                      href={`/chat?corpus=${encodeURIComponent(corpus.corpus_id)}`}
+                      href={`/chat?corpus=${encodeURIComponent(corpus.corpus_id)}&thread=new`}
                       className="ob-help-link"
                       onClick={(e) => {
                         e.preventDefault();
-                        navigate(`/chat?corpus=${encodeURIComponent(corpus.corpus_id)}`);
+                        navigate(`/chat?corpus=${encodeURIComponent(corpus.corpus_id)}&thread=new`);
                       }}
                       data-testid="onboarding-open-chat"
                     >

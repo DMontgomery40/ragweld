@@ -120,7 +120,7 @@ export const routes: RouteConfig[] = [
       { id: 'data-quality', title: 'Data Quality' },
       { id: 'retrieval', title: 'Retrieval' },
       { id: 'graph', title: 'Graph' },
-      { id: 'reranker-config', title: 'Reranker' },
+      { id: 'reranker', title: 'Reranker' },
       { id: 'learning-reranker', title: 'Learning Reranker' },
       { id: 'learning-agent', title: 'Learning Agent Studio' },
       { id: 'indexing', title: 'Indexing' },

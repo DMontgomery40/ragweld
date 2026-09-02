@@ -8,6 +8,11 @@
 // `PATCH /api/config/retrieval?corpus_id=Y` and Helpful issued `POST /api/feedback?corpus_id=Y`,
 // where Y was the stale global corpus. The feedback log is per-corpus training data, so that
 // mislabels the reranker's inputs as well as mutating the wrong corpus's config.
+// D20: the other half of M-03. Because a used thread is never rewritten, opening
+// `/chat?corpus=X` over a conversation answered from Y silently searched Y and reported nothing
+// about X. The surface must say so and offer the two honest moves (add X to this thread's
+// Sources, or start a fresh thread about X), and a `thread=new` deep link must land in a fresh
+// thread scoped to X without touching the used one.
 import { expect, test, type Page } from '@playwright/test';
 import { seedAnswerFromSearch } from './chat_seed';
 import {
@@ -94,6 +99,125 @@ test('a conversation keeps the corpus it was answered from when the global corpu
   const active = parsed.sessions.find((s) => s.conversation_id === parsed.active_conversation_id);
   expect(active?.sources?.corpus_ids ?? []).toContain(corpus.corpusId);
   expect(active?.sources?.corpus_ids ?? []).not.toContain(otherCorpusId);
+});
+
+type StoredThreads = {
+  sessions: Array<{ conversation_id: string; sources?: { corpus_ids?: string[] }; messages?: unknown[] }>;
+  active_conversation_id: string;
+};
+
+async function readThreadStore(page: Page): Promise<StoredThreads> {
+  const stored = await page.evaluate(() => localStorage.getItem('ragweld-chat-threads:v2'));
+  expect(stored, 'the thread store must exist').toBeTruthy();
+  return JSON.parse(String(stored)) as StoredThreads;
+}
+
+test('a used conversation shows the active-corpus mismatch notice and Add puts the corpus in Sources', async ({
+  page,
+  request,
+}) => {
+  if (!corpus) throw new Error('corpus not provisioned');
+  await seedAnswerFromSearch(page, request, corpus.corpusId, 'How often is the salinity array calibrated?', {
+    topK: 5,
+    label: 'Corpus scope mismatch spec',
+  });
+
+  await gotoChatWithGlobalCorpus(page, otherCorpusId);
+  await expect(page.getByTestId('chat-sources').last()).toBeVisible({ timeout: 60_000 });
+
+  // The thread was answered from `corpus`, the URL says `otherCorpusId`: the operator must be
+  // told, in the conversation, instead of finding out from an answer that searched elsewhere.
+  const notice = page.getByTestId('chat-active-corpus-mismatch');
+  await expect(notice).toBeVisible({ timeout: 30_000 });
+  await expect(notice).toContainText(otherCorpusId);
+
+  await page.getByTestId('chat-add-active-corpus').click();
+  await expect(notice).toHaveCount(0);
+  // Adding a source is not a new thread: the seeded answer is still the conversation.
+  await expect(page.getByTestId('chat-sources')).toHaveCount(1);
+
+  await openSources(page);
+  await expect(page.getByTestId(`source-corpus-${otherCorpusId}`)).toBeChecked();
+  await expect(page.getByTestId(`source-corpus-${corpus.corpusId}`)).toBeChecked();
+
+  await expect
+    .poll(
+      async () => {
+        const parsed = await readThreadStore(page);
+        const active = parsed.sessions.find((s) => s.conversation_id === parsed.active_conversation_id);
+        return active?.sources?.corpus_ids ?? [];
+      },
+      { timeout: 30_000 },
+    )
+    .toEqual(expect.arrayContaining([corpus.corpusId, otherCorpusId]));
+});
+
+test('the notice is absent when the active corpus is already a source', async ({ page, request }) => {
+  if (!corpus) throw new Error('corpus not provisioned');
+  await seedAnswerFromSearch(page, request, corpus.corpusId, 'What is the calibration interval?', {
+    topK: 5,
+    label: 'Corpus scope no-mismatch spec',
+  });
+
+  await gotoChatWithGlobalCorpus(page, corpus.corpusId);
+  await expect(page.getByTestId('chat-sources').last()).toBeVisible({ timeout: 60_000 });
+
+  await openSources(page);
+  await expect(page.getByTestId(`source-corpus-${corpus.corpusId}`)).toBeChecked();
+  await expect(page.getByTestId('chat-active-corpus-mismatch')).toHaveCount(0);
+});
+
+test('thread=new opens a fresh conversation scoped to the URL corpus and leaves the used thread alone', async ({
+  page,
+  request,
+}) => {
+  if (!corpus) throw new Error('corpus not provisioned');
+  await seedAnswerFromSearch(page, request, corpus.corpusId, 'How often is the salinity array calibrated?', {
+    topK: 5,
+    label: 'Corpus scope deep-link spec',
+  });
+
+  await page.goto(`chat?subtab=ui&corpus=${encodeURIComponent(otherCorpusId)}&thread=new`, {
+    waitUntil: 'domcontentloaded',
+  });
+  await page.waitForSelector('.topbar', { timeout: 90_000 });
+  await page.waitForSelector('#chat-input', { timeout: 90_000 });
+
+  // The link is consumed: a reload must not mint another thread.
+  await expect
+    .poll(() => page.evaluate(() => new URL(window.location.href).searchParams.get('thread')), {
+      timeout: 30_000,
+    })
+    .toBeNull();
+  expect(await page.evaluate(() => new URL(window.location.href).searchParams.get('corpus'))).toBe(otherCorpusId);
+
+  // A fresh thread about the URL corpus: no answer on screen, nothing to warn about.
+  await expect(page.getByTestId('chat-sources')).toHaveCount(0);
+  await expect(page.getByTestId('chat-active-corpus-mismatch')).toHaveCount(0);
+  await openSources(page);
+  await expect(page.getByTestId(`source-corpus-${otherCorpusId}`)).toBeChecked();
+  await expect(page.getByTestId(`source-corpus-${corpus.corpusId}`)).not.toBeChecked();
+
+  const parsed = await readThreadStore(page);
+  expect(parsed.sessions, 'the seeded thread plus the new one').toHaveLength(2);
+  const active = parsed.sessions.find((s) => s.conversation_id === parsed.active_conversation_id);
+  expect(active?.messages ?? []).toHaveLength(0);
+  expect(active?.sources?.corpus_ids ?? []).toContain(otherCorpusId);
+  expect(active?.sources?.corpus_ids ?? []).not.toContain(corpus.corpusId);
+  const seeded = parsed.sessions.find((s) => s.conversation_id !== parsed.active_conversation_id);
+  expect((seeded?.messages ?? []).length, 'the used thread keeps its answer').toBeGreaterThan(0);
+  expect(seeded?.sources?.corpus_ids ?? []).toEqual([corpus.corpusId]);
+
+  // Leaving and re-entering Chat remounts the surface over the consumed URL and keeps the
+  // two threads: the deep link fired exactly once. This is an in-app navigation on purpose;
+  // a full navigation would re-run the seed init script and put the store back to one thread.
+  const sidebar = page.getByRole('navigation');
+  await sidebar.getByRole('link', { name: 'Benchmark', exact: true }).click();
+  await expect(page.locator('#chat-input')).toHaveCount(0);
+  await sidebar.getByRole('link', { name: 'Chat', exact: true }).click();
+  await page.waitForSelector('#chat-input', { timeout: 90_000 });
+  await expect(page.getByTestId('chat-sources')).toHaveCount(0);
+  expect((await readThreadStore(page)).sessions).toHaveLength(2);
 });
 
 test('feedback on an answer is scoped to the conversation corpus, not the global one', async ({

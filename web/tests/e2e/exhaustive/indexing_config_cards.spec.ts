@@ -116,3 +116,14 @@ test('the Graph card is named for everything it still holds', async ({ page }) =
   await openCard(page, 'enrichment');
   await expect(page.getByText('Prompt Templates')).toBeVisible();
 });
+
+test('the page header is corpus-first, not "Code Indexing"', async ({ page }) => {
+  // Every corpus (an email corpus included) was headed "Code Indexing"; the product
+  // is corpus-first and the settings below are per corpus (2026-09-02 drive, S6).
+  await openTab(page);
+  const header = page.locator('.subtab-panel h3', { hasText: 'Indexing' }).first();
+  await expect(header).toContainText('Corpus Indexing');
+  await expect(header).not.toContainText('Code Indexing');
+  await expect(page.locator('body')).not.toContainText('Code Indexing');
+  await expect(page.locator('.subtab-panel').getByText(/applies to that corpus only/)).toBeVisible();
+});

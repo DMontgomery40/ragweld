@@ -34,7 +34,7 @@ test.describe('RAG > Reranker status honesty (wave 2b)', () => {
 
   test('M-06: one authoritative configured-vs-active status, scoped to the corpus', async ({ page }) => {
     await activateCorpusInBrowser(page, corpus.corpusId);
-    await page.goto('rag?subtab=reranker-config', { waitUntil: 'domcontentloaded' });
+    await page.goto('rag?subtab=reranker', { waitUntil: 'domcontentloaded' });
 
     const status = page.getByTestId('reranker-authoritative-status');
     await expect(status).toBeVisible();
@@ -45,9 +45,28 @@ test.describe('RAG > Reranker status honesty (wave 2b)', () => {
     await expect(page.getByTestId('reranker-active-reason')).toContainText('openai.gpt-4.1-nano');
   });
 
+  test('S8: the Reranker tab answers to the slug its label suggests, and to the old one', async ({ page }) => {
+    // The tab was labelled "Reranker" but its id was `reranker-config`, so `?subtab=reranker`
+    // (what the label suggests, what a runbook would say) bounced to Data Quality with an
+    // error toast (2026-09-02 drive, S8). The label's slug is now the id.
+    await activateCorpusInBrowser(page, corpus.corpusId);
+    await page.goto('rag?subtab=reranker', { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('#rag-subtabs [data-subtab="reranker"]')).toHaveClass(/active/);
+    await expect(page.locator('#tab-rag-reranker')).toHaveClass(/active/);
+    await expect(page.getByTestId('reranker-authoritative-status')).toBeVisible();
+    await expect(page).toHaveURL(/[?&]subtab=reranker(?:&|$)/);
+    await expect(page.getByText(/No "reranker" tab on RAG/)).toHaveCount(0);
+
+    // The old slug still lands on the same tab, silently corrected in the address bar.
+    await page.goto('rag?subtab=reranker-config', { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('#tab-rag-reranker')).toHaveClass(/active/);
+    await expect(page).toHaveURL(/[?&]subtab=reranker(?:&|$)/);
+    await expect(page.getByText(/No "reranker-config" tab on RAG/)).toHaveCount(0);
+  });
+
   test('M-39: the cloud reranker model picker shows no chat-context caption', async ({ page }) => {
     await activateCorpusInBrowser(page, corpus.corpusId);
-    await page.goto('rag?subtab=reranker-config', { waitUntil: 'domcontentloaded' });
+    await page.goto('rag?subtab=reranker', { waitUntil: 'domcontentloaded' });
 
     // Cloud mode is selected (patched above), so the cloud model picker is visible.
     await expect(page.getByTestId('reranker-cloud-provider')).toBeVisible();

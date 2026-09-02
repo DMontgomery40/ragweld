@@ -93,7 +93,7 @@ export function IndexDisplayPanels() {
 
   const embedding = metadata.embedding_config || {};
   const costs = metadata.costs || {};
-  const storage = metadata.storage_breakdown || {};
+  const storage = metadata.storage_breakdown;
   const hasCostCard =
     Number(costs.total_tokens || 0) > 0 ||
     costs.embedding_cost != null ||
@@ -104,12 +104,18 @@ export function IndexDisplayPanels() {
     Number(costs.figures_described || 0) > 0 ||
     costs.total_cost != null;
 
-  const storageCards = [
+  const storageCards: Array<{ label: string; value: string; accent: string; note?: string }> = [
     { label: 'Chunks', value: formatBytes(storage.chunks_bytes), accent: 'var(--link)' },
     { label: 'Qdrant points', value: (storage.qdrant_points ?? 0).toLocaleString(), accent: 'var(--link)' },
     { label: 'Qdrant dense vectors (est.)', value: formatBytes(storage.qdrant_dense_vector_bytes), accent: 'var(--accent-text)' },
     { label: 'Chunk Summaries', value: formatBytes(storage.chunk_summaries_bytes), accent: 'var(--accent-text)' },
-    { label: 'Neo4j Store', value: formatBytes(storage.neo4j_store_bytes), accent: 'var(--warn)' },
+    {
+      label: 'Neo4j Store',
+      // Unmeasured is "n/a" with the reason, never a measured-looking "0 B" (S5).
+      value: storage.neo4j_store_bytes == null ? 'n/a' : formatBytes(storage.neo4j_store_bytes),
+      accent: 'var(--warn)',
+      note: storage.neo4j_store_bytes == null ? (storage.neo4j_store_note ?? undefined) : undefined
+    },
     { label: 'Keywords', value: (metadata.keywords_count ?? 0).toLocaleString(), accent: 'var(--warn)' },
     { label: 'Postgres Total', value: formatBytes(storage.postgres_total_bytes), accent: 'var(--link)' }
   ];
@@ -314,6 +320,8 @@ export function IndexDisplayPanels() {
           {storageCards.map(card => (
             <div
               key={card.label}
+              data-testid={`storage-card-${card.label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-+$/, '')}`}
+              title={card.note}
               style={{
                 background: 'var(--card-bg)',
                 padding: '12px',
@@ -321,7 +329,8 @@ export function IndexDisplayPanels() {
                 border: '1px solid var(--bg-elev2)',
                 display: 'flex',
                 justifyContent: 'space-between',
-                alignItems: 'center'
+                alignItems: 'center',
+                gap: '10px'
               }}
             >
               <span
@@ -334,15 +343,22 @@ export function IndexDisplayPanels() {
               >
                 {card.label}
               </span>
-              <span
-                style={{
-                  fontSize: '13px',
-                  fontWeight: 700,
-                  color: card.accent,
-                  fontFamily: "'SF Mono', monospace"
-                }}
-              >
-                {card.value}
+              <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px', minWidth: 0 }}>
+                <span
+                  style={{
+                    fontSize: '13px',
+                    fontWeight: 700,
+                    color: card.accent,
+                    fontFamily: "'SF Mono', monospace"
+                  }}
+                >
+                  {card.value}
+                </span>
+                {card.note ? (
+                  <span style={{ fontSize: '11.5px', lineHeight: 1.35, color: 'var(--fg-muted)', textAlign: 'right' }}>
+                    {card.note}
+                  </span>
+                ) : null}
               </span>
             </div>
           ))}

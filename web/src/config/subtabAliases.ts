@@ -12,6 +12,9 @@
 // copy here — only historical slug -> canonical slug pairs.
 export const SUBTAB_ALIASES: Record<string, string> = {
   'learning-ranker': 'learning-reranker',
+  // The Reranker tab's id used to differ from its label, so `?subtab=reranker` (the slug the
+  // label suggests) bounced to Data Quality with an error toast (2026-09-02 drive, S8).
+  'reranker-config': 'reranker',
 };
 
 /** Resolve a renamed subtab slug to its canonical id, or null when there is no alias. */

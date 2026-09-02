@@ -1,18 +1,26 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useAPI } from '@/hooks';
+import { useAPI, useRuntimeCapabilities } from '@/hooks';
 import { withCorpusScope } from '@/api/client';
+import { getReadiness } from '@/api/dashboard';
 import { Button } from '@/components/ui/Button';
 import { LineageMeta } from '@/components/ui/LineageMeta';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { PipelineProfile } from '@/components/Benchmark/PipelineProfile';
 import { ResultsTable } from '@/components/Benchmark/ResultsTable';
 import { SplitScreen } from '@/components/Benchmark/SplitScreen';
+import {
+  defaultBenchmarkSelection,
+  describeLocalLane,
+  localLaneState,
+  toModelValue,
+} from '@/components/Benchmark/defaultSelection';
 import type {
   BenchmarkRun,
   BenchmarkRunRequest,
   BenchmarkRunsResponse,
   ChatModelInfo,
   ChatModelsResponse,
+  ReadinessStatus,
 } from '@/types/generated';
 import { chatModelDetail, chatModelLabel, chatModelName, groupChatModels } from '@/components/Chat/modelLabel';
 
@@ -27,10 +35,6 @@ function formatUsd(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return '$0';
   if (value < 0.01) return `$${value.toFixed(4)}`;
   return `$${value.toFixed(2)}`;
-}
-
-function toModelValue(model: ChatModelInfo): string {
-  return String(model.override || model.id || '').trim();
 }
 
 function toModelLabel(model: ChatModelInfo): string {
@@ -64,11 +68,40 @@ export default function BenchmarkTab() {
 
   const initSelectionRef = useRef(false);
 
+  // The local serving lane is only a default when this host really serves it: switched on
+  // in the effective config (runtime capabilities) and answering its readiness probe.
+  const { capabilities, loading: capabilitiesLoading, error: capabilitiesError } = useRuntimeCapabilities();
+  const [readiness, setReadiness] = useState<ReadinessStatus | null>(null);
+  const [readinessSettled, setReadinessSettled] = useState(false);
+  useEffect(() => {
+    let mounted = true;
+    getReadiness()
+      .then((status) => {
+        if (mounted) setReadiness(status);
+      })
+      .catch(() => {
+        if (mounted) setReadiness(null);
+      })
+      .finally(() => {
+        if (mounted) setReadinessSettled(true);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+  const localLane = useMemo(
+    () => (capabilities ? localLaneState(capabilities, readiness) : null),
+    [capabilities, readiness]
+  );
+
   // 387 checkboxes with no filter (B-14) — match on the same label + alias the row shows.
   const filterText = modelFilter.trim().toLowerCase();
+  const litellmModels = useMemo(() => availableModels.filter((m) => m.source === 'litellm'), [availableModels]);
+  // The page's display order, flattened: local serving row first, then providers A-Z, names A-Z.
+  const orderedModels = useMemo(() => groupChatModels(litellmModels).flatMap((group) => group.models), [litellmModels]);
   const groupedModels = useMemo(
     () =>
-      groupChatModels(availableModels.filter((m) => m.source === 'litellm'))
+      groupChatModels(litellmModels)
         .map(({ group, models }) => {
           const items = filterText
             ? models.filter((m) => `${chatModelLabel(m)} ${m.id} ${chatModelName(m)}`.toLowerCase().includes(filterText))
@@ -76,7 +109,7 @@ export default function BenchmarkTab() {
           return { source: group, label: `${group} (${items.length})`, items };
         })
         .filter((group) => group.items.length > 0),
-    [availableModels, filterText]
+    [litellmModels, filterText]
   );
 
   const selectedModelInfos = useMemo(
@@ -142,12 +175,15 @@ export default function BenchmarkTab() {
     })();
   }, [api]);
 
+  // Default selection waits for the lane truth. If capabilities never load there is no
+  // default at all (the operator picks by hand) rather than a guess at a live lane.
   useEffect(() => {
     if (initSelectionRef.current) return;
-    if (availableModels.length < 2) return;
+    if (orderedModels.length < 2) return;
+    if (!localLane || !readinessSettled) return;
     initSelectionRef.current = true;
-    setSelectedModels([toModelValue(availableModels[0]), toModelValue(availableModels[1])]);
-  }, [availableModels]);
+    setSelectedModels(defaultBenchmarkSelection(orderedModels, localLane));
+  }, [orderedModels, localLane, readinessSettled]);
 
   const splitResults = useMemo(() => {
     return (runResult?.results || []).map((r) => ({
@@ -266,6 +302,15 @@ export default function BenchmarkTab() {
             }}
           />
 
+          {!capabilitiesLoading && capabilitiesError ? (
+            <div
+              data-testid="benchmark-capabilities-error"
+              style={{ marginTop: 10, fontSize: 12, color: 'var(--warn)', lineHeight: 1.5 }}
+            >
+              Runtime capabilities unavailable ({capabilitiesError}); no models were pre-selected. Pick them by hand.
+            </div>
+          ) : null}
+
           {modelsLoading ? (
             <div style={{ padding: '12px 0' }}>
               <LoadingSpinner size="md" color="accent" label="Loading models…" />
@@ -305,10 +350,13 @@ export default function BenchmarkTab() {
                       const value = toModelValue(m);
                       const checked = selectedModels.includes(value);
                       const wouldExceed = !checked && selectedModels.length >= 4;
+                      const isLocalLane = Boolean(localLane?.alias) && String(m.id || '').trim() === localLane?.alias;
 
                       return (
                         <label
                           key={value}
+                          data-testid="benchmark-model-row"
+                          data-alias={m.id}
                           style={{
                             display: 'flex',
                             alignItems: 'flex-start',
@@ -346,6 +394,20 @@ export default function BenchmarkTab() {
                             <div style={{ marginTop: 2, fontSize: 12, color: 'var(--fg-muted)' }}>
                               {chatModelDetail(m)}
                             </div>
+                            {isLocalLane && localLane ? (
+                              <div
+                                data-testid="benchmark-local-lane-state"
+                                data-reachable={localLane.reachable ? 'true' : 'false'}
+                                style={{
+                                  marginTop: 3,
+                                  fontSize: 12,
+                                  fontWeight: 600,
+                                  color: localLane.reachable ? 'var(--ok)' : 'var(--warn)',
+                                }}
+                              >
+                                {describeLocalLane(localLane)}
+                              </div>
+                            ) : null}
                           </div>
                         </label>
                       );

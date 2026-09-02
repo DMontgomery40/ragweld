@@ -1,5 +1,6 @@
 import type React from 'react';
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation, useNavigate, useNavigationType } from 'react-router-dom';
 import {
   AssistantRuntimeProvider,
   AuiIf,
@@ -36,6 +37,8 @@ import {
 import type { RagweldMessageCustom } from '@/components/Chat/chatSessions';
 import {
   ChatRequestFailedError,
+  ChatStreamEventError,
+  type ChatFailedRun,
   sendRagweldChat,
   toAbortReason,
 } from '@/components/Chat/chatTransport';
@@ -462,10 +465,37 @@ function formatConfidence(value?: number | null): string | null {
   return `${percent.toFixed(1)}%`;
 }
 
-function StructuredErrorCard({ error }: { error: NonNullable<RagweldMessageCustom['structuredError']> }) {
+/** The identity a failed send shares with a successful one, taken from the stream's `done`
+ * event: the run the trace store recorded plus the request's trace headers. Feedback and the
+ * Trace button key off the same fields, so a failed answer can be traced like any other. */
+function failedRunCustom(run: ChatFailedRun | null): Partial<RagweldMessageCustom> {
+  if (!run) return {};
+  return {
+    correlationId: run.headers.correlationId,
+    endedAtMs: run.endedAtMs,
+    eventId: run.runId,
+    rootSpanId: run.headers.rootSpanId,
+    runId: run.runId,
+    startedAtMs: run.startedAtMs,
+    traceId: run.headers.traceId,
+  };
+}
+
+function StructuredErrorCard({
+  error,
+  runId,
+}: {
+  error: NonNullable<RagweldMessageCustom['structuredError']>;
+  runId?: string;
+}) {
   const action = error.required_action || error.operator_hint || '';
   const detailEntries: [string, unknown][] = [];
   if (error.operation) detailEntries.push(['operation', error.operation]);
+  // The provider's own words (sanitised server-side) and how the server classified them:
+  // the hint above is chosen from these, so the operator can check the classification.
+  if (error.failure_kind) detailEntries.push(['failure class', error.failure_kind]);
+  if (error.gateway_reason) detailEntries.push(['reason', error.gateway_reason]);
+  if (runId) detailEntries.push(['run id', runId]);
   if (error.corpus_id) detailEntries.push(['corpus', error.corpus_id]);
   if (error.dependency) detailEntries.push(['dependency', error.dependency]);
   if (typeof error.http_status === 'number') detailEntries.push(['http status', error.http_status]);
@@ -658,7 +688,7 @@ function AssistantThreadMessage(props: AssistantThreadMessageProps) {
           <>
             {props.renderAssistantContent(text)}
             {custom.structuredError ? (
-              <StructuredErrorCard error={custom.structuredError} />
+              <StructuredErrorCard error={custom.structuredError} runId={custom.runId || custom.eventId} />
             ) : isAssistantError ? (
               <div
                 data-testid="chat-assistant-error"
@@ -925,6 +955,9 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
   const { showToast } = useUIHelpers();
   const { status: embeddingStatus, loading: embeddingStatusLoading, error: embeddingStatusError } = useEmbeddingStatus();
   const { repos, loadRepos, initialized, activeRepo, deleteUnindexedCorpora } = useRepoStore();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const navigationType = useNavigationType();
 
   const [chatSessions, setChatSessions] = useState<ReturnType<typeof createChatSession>[]>([]);
   const [messages, setMessages] = useState<ThreadMessage[]>([]);
@@ -966,6 +999,21 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
         .find((id) => id && id !== recallCorpusId) ?? '',
     [activeSources, recallCorpusId],
   );
+
+  // D20: the page-level corpus (`?corpus=`, the top-bar switcher) and a used conversation's
+  // Sources are allowed to disagree - a used thread is never rewritten (M-03/B-04). What is
+  // not allowed is hiding the disagreement: the drive opened `/chat?corpus=X` over a thread
+  // answered from Y, the answer searched Y and honestly found nothing about X. An unused
+  // thread already follows the active corpus, so only a thread with messages can mismatch.
+  const activeRepoId = String(activeRepo || '').trim();
+  const activeRepoLabel = useMemo(
+    () => repos.find((repo) => String(repo.corpus_id) === activeRepoId)?.name || activeRepoId,
+    [activeRepoId, repos],
+  );
+  const activeRepoOutsideSources =
+    Boolean(activeRepoId) &&
+    messages.length > 0 &&
+    !(activeSources?.corpus_ids ?? []).map(String).includes(activeRepoId);
 
   const chatShowConfidence = config?.ui?.chat_show_confidence ?? false;
   const chatShowCitations = config?.ui?.chat_show_citations ?? true;
@@ -1649,6 +1697,10 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
         }
 
         console.error('[ChatInterface] Failed to send message:', error);
+        // A failure the stream reported after the server had started a run carries that run;
+        // it is published exactly like a success so the Routing Trace panel follows it.
+        const failedRun =
+          error instanceof ChatRequestFailedError || error instanceof ChatStreamEventError ? error.run : null;
         if (error instanceof ChatRequestFailedError && error.detail) {
           // Typed pre-generation failure: render a structured error card, not prose.
           const structured = { ...error.detail, http_status: error.status };
@@ -1660,10 +1712,11 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
                 content: [],
                 status: buildAssistantStatus('error', summary),
               },
-              { ...getMessageCustom(assistant), structuredError: structured },
+              { ...getMessageCustom(assistant), ...failedRunCustom(failedRun), structuredError: structured },
             ),
           );
           saveChatHistory(failedMessages);
+          if (failedRun) emitRunComplete(failedRun.runId, failedRun.startedAtMs, failedRun.endedAtMs);
           showToast(summary, 'error');
           return;
         }
@@ -1675,10 +1728,11 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
               content: [{ type: 'text', text: errorMessage }],
               status: buildAssistantStatus('error', errorMessage),
             },
-            getMessageCustom(assistant),
+            { ...getMessageCustom(assistant), ...failedRunCustom(failedRun) },
           ),
         );
         saveChatHistory(failedMessages);
+        if (failedRun) emitRunComplete(failedRun.runId, failedRun.startedAtMs, failedRun.endedAtMs);
         showToast(error instanceof Error ? error.message : 'Failed to get response', 'error');
       } finally {
         window.clearTimeout(timeoutId);
@@ -1832,6 +1886,64 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
     sessionsLoadedRef.current = true;
     activateSession(session);
   }, [activateSession, chatHistoryMax, persistSessions]);
+
+  // Same path as a tick in the Sources picker: ref + state, and the sources->session effect
+  // persists it. Appending never drops recall, so the recall intensity is left alone.
+  const handleAddActiveCorpus = useCallback(() => {
+    if (!activeRepoId) return;
+    const current = activeSourcesRef.current || activeSources || defaultChatSources();
+    const ids = (current.corpus_ids ?? []).map(String);
+    if (ids.includes(activeRepoId)) return;
+    const next = { ...current, corpus_ids: [...ids, activeRepoId] };
+    activeSourcesRef.current = next;
+    setActiveSources(next);
+  }, [activeRepoId, activeSources]);
+
+  // `?thread=new` is a deep link meaning "chat about this corpus in a fresh conversation"
+  // (StartTab's Open Chat). It fires once sessions and the active corpus are settled, so the
+  // new thread's default sources include the URL corpus, and it is consumed by rewriting the
+  // URL through the router: a window-level replaceState would be undone by the next subtab
+  // navigation, which rebuilds the query string from react-router's own location. That
+  // rebuild can also resurrect the param once (the subtab hook's ensure-in-URL replace runs
+  // in the same commit with the pre-strip search), so a REPLACE that carries it again is
+  // stripped without minting a second thread; only a fresh PUSH is a new deep link. The
+  // docked copy renders under a synthetic location and never sees the param. An unused
+  // active thread already follows the active corpus, so it is the fresh thread.
+  //
+  // The thread itself is created in a later commit, through state, never from the mount
+  // effect pass: handleNewChat persists inside a setChatSessions updater that runs on the
+  // next render, and StrictMode's second effect pass on mount re-runs loadChatHistory
+  // before that, re-hydrating the old thread over the one just created.
+  const threadDeepLinkConsumedKeyRef = useRef<string | null>(null);
+  const [threadDeepLinkPending, setThreadDeepLinkPending] = useState(false);
+  useEffect(() => {
+    if (!initialized || !config || !activeRepoId) return;
+    if (!sessionsLoadedRef.current) return;
+    const params = new URLSearchParams(location.search || '');
+    if (params.get('thread') !== 'new') return;
+    const consumedKey = threadDeepLinkConsumedKeyRef.current;
+    const fresh = consumedKey === null || (navigationType === 'PUSH' && consumedKey !== location.key);
+    threadDeepLinkConsumedKeyRef.current = location.key;
+    params.delete('thread');
+    const search = params.toString();
+    navigate({ pathname: location.pathname, search: search ? `?${search}` : '' }, { replace: true });
+    if (fresh && messagesRef.current.length > 0) setThreadDeepLinkPending(true);
+  }, [
+    activeRepoId,
+    config,
+    handleNewChat,
+    initialized,
+    location.key,
+    location.pathname,
+    location.search,
+    navigate,
+    navigationType,
+  ]);
+  useEffect(() => {
+    if (!threadDeepLinkPending) return;
+    setThreadDeepLinkPending(false);
+    handleNewChat();
+  }, [handleNewChat, threadDeepLinkPending]);
 
   const handleClear = useCallback(async () => {
     const activeId = String(conversationIdRef.current || '').trim();
@@ -2081,6 +2193,64 @@ export function ChatInterface({ onTraceUpdate }: ChatInterfaceProps) {
             Settings
           </button>
         </div>
+
+        {activeRepoOutsideSources ? (
+          <div
+            data-testid="chat-active-corpus-mismatch"
+            role="status"
+            style={{
+              flex: '1 1 100%',
+              display: 'flex',
+              flexWrap: 'wrap',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '6px 10px',
+              border: '1px solid var(--line)',
+              borderRadius: '10px',
+              background: 'var(--bg-elev2)',
+              color: 'var(--fg-muted)',
+              fontSize: '12.5px',
+              lineHeight: 1.4,
+            }}
+          >
+            <span style={{ flex: '1 1 auto', minWidth: 0 }}>
+              Active corpus <strong style={{ color: 'var(--fg)' }}>{activeRepoLabel}</strong> is not in this
+              conversation&apos;s Sources.
+            </span>
+            <button
+              type="button"
+              data-testid="chat-add-active-corpus"
+              onClick={handleAddActiveCorpus}
+              style={{
+                background: 'var(--bg-elev1)',
+                color: 'var(--accent-text)',
+                border: '1px solid var(--accent)',
+                padding: '5px 10px',
+                borderRadius: '10px',
+                fontSize: '12.5px',
+                cursor: 'pointer',
+              }}
+            >
+              Add {activeRepoLabel}
+            </button>
+            <button
+              type="button"
+              data-testid="chat-new-thread-active-corpus"
+              onClick={handleNewChat}
+              style={{
+                background: 'var(--bg-elev1)',
+                color: 'var(--fg)',
+                border: '1px solid var(--line)',
+                padding: '5px 10px',
+                borderRadius: '10px',
+                fontSize: '12.5px',
+                cursor: 'pointer',
+              }}
+            >
+              New chat about {activeRepoLabel}
+            </button>
+          </div>
+        ) : null}
       </div>
 
       <EmbeddingMismatchWarning variant="inline" showActions={true} />

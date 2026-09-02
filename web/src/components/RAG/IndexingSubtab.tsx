@@ -1454,7 +1454,7 @@ export function IndexingSubtab() {
           }}
         >
           <span style={{ fontSize: '22px' }}>📦</span>
-          Code Indexing
+          Corpus Indexing
           <TooltipIcon name="INDEXING" />
         </h3>
         <p
@@ -1466,7 +1466,8 @@ export function IndexingSubtab() {
             margin: 0,
           }}
         >
-          Configure embeddings, chunking, sparse tokenization, and graph build behavior. This is corpus-scoped.
+          Configure how the selected corpus is chunked, embedded, sparse-tokenized, and graph-built. Every
+          setting here applies to that corpus only, whatever it holds: documents, email, or code.
         </p>
       </div>
 

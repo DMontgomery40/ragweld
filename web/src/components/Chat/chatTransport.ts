@@ -92,9 +92,25 @@ export type ChatStructuredErrorDetail = Partial<
     Omit<RetrievalContractMismatchDetail, 'code'>
 > & { code: string };
 
+/** What the server had already committed about a request whose generation failed in-stream.
+ * The stream's `error` event arrives BEFORE its terminal `done` event, and `done` is where the
+ * run id lives; the transport used to throw on `error` and never read it, so a failed send had
+ * no run to publish and the Routing Trace panel kept showing the previous, successful run
+ * (2026-09-02 drive, S10). Reading through to `done` gives the failure the same identity a
+ * success gets: run id, timing, and the trace headers. */
+export type ChatFailedRun = {
+  conversationId: string;
+  endedAtMs?: number;
+  headers: RagweldTraceHeaders;
+  runId?: string;
+  startedAtMs?: number;
+};
+
 export class ChatRequestFailedError extends Error {
   status: number;
   detail: ChatStructuredErrorDetail | null;
+  /** Set when the failure came from the stream and its `done` event was read. */
+  run: ChatFailedRun | null = null;
 
   constructor(message: string, status: number, detail: ChatStructuredErrorDetail | null) {
     super(message);
@@ -111,7 +127,10 @@ function parseStructuredDetail(value: unknown): ChatStructuredErrorDetail | null
   return record as ChatStructuredErrorDetail;
 }
 
-class ChatStreamEventError extends Error {
+export class ChatStreamEventError extends Error {
+  /** Set when the stream's `done` event was read after the untyped `error` event. */
+  run: ChatFailedRun | null = null;
+
   constructor(message: string) {
     super(message);
     this.name = 'ChatStreamEventError';
@@ -273,6 +292,9 @@ async function runStreamingChat(args: SendRagweldChatArgs): Promise<RagweldChatR
   let streamBuffer = '';
   let accumulatedText = '';
   let doneEvent: RagweldStreamTerminal | null = null;
+  // The first in-stream failure; the stream is still read to its `done` event so the
+  // failure can carry the run the server recorded.
+  let streamFailure: ChatRequestFailedError | ChatStreamEventError | null = null;
 
   const readNextChunk = async (): Promise<ReadableStreamReadResult<Uint8Array>> => {
     let onAbort: (() => void) | null = null;
@@ -331,14 +353,15 @@ async function runStreamingChat(args: SendRagweldChatArgs): Promise<RagweldChatR
         return;
       }
       case 'error': {
+        if (streamFailure) return;
         const message = typeof parsed.message === 'string' && parsed.message.trim()
           ? parsed.message.trim()
           : 'Chat request failed';
         const structured = parseStructuredDetail(parsed.detail);
-        if (structured) {
-          throw new ChatRequestFailedError(structured.message || message, 200, structured);
-        }
-        throw new ChatStreamEventError(message);
+        streamFailure = structured
+          ? new ChatRequestFailedError(structured.message || message, 200, structured)
+          : new ChatStreamEventError(message);
+        return;
       }
       default:
         return;
@@ -370,6 +393,23 @@ async function runStreamingChat(args: SendRagweldChatArgs): Promise<RagweldChatR
   if (remaining) streamBuffer += remaining;
   if (streamBuffer.trim()) {
     processDataLine(streamBuffer);
+  }
+
+  // Both are assigned inside processDataLine, so control-flow narrowing still sees the
+  // initial nulls here; the casts restore the declared unions.
+  const failure = streamFailure as ChatRequestFailedError | ChatStreamEventError | null;
+  if (failure) {
+    const terminal = doneEvent as RagweldStreamTerminal | null;
+    if (terminal) {
+      failure.run = {
+        conversationId: terminal.conversationId,
+        endedAtMs: terminal.endedAtMs,
+        headers: readTraceHeaders(response),
+        runId: terminal.runId,
+        startedAtMs: terminal.startedAtMs,
+      };
+    }
+    throw failure;
   }
 
   if (!doneEvent) {

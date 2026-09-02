@@ -126,6 +126,12 @@ function App() {
       }
     };
 
+    // The first reading is not gated on visibility. A page opened in a background tab (Chrome
+    // reports an automation-driven or cmd-clicked tab as hidden from its first paint) otherwise
+    // never gets one, and its chip reads "— · not checked yet" while the Dashboard, whose System
+    // Status subtab probes on its own, reads "OK" (S7). One probe at mount gives every page the
+    // same store-owned reading; only the recurring poll follows visibility.
+    if (useHealthStore.getState().lastChecked === null) checkHealth();
     syncToVisibility();
     document.addEventListener('visibilitychange', syncToVisibility);
     return () => {

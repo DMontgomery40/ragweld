@@ -9,7 +9,7 @@ type SyntheticContext =
   | 'data-quality'
   | 'retrieval'
   | 'graph'
-  | 'reranker-config'
+  | 'reranker'
   | 'learning-reranker'
   | 'learning-agent';
 
@@ -62,7 +62,7 @@ const ACTIONS: Record<SyntheticContext, ActionPreset[]> = {
       recipe: 'eval_dataset',
     },
   ],
-  'reranker-config': [
+  reranker: [
     {
       label: 'Generate synthetic triplets in Synthetic Lab \u2192',
       title: 'Opens RAG \u203a Synthetic Lab with the triplets recipe preselected. Nothing runs until you start it there.',

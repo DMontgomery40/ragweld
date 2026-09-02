@@ -113,6 +113,13 @@
   font-size: 0.78rem;
 }
 
+/* The header blurb when this host cannot run the configured training backend: the
+   fail-closed sentence must read as a warning, not as muted boilerplate. */
+.studio-subtitle.studio-lane-unavailable {
+  color: var(--warn);
+  font-weight: 600;
+}
+
 .studio-header-actions {
   display: flex;
   flex-wrap: nowrap;

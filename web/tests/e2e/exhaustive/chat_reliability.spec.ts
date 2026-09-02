@@ -312,3 +312,57 @@ test.describe.serial('chat reliability', () => {
     await mineAndAssertReranker(request);
   });
 });
+
+test.describe('a failed generation is published like an answer', () => {
+  test('the error card says why, and the Routing Trace panel follows the failed run', async ({ page, request }) => {
+    // `ragweld-local` is a real, free, deterministic generation failure through the gateway on a
+    // box with no vLLM behind it (a connection error). The drive found two defects on it: the
+    // card hid the gateway's reason behind a one-size hint about keys and aliases (S9), and the
+    // Routing Trace panel kept showing the previous successful run because the transport threw
+    // on the stream's `error` event before reading the `done` event that carries the run id (S10).
+    const corpusLabels = await ensureCorpusExists(request);
+    const uiCfgResp = await request.patch(`${API_BASE}/config/ui?corpus_id=${encodeURIComponent(CORPUS_ID)}`, {
+      data: { chat_streaming_enabled: true, chat_show_trace: true },
+    });
+    expect(uiCfgResp.ok()).toBeTruthy();
+
+    await gotoChat(page);
+    await setSources(page, corpusLabels, false);
+    await page.getByTestId('model-picker').selectOption('litellm:ragweld-local');
+
+    const tracePanel = page.locator('#chat-trace');
+    await expect(tracePanel).toBeVisible();
+    if (!(await tracePanel.evaluate((el) => (el as HTMLDetailsElement).open))) {
+      await tracePanel.locator('summary').click();
+    }
+    const traceOutput = page.locator('#chat-trace-output');
+    const previousRunId = ((await traceOutput.innerText()).match(/run_id: (\S+)/) || [])[1] || '';
+
+    await sendMessage(page, corpusQuestion(3));
+
+    const latest = page.locator('[data-role="assistant"]').last();
+    const card = latest.getByTestId('chat-structured-error-card');
+    await expect(card).toBeVisible({ timeout: 120_000 });
+    await expect(card).toContainText('generation_unavailable');
+    // The hint is chosen from the gateway's reason, not the same sentence for every failure.
+    await expect(card.getByTestId('chat-structured-error-action')).toContainText('serving lane is not running');
+    await card.locator('summary', { hasText: 'Details' }).click();
+    await expect(card).toContainText('failure class');
+    await expect(card).toContainText('upstream_unreachable');
+    await expect(card).toContainText('reason');
+    await expect(card).toContainText('Connection error');
+    await expect(card).not.toContainText('http://');
+    await expect(card).not.toContainText('https://');
+
+    const runIdCell = card.locator('dt', { hasText: /^run id$/ }).locator('xpath=following-sibling::dd[1]');
+    await expect(runIdCell).toBeVisible();
+    const failedRunId = (await runIdCell.innerText()).trim();
+    expect(failedRunId, 'a failed send must carry the run the server recorded').toMatch(/^[0-9a-f-]{36}$/);
+    expect(failedRunId).not.toBe(previousRunId);
+
+    // The panel follows the failed run, not the previous successful one.
+    await expect(traceOutput).toContainText(`run_id: ${failedRunId}`, { timeout: 30_000 });
+    if (previousRunId) await expect(traceOutput).not.toContainText(`run_id: ${previousRunId}`);
+    await expect(traceOutput).toContainText('chat.request');
+  });
+});

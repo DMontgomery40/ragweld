@@ -57,7 +57,7 @@ const SERVICE_GROUPS: Array<{
   {
     title: 'Gateway and serving',
     description:
-      'The only supported generation path: LiteLLM routes model aliases upstream. The local alias targets the host local-model server (vllm-metal on 127.0.0.1:58080, started by ./start.sh), not a container.',
+      'The only supported generation path: LiteLLM routes model aliases upstream. The local alias targets the host local-model server (127.0.0.1:58080, started by ./start.sh when chat.vllm is enabled), not a container; Admin > Runtime shows whether that lane is on for this host.',
     services: ['litellm'],
   },
   {

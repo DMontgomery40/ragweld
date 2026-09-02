@@ -292,9 +292,14 @@ export function ObservabilityOperatorDeck({
 
         <div className="obs-deck-chip-row">
           <span className="obs-chip">mode={observability?.mode || 'unknown'}</span>
-          <span className="obs-chip">corpus={scopedCorpusId || 'global'}</span>
+          <span className="obs-chip" data-testid="obs-chip-corpus">corpus={scopedCorpusId || 'global'}</span>
           <span className="obs-chip">severity={observability?.severity || 'unknown'}</span>
-          <span className="obs-chip">incidents={incidents?.total_count || observability?.incident_count || 0}</span>
+          {/* The incidents feed is the only incident count. A loaded feed's total_count is the
+              number even when it is 0; before it loads the chip says so rather than borrowing a
+              count from another payload (S14: "incidents=8" beside a feed that said 0). */}
+          <span className="obs-chip" data-testid="obs-chip-incidents">
+            {`incidents=${incidents ? incidents.total_count : loading ? 'loading' : 'unavailable'}`}
+          </span>
           <span className="obs-chip">
             workflow={controlPlane?.lane === 'flyte_mlflow_unsloth' ? 'flyte+mlflow+unsloth' : 'legacy_local'}
           </span>

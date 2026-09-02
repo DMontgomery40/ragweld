@@ -446,3 +446,51 @@ test.describe.serial('M1/M5: onboarding runs on the real corpus, index and chat 
     await expect(page).toHaveURL(new RegExp(`/chat\\?corpus=${createdCorpusId}`));
   });
 });
+
+test.describe('S12: the Get Started wizard drops a deleted corpus and follows the active one', () => {
+  let corpus: ExhaustiveCorpus;
+
+  test.beforeAll(async ({ request }) => {
+    corpus = await provisionExhaustiveCorpus(request, { index: true });
+  });
+
+  test.afterAll(async ({ request }) => {
+    await corpus?.dispose(request);
+  });
+
+  test('a persisted wizard corpus that no longer exists gives way to the URL corpus', async ({ page, baseURL }) => {
+    // The 2026-09-02 drive found the wizard on step 4 of a corpus deleted three days earlier:
+    // step 3 greyed out with "Pick or create a corpus in the previous step first" and step 4 with
+    // "Build the indexes in the previous step first", while the corpus in the URL was indexed.
+    await page.addInitScript(() => {
+      localStorage.setItem(
+        'tribrid-onboarding-ui',
+        JSON.stringify({ state: { step: 4, corpusId: 'drive-scratch-runbooks' }, version: 0 })
+      );
+    });
+    await gotoWeb(page, baseURL, `start?corpus=${encodeURIComponent(corpus.corpusId)}`);
+
+    const step4 = page.getByTestId('onboarding-step-4');
+    await expect(step4).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByTestId('onboarding-wizard-corpus')).toContainText(corpus.corpusId, { timeout: 60_000 });
+    await expect(step4).not.toContainText('Build the indexes in the previous step first');
+    await expect(page.getByTestId('onboarding-question')).toBeVisible();
+
+    await page.getByTestId('onboarding-dot-3').click();
+    const step3 = page.getByTestId('onboarding-step-3');
+    await expect(step3).toBeVisible();
+    await expect(step3).not.toContainText('Pick or create a corpus in the previous step first');
+    await expect(page.getByTestId('onboarding-wizard-corpus')).toContainText(corpus.corpusId);
+    await expect(page.getByTestId('onboarding-index-start')).toHaveText('Rebuild indexes');
+    await expect(page.getByTestId('onboarding-index-summary')).toBeVisible();
+
+    await page.getByTestId('onboarding-dot-2').click();
+    await expect(page.getByTestId('onboarding-existing-corpus')).toHaveValue(corpus.corpusId);
+
+    const persisted = await page.evaluate(() => {
+      const raw = localStorage.getItem('tribrid-onboarding-ui') || '{}';
+      return (JSON.parse(raw) as { state?: { corpusId?: string } }).state?.corpusId || '';
+    });
+    expect(persisted, 'the stale corpus id must be replaced in the persisted wizard state').toBe(corpus.corpusId);
+  });
+});

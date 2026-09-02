@@ -137,7 +137,7 @@ export function RerankerConfigSubtab() {
         </div>
       </div>
 
-      <SyntheticCallout context="reranker-config" />
+      <SyntheticCallout context="reranker" />
 
       <div
         style={{

@@ -61,7 +61,7 @@ test.describe('eval data lane surfaces', () => {
   });
 
   test('Reranker config offers the LiteLLM gateway provider with catalog aliases', async ({ page }) => {
-    await page.goto(`rag?subtab=reranker-config&corpus=${encodeURIComponent(CORPUS_ID)}`, { waitUntil: 'domcontentloaded' });
+    await page.goto(`rag?subtab=reranker&corpus=${encodeURIComponent(CORPUS_ID)}`, { waitUntil: 'domcontentloaded' });
     const cloudMode = page.getByTestId('reranker-mode-cloud');
     await expect(cloudMode).toBeVisible({ timeout: 60_000 });
     await cloudMode.click();
