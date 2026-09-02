@@ -697,3 +697,12 @@ carry S numbers; the working scratchpad with every row lives with the session an
   rows; S27 `chat.vllm.default_model` still names an MLX quant and the checked-in config disagrees with the effective
   one on `chat.vllm.enabled`; S28 minor spec/alias footguns. The promoted-lane test's storage assertion was updated for
   the null Neo4j size (384a83b1) before that run can pass again.
+- **Operator raised the OpenRouter key's weekly limit to $100 (11:0x UTC) and authorised the push.** origin/main = eec26d46
+  after a rebase over the daily catalog refresh; LXC100 deployed eec26d46 (ready 96 s). **S18 fixed (eec26d46):** in
+  production mode the config store no longer reconciles `embedding.*` to the deployment globals, so a corpus's saved
+  embedding contract is what every reader sees (the operator's intuitive reading: what you save on a corpus applies to
+  that corpus). Live repro on the deployed API: PATCH deterministic reads back deterministic; force index and a following
+  non-forced rebuild both complete. DeepSeek V4 Flash review of D25 + S18 `gen-1788359641-ARJMX3RzQQxipi77Uorq`
+  (5,377 prompt + 500 completion, $0.00045): **PASS**, no P1; P2 notes were pre-existing style (RuntimeError from the
+  catalog lookup matches the route resolver's own errors; `int(llm_timeout_s)` on an int-typed field) and were not
+  changed.
