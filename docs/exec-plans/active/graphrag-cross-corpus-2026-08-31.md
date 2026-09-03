@@ -984,3 +984,13 @@ carry S numbers; the working scratchpad with every row lives with the session an
   and the JSONL record) is recorded as **accepted risk**: it is a consistency-model redesign, not a defect, and
   the failure it names (messages present, cache or log absent after a store error) degrades to a cache miss and a
   missing training record, never to substituted content. Deploying HEAD after nine review rounds; gate green.
+- **Deployed c4e73ca9 (2026-09-03 ~04:4x UTC): origin/main = LXC100 HEAD = deployment marker; `/api/ready` true after
+  81 s.** Live verification on the deployed API and the public site: `/api/search` on epstein-files-public 200 in
+  1.6 s (10 matches, 117 graph entities); `POST /api/chat/stream` 267 events, no `error` event, `llm_used` true, the
+  exchange committed as `['user','assistant']`; a browser chat on https://ragweld.dtmont.com (GLM 5.3 Flash,
+  "Who did Epstein email about Lawrence Krauss?") answered with citations and Recall hits and the Routing Trace
+  panel followed that conversation's own run. Touched Playwright specs against the deployed API from the overlay:
+  `chat_corpus_scope` + `chat_reliability` 19/19, `curious_user_p1_fixes` M12 1/1. One observation for item E (cost
+  telemetry, parked): the Routing Trace panel decides whether to show the Langfuse link at `done` time, before the
+  v4 events-only ingestion lands — the browser run reported "link withheld" while Langfuse later held its
+  `chat.generation.stream` observation (model/usage/cost still null), and the API probe trace never received one.
