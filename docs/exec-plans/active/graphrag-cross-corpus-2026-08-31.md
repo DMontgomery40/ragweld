@@ -975,3 +975,12 @@ carry S numbers; the working scratchpad with every row lives with the session an
   client-closed streams, cancellation during priming, trace close-out, the write ordering around `done`, and the
   chat suite runs on real retrieval and a real local gateway. Open by design decision: cross-store transactional
   commit (codex's remaining P1). Still not pushed or deployed; LXC100 runs ec71b669.
+- **Decision (operator, 2026-09-03 ~04:2x UTC, delegated to the assistant's judgement): accept the best-effort
+  commit contract and ship.** Contract as shipped: an exchange is committed by the chat handler in one shielded
+  block immediately before it produces `done` — both messages first and synchronously, then provider chaining,
+  the generation cache and the query/source record as best-effort derived records; nothing about the exchange is
+  durable before that block and nothing is written after `done`; retrieval-side state (retrieval cache, Recall
+  priming) is retrieval state. Codex's remaining P1 (a transactional commit across the in-memory store, Postgres
+  and the JSONL record) is recorded as **accepted risk**: it is a consistency-model redesign, not a defect, and
+  the failure it names (messages present, cache or log absent after a store error) degrades to a cache miss and a
+  missing training record, never to substituted content. Deploying HEAD after nine review rounds; gate green.
