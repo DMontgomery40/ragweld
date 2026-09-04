@@ -17,6 +17,7 @@ from server.chat.prompt_budget import (
     image_sizes_from_attachments,
 )
 from server.chat.provider_router import ProviderRoute
+from server.model_policy import ensure_model_allowed
 from server.models.chat_config import ImageAttachment
 from server.models.retrieval import ChunkMatch
 from server.models.tribrid_config_model import (
@@ -336,6 +337,7 @@ async def generate_chat_text(
     the keys the transport owns.
     """
 
+    ensure_model_allowed(route.model)
     prompt = _prompt_with_context(
         system_prompt=system_prompt, context_text=context_text, context_chunks=context_chunks
     )
@@ -467,6 +469,7 @@ async def stream_chat_text(
 ) -> AsyncIterator[str]:
     """Stream OpenAI Chat Completions deltas through LiteLLM."""
 
+    ensure_model_allowed(route.model)
     prompt = _prompt_with_context(
         system_prompt=system_prompt, context_text=context_text, context_chunks=context_chunks
     )

@@ -24,7 +24,7 @@ test.describe('RAG > Reranker status honesty (wave 2b)', () => {
     await patchCorpusConfigSection(request, corpus.corpusId, 'reranking', {
       reranker_mode: 'cloud',
       reranker_cloud_provider: 'litellm',
-      reranker_cloud_model: 'openai.gpt-4.1-nano',
+      reranker_cloud_model: 'openai.gpt-5.6-luna',
     });
   });
 
@@ -42,7 +42,7 @@ test.describe('RAG > Reranker status honesty (wave 2b)', () => {
     // the contradiction the drive caught is gone.
     await expect(status).toContainText('Configured: Cloud');
     await expect(status).toContainText('Active: yes');
-    await expect(page.getByTestId('reranker-active-reason')).toContainText('openai.gpt-4.1-nano');
+    await expect(page.getByTestId('reranker-active-reason')).toContainText('openai.gpt-5.6-luna');
   });
 
   test('S8: the Reranker tab answers to the slug its label suggests, and to the old one', async ({ page }) => {

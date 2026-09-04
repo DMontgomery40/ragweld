@@ -23,6 +23,7 @@ from typing import Any
 import httpx
 
 from server.chat.gateway_runtime import resolve_litellm_api_key, resolve_litellm_base_url
+from server.model_policy import ensure_model_allowed
 from server.models.tribrid_config_model import PromptfooRun, PromptfooRunResult, TriBridConfig
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -96,6 +97,11 @@ def _gateway(cfg: TriBridConfig) -> tuple[str, str]:
 def _aliases(cfg: TriBridConfig) -> tuple[str, str]:
     provider = str(cfg.chat.litellm.default_model or "").strip()
     grader = str(cfg.evaluation.promptfoo_grader_model or "").strip() or provider
+    try:
+        ensure_model_allowed(provider)
+        ensure_model_allowed(grader)
+    except ValueError as exc:
+        raise PromptfooUnavailableError(str(exc)) from exc
     if not provider:
         raise PromptfooUnavailableError("chat.litellm.default_model is empty; no gateway alias to answer prompts")
     return provider, grader
@@ -103,9 +109,9 @@ def _aliases(cfg: TriBridConfig) -> tuple[str, str]:
 
 def preflight(cfg: TriBridConfig) -> str:
     """Verify CLI, runtime, and gateway; return the promptfoo version."""
+    provider, grader = _aliases(cfg)
     version = promptfoo_version()
     base_url, api_key = _gateway(cfg)
-    provider, grader = _aliases(cfg)
     try:
         response = httpx.get(
             f"{base_url.rstrip('/')}/models",
@@ -133,8 +139,8 @@ def _ragweld_api_base() -> str:
 
 
 def _build_config(cfg: TriBridConfig, tests: list[PromptfooTest], *, repo_id: str) -> dict[str, Any]:
-    base_url, _ = _gateway(cfg)
     provider, grader = _aliases(cfg)
+    base_url, _ = _gateway(cfg)
     # The system under test is ragweld's own grounded answer path, not a bare
     # model: each test posts the question to /api/answer for this corpus.
     provider_spec = {

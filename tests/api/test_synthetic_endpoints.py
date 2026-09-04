@@ -239,7 +239,7 @@ async def test_synthetic_start_rejects_direct_provider_model(client) -> None:
             "corpus_id": corpus_id,
             "provider": "grounded_qa",
             "recipe": "eval_dataset",
-            "generator_model": "openai/gpt-4o-mini",
+            "generator_model": "openai/gpt-5.6-luna",
             "judge_model": "litellm:synthetic-quality",
         },
     )

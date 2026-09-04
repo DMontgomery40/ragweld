@@ -10,6 +10,7 @@ from typing import Any
 
 from pydantic import AnyUrl
 
+from server.model_policy import ensure_model_allowed
 from server.models.index import (
     DocumentKind,
     ExtractionMethod,
@@ -102,6 +103,8 @@ def build_figure_pipeline_options(figures: Any, gateway: FigureGateway | None) -
     producing none would hide a misconfigured vision alias behind an index run that
     looks successful, so the missing route raises instead.
     """
+    if gateway is not None:
+        ensure_model_allowed(gateway.model)
     from docling.datamodel.pipeline_options import PdfPipelineOptions, PictureDescriptionApiOptions
 
     from server.indexing.figure_prompts import FIGURE_PROMPTS

@@ -436,7 +436,7 @@ async def test_image_bearing_requests_do_not_stall_the_event_loop() -> None:
             for transport in ("nonstream", "stream"):
                 if transport == "nonstream":
                     result = await generate_chat_text(
-                        route=_route(base_url, model="openai.gpt-4o"),
+                        route=_route(base_url, model="openai.gpt-5.6-luna"),
                         system_prompt="Describe the attached plane-management documents.",
                         user_message="Which aircraft management change do these scans discuss?",
                         images=images,
@@ -450,7 +450,7 @@ async def test_image_bearing_requests_do_not_stall_the_event_loop() -> None:
                     deltas = [
                         delta
                         async for delta in stream_chat_text(
-                            route=_route(base_url, model="openai.gpt-4o"),
+                            route=_route(base_url, model="openai.gpt-5.6-luna"),
                             system_prompt="Describe the attached plane-management documents.",
                             user_message="Which aircraft management change do these scans discuss?",
                             images=images,

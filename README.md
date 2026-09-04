@@ -978,7 +978,7 @@ curl -X POST "http://localhost:58012/api/cost/estimate" \
   -H "Content-Type: application/json" \
   -d '{
     "gen_provider": "openai",
-    "gen_model": "gpt-4o-mini",
+    "gen_model": "openai.gpt-5.6-luna",
     "tokens_in": 2000,
     "tokens_out": 500,
     "embed_provider": "openai",

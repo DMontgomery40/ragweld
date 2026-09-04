@@ -34,6 +34,7 @@ from neo4j_graphrag.llm import OpenAILLM
 from server.gateway_reasoning import reasoning_model_params
 from server.indexing.code_graph import CODE_GRAPH_LANGUAGES, extract_code_graph
 from server.indexing.graph_policy import GraphPolicy
+from server.model_policy import ensure_model_allowed
 from server.models.index import Chunk, GraphResolutionTelemetry
 from server.models.tribrid_config_model import TriBridConfig
 
@@ -433,6 +434,8 @@ def semantic_extraction_llm(
     request in the upstream's own protocol (:func:`reasoning_model_params`); the Indexing
     page showed both, but neither reached the pipeline before (Task 8 drive defect D9).
     """
+    ensure_model_allowed(route_model)
+    ensure_model_allowed(route_upstream)
     if not str(route_model or "").strip():
         raise RuntimeError("GraphRAG semantic extraction requires a resolved model id")
     if not str(route_base_url or "").strip():

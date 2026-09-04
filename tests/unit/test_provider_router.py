@@ -14,6 +14,14 @@ from server.models.chat_config import ChatConfig, LiteLLMConfig
 from server.models.tribrid_config_model import TriBridConfig
 
 
+@pytest.mark.parametrize("alias", ["openai.gpt-4", "openai.gpt-4o-mini", "openai.gpt-4.1-nano"])
+@pytest.mark.parametrize("prefix", ["", "litellm:"])
+def test_blocked_family_refused_before_route_or_credentials(alias: str, prefix: str) -> None:
+    with _environment(LITELLM_API_KEY=None):
+        with pytest.raises(RuntimeError, match="GPT-4-class models are blocked"):
+            select_provider_route(config=_config(), model_override=prefix + alias)
+
+
 @contextmanager
 def _environment(**values: str | None) -> Iterator[None]:
     previous = {key: os.environ.get(key) for key in values}

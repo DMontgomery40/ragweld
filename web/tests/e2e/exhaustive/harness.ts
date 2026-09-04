@@ -335,7 +335,7 @@ function toModelOverrideValue(model: ChatModel): string {
 const PREFERRED_PROVIDER_MODELS: Record<string, string> = {
   openai: 'openai.gpt-5.6-luna',
   // Every non-local alias reaches its upstream via OpenRouter after the cutover.
-  openrouter: 'openai.gpt-4.1-nano',
+  openrouter: 'z-ai.glm-5.3-flash',
   cohere: 'cohere.command-r7b-12-2024',
   ...Object.fromEntries(
     String(process.env.EXHAUSTIVE_PROVIDER_MODELS || '')

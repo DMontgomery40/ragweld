@@ -20,6 +20,14 @@ from scripts.refresh_models_catalog import (
 from server.gateway_catalog import GatewayCatalogError
 
 
+def test_refresh_removes_the_entire_blocked_family_and_keeps_unrelated_fours() -> None:
+    blocked = ["openai/gpt-4", "openai/gpt-4-turbo", "openai/gpt-4o-mini",
+               "openai/gpt-4o-2024-08-06", "openai/gpt-4.1-nano:batch"]
+    allowed = ["openai/gpt-5.6-luna", "anthropic/claude-sonnet-4.5", "meta-llama/llama-4-maverick"]
+    normalized = normalize_openrouter_rows([_feed_row(model) for model in blocked + allowed])
+    assert set(normalized) == set(allowed)
+
+
 def _feed_row(
     model_id: str,
     *,
@@ -227,13 +235,11 @@ def test_refresh_replaces_provider_direct_generation_rows_and_preserves_embeddin
     assert changed is True
     models = [(row["provider"], row["model"]) for row in _rows(merged)]
     assert models == [
-        ("openai", "openai/gpt-4.1"),
         ("openai", "openai/gpt-5.4-mini"),
         ("openai", "text-embedding-3-small"),
         ("ragweld", "mlx-community/Qwen3.8-27B-4bit"),
     ]
-    assert _find(merged, "openai/gpt-4.1")["gateway_alias"] == "openai.gpt-4.1"
-    assert _find(merged, "openai/gpt-4.1")["base_url"] == "https://openrouter.ai/api/v1"
+    assert all("gpt-4" not in row["model"] for row in _rows(merged))
     assert _find(merged, "text-embedding-3-small") == {
         **_embedding_row(),
         "selection_roles": ["embedding_provider"],
@@ -242,9 +248,9 @@ def test_refresh_replaces_provider_direct_generation_rows_and_preserves_embeddin
     }
     assert _find(merged, "mlx-community/Qwen3.8-27B-4bit")["gateway_alias"] == "ragweld-local"
     assert stats.removed_rows == 2
-    assert stats.added_rows == 2
+    assert stats.added_rows == 1
     assert stats.preserved_rows == 2
-    assert stats.gateway_rows == 2
+    assert stats.gateway_rows == 1
     assert merged["last_updated"] == "2026-08-22"
     assert merged["sources"] == [f"{OPENROUTER_SOURCE_PREFIX} (2026-08-22)"]
 

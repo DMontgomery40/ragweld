@@ -2466,8 +2466,8 @@ export interface RerankingConfig {
   reranker_mode?: string; // default: "none"
   /** Cloud reranker provider when mode=cloud: 'litellm' scores candidates listwise through a LiteLLM gateway alias (no local model, no extra credential); 'cohere' calls the Cohere rerank API (COHERE_API_KEY). */
   reranker_cloud_provider?: string; // default: "litellm"
-  /** Cloud reranker model when mode=cloud: a LiteLLM gateway alias for provider 'litellm' (a cheap non-reasoning instruct model is ideal), or a Cohere rerank model id for provider 'cohere'. */
-  reranker_cloud_model?: string; // default: "openai.gpt-4.1-nano"
+  /** Cloud reranker model when mode=cloud: a LiteLLM gateway alias for provider 'litellm' or a Cohere rerank model id for provider 'cohere'. Select an allowed model before enabling cloud reranking. */
+  reranker_cloud_model?: string; // default: ""
   /** Blend weight for reranker scores */
   tribrid_reranker_alpha?: number; // default: 0.7
   /** Number of candidates to rerank (learning mode) */

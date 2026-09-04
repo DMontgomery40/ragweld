@@ -13,6 +13,19 @@ from server.models.runtime_gateway import (
 from server.models.tribrid_config_model import ChatConfig, ModelCatalogEntry, TriBridConfig
 
 
+@pytest.mark.parametrize("alias", [
+    "openai.gpt-4", "openai.gpt-4-turbo", "openai.gpt-4-1106-preview",
+    "openai.gpt-4o", "openai.gpt-4o-mini", "openai.gpt-4o-2024-08-06",
+    "openai.gpt-4o-mini.batch", "openai.gpt-4.1", "openai.gpt-4.1-mini",
+    "openai.gpt-4.1-nano", "openai.gpt-4.1-nano.batch",
+])
+def test_gpt4_family_is_rejected_by_generation_configuration(alias: str) -> None:
+    with pytest.raises(ValidationError, match="GPT-4-class models are blocked"):
+        GenerationConfig(gen_model=alias)
+    with pytest.raises(ValidationError, match="GPT-4-class models are blocked"):
+        LiteLLMConfig(default_model=alias)
+
+
 def test_generation_config_contains_only_gateway_aliases_and_generic_controls() -> None:
     fields = set(GenerationConfig.model_fields)
 

@@ -29,6 +29,7 @@ except ImportError:
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from server.model_policy import ensure_model_allowed
 from server.models.index import ChunkProvenance, IndexStats
 from server.models.runtime_gateway import BenchmarkConfig as BenchmarkConfig
 from server.models.runtime_gateway import ChatModelInfo as ChatModelInfo
@@ -3895,6 +3896,7 @@ class SyntheticRunStartRequest(BaseModel):
     @classmethod
     def _validate_non_blank_models(cls, value: str) -> str:
         model_name = str(value or "").strip()
+        ensure_model_allowed(model_name)
         if not model_name:
             raise ValueError("must not be empty")
         alias = model_name[len("litellm:") :] if model_name.lower().startswith("litellm:") else model_name
@@ -4770,6 +4772,11 @@ class IndexingFiguresConfig(BaseModel):
         default="z-ai.glm-5.3-flash",
         description="Gateway alias used to describe figures; must be vision-capable in the model catalog",
     )
+
+    @field_validator("vision_model")
+    @classmethod
+    def validate_figure_model_policy(cls, value: str) -> str:
+        return validate_litellm_alias(value, allow_empty=False)
     prompt_profile: ChunkFigurePromptProfile = Field(
         default="technical_figure",
         description="Prompt template for figure descriptions: technical figures or engineering schematics",
@@ -5299,12 +5306,18 @@ class RerankingConfig(BaseModel):
     )
 
     reranker_cloud_model: str = Field(
-        default="openai.gpt-4.1-nano",
+        default="",
         description=(
             "Cloud reranker model when mode=cloud: a LiteLLM gateway alias for provider 'litellm' "
-            "(a cheap non-reasoning instruct model is ideal), or a Cohere rerank model id for provider 'cohere'."
+            "or a Cohere rerank model id for provider 'cohere'. Select an allowed model before enabling cloud reranking."
         ),
     )
+
+    @field_validator("reranker_cloud_model")
+    @classmethod
+    def validate_reranker_model_policy(cls, value: str) -> str:
+        ensure_model_allowed(value)
+        return value
 
     tribrid_reranker_alpha: float = Field(
         default=0.7,
@@ -6365,6 +6378,11 @@ class EvaluationConfig(BaseModel):
         default="",
         description="LiteLLM alias used by Promptfoo llm-rubric assertions; empty uses the chat default alias.",
     )
+
+    @field_validator("ragas_judge_model", "promptfoo_grader_model")
+    @classmethod
+    def validate_evaluation_model_policy(cls, value: str) -> str:
+        return validate_litellm_alias(value, allow_empty=True)
 
     ragas_judge_timeout_s: int = Field(
         default=600,

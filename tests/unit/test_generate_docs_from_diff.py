@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -9,6 +10,26 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MODULE_PATH = REPO_ROOT / "scripts" / "docs_ai" / "generate_docs_from_diff.py"
+
+
+@pytest.mark.parametrize("model", ["gpt-4", "openai/gpt-4.1-nano", "openai/gpt-4o-mini", "openai/chatgpt-4o-latest"])
+def test_docs_model_policy_refuses_retired_models_before_credentials(model: str) -> None:
+    # A real child process isolates environment changes. No provider key or usable
+    # endpoint exists, so only the model-policy refusal can satisfy this assertion.
+    env = dict(os.environ)
+    env.update({"DOCS_AUTOPILOT_MODEL": model, "DOCS_AUTOPILOT_API_BASE": "http://127.0.0.1:1/v1", "OPENROUTER_API_KEY": ""})
+    child = subprocess.run(
+        [sys.executable, "-c", "import runpy, sys; m = runpy.run_path(sys.argv[1]); m['call_llm']('test', system_prompt='test')", str(MODULE_PATH)],
+        cwd=REPO_ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=20,
+        check=False,
+    )
+    assert child.returncode != 0
+    assert "GPT-4-class models are blocked" in child.stderr
+    assert "OPENROUTER_API_KEY not set" not in child.stderr
 
 
 def _load_module():

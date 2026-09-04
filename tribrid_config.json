@@ -247,7 +247,7 @@
   "reranking": {
     "reranker_mode": "none",
     "reranker_cloud_provider": "litellm",
-    "reranker_cloud_model": "openai.gpt-4.1-nano",
+    "reranker_cloud_model": "",
     "tribrid_reranker_alpha": 0.7,
     "tribrid_reranker_topn": 50,
     "reranker_cloud_top_n": 50,

@@ -13,6 +13,7 @@ import os
 import pytest
 from pydantic import ValidationError
 
+from server.evaluation import promptfoo_runner, ragas_runner
 from server.evaluation.promptfoo_runner import PromptfooTest, _build_config
 from server.models.tribrid_config_model import EvaluationConfig, TriBridConfig
 
@@ -62,7 +63,7 @@ def test_evaluation_substrate_fields_round_trip_through_the_flat_config() -> Non
     cfg.evaluation.ragas_enabled = True
     cfg.evaluation.ragas_judge_model = "openai.gpt-5.6-luna"
     cfg.evaluation.ragas_metrics = ["faithfulness"]
-    cfg.evaluation.promptfoo_grader_model = "openai.gpt-4.1-nano"
+    cfg.evaluation.promptfoo_grader_model = "openai.gpt-5.4-mini"
     cfg.evaluation.ragas_judge_timeout_s = 120
 
     flat = cfg.to_flat_dict()
@@ -72,5 +73,39 @@ def test_evaluation_substrate_fields_round_trip_through_the_flat_config() -> Non
     assert rehydrated.evaluation.ragas_enabled is True
     assert rehydrated.evaluation.ragas_judge_model == "openai.gpt-5.6-luna"
     assert rehydrated.evaluation.ragas_metrics == ["faithfulness"]
-    assert rehydrated.evaluation.promptfoo_grader_model == "openai.gpt-4.1-nano"
+    assert rehydrated.evaluation.promptfoo_grader_model == "openai.gpt-5.4-mini"
     assert rehydrated.evaluation.ragas_judge_timeout_s == 120
+
+
+@pytest.mark.parametrize("alias", ["openai.gpt-4", "openai.gpt-4.1-nano", "openai.gpt-4o-mini", "openai.chatgpt-4o-latest"])
+@pytest.mark.parametrize("use_default", [False, True])
+def test_ragas_rejects_retired_models_before_preflight(alias: str, use_default: bool) -> None:
+    cfg = TriBridConfig()
+    if use_default:
+        cfg.chat.litellm.default_model = alias
+    else:
+        cfg.evaluation.ragas_judge_model = alias
+    with pytest.raises(ragas_runner.RagasUnavailableError, match="GPT-4-class models are blocked"):
+        ragas_runner.preflight(cfg)
+
+
+@pytest.mark.parametrize("alias", ["openai.gpt-4", "openai.gpt-4.1-nano", "openai.gpt-4o-mini", "openai.chatgpt-4o-latest"])
+@pytest.mark.parametrize("use_default", [False, True])
+def test_promptfoo_rejects_retired_models_before_preflight(alias: str, use_default: bool) -> None:
+    cfg = TriBridConfig()
+    if use_default:
+        cfg.chat.litellm.default_model = alias
+    else:
+        cfg.evaluation.promptfoo_grader_model = alias
+    with pytest.raises(promptfoo_runner.PromptfooUnavailableError, match="GPT-4-class models are blocked"):
+        promptfoo_runner.preflight(cfg)
+    with pytest.raises(promptfoo_runner.PromptfooUnavailableError, match="GPT-4-class models are blocked"):
+        _build_config(cfg, [], repo_id="policy-test")
+
+
+@pytest.mark.parametrize("alias", ["ragweld-local", "openai.gpt-5.4-mini", "openai.gpt-6-astra", "z-ai.glm-5.3-flash"])
+def test_evaluation_alias_policy_preserves_allowed_models(alias: str) -> None:
+    cfg = TriBridConfig()
+    cfg.chat.litellm.default_model = alias
+    assert ragas_runner._judge_alias(cfg) == alias
+    assert promptfoo_runner._aliases(cfg) == (alias, alias)

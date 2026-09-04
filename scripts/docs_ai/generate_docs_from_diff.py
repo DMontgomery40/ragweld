@@ -24,11 +24,16 @@ import os
 import re
 import shlex
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+# Direct script invocation must resolve the same policy as application callers.
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 PROMPT_BASE_PATH = ROOT / "scripts" / "docs_ai" / "docs_prompt_base.md"
 
 PATCH_FILE = ROOT / "mkdocs-docs-llm.patch"
@@ -859,7 +864,12 @@ def call_llm_pages(prompt: str) -> str:
 def call_llm(prompt: str, *, system_prompt: str) -> str:
     import requests
 
+    from server.model_policy import ensure_model_allowed
+
     _maybe_load_dotenv()
+
+    model = os.getenv("DOCS_AUTOPILOT_MODEL", DEFAULT_MODEL)
+    ensure_model_allowed(model)
 
     api_key = (os.getenv("OPENROUTER_API_KEY") or "").strip().strip('"').strip("'")
     if not api_key:
@@ -868,7 +878,6 @@ def call_llm(prompt: str, *, system_prompt: str) -> str:
             "gh secret set OPENROUTER_API_KEY --repo <owner>/<repo>"
         )
 
-    model = os.getenv("DOCS_AUTOPILOT_MODEL", DEFAULT_MODEL)
     url = (os.getenv("DOCS_AUTOPILOT_API_BASE", DEFAULT_API_BASE).rstrip("/") + "/responses")
     max_output_tokens = int(os.getenv("DOCS_AUTOPILOT_MAX_OUTPUT_TOKENS", str(DEFAULT_MAX_OUTPUT_TOKENS)))
 

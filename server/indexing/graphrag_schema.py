@@ -20,6 +20,7 @@ from neo4j_graphrag.components.schema import (
 from neo4j_graphrag.llm import OpenAILLM
 
 from server.gateway_reasoning import reasoning_model_params
+from server.model_policy import ensure_model_allowed
 from server.models.index import Chunk, GraphSchemaProposal, GraphSchemaSample
 
 _GRAPH_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
@@ -223,6 +224,8 @@ async def derive_graph_schema_proposal(
     reasoning_effort: str,
     input_fingerprint: str,
 ) -> GraphSchemaProposal:
+    for identifier in (model_alias, route_model, route_upstream):
+        ensure_model_allowed(identifier)
     sample = select_schema_chunks(chunks, corpus_id=corpus_id)
     if not sample:
         raise ValueError("graph schema proposal requires at least one nonempty chunk")

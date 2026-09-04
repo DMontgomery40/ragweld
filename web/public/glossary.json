@@ -1139,7 +1139,7 @@
     {
       "term": "Cloud Model",
       "key": "RERANKER_CLOUD_MODEL",
-      "definition": "The model the cloud reranker calls: a LiteLLM gateway alias for provider `litellm` (a cheap non-reasoning instruct model such as openai.gpt-4.1-nano keeps the listwise scoring fast and deterministic), or a Cohere rerank model id for provider `cohere`. This parameter directly controls the quality/latency/cost tradeoff of the rerank stage; the scores it returns are min-max normalized and blended with the fusion score by the reranker alpha.",
+      "definition": "The model the cloud reranker calls: a LiteLLM gateway alias for provider `litellm` (select an allowed catalog model and verify listwise scoring quality and latency), or a Cohere rerank model id for provider `cohere`. This parameter directly controls the quality/latency/cost tradeoff of the rerank stage; the scores it returns are min-max normalized and blended with the fusion score by the reranker alpha.",
       "category": "reranking",
       "related": [],
       "links": [
