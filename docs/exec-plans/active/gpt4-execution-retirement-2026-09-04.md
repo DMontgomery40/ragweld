@@ -1,7 +1,7 @@
 # GPT-4 execution retirement and resumed Ragweld audit
 
 Date: 2026-09-04
-Status: source verified; deployment pending
+Status: GPT-4 execution block deployed and verified; paid Apollo acceptance pending
 
 ## Operator decision
 
@@ -106,10 +106,30 @@ Do not declare these fixed by the execution-policy change:
   a best-effort derived-record contract; it is not an unimplemented transactional
   guarantee to claim as done or silently reintroduce into this slice.
 
-## Pending closeout
+## Deployment and live acceptance
 
-Finish deployed browser acceptance,
-deployment, gateway route inventory and blocked-request proof. A bounded paid
-NASA/Luna reranker probe was rejected by automatic approval review as private
-corpus transmission; explicit operator approval was requested. Do not send those
-excerpts unless approval arrives.
+- Implementation commit: `3ba1a00d9778ba29b9b0e3d69697da801a9734b6`.
+  The clean LXC100 checkout fast-forwarded via a verified Git bundle. The
+  production frontend built successfully in 7.47 seconds. All four corpora were
+  complete before the service restart.
+- Production readiness is true with Postgres, Neo4j and authenticated LiteLLM
+  healthy. The running gateway advertises 385 aliases, zero GPT-4-family routes,
+  and the allowed Luna replacement.
+- All five live config scopes pass the model policy. Deployed API requests
+  selecting GPT-4, GPT-4o-mini, GPT-4.1-nano and GPT-4.5-preview return HTTP 422
+  with the policy message. The global config is identical before/after all four
+  rejected requests; no provider call is made.
+- The existing signed-in browser session opened the deployed NASA Reranker
+  page and its model menu. It shows Luna, active cloud reranking, healthy status,
+  no GPT-4 chat options and no unsaved changes. The remote five-test browser
+  suite separately proves explicit selection/save/reload and provider clearing.
+
+## Remaining acceptance limit
+
+A bounded paid NASA/Luna reranker probe was rejected by automatic approval
+review as private corpus transmission; explicit operator approval was requested.
+The two Apollo schema tests were therefore excluded from the final full run.
+Do not send those excerpts unless approval arrives. The successful paid Luna
+probe used only assistant-written public-knowledge sentences, with no corpus
+data. NASA-specific reranker quality and the two Apollo checks remain unverified.
+The separate Fable follow-ups above are still open.
