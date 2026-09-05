@@ -229,10 +229,14 @@ def gateway_rows_by_alias(catalog: dict[str, Any]) -> dict[str, GatewayRow]:
     return {row.alias: row for row in gateway_rows(catalog)}
 
 
-def _litellm_params(row: GatewayRow) -> dict[str, str]:
+def _litellm_params(row: GatewayRow) -> dict[str, str | int]:
+    # Native deployment values can override a request's num_retries=0.
+    params: dict[str, str | int] = {"model": row.upstream, "num_retries": 0, "max_retries": 0}
     if row.upstream.startswith(OPENROUTER_UPSTREAM_PREFIX):
-        return {"model": row.upstream, "api_key": OPENROUTER_API_KEY_REF}
-    return {"model": row.upstream, "api_base": str(row.base_url), "api_key": "none"}
+        params["api_key"] = OPENROUTER_API_KEY_REF
+    else:
+        params.update({"api_base": str(row.base_url), "api_key": "none"})
+    return params
 
 
 def build_model_list(catalog: dict[str, Any]) -> list[dict[str, Any]]:
@@ -247,17 +251,35 @@ def build_litellm_config(catalog: dict[str, Any]) -> dict[str, Any]:
     return {
         "model_list": build_model_list(catalog),
         "litellm_settings": {
+            # Native embeddings uses max_retries or DEFAULT_MAX_RETRIES, so
+            # request/deployment zero alone still permits inner SDK retries.
+            "DEFAULT_MAX_RETRIES": 0,
             "num_retries": 0,
             "fallbacks": [],
             "context_window_fallbacks": [],
-            "callbacks": ["prometheus"],
+            "callbacks": ["prometheus", "langfuse_otel"],
+            # Only the bounded execution lane belongs in metric labels; native
+            # spend rows and traces retain run/corpus identity independently.
+            "custom_prometheus_metadata_labels": ["metadata.lane"],
+            "turn_off_message_logging": True,
             "require_auth_for_metrics_endpoint": False,
             "include_cost_in_streaming_usage": True,
         },
-        "router_settings": {"num_retries": 0},
+        "router_settings": {
+            "num_retries": 0,
+            "default_fallbacks": [],
+            "retry_policy": None,
+            "model_group_retry_policy": {},
+            "fallbacks": [],
+            "context_window_fallbacks": [],
+            "content_policy_fallbacks": [],
+            "enable_weighted_failover": False,
+        },
         "general_settings": {
             "master_key": "os.environ/LITELLM_MASTER_KEY",
             "store_model_in_db": False,
+            "store_prompts_in_spend_logs": False,
+            "disable_spend_logs": False,
         },
     }
 

@@ -9,8 +9,11 @@ were indistinguishable in the ops strip.
 
 from __future__ import annotations
 
+import asyncio
+import threading
 import uuid
 from collections.abc import Generator
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -18,7 +21,11 @@ from httpx import AsyncClient
 
 import server.api.index as index_api
 from server.db.postgres import PostgresClient
+from server.indexing.accounting import IndexAccountingOwner
+from server.indexing.generations import GENERATION_META_KEY, GenerationManifest
+from server.indexing.run_records import write_run_summary
 from server.models.index import IndexRunSummary
+from server.models.run_accounting import IndexCostEstimateSnapshot
 
 pytestmark = pytest.mark.requires_postgres
 
@@ -220,32 +227,157 @@ async def test_a_completed_run_whose_chunks_are_gone_is_not_reported_as_complete
         await _drop(corpus_id)
 
 
+def _estimate_snapshot(amount: float) -> IndexCostEstimateSnapshot:
+    return IndexCostEstimateSnapshot(
+        captured_at=datetime.now(UTC), embedding_usd=amount,
+        semantic_kg_usd=amount * 2, figure_description_usd=amount * 3,
+        total_usd=amount * 6, estimated_chunks=3, estimated_tokens=17,
+        detail="Synthetic immutable pre-run quote",
+    )
+
+
 @pytest.mark.asyncio
-async def test_deleting_the_index_discards_the_persisted_runs(client: AsyncClient) -> None:
-    """DELETE must not leave run summaries describing an index that no longer exists."""
+@pytest.mark.requires_neo4j
+@pytest.mark.requires_qdrant
+@pytest.mark.parametrize("state", ["complete", "error", "cancelled", "held"])
+async def test_deleting_the_index_preserves_accounting_and_late_worker_history(
+    client: AsyncClient, state: str,
+) -> None:
+    """Deleting stores never erases a paid attempt's census, quote or event history."""
     corpus_id = f"pytest_dash_status_{uuid.uuid4().hex[:10]}"
     await _register(corpus_id)
+    run_id = uuid.uuid4().hex
+    path = index_api._run_summary_path(corpus_id, run_id)
+    status = "cancelled" if state == "held" else state
+    summary = _summary(corpus_id, run_id, status=status)
+    owner = IndexAccountingOwner(
+        path, summary, config_json='{"synthetic": true}', models={"semantic_kg": "openai.gpt-5.6-sol"},
+        coverage_complete=True, coverage_notes=[], estimate=_estimate_snapshot(0.25),
+    )
+    release = threading.Event()
+    worker_started = threading.Event()
+    executor = ThreadPoolExecutor(max_workers=1)
+    worker = None
     try:
-        index_api._persist_run_summary(_summary(corpus_id, "run_before_delete"))
-        index_api._append_run_event(corpus_id, "run_before_delete", {"type": "log", "message": "hi"})
-        # Summaries and events are written by a background writer thread; the endpoint flushes
-        # it, so read through the API before asserting anything about the directory.
-        latest = await client.get(f"/api/index/{corpus_id}/runs/latest")
-        assert latest.status_code == 200
-        runs_dir = index_api._repo_runs_dir(corpus_id)
-        assert runs_dir.exists(), "precondition: the run directory is on disk"
+        owner.progress(files=1, chunks=3, tokens=17)
+        if state == "held":
+            lease = owner.scopes["semantic_kg"].producer_started()
+
+            def retained_worker() -> None:
+                worker_started.set()
+                try:
+                    if not release.wait(60):
+                        raise TimeoutError("test did not release its retained producer")
+                finally:
+                    lease.close()
+
+            worker = executor.submit(retained_worker)
+            assert await asyncio.to_thread(worker_started.wait, 5)
+        owner.finish(interrupted=status != "complete")
+        index_api._append_run_event(corpus_id, run_id, {"type": "log", "message": "retained attempt"})
+        await index_api._flush_run_events()
+        before = IndexRunSummary.model_validate_json(path.read_text())
+        assert before.accounting is not None
+        before_census = before.accounting.census["semantic_kg"]
+        assert before_census.active_producers == int(state == "held")
+        assert before_census.state == ("open" if state == "held" else "closed")
 
         deleted = await client.delete(f"/api/index/{corpus_id}")
         assert deleted.status_code == 200, deleted.text
+        exact = await client.get(f"/api/index/{corpus_id}/runs/{run_id}")
+        assert exact.status_code == 200, exact.text
+        saved = IndexRunSummary.model_validate(exact.json())
+        assert saved == before
+        history = await client.get(f"/api/index/{corpus_id}/runs/{run_id}/events")
+        assert history.status_code == 200 and history.json()["total"] == 1
+        assert history.json()["events"][0]["message"] == "retained attempt"
 
-        assert not runs_dir.exists(), "the run directory outlived the index it describes"
-        gone = await client.get(f"/api/index/{corpus_id}/runs/latest")
-        assert gone.status_code == 404
-
+        if worker is not None:
+            release.set()
+            await asyncio.wrap_future(worker)
+            closed = await client.get(f"/api/index/{corpus_id}/runs/{run_id}")
+            assert closed.status_code == 200, closed.text
+            final = IndexRunSummary.model_validate(closed.json())
+            assert final.accounting is not None
+            census = final.accounting.census["semantic_kg"]
+            assert census.state == "closed" and census.active_producers == census.inflight == 0
+            assert census.revision > before_census.revision
+            assert final.accounting.estimate == before.accounting.estimate
+            assert final.accounting.processed_tokens == 17
+            assert final.status == status
         response = await client.get("/api/index/status", params={"corpus_id": corpus_id})
-        assert response.status_code == 200
-        assert "ready to index" in " ".join(response.json()["lines"]).lower()
+        assert response.status_code == 200, response.text
+        costs = response.json()["metadata"]["costs"]
+        assert costs["accounting"] is None and costs["total_cost"] is None
     finally:
+        release.set()
+        if worker is not None:
+            await asyncio.wrap_future(worker)
+        executor.shutdown(wait=True)
+        owner.finish(interrupted=True)
+        await _drop(corpus_id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("newer_kind,newer_status", [
+    ("index", "error"), ("index", "indexing"), ("schema_proposal", "complete"),
+])
+async def test_dashboard_costs_name_the_manifest_run_and_never_reprice_history(
+    client: AsyncClient, newer_kind: str, newer_status: str,
+) -> None:
+    corpus_id = f"pytest_dash_cost_{uuid.uuid4().hex[:10]}"
+    await _register(corpus_id)
+    pg = PostgresClient("postgresql://ignored")
+    await pg.connect()
+    try:
+        await _seed_chunk(corpus_id)
+        active_id = uuid.uuid4().hex
+        active = _summary(corpus_id, active_id)
+        owner = IndexAccountingOwner(
+            index_api._run_summary_path(corpus_id, active_id), active,
+            config_json='{"price_snapshot": "original"}', models={}, coverage_complete=True,
+            coverage_notes=[], estimate=_estimate_snapshot(1.25),
+        )
+        owner.finish()
+        expected = IndexRunSummary.model_validate_json(owner.path.read_text()).accounting
+        assert expected is not None
+        manifest = GenerationManifest(run_id=active_id, promoted_at=datetime.now(UTC))
+        await pg.update_corpus_meta(corpus_id, {GENERATION_META_KEY: manifest.model_dump(mode="json")})
+        assert (await pg.get_corpus(corpus_id))["meta"][GENERATION_META_KEY]["run_id"] == active_id
+        newer_id = uuid.uuid4().hex
+        newer = _summary(corpus_id, newer_id, run_kind=newer_kind, status=newer_status,
+                         started_at=datetime.now(UTC), completed_at=None)
+        competing = IndexAccountingOwner(
+            index_api._run_summary_path(corpus_id, newer_id), newer,
+            config_json='{"price_snapshot": "new"}', models={}, coverage_complete=True,
+            coverage_notes=[], estimate=_estimate_snapshot(99),
+        )
+        competing.finish()
+        # A later status write must retain the active run's immutable cost snapshot.
+        write_run_summary(owner.path, active)
+        status = await client.get("/api/index/status", params={"corpus_id": corpus_id})
+        assert status.status_code == 200, status.text
+        costs = status.json()["metadata"]["costs"]
+        assert costs["accounting"] == expected.model_dump(mode="json")
+        assert costs["embedding_cost"] == 1.25
+        assert costs["semantic_kg_cost"] == 2.5
+        assert costs["figure_description_cost"] == 3.75
+        assert costs["total_cost"] == 7.5
+
+        # History and even old chunks do not imply a currently promoted generation.
+        await pg.update_corpus_meta(corpus_id, {GENERATION_META_KEY: None})
+        without_manifest = await client.get("/api/index/status", params={"corpus_id": corpus_id})
+        assert without_manifest.status_code == 200, without_manifest.text
+        costs = without_manifest.json()["metadata"]["costs"]
+        assert costs["accounting"] is None
+        assert all(costs[key] is None for key in (
+            "embedding_cost", "semantic_kg_cost", "figure_description_cost", "total_cost",
+        ))
+        for run_id in (active_id, newer_id):
+            historical = await client.get(f"/api/index/{corpus_id}/runs/{run_id}")
+            assert historical.status_code == 200 and historical.json()["accounting"] is not None
+    finally:
+        await pg.disconnect()
         await _drop(corpus_id)
 
 

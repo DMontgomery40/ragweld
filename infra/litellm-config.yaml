@@ -5,1578 +5,2374 @@ model_list:
 - model_name: ragweld-local
   litellm_params:
     model: openai/ragweld-local
+    num_retries: 0
+    max_retries: 0
     api_base: http://host.docker.internal:58080/v1
     api_key: none
 - model_name: aion-labs.aion-2.0
   litellm_params:
     model: openrouter/aion-labs/aion-2.0
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: aion-labs.aion-3.0
   litellm_params:
     model: openrouter/aion-labs/aion-3.0
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: aion-labs.aion-3.0-mini
   litellm_params:
     model: openrouter/aion-labs/aion-3.0-mini
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: aion-labs.aion-rp-llama-3.1-8b
   litellm_params:
     model: openrouter/aion-labs/aion-rp-llama-3.1-8b
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: amazon.nova-2-lite-v1
   litellm_params:
     model: openrouter/amazon/nova-2-lite-v1
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: amazon.nova-lite-v1
   litellm_params:
     model: openrouter/amazon/nova-lite-v1
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: amazon.nova-micro-v1
   litellm_params:
     model: openrouter/amazon/nova-micro-v1
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: amazon.nova-premier-v1
   litellm_params:
     model: openrouter/amazon/nova-premier-v1
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: amazon.nova-pro-v1
   litellm_params:
     model: openrouter/amazon/nova-pro-v1
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: anthracite-org.magnum-v4-72b
   litellm_params:
     model: openrouter/anthracite-org/magnum-v4-72b
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: anthropic.claude-3-haiku
   litellm_params:
     model: openrouter/anthropic/claude-3-haiku
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: anthropic.claude-fable-5
   litellm_params:
     model: openrouter/anthropic/claude-fable-5
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: anthropic.claude-fable-5.1
   litellm_params:
     model: openrouter/anthropic/claude-fable-5.1
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: anthropic.claude-fable-5.1.batch
   litellm_params:
     model: openrouter/anthropic/claude-fable-5.1:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: anthropic.claude-fable-5.batch
   litellm_params:
     model: openrouter/anthropic/claude-fable-5:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: anthropic.claude-haiku-4.5
   litellm_params:
     model: openrouter/anthropic/claude-haiku-4.5
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: anthropic.claude-haiku-4.5.batch
   litellm_params:
     model: openrouter/anthropic/claude-haiku-4.5:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: anthropic.claude-opus-4
   litellm_params:
     model: openrouter/anthropic/claude-opus-4
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: anthropic.claude-opus-4.1
   litellm_params:
     model: openrouter/anthropic/claude-opus-4.1
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: anthropic.claude-opus-4.1.batch
   litellm_params:
     model: openrouter/anthropic/claude-opus-4.1:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: anthropic.claude-opus-4.5
   litellm_params:
     model: openrouter/anthropic/claude-opus-4.5
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: anthropic.claude-opus-4.5.batch
   litellm_params:
     model: openrouter/anthropic/claude-opus-4.5:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: anthropic.claude-opus-4.6
   litellm_params:
     model: openrouter/anthropic/claude-opus-4.6
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: anthropic.claude-opus-4.6.batch
   litellm_params:
     model: openrouter/anthropic/claude-opus-4.6:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: anthropic.claude-opus-4.7
   litellm_params:
     model: openrouter/anthropic/claude-opus-4.7
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: anthropic.claude-opus-4.7.batch
   litellm_params:
     model: openrouter/anthropic/claude-opus-4.7:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: anthropic.claude-opus-4.8
   litellm_params:
     model: openrouter/anthropic/claude-opus-4.8
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: anthropic.claude-opus-4.8.batch
   litellm_params:
     model: openrouter/anthropic/claude-opus-4.8:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: anthropic.claude-opus-5
   litellm_params:
     model: openrouter/anthropic/claude-opus-5
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: anthropic.claude-opus-5.batch
   litellm_params:
     model: openrouter/anthropic/claude-opus-5:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: anthropic.claude-sonnet-4
   litellm_params:
     model: openrouter/anthropic/claude-sonnet-4
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: anthropic.claude-sonnet-4.5
   litellm_params:
     model: openrouter/anthropic/claude-sonnet-4.5
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: anthropic.claude-sonnet-4.5.batch
   litellm_params:
     model: openrouter/anthropic/claude-sonnet-4.5:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: anthropic.claude-sonnet-4.6
   litellm_params:
     model: openrouter/anthropic/claude-sonnet-4.6
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: anthropic.claude-sonnet-4.6.batch
   litellm_params:
     model: openrouter/anthropic/claude-sonnet-4.6:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: anthropic.claude-sonnet-5
   litellm_params:
     model: openrouter/anthropic/claude-sonnet-5
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: anthropic.claude-sonnet-5.batch
   litellm_params:
     model: openrouter/anthropic/claude-sonnet-5:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: arcee-ai.trinity-large-thinking
   litellm_params:
     model: openrouter/arcee-ai/trinity-large-thinking
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: baidu.ernie-4.5-vl-424b-a47b
   litellm_params:
     model: openrouter/baidu/ernie-4.5-vl-424b-a47b
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: bytedance-seed.seed-1.6
   litellm_params:
     model: openrouter/bytedance-seed/seed-1.6
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: bytedance-seed.seed-1.6-flash
   litellm_params:
     model: openrouter/bytedance-seed/seed-1.6-flash
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: bytedance-seed.seed-2-1-turbo
   litellm_params:
     model: openrouter/bytedance-seed/seed-2-1-turbo
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: bytedance-seed.seed-2.0-code
   litellm_params:
     model: openrouter/bytedance-seed/seed-2.0-code
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: bytedance-seed.seed-2.0-lite
   litellm_params:
     model: openrouter/bytedance-seed/seed-2.0-lite
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: bytedance-seed.seed-2.0-mini
   litellm_params:
     model: openrouter/bytedance-seed/seed-2.0-mini
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: bytedance.ui-tars-1.5-7b
   litellm_params:
     model: openrouter/bytedance/ui-tars-1.5-7b
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: cognitivecomputations.dolphin-mistral-24b-venice-edition
   litellm_params:
     model: openrouter/cognitivecomputations/dolphin-mistral-24b-venice-edition
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: cohere.command-a
   litellm_params:
     model: openrouter/cohere/command-a
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: cohere.command-r-08-2024
   litellm_params:
     model: openrouter/cohere/command-r-08-2024
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: cohere.command-r-plus-08-2024
   litellm_params:
     model: openrouter/cohere/command-r-plus-08-2024
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: cohere.command-r7b-12-2024
   litellm_params:
     model: openrouter/cohere/command-r7b-12-2024
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: cohere.north-mini-code.free
   litellm_params:
     model: openrouter/cohere/north-mini-code:free
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: deepseek.deepseek-chat
   litellm_params:
     model: openrouter/deepseek/deepseek-chat
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: deepseek.deepseek-chat-v3-0324
   litellm_params:
     model: openrouter/deepseek/deepseek-chat-v3-0324
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: deepseek.deepseek-chat-v3.1
   litellm_params:
     model: openrouter/deepseek/deepseek-chat-v3.1
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: deepseek.deepseek-r1
   litellm_params:
     model: openrouter/deepseek/deepseek-r1
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: deepseek.deepseek-r1-0528
   litellm_params:
     model: openrouter/deepseek/deepseek-r1-0528
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: deepseek.deepseek-r1-distill-llama-70b
   litellm_params:
     model: openrouter/deepseek/deepseek-r1-distill-llama-70b
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: deepseek.deepseek-v3.1-terminus
   litellm_params:
     model: openrouter/deepseek/deepseek-v3.1-terminus
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: deepseek.deepseek-v3.2
   litellm_params:
     model: openrouter/deepseek/deepseek-v3.2
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: deepseek.deepseek-v3.2-exp
   litellm_params:
     model: openrouter/deepseek/deepseek-v3.2-exp
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: deepseek.deepseek-v4-flash
   litellm_params:
     model: openrouter/deepseek/deepseek-v4-flash
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: deepseek.deepseek-v4-flash-0731
   litellm_params:
     model: openrouter/deepseek/deepseek-v4-flash-0731
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: deepseek.deepseek-v4-flash-0731.batch
   litellm_params:
     model: openrouter/deepseek/deepseek-v4-flash-0731:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: deepseek.deepseek-v4-flash-vision-exp
   litellm_params:
     model: openrouter/deepseek/deepseek-v4-flash-vision-exp
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: deepseek.deepseek-v4-pro
   litellm_params:
     model: openrouter/deepseek/deepseek-v4-pro
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: deepseek.deepseek-v4-pro-0813
   litellm_params:
     model: openrouter/deepseek/deepseek-v4-pro-0813
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: deepseek.deepseek-v4-pro-0813.batch
   litellm_params:
     model: openrouter/deepseek/deepseek-v4-pro-0813:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: dots-studio.dots-3-note-preview.free
   litellm_params:
     model: openrouter/dots-studio/dots-3-note-preview:free
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.gemini-2.5-flash
   litellm_params:
     model: openrouter/google/gemini-2.5-flash
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.gemini-2.5-flash-image
   litellm_params:
     model: openrouter/google/gemini-2.5-flash-image
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.gemini-2.5-flash-lite
   litellm_params:
     model: openrouter/google/gemini-2.5-flash-lite
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.gemini-2.5-flash-lite.batch
   litellm_params:
     model: openrouter/google/gemini-2.5-flash-lite:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.gemini-2.5-flash.batch
   litellm_params:
     model: openrouter/google/gemini-2.5-flash:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.gemini-2.5-pro
   litellm_params:
     model: openrouter/google/gemini-2.5-pro
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.gemini-2.5-pro-preview
   litellm_params:
     model: openrouter/google/gemini-2.5-pro-preview
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.gemini-2.5-pro-preview-05-06
   litellm_params:
     model: openrouter/google/gemini-2.5-pro-preview-05-06
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.gemini-2.5-pro.batch
   litellm_params:
     model: openrouter/google/gemini-2.5-pro:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.gemini-3-flash-preview
   litellm_params:
     model: openrouter/google/gemini-3-flash-preview
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.gemini-3-flash-preview.batch
   litellm_params:
     model: openrouter/google/gemini-3-flash-preview:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.gemini-3-pro-image
   litellm_params:
     model: openrouter/google/gemini-3-pro-image
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.gemini-3-pro-image-preview
   litellm_params:
     model: openrouter/google/gemini-3-pro-image-preview
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.gemini-3.1-flash-image
   litellm_params:
     model: openrouter/google/gemini-3.1-flash-image
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.gemini-3.1-flash-image-preview
   litellm_params:
     model: openrouter/google/gemini-3.1-flash-image-preview
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.gemini-3.1-flash-lite
   litellm_params:
     model: openrouter/google/gemini-3.1-flash-lite
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.gemini-3.1-flash-lite-image
   litellm_params:
     model: openrouter/google/gemini-3.1-flash-lite-image
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.gemini-3.1-flash-lite-preview
   litellm_params:
     model: openrouter/google/gemini-3.1-flash-lite-preview
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.gemini-3.1-flash-lite.batch
   litellm_params:
     model: openrouter/google/gemini-3.1-flash-lite:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.gemini-3.1-pro-preview
   litellm_params:
     model: openrouter/google/gemini-3.1-pro-preview
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.gemini-3.1-pro-preview-customtools
   litellm_params:
     model: openrouter/google/gemini-3.1-pro-preview-customtools
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.gemini-3.1-pro-preview.batch
   litellm_params:
     model: openrouter/google/gemini-3.1-pro-preview:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.gemini-3.5-flash
   litellm_params:
     model: openrouter/google/gemini-3.5-flash
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.gemini-3.5-flash-lite
   litellm_params:
     model: openrouter/google/gemini-3.5-flash-lite
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.gemini-3.5-flash-lite.batch
   litellm_params:
     model: openrouter/google/gemini-3.5-flash-lite:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.gemini-3.5-flash.batch
   litellm_params:
     model: openrouter/google/gemini-3.5-flash:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.gemini-3.6-flash
   litellm_params:
     model: openrouter/google/gemini-3.6-flash
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.gemini-3.6-flash.batch
   litellm_params:
     model: openrouter/google/gemini-3.6-flash:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.gemini-3.7-flash
   litellm_params:
     model: openrouter/google/gemini-3.7-flash
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.gemini-3.7-flash.batch
   litellm_params:
     model: openrouter/google/gemini-3.7-flash:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.gemini-3.8-flash
   litellm_params:
     model: openrouter/google/gemini-3.8-flash
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.gemini-3.8-flash.batch
   litellm_params:
     model: openrouter/google/gemini-3.8-flash:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.gemma-2-27b-it
   litellm_params:
     model: openrouter/google/gemma-2-27b-it
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.gemma-3-12b-it
   litellm_params:
     model: openrouter/google/gemma-3-12b-it
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.gemma-3-27b-it
   litellm_params:
     model: openrouter/google/gemma-3-27b-it
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.gemma-3-4b-it
   litellm_params:
     model: openrouter/google/gemma-3-4b-it
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.gemma-4-26b-a4b-it
   litellm_params:
     model: openrouter/google/gemma-4-26b-a4b-it
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.gemma-4-26b-a4b-it.free
   litellm_params:
     model: openrouter/google/gemma-4-26b-a4b-it:free
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.gemma-4-31b-it
   litellm_params:
     model: openrouter/google/gemma-4-31b-it
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.gemma-4-31b-it.batch
   litellm_params:
     model: openrouter/google/gemma-4-31b-it:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.gemma-4-31b-it.free
   litellm_params:
     model: openrouter/google/gemma-4-31b-it:free
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.lyria-3-clip-preview
   litellm_params:
     model: openrouter/google/lyria-3-clip-preview
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.lyria-3-pro-preview
   litellm_params:
     model: openrouter/google/lyria-3-pro-preview
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: gryphe.mythomax-l2-13b
   litellm_params:
     model: openrouter/gryphe/mythomax-l2-13b
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: ibm-granite.granite-4.0-h-micro
   litellm_params:
     model: openrouter/ibm-granite/granite-4.0-h-micro
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: ibm-granite.granite-4.1-8b
   litellm_params:
     model: openrouter/ibm-granite/granite-4.1-8b
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: ibm-granite.granite-4.2-8b
   litellm_params:
     model: openrouter/ibm-granite/granite-4.2-8b
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: inception.mercury-2
   litellm_params:
     model: openrouter/inception/mercury-2
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: inception.mercury-2.5-preview
   litellm_params:
     model: openrouter/inception/mercury-2.5-preview
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: inclusionai.ling-3.0-flash
   litellm_params:
     model: openrouter/inclusionai/ling-3.0-flash
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: inclusionai.ling-3.0-flash-fin
   litellm_params:
     model: openrouter/inclusionai/ling-3.0-flash-fin
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: inclusionai.ling-3.0-flash-fin.free
   litellm_params:
     model: openrouter/inclusionai/ling-3.0-flash-fin:free
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: kwaipilot.kat-coder-pro-v2
   litellm_params:
     model: openrouter/kwaipilot/kat-coder-pro-v2
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: kwaipilot.kat-coder-pro-v2.5
   litellm_params:
     model: openrouter/kwaipilot/kat-coder-pro-v2.5
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: liquid.lfm-2.5-2.6b.free
   litellm_params:
     model: openrouter/liquid/lfm-2.5-2.6b:free
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: mancer.weaver
   litellm_params:
     model: openrouter/mancer/weaver
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: meituan.longcat-2.0
   litellm_params:
     model: openrouter/meituan/longcat-2.0
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: meta-llama.llama-3.1-70b-instruct
   litellm_params:
     model: openrouter/meta-llama/llama-3.1-70b-instruct
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: meta-llama.llama-3.1-8b-instruct
   litellm_params:
     model: openrouter/meta-llama/llama-3.1-8b-instruct
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: meta-llama.llama-3.2-1b-instruct
   litellm_params:
     model: openrouter/meta-llama/llama-3.2-1b-instruct
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: meta-llama.llama-3.2-3b-instruct
   litellm_params:
     model: openrouter/meta-llama/llama-3.2-3b-instruct
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: meta-llama.llama-3.3-70b-instruct
   litellm_params:
     model: openrouter/meta-llama/llama-3.3-70b-instruct
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: meta-llama.llama-4-maverick
   litellm_params:
     model: openrouter/meta-llama/llama-4-maverick
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: meta-llama.llama-4-scout
   litellm_params:
     model: openrouter/meta-llama/llama-4-scout
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: meta-llama.llama-guard-4-12b
   litellm_params:
     model: openrouter/meta-llama/llama-guard-4-12b
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: meta.muse-glimmer-30b
   litellm_params:
     model: openrouter/meta/muse-glimmer-30b
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: meta.muse-glimmer-30b.batch
   litellm_params:
     model: openrouter/meta/muse-glimmer-30b:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: meta.muse-spark-1.1
   litellm_params:
     model: openrouter/meta/muse-spark-1.1
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: meta.muse-spark-1.2
   litellm_params:
     model: openrouter/meta/muse-spark-1.2
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: meta.muse-spark-1.2-contributor
   litellm_params:
     model: openrouter/meta/muse-spark-1.2-contributor
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: meta.muse-spark-1.3
   litellm_params:
     model: openrouter/meta/muse-spark-1.3
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: meta.muse-spark-1.3-contributor
   litellm_params:
     model: openrouter/meta/muse-spark-1.3-contributor
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: microsoft.phi-4
   litellm_params:
     model: openrouter/microsoft/phi-4
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: microsoft.wizardlm-2-8x22b
   litellm_params:
     model: openrouter/microsoft/wizardlm-2-8x22b
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: minimax.minimax-01
   litellm_params:
     model: openrouter/minimax/minimax-01
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: minimax.minimax-m1
   litellm_params:
     model: openrouter/minimax/minimax-m1
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: minimax.minimax-m2
   litellm_params:
     model: openrouter/minimax/minimax-m2
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: minimax.minimax-m2-her
   litellm_params:
     model: openrouter/minimax/minimax-m2-her
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: minimax.minimax-m2.1
   litellm_params:
     model: openrouter/minimax/minimax-m2.1
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: minimax.minimax-m2.5
   litellm_params:
     model: openrouter/minimax/minimax-m2.5
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: minimax.minimax-m2.7
   litellm_params:
     model: openrouter/minimax/minimax-m2.7
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: minimax.minimax-m2.7.free
   litellm_params:
     model: openrouter/minimax/minimax-m2.7:free
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: minimax.minimax-m3
   litellm_params:
     model: openrouter/minimax/minimax-m3
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: minimax.minimax-m3.batch
   litellm_params:
     model: openrouter/minimax/minimax-m3:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: minimax.minimax-m3.free
   litellm_params:
     model: openrouter/minimax/minimax-m3:free
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: mistralai.codestral-2508
   litellm_params:
     model: openrouter/mistralai/codestral-2508
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: mistralai.devstral-2512
   litellm_params:
     model: openrouter/mistralai/devstral-2512
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: mistralai.ministral-14b-2512
   litellm_params:
     model: openrouter/mistralai/ministral-14b-2512
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: mistralai.ministral-3b-2512
   litellm_params:
     model: openrouter/mistralai/ministral-3b-2512
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: mistralai.ministral-8b-2512
   litellm_params:
     model: openrouter/mistralai/ministral-8b-2512
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: mistralai.mistral-large
   litellm_params:
     model: openrouter/mistralai/mistral-large
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: mistralai.mistral-large-2407
   litellm_params:
     model: openrouter/mistralai/mistral-large-2407
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: mistralai.mistral-large-2512
   litellm_params:
     model: openrouter/mistralai/mistral-large-2512
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: mistralai.mistral-medium-3
   litellm_params:
     model: openrouter/mistralai/mistral-medium-3
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: mistralai.mistral-medium-3-5
   litellm_params:
     model: openrouter/mistralai/mistral-medium-3-5
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: mistralai.mistral-medium-3-5.batch
   litellm_params:
     model: openrouter/mistralai/mistral-medium-3-5:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: mistralai.mistral-medium-3.1
   litellm_params:
     model: openrouter/mistralai/mistral-medium-3.1
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: mistralai.mistral-nemo
   litellm_params:
     model: openrouter/mistralai/mistral-nemo
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: mistralai.mistral-saba
   litellm_params:
     model: openrouter/mistralai/mistral-saba
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: mistralai.mistral-small-24b-instruct-2501
   litellm_params:
     model: openrouter/mistralai/mistral-small-24b-instruct-2501
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: mistralai.mistral-small-2603
   litellm_params:
     model: openrouter/mistralai/mistral-small-2603
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: mistralai.mistral-small-3.1-24b-instruct
   litellm_params:
     model: openrouter/mistralai/mistral-small-3.1-24b-instruct
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: mistralai.mistral-small-3.2-24b-instruct
   litellm_params:
     model: openrouter/mistralai/mistral-small-3.2-24b-instruct
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: mistralai.mixtral-8x22b-instruct
   litellm_params:
     model: openrouter/mistralai/mixtral-8x22b-instruct
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: mistralai.voxtral-small-24b-2507
   litellm_params:
     model: openrouter/mistralai/voxtral-small-24b-2507
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: moonshotai.kimi-k2
   litellm_params:
     model: openrouter/moonshotai/kimi-k2
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: moonshotai.kimi-k2-0905
   litellm_params:
     model: openrouter/moonshotai/kimi-k2-0905
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: moonshotai.kimi-k2-thinking
   litellm_params:
     model: openrouter/moonshotai/kimi-k2-thinking
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: moonshotai.kimi-k2.5
   litellm_params:
     model: openrouter/moonshotai/kimi-k2.5
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: moonshotai.kimi-k2.6
   litellm_params:
     model: openrouter/moonshotai/kimi-k2.6
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: moonshotai.kimi-k2.7-code
   litellm_params:
     model: openrouter/moonshotai/kimi-k2.7-code
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: moonshotai.kimi-k3
   litellm_params:
     model: openrouter/moonshotai/kimi-k3
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: moonshotai.kimi-k3.batch
   litellm_params:
     model: openrouter/moonshotai/kimi-k3:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: morph.morph-v3-fast
   litellm_params:
     model: openrouter/morph/morph-v3-fast
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: morph.morph-v3-large
   litellm_params:
     model: openrouter/morph/morph-v3-large
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: nex-agi.nex-n2-mini
   litellm_params:
     model: openrouter/nex-agi/nex-n2-mini
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: nex-agi.nex-n2-pro
   litellm_params:
     model: openrouter/nex-agi/nex-n2-pro
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: nousresearch.hermes-3-llama-3.1-405b
   litellm_params:
     model: openrouter/nousresearch/hermes-3-llama-3.1-405b
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: nousresearch.hermes-3-llama-3.1-70b
   litellm_params:
     model: openrouter/nousresearch/hermes-3-llama-3.1-70b
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: nousresearch.hermes-4-405b
   litellm_params:
     model: openrouter/nousresearch/hermes-4-405b
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: nousresearch.hermes-4-70b
   litellm_params:
     model: openrouter/nousresearch/hermes-4-70b
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: nvidia.nemotron-3-nano-30b-a3b
   litellm_params:
     model: openrouter/nvidia/nemotron-3-nano-30b-a3b
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: nvidia.nemotron-3-nano-omni-30b-a3b-reasoning.free
   litellm_params:
     model: openrouter/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: nvidia.nemotron-3-super-120b-a12b
   litellm_params:
     model: openrouter/nvidia/nemotron-3-super-120b-a12b
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: nvidia.nemotron-3-super-120b-a12b.free
   litellm_params:
     model: openrouter/nvidia/nemotron-3-super-120b-a12b:free
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: nvidia.nemotron-3-ultra-550b-a55b
   litellm_params:
     model: openrouter/nvidia/nemotron-3-ultra-550b-a55b
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: nvidia.nemotron-3-ultra-550b-a55b.free
   litellm_params:
     model: openrouter/nvidia/nemotron-3-ultra-550b-a55b:free
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: nvidia.nemotron-3.5-content-safety
   litellm_params:
     model: openrouter/nvidia/nemotron-3.5-content-safety
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: nvidia.nemotron-3.5-content-safety.free
   litellm_params:
     model: openrouter/nvidia/nemotron-3.5-content-safety:free
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: nvidia.nemotron-3.5-lightning
   litellm_params:
     model: openrouter/nvidia/nemotron-3.5-lightning
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: nvidia.nemotron-3.5-lightning.free
   litellm_params:
     model: openrouter/nvidia/nemotron-3.5-lightning:free
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-3.5-turbo
   litellm_params:
     model: openrouter/openai/gpt-3.5-turbo
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-3.5-turbo-0613
   litellm_params:
     model: openrouter/openai/gpt-3.5-turbo-0613
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-3.5-turbo-16k
   litellm_params:
     model: openrouter/openai/gpt-3.5-turbo-16k
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-3.5-turbo-instruct
   litellm_params:
     model: openrouter/openai/gpt-3.5-turbo-instruct
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-3.5-turbo.batch
   litellm_params:
     model: openrouter/openai/gpt-3.5-turbo:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5
   litellm_params:
     model: openrouter/openai/gpt-5
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5-image
   litellm_params:
     model: openrouter/openai/gpt-5-image
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5-image-mini
   litellm_params:
     model: openrouter/openai/gpt-5-image-mini
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5-mini
   litellm_params:
     model: openrouter/openai/gpt-5-mini
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5-mini.batch
   litellm_params:
     model: openrouter/openai/gpt-5-mini:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5-nano
   litellm_params:
     model: openrouter/openai/gpt-5-nano
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5-nano.batch
   litellm_params:
     model: openrouter/openai/gpt-5-nano:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5-pro
   litellm_params:
     model: openrouter/openai/gpt-5-pro
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5-pro.batch
   litellm_params:
     model: openrouter/openai/gpt-5-pro:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.1
   litellm_params:
     model: openrouter/openai/gpt-5.1
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.1-codex
   litellm_params:
     model: openrouter/openai/gpt-5.1-codex
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.1-codex-max
   litellm_params:
     model: openrouter/openai/gpt-5.1-codex-max
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.1-codex-mini
   litellm_params:
     model: openrouter/openai/gpt-5.1-codex-mini
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.1.batch
   litellm_params:
     model: openrouter/openai/gpt-5.1:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.2
   litellm_params:
     model: openrouter/openai/gpt-5.2
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.2-chat
   litellm_params:
     model: openrouter/openai/gpt-5.2-chat
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.2-codex
   litellm_params:
     model: openrouter/openai/gpt-5.2-codex
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.2-pro
   litellm_params:
     model: openrouter/openai/gpt-5.2-pro
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.2-pro.batch
   litellm_params:
     model: openrouter/openai/gpt-5.2-pro:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.2.batch
   litellm_params:
     model: openrouter/openai/gpt-5.2:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.3-codex
   litellm_params:
     model: openrouter/openai/gpt-5.3-codex
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.4
   litellm_params:
     model: openrouter/openai/gpt-5.4
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.4-image-2
   litellm_params:
     model: openrouter/openai/gpt-5.4-image-2
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.4-mini
   litellm_params:
     model: openrouter/openai/gpt-5.4-mini
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.4-mini.batch
   litellm_params:
     model: openrouter/openai/gpt-5.4-mini:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.4-nano
   litellm_params:
     model: openrouter/openai/gpt-5.4-nano
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.4-nano.batch
   litellm_params:
     model: openrouter/openai/gpt-5.4-nano:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.4-pro
   litellm_params:
     model: openrouter/openai/gpt-5.4-pro
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.4-pro.batch
   litellm_params:
     model: openrouter/openai/gpt-5.4-pro:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.4.batch
   litellm_params:
     model: openrouter/openai/gpt-5.4:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.5
   litellm_params:
     model: openrouter/openai/gpt-5.5
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.5-pro
   litellm_params:
     model: openrouter/openai/gpt-5.5-pro
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.5-pro.batch
   litellm_params:
     model: openrouter/openai/gpt-5.5-pro:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.5.batch
   litellm_params:
     model: openrouter/openai/gpt-5.5:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.6-luna
   litellm_params:
     model: openrouter/openai/gpt-5.6-luna
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.6-luna-pro
   litellm_params:
     model: openrouter/openai/gpt-5.6-luna-pro
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.6-luna-pro.batch
   litellm_params:
     model: openrouter/openai/gpt-5.6-luna-pro:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.6-luna.batch
   litellm_params:
     model: openrouter/openai/gpt-5.6-luna:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.6-sol
   litellm_params:
     model: openrouter/openai/gpt-5.6-sol
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.6-sol-pro
   litellm_params:
     model: openrouter/openai/gpt-5.6-sol-pro
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.6-sol-pro.batch
   litellm_params:
     model: openrouter/openai/gpt-5.6-sol-pro:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.6-sol.batch
   litellm_params:
     model: openrouter/openai/gpt-5.6-sol:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.6-terra
   litellm_params:
     model: openrouter/openai/gpt-5.6-terra
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.6-terra-pro
   litellm_params:
     model: openrouter/openai/gpt-5.6-terra-pro
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.6-terra-pro.batch
   litellm_params:
     model: openrouter/openai/gpt-5.6-terra-pro:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.6-terra.batch
   litellm_params:
     model: openrouter/openai/gpt-5.6-terra:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5.batch
   litellm_params:
     model: openrouter/openai/gpt-5:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-audio
   litellm_params:
     model: openrouter/openai/gpt-audio
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-audio-mini
   litellm_params:
     model: openrouter/openai/gpt-audio-mini
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-chat-latest
   litellm_params:
     model: openrouter/openai/gpt-chat-latest
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-oss-120b
   litellm_params:
     model: openrouter/openai/gpt-oss-120b
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-oss-120b.batch
   litellm_params:
     model: openrouter/openai/gpt-oss-120b:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-oss-20b
   litellm_params:
     model: openrouter/openai/gpt-oss-20b
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-oss-20b.batch
   litellm_params:
     model: openrouter/openai/gpt-oss-20b:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-oss-safeguard-20b
   litellm_params:
     model: openrouter/openai/gpt-oss-safeguard-20b
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.o1
   litellm_params:
     model: openrouter/openai/o1
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.o1-pro
   litellm_params:
     model: openrouter/openai/o1-pro
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.o3
   litellm_params:
     model: openrouter/openai/o3
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.o3-mini
   litellm_params:
     model: openrouter/openai/o3-mini
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.o3-mini-high
   litellm_params:
     model: openrouter/openai/o3-mini-high
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.o3-mini.batch
   litellm_params:
     model: openrouter/openai/o3-mini:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.o3-pro
   litellm_params:
     model: openrouter/openai/o3-pro
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.o3.batch
   litellm_params:
     model: openrouter/openai/o3:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.o4-mini
   litellm_params:
     model: openrouter/openai/o4-mini
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.o4-mini-high
   litellm_params:
     model: openrouter/openai/o4-mini-high
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.o4-mini.batch
   litellm_params:
     model: openrouter/openai/o4-mini:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: perceptron.perceptron-mk1
   litellm_params:
     model: openrouter/perceptron/perceptron-mk1
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: perplexity.sonar
   litellm_params:
     model: openrouter/perplexity/sonar
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: perplexity.sonar-deep-research
   litellm_params:
     model: openrouter/perplexity/sonar-deep-research
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: perplexity.sonar-pro
   litellm_params:
     model: openrouter/perplexity/sonar-pro
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: perplexity.sonar-pro-search
   litellm_params:
     model: openrouter/perplexity/sonar-pro-search
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: perplexity.sonar-reasoning-pro
   litellm_params:
     model: openrouter/perplexity/sonar-reasoning-pro
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: poolside.laguna-s-2.1
   litellm_params:
     model: openrouter/poolside/laguna-s-2.1
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: poolside.laguna-s-2.1.free
   litellm_params:
     model: openrouter/poolside/laguna-s-2.1:free
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: poolside.laguna-xs-2.1
   litellm_params:
     model: openrouter/poolside/laguna-xs-2.1
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: poolside.laguna-xs-2.1.free
   litellm_params:
     model: openrouter/poolside/laguna-xs-2.1:free
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen-2.5-72b-instruct
   litellm_params:
     model: openrouter/qwen/qwen-2.5-72b-instruct
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen-2.5-7b-instruct
   litellm_params:
     model: openrouter/qwen/qwen-2.5-7b-instruct
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen-2.5-coder-32b-instruct
   litellm_params:
     model: openrouter/qwen/qwen-2.5-coder-32b-instruct
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen-plus
   litellm_params:
     model: openrouter/qwen/qwen-plus
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen-plus-2025-07-28
   litellm_params:
     model: openrouter/qwen/qwen-plus-2025-07-28
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen2.5-vl-72b-instruct
   litellm_params:
     model: openrouter/qwen/qwen2.5-vl-72b-instruct
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3-14b
   litellm_params:
     model: openrouter/qwen/qwen3-14b
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3-235b-a22b
   litellm_params:
     model: openrouter/qwen/qwen3-235b-a22b
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3-235b-a22b-2507
   litellm_params:
     model: openrouter/qwen/qwen3-235b-a22b-2507
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3-235b-a22b-thinking-2507
   litellm_params:
     model: openrouter/qwen/qwen3-235b-a22b-thinking-2507
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3-30b-a3b
   litellm_params:
     model: openrouter/qwen/qwen3-30b-a3b
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3-30b-a3b-instruct-2507
   litellm_params:
     model: openrouter/qwen/qwen3-30b-a3b-instruct-2507
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3-30b-a3b-thinking-2507
   litellm_params:
     model: openrouter/qwen/qwen3-30b-a3b-thinking-2507
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3-32b
   litellm_params:
     model: openrouter/qwen/qwen3-32b
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3-8b
   litellm_params:
     model: openrouter/qwen/qwen3-8b
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3-coder
   litellm_params:
     model: openrouter/qwen/qwen3-coder
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3-coder-30b-a3b-instruct
   litellm_params:
     model: openrouter/qwen/qwen3-coder-30b-a3b-instruct
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3-coder-flash
   litellm_params:
     model: openrouter/qwen/qwen3-coder-flash
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3-coder-next
   litellm_params:
     model: openrouter/qwen/qwen3-coder-next
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3-coder-plus
   litellm_params:
     model: openrouter/qwen/qwen3-coder-plus
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3-max
   litellm_params:
     model: openrouter/qwen/qwen3-max
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3-max-thinking
   litellm_params:
     model: openrouter/qwen/qwen3-max-thinking
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3-next-80b-a3b-instruct
   litellm_params:
     model: openrouter/qwen/qwen3-next-80b-a3b-instruct
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3-next-80b-a3b-thinking
   litellm_params:
     model: openrouter/qwen/qwen3-next-80b-a3b-thinking
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3-vl-235b-a22b-instruct
   litellm_params:
     model: openrouter/qwen/qwen3-vl-235b-a22b-instruct
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3-vl-235b-a22b-thinking
   litellm_params:
     model: openrouter/qwen/qwen3-vl-235b-a22b-thinking
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3-vl-30b-a3b-instruct
   litellm_params:
     model: openrouter/qwen/qwen3-vl-30b-a3b-instruct
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3-vl-30b-a3b-thinking
   litellm_params:
     model: openrouter/qwen/qwen3-vl-30b-a3b-thinking
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3-vl-32b-instruct
   litellm_params:
     model: openrouter/qwen/qwen3-vl-32b-instruct
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3-vl-8b-instruct
   litellm_params:
     model: openrouter/qwen/qwen3-vl-8b-instruct
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3-vl-8b-thinking
   litellm_params:
     model: openrouter/qwen/qwen3-vl-8b-thinking
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3.5-122b-a10b
   litellm_params:
     model: openrouter/qwen/qwen3.5-122b-a10b
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3.5-27b
   litellm_params:
     model: openrouter/qwen/qwen3.5-27b
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3.5-35b-a3b
   litellm_params:
     model: openrouter/qwen/qwen3.5-35b-a3b
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3.5-397b-a17b
   litellm_params:
     model: openrouter/qwen/qwen3.5-397b-a17b
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3.5-9b
   litellm_params:
     model: openrouter/qwen/qwen3.5-9b
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3.5-9b.batch
   litellm_params:
     model: openrouter/qwen/qwen3.5-9b:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3.5-flash-02-23
   litellm_params:
     model: openrouter/qwen/qwen3.5-flash-02-23
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3.5-plus-02-15
   litellm_params:
     model: openrouter/qwen/qwen3.5-plus-02-15
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3.5-plus-20260420
   litellm_params:
     model: openrouter/qwen/qwen3.5-plus-20260420
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3.6-27b
   litellm_params:
     model: openrouter/qwen/qwen3.6-27b
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3.6-35b-a3b
   litellm_params:
     model: openrouter/qwen/qwen3.6-35b-a3b
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3.6-flash
   litellm_params:
     model: openrouter/qwen/qwen3.6-flash
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3.6-max-preview
   litellm_params:
     model: openrouter/qwen/qwen3.6-max-preview
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3.6-plus
   litellm_params:
     model: openrouter/qwen/qwen3.6-plus
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3.7-flash
   litellm_params:
     model: openrouter/qwen/qwen3.7-flash
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3.7-max
   litellm_params:
     model: openrouter/qwen/qwen3.7-max
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3.7-plus
   litellm_params:
     model: openrouter/qwen/qwen3.7-plus
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3.8-2.4t-a95b
   litellm_params:
     model: openrouter/qwen/qwen3.8-2.4t-a95b
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3.8-2.4t-a95b.batch
   litellm_params:
     model: openrouter/qwen/qwen3.8-2.4t-a95b:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3.8-27b
   litellm_params:
     model: openrouter/qwen/qwen3.8-27b
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3.8-flash
   litellm_params:
     model: openrouter/qwen/qwen3.8-flash
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3.8-max
   litellm_params:
     model: openrouter/qwen/qwen3.8-max
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: rekaai.reka-edge
   litellm_params:
     model: openrouter/rekaai/reka-edge
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: rekaai.reka-flash-3
   litellm_params:
     model: openrouter/rekaai/reka-flash-3
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: relace.relace-apply-3
   litellm_params:
     model: openrouter/relace/relace-apply-3
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: relace.relace-search
   litellm_params:
     model: openrouter/relace/relace-search
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: sakana.fugu-ultra
   litellm_params:
     model: openrouter/sakana/fugu-ultra
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: sakana.sakana-namazu
   litellm_params:
     model: openrouter/sakana/sakana-namazu
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: sao10k.l3-lunaris-8b
   litellm_params:
     model: openrouter/sao10k/l3-lunaris-8b
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: sao10k.l3.1-euryale-70b
   litellm_params:
     model: openrouter/sao10k/l3.1-euryale-70b
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: sao10k.l3.3-euryale-70b
   litellm_params:
     model: openrouter/sao10k/l3.3-euryale-70b
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: stepfun.step-3.5-flash
   litellm_params:
     model: openrouter/stepfun/step-3.5-flash
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: stepfun.step-3.7-flash
   litellm_params:
     model: openrouter/stepfun/step-3.7-flash
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: tencent.hunyuan-a13b-instruct
   litellm_params:
     model: openrouter/tencent/hunyuan-a13b-instruct
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: tencent.hy-mt2-1.8b
   litellm_params:
     model: openrouter/tencent/hy-mt2-1.8b
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: tencent.hy-mt2-30b-a3b
   litellm_params:
     model: openrouter/tencent/hy-mt2-30b-a3b
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: tencent.hy-mt2-7b
   litellm_params:
     model: openrouter/tencent/hy-mt2-7b
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: tencent.hy3
   litellm_params:
     model: openrouter/tencent/hy3
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: tencent.hy3-preview
   litellm_params:
     model: openrouter/tencent/hy3-preview
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: tencent.hy4-preview
   litellm_params:
     model: openrouter/tencent/hy4-preview
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: thedrummer.cydonia-24b-v4.1
   litellm_params:
     model: openrouter/thedrummer/cydonia-24b-v4.1
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: thedrummer.skyfall-36b-v2
   litellm_params:
     model: openrouter/thedrummer/skyfall-36b-v2
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: thedrummer.unslopnemo-12b
   litellm_params:
     model: openrouter/thedrummer/unslopnemo-12b
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: thinkingmachines.inkling
   litellm_params:
     model: openrouter/thinkingmachines/inkling
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: thinkingmachines.inkling-small
   litellm_params:
     model: openrouter/thinkingmachines/inkling-small
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: thinkingmachines.inkling-small.batch
   litellm_params:
     model: openrouter/thinkingmachines/inkling-small:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: thinkingmachines.inkling-small.free
   litellm_params:
     model: openrouter/thinkingmachines/inkling-small:free
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: thinkingmachines.inkling.batch
   litellm_params:
     model: openrouter/thinkingmachines/inkling:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: thinkingmachines.inkling.free
   litellm_params:
     model: openrouter/thinkingmachines/inkling:free
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: undi95.remm-slerp-l2-13b
   litellm_params:
     model: openrouter/undi95/remm-slerp-l2-13b
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: upstage.solar-pro-3
   litellm_params:
     model: openrouter/upstage/solar-pro-3
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: upstage.solar-pro4
   litellm_params:
     model: openrouter/upstage/solar-pro4
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: writer.palmyra-x5
   litellm_params:
     model: openrouter/writer/palmyra-x5
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: x-ai.grok-4.20
   litellm_params:
     model: openrouter/x-ai/grok-4.20
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: x-ai.grok-4.20-multi-agent
   litellm_params:
     model: openrouter/x-ai/grok-4.20-multi-agent
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: x-ai.grok-4.3
   litellm_params:
     model: openrouter/x-ai/grok-4.3
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: x-ai.grok-4.3.batch
   litellm_params:
     model: openrouter/x-ai/grok-4.3:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: x-ai.grok-4.5
   litellm_params:
     model: openrouter/x-ai/grok-4.5
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: x-ai.grok-4.6
   litellm_params:
     model: openrouter/x-ai/grok-4.6
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: x-ai.grok-build-0.1
   litellm_params:
     model: openrouter/x-ai/grok-build-0.1
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: xiaomi.mimo-v2.5
   litellm_params:
     model: openrouter/xiaomi/mimo-v2.5
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: xiaomi.mimo-v2.5-pro
   litellm_params:
     model: openrouter/xiaomi/mimo-v2.5-pro
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: z-ai.glm-4.5
   litellm_params:
     model: openrouter/z-ai/glm-4.5
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: z-ai.glm-4.5-air
   litellm_params:
     model: openrouter/z-ai/glm-4.5-air
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: z-ai.glm-4.5v
   litellm_params:
     model: openrouter/z-ai/glm-4.5v
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: z-ai.glm-4.6
   litellm_params:
     model: openrouter/z-ai/glm-4.6
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: z-ai.glm-4.6v
   litellm_params:
     model: openrouter/z-ai/glm-4.6v
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: z-ai.glm-4.7
   litellm_params:
     model: openrouter/z-ai/glm-4.7
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: z-ai.glm-4.7-flash
   litellm_params:
     model: openrouter/z-ai/glm-4.7-flash
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: z-ai.glm-5
   litellm_params:
     model: openrouter/z-ai/glm-5
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: z-ai.glm-5-turbo
   litellm_params:
     model: openrouter/z-ai/glm-5-turbo
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: z-ai.glm-5.1
   litellm_params:
     model: openrouter/z-ai/glm-5.1
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: z-ai.glm-5.2
   litellm_params:
     model: openrouter/z-ai/glm-5.2
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: z-ai.glm-5.2.free
   litellm_params:
     model: openrouter/z-ai/glm-5.2:free
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: z-ai.glm-5.3
   litellm_params:
     model: openrouter/z-ai/glm-5.3
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: z-ai.glm-5.3-flash
   litellm_params:
     model: openrouter/z-ai/glm-5.3-flash
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: z-ai.glm-5.3-flash.batch
   litellm_params:
     model: openrouter/z-ai/glm-5.3-flash:batch
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 - model_name: z-ai.glm-5v-turbo
   litellm_params:
     model: openrouter/z-ai/glm-5v-turbo
+    num_retries: 0
+    max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
 litellm_settings:
+  DEFAULT_MAX_RETRIES: 0
   num_retries: 0
   fallbacks: []
   context_window_fallbacks: []
   callbacks:
   - prometheus
+  - langfuse_otel
+  custom_prometheus_metadata_labels:
+  - metadata.lane
+  turn_off_message_logging: true
   require_auth_for_metrics_endpoint: false
   include_cost_in_streaming_usage: true
 router_settings:
   num_retries: 0
+  default_fallbacks: []
+  retry_policy: null
+  model_group_retry_policy: {}
+  fallbacks: []
+  context_window_fallbacks: []
+  content_policy_fallbacks: []
+  enable_weighted_failover: false
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
   store_model_in_db: false
+  store_prompts_in_spend_logs: false
+  disable_spend_logs: false

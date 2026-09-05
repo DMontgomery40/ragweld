@@ -17,28 +17,32 @@ import time
 import uuid
 from collections import defaultdict
 from collections.abc import AsyncGenerator, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal, TypeVar
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from httpx import InvalidURL
 from neo4j import Driver, GraphDatabase
 from neo4j_graphrag.components.schema import GraphSchema
 from neo4j_graphrag.components.types import Neo4jRelationship
 from neo4j_graphrag.experimental.pipeline import Pipeline
+from pydantic import SecretStr
 from starlette.responses import StreamingResponse
 
 from server.api.dependency_errors import (
     dependency_unavailable_http_exception,
     raise_postgres_unavailable_if_applicable,
 )
+from server.chat.gateway_runtime import resolve_litellm_api_key, resolve_litellm_base_url
 from server.chat.provider_router import ProviderRoute, select_provider_route
 from server.db.neo4j import Neo4jClient
 from server.db.postgres import PostgresClient
 from server.gateway_catalog import gateway_upstream_for_alias
 from server.graph.communities import detect_leiden_communities
+from server.indexing.accounting import IndexAccountingOwner, reconcile_run_costs
 from server.indexing.chunker import Chunker
 from server.indexing.embedder import Embedder, configure_postgres_embedding_cache_backend
 from server.indexing.estimate import (
@@ -83,6 +87,7 @@ from server.indexing.graph_policy import (
 from server.indexing.graphrag_pipeline import (
     ScopedNeo4jWriter,
     build_semantic_pipeline,
+    close_semantic_pipeline,
     extraction_prompt_template,
     resolve_staged_entities,
     write_code_file_graph,
@@ -97,6 +102,7 @@ from server.indexing.graphrag_schema import (
 )
 from server.indexing.loader import FileLoader
 from server.indexing.provenance import stamp_provenance
+from server.indexing.run_records import update_run_accounting, write_run_summary
 from server.indexing.text_extractors import (
     ExtractedDocument,
     FigureGateway,
@@ -132,6 +138,7 @@ from server.models.index import (
     IndexStatus,
     PersistedStateCorruptResponse,
 )
+from server.models.run_accounting import CostLane, IndexCostEstimateSnapshot
 from server.models.tribrid_config_model import (
     CorpusScope,
     DashboardEmbeddingConfigSummary,
@@ -141,8 +148,10 @@ from server.models.tribrid_config_model import (
     DashboardIndexStatusResponse,
     DashboardIndexStorageBreakdown,
     DependencyUnavailableResponse,
+    GraphIndexingConfig,
     TriBridConfig,
 )
+from server.observability.gateway_costs import NativeSpendReader
 from server.observability.metrics import (
     CHUNKS_INDEXED_CURRENT,
     GRAPH_ENTITIES_CURRENT,
@@ -156,6 +165,7 @@ from server.observability.metrics import (
     INDEX_STAGE_LATENCY_SECONDS,
     INDEX_TOKENS_TOTAL,
 )
+from server.observability.run_census import ProducerLease, RunCensusScope
 from server.reranker.artifacts import resolve_project_path
 from server.retrieval.qdrant_store import QdrantChunkStore
 from server.services.config_store import CorpusNotFoundError
@@ -411,16 +421,6 @@ def _sanitize_fs_component(value: str) -> str:
 def _repo_runs_dir(repo_id: str) -> Path:
     return _INDEX_RUNS_DIR / _sanitize_fs_component(repo_id)
 
-
-
-def _discard_persisted_runs(repo_id: str) -> None:
-    """Remove ``data/index_runs/<corpus>/`` after the index it describes has been deleted."""
-    import shutil
-
-    with contextlib.suppress(Exception):
-        shutil.rmtree(_repo_runs_dir(repo_id), ignore_errors=True)
-
-
 def _run_dir(repo_id: str, run_id: str) -> Path:
     return _repo_runs_dir(repo_id) / _sanitize_fs_component(run_id)
 
@@ -447,15 +447,17 @@ def _load_run_summary(repo_id: str, run_id: str) -> IndexRunSummary | None:
     if not path.exists():
         return None
     try:
-        return IndexRunSummary.model_validate_json(path.read_text())
+        summary = IndexRunSummary.model_validate_json(path.read_text())
+        return summary if (summary.repo_id, summary.run_id) == (repo_id, run_id) else None
     except Exception:
         return None
 
 
 def _load_latest_run_summary(
-    repo_id: str, statuses: tuple[str, ...] | None = None
+    repo_id: str, statuses: tuple[str, ...] | None = None,
+    *, run_kind: Literal["index", "schema_proposal"] = "index",
 ) -> IndexRunSummary | None:
-    """The most recently written run summary, optionally restricted to certain statuses.
+    """The most recently started run, optionally restricted to certain statuses.
 
     Unrestricted is what a run-state reader wants: an operator asking about the latest run
     wants the failure, not the last success. ``statuses=("complete",)`` is what a reader of the
@@ -465,19 +467,15 @@ def _load_latest_run_summary(
     repo_dir = _repo_runs_dir(repo_id)
     if not repo_dir.exists():
         return None
-    candidates = sorted(
-        [p for p in repo_dir.glob("*/summary.json") if p.is_file()],
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )
-    for p in candidates:
+    candidates: list[IndexRunSummary] = []
+    for p in repo_dir.glob("*/summary.json"):
         try:
             summary = IndexRunSummary.model_validate_json(p.read_text())
         except Exception:
             continue
-        if statuses is None or str(summary.status) in statuses:
-            return summary
-    return None
+        if summary.repo_id == repo_id and summary.run_kind == run_kind and (statuses is None or str(summary.status) in statuses):
+            candidates.append(summary)
+    return max(candidates, key=lambda run: (run.started_at.timestamp(), run.run_id), default=None)
 
 
 async def _manifest_names_run(repo_id: str, run_id: str) -> bool | None:
@@ -670,9 +668,9 @@ def _event_writer_loop() -> None:
                 with path.open("a", encoding="utf-8") as f:
                     f.write(payload)
             else:
-                tmp = path.with_name(path.name + ".tmp")
-                tmp.write_text(payload, encoding="utf-8")
-                os.replace(tmp, path)
+                from server.indexing.run_records import write_run_summary
+
+                write_run_summary(path, IndexRunSummary.model_validate_json(payload))
         except Exception:
             logger.warning("index run persistence failed", exc_info=True)
         finally:
@@ -751,6 +749,8 @@ def _load_run_events(repo_id: str, run_id: str, *, limit: int) -> tuple[list[Ind
     The total is what lets a reader tell "this run had 48 events" from "this is the first
     page of 1,284"; without it the caller can only report the cap it asked for.
     """
+    if _load_run_summary(repo_id, run_id) is None:
+        return [], 0
     path = _run_events_path(repo_id, run_id)
     if not path.exists():
         return [], 0
@@ -760,7 +760,9 @@ def _load_run_events(repo_id: str, run_id: str, *, limit: int) -> tuple[list[Ind
             if not line.strip():
                 continue
             try:
-                out.append(IndexRunEvent.model_validate_json(line))
+                event = IndexRunEvent.model_validate_json(line)
+                if event.run_id == run_id:
+                    out.append(event)
             except Exception:
                 continue
     except Exception:
@@ -1093,6 +1095,8 @@ def _latest_run_stage(repo_id: str, run_id: str) -> str | None:
 
     Blocking (file I/O), so callers on the event loop hand it to a thread.
     """
+    if _load_run_summary(repo_id, run_id) is None:
+        return None
     path = _run_events_path(repo_id, run_id)
     try:
         with path.open("rb") as handle:
@@ -1110,7 +1114,7 @@ def _latest_run_stage(repo_id: str, run_id: str) -> str | None:
             event = IndexRunEvent.model_validate_json(line)
         except Exception:
             continue
-        if event.type not in _RUN_STAGE_EVENT_TYPES:
+        if event.run_id != run_id or event.type not in _RUN_STAGE_EVENT_TYPES:
             continue
         message = str(event.message or "").strip()
         if message:
@@ -1449,26 +1453,25 @@ def _figure_run_totals(
     """Price a run's figure phase with the same ceiling the pre-run estimate quotes.
 
     The estimate charges the full ``max_completion_tokens`` budget per figure against a
-    guessed figure count; this charges it against the figures the run really described, so
-    the two numbers are directly comparable (record <= estimate when the guess held).
-
-    A run that described nothing carries no price at all: skipped and failed figures never
-    reached the vision alias, and quoting ``$0.0000`` would put a cost line on the dashboard
-    for a run that made no call.
+    guessed figure count; this uses described plus failed figures, since both count
+    attempted descriptions. This remains a ceiling estimate, never measured billing.
+    Skipped figures contribute no attempted call; a run with no attempts has no price.
     """
     count = max(0, int(described or 0))
+    failures = max(0, int(failed or 0))
+    attempts = count + failures
     cost = (
         _estimate_figure_description_cost_usd(
             alias=cfg.indexing.figures.vision_model,
-            figures=count,
+            figures=attempts,
             max_completion_tokens=int(cfg.indexing.figures.max_completion_tokens),
         )
-        if count > 0
+        if attempts > 0
         else None
     )
     return FigureRunTotals(
         described=count,
-        failed=max(0, int(failed or 0)),
+        failed=failures,
         undescribed=max(0, int(undescribed or 0)),
         cost_usd=cost,
     )
@@ -1482,63 +1485,20 @@ def _status_costs(
     total_chunks: int,
     latest_run: IndexRunSummary | None,
 ) -> DashboardIndexCosts:
-    """What the corpus's index has cost, recomputed from live stats, config and the run record.
-
-    Embedding and semantic KG are re-derived from what is in the stores right now (they scale
-    with chunks and tokens, which survive the run). The figure spend cannot be: nothing in
-    Postgres or Qdrant records how many pictures went to the vision alias, so it is read off the
-    latest run summary, which is where ``_publish_complete`` wrote it.
-
-    ``total_cost`` sums exactly the phases that apply, and an applicable component with no known
-    price makes the total unknown rather than silently counting as zero -- understating spend is
-    the same failure as omitting the component, only quieter.
-    """
-    skip_dense = bool(getattr(cfg.indexing, "skip_dense", False))
-    embedding_backend = str(
-        getattr(cfg.embedding, "embedding_backend", "deterministic") or "deterministic"
-    ).strip()
-    embedding_cost: float | None
-    if skip_dense or embedding_backend != "provider":
-        embedding_cost = 0.0
-    else:
-        embedding_cost = _estimate_embedding_cost_usd(
-            provider=cfg.embedding.embedding_type,
-            model=cfg.embedding.effective_model,
-            total_tokens=int(total_tokens),
-        )
-
-    semantic_graph_active = graph_policy == "semantic"
-    semantic_kg_cost: float | None = None
-    if semantic_graph_active:
-        semantic_kg_cost = _estimate_semantic_kg_cost_usd(
-            alias=_semantic_kg_model_override(cfg),
-            chunks_in_scope=int(total_chunks),
-            enrich_max_chars=int(cfg.enrichment.enrich_max_chars or 1000),
-        )
-
-    figures_described = max(0, int(getattr(latest_run, "figures_described", 0) or 0))
-    figure_cost = (
-        getattr(latest_run, "figure_description_cost_usd", None) if figures_described > 0 else None
-    )
-
-    components: list[float | None] = [embedding_cost]
-    if semantic_graph_active:
-        components.append(semantic_kg_cost)
-    if figures_described > 0:
-        components.append(figure_cost)
-    total_cost: float | None = (
-        None
-        if any(component is None for component in components)
-        else sum(component for component in components if component is not None)
-    )
-
+    """Show saved run estimates and measurements; never reprice history with current config."""
+    record = latest_run.accounting if latest_run is not None else None
+    quote = record.estimate if record is not None else None
     return DashboardIndexCosts(
-        total_tokens=int(total_tokens),
-        embedding_cost=embedding_cost,
-        semantic_kg_cost=semantic_kg_cost,
-        figure_description_cost=figure_cost,
-        figures_described=figures_described,
-        total_cost=total_cost,
+        total_tokens=total_tokens,
+        embedding_cost=quote.embedding_usd if quote is not None else None,
+        semantic_kg_cost=quote.semantic_kg_usd if quote is not None else None,
+        figure_description_cost=(
+            quote.figure_description_usd if quote is not None else
+            latest_run.figure_description_cost_usd if latest_run is not None else None
+        ),
+        figures_described=latest_run.figures_described if latest_run is not None else 0,
+        total_cost=quote.total_usd if quote is not None else None,
+        accounting=record,
     )
 
 
@@ -1875,6 +1835,7 @@ async def _run_index(
     cfg: TriBridConfig,
     graph_schema: GraphSchema | None = None,
     graph_extraction: GraphExtractionTelemetry | None = None,
+    accounting: IndexAccountingOwner | None = None,
 ) -> tuple[IndexStats, FigureRunTotals]:
     # ONE config snapshot per run (the caller's): what the fence recorded, what is
     # built here and what the commit names must come from the same decision.
@@ -2048,6 +2009,7 @@ async def _run_index(
                     llm_timeout_s=int(cfg.graph_indexing.semantic_kg_llm_timeout_s),
                     reasoning_effort=str(cfg.graph_indexing.semantic_kg_reasoning_effort),
                     prompt_template=str(cfg.system_prompts.semantic_kg_extraction),
+                    census_scope=accounting.scopes.get("semantic_kg") if accounting is not None else None,
                 )
             else:
                 code_writer = await asyncio.to_thread(
@@ -2078,6 +2040,7 @@ async def _run_index(
             graph_policy=graph_policy,
             graph_schema=graph_schema,
             graph_extraction=graph_extraction,
+            accounting=accounting,
             semantic_pipeline=semantic_pipeline,
             code_writer=code_writer,
             chunker=chunker,
@@ -2093,6 +2056,8 @@ async def _run_index(
             qdrant_generation=qdrant_generation,
         )
     finally:
+        if semantic_pipeline is not None:
+            await close_semantic_pipeline(semantic_pipeline)
         if sync_graph_driver is not None:
             with contextlib.suppress(Exception):
                 await asyncio.to_thread(sync_graph_driver.close)
@@ -2185,6 +2150,7 @@ async def _run_docling_extraction_locked(
     *args: Any,
     event_queue: asyncio.Queue[dict[str, Any]] | None = None,
     conversion: DoclingConversion | None = None,
+    census_scope: RunCensusScope | None = None,
     wait_notice_seconds: float = _DOCLING_WAIT_NOTICE_SECONDS,
     wait_repeat_seconds: float = _DOCLING_WAIT_REPEAT_SECONDS,
     heartbeat_seconds: float = _DOCLING_HEARTBEAT_SECONDS,
@@ -2260,6 +2226,7 @@ async def _run_docling_extraction_locked(
         _DOCLING_LOCK_HOLDER = conversion
     released = False
     heartbeat: asyncio.Task[None] | None = None
+    producer: ProducerLease | None = None
 
     def _release_lock(_future: object | None = None) -> None:
         nonlocal released
@@ -2276,6 +2243,11 @@ async def _run_docling_extraction_locked(
         if heartbeat is not None:
             heartbeat.cancel()
         _DOCLING_EXTRACTION_LOCK.release()
+        if producer is not None:
+            try:
+                producer.close()
+            except Exception:
+                logger.exception("Docling accounting worker completion was not acknowledged")
 
     async def _beat(file: str) -> None:
         started = time.monotonic()
@@ -2304,6 +2276,8 @@ async def _run_docling_extraction_locked(
     worker: asyncio.Task[T] | None = None
     callback_registered = False
     try:
+        if census_scope is not None:
+            producer = census_scope.producer_started()
         # Started before the worker so the release callback can never fire against a
         # heartbeat that has not been assigned yet, which would leak the beat forever.
         if conversion is not None and heartbeat_seconds > 0:
@@ -2348,6 +2322,7 @@ async def _extract_text_for_index(
             path,
             event_queue=event_queue,
             conversion=conversion,
+            census_scope=gateway.census_scope if gateway is not None else None,
             figures=figures,
             gateway=gateway,
             parquet_max_rows=parquet_max_rows,
@@ -2392,6 +2367,7 @@ async def _run_index_body(
     qdrant: QdrantChunkStore,
     qdrant_generation: str,
     graph_extraction: GraphExtractionTelemetry | None = None,
+    accounting: IndexAccountingOwner | None = None,
 ) -> tuple[IndexStats, FigureRunTotals]:
     """Core indexing loop -- extracted to allow _run_index() to guarantee Neo4j cleanup via finally.
 
@@ -2461,6 +2437,8 @@ async def _run_index_body(
     # figures the pipeline is asked for and the alias that describes them must come from
     # one decision. ``start_index`` already refused an unroutable alias before the fence.
     figure_gateway = _resolve_figure_route(cfg, as_http=False)
+    if figure_gateway is not None and accounting is not None:
+        figure_gateway = replace(figure_gateway, census_scope=accounting.scopes.get("figure_description"))
     figures_described_total = 0
     figures_failed_total = 0
     figures_undescribed_total = 0
@@ -2498,6 +2476,8 @@ async def _run_index_body(
         total_chunks += len(chunks)
         chunk_tokens = sum(int(c.token_count or 0) for c in chunks)
         total_tokens += chunk_tokens
+        if accounting is not None:
+            accounting.progress(chunks=len(chunks), tokens=chunk_tokens)
         INDEX_CHUNKS_CREATED_TOTAL.inc(len(chunks))
         INDEX_TOKENS_TOTAL.inc(chunk_tokens)
 
@@ -2569,7 +2549,14 @@ async def _run_index_body(
             async with sem:
                 results[i] = await _upsert_chunk_batch(batch)
 
-        await asyncio.gather(*(_run_batch(i, batch) for i, batch in enumerate(batches)))
+        tasks = [asyncio.create_task(_run_batch(i, batch)) for i, batch in enumerate(batches)]
+        try:
+            await asyncio.gather(*tasks)
+        except BaseException:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
         merged: list[Chunk] = []
         for r in results:
             if r:
@@ -2746,6 +2733,8 @@ async def _run_index_body(
             ordinal = 0
             try:
                 INDEX_FILES_PROCESSED_TOTAL.inc()
+                if accounting is not None:
+                    accounting.progress(files=1)
                 await _record_document(postgres, write_repo_id, rel_path, abs_path, None)
                 with INDEX_STAGE_LATENCY_SECONDS.labels(stage="file_read_stream").time():
                     stream = await asyncio.to_thread(
@@ -2916,6 +2905,8 @@ async def _run_index_body(
                         embedding=cfg.embedding,
                     )
                 INDEX_FILES_PROCESSED_TOTAL.inc()
+                if accounting is not None:
+                    accounting.progress(files=1)
                 if not chunks:
                     continue
                 stamp_provenance(chunks, extraction=extracted.extraction, spans=extracted.spans)
@@ -2936,6 +2927,8 @@ async def _run_index_body(
                     extracted.spans,
                 )
             INDEX_FILES_PROCESSED_TOTAL.inc()
+            if accounting is not None:
+                accounting.progress(files=1)
             if not chunks:
                 continue
             stamp_provenance(chunks, extraction=extracted.extraction, spans=extracted.spans)
@@ -3326,11 +3319,13 @@ async def _background_index_job(
     *,
     run_id: str,
     override_actor: str | None = None,
+    config_snapshot: TriBridConfig | None = None,
+    run_started_at: datetime | None = None,
 ) -> None:
     """One index run; ``run_id`` is the fence this run holds on the corpus row (released in ``finally``)."""
     repo_id = request.repo_id
     staging_repo_id = _build_staging_repo_id(repo_id, run_id)
-    started_at = datetime.now(UTC)
+    started_at = run_started_at or datetime.now(UTC)
     this_task = asyncio.current_task()
     _ACTIVE_RUNS[repo_id] = run_id
     _UNKNOWN_COMMITS.pop(repo_id, None)  # any earlier unknown run is now the takeover's business
@@ -3373,6 +3368,7 @@ async def _background_index_job(
     staged_collection: str | None = None  # the name recorded on the fence BEFORE creation
     staged_graph_recorded: str | None = None  # the graph id recorded on the fence
     cleanup_recorded = True  # False only when an uncommitted run could not record its handoff
+    accounting: IndexAccountingOwner | None = None
 
     def _current_graph_metadata(
         *, override: Any | None = None, partial: bool = False
@@ -3420,7 +3416,7 @@ async def _background_index_job(
             {"type": "log", "message": f"🚀 Indexing started: {repo_id} (run_id={run_id})"},
             drop_oldest=True,
         )
-        cfg = await load_scoped_config(repo_id=repo_id)
+        cfg = config_snapshot or await load_scoped_config(repo_id=repo_id)
         policy_pg = PostgresClient(cfg.indexing.postgres_url)
         await policy_pg.connect()
         try:
@@ -3467,6 +3463,24 @@ async def _background_index_job(
         )
         heartbeat = _FenceHeartbeat(cfg, repo_id, run_id)
         heartbeat.start()
+        # Freeze the existing estimator's result from this exact config before
+        # dispatch. Sampling reads source text locally and sends no provider call.
+        estimate = await _freeze_index_estimate(request, cfg)
+        models: dict[CostLane, str] = {}
+        coverage_notes: list[str] = []
+        if graph_policy == "semantic":
+            models["semantic_kg"] = _semantic_kg_model_override(cfg)
+        if not cfg.indexing.skip_dense and cfg.embedding.embedding_backend == "provider" and _looks_cloud_provider(cfg.embedding.embedding_type):
+            models["embedding"] = cfg.embedding.effective_model
+            coverage_notes.append("Direct provider embeddings are outside native gateway accounting.")
+        if cfg.indexing.figures.enabled and cfg.indexing.figures.describe:
+            models["figure_description"] = cfg.indexing.figures.vision_model
+        accounting = IndexAccountingOwner(
+            _run_summary_path(repo_id, run_id), summary,
+            config_json=cfg.model_dump_json(), config=cfg, models=models,
+            coverage_complete=not coverage_notes, coverage_notes=coverage_notes, estimate=estimate,
+            gateway_base_url=resolve_litellm_base_url(configured_url=cfg.chat.litellm.base_url).removesuffix("/v1"),
+        )
         # Every claim drains the durable reclaim backlog (a failed reclaim from an
         # earlier takeover is retried by the next normal run, never forgotten).
         await _drain_reclaim_backlog(cfg, repo_id)
@@ -3520,7 +3534,9 @@ async def _background_index_job(
                 cfg=cfg,
                 graph_schema=graph_schema,
                 graph_extraction=graph_extraction,
+                accounting=accounting,
             )
+        accounting.finish()
         # Verify every staged resource BEFORE the commit: a partial vector index
         # or an empty staged graph must never become the active generation.
         staged_points = await qdrant.count_points(qdrant_generation)
@@ -4006,6 +4022,11 @@ async def _background_index_job(
             _persist_run_summary(summary)
         _emit_event(queue, {"type": "error", "message": str(e)}, guarantee=True)
     finally:
+        if accounting is not None:
+            try:
+                accounting.finish(interrupted=True)
+            except Exception:
+                logger.exception("Index accounting closure was not acknowledged for run %s", run_id)
         if heartbeat is not None:
             heartbeat.stop()
         # The release must survive a cancellation delivered while this `finally`
@@ -4188,7 +4209,8 @@ def proposal_matches(
 
 
 async def build_proposal_from_corpus(
-    corpus: dict[str, Any], cfg: TriBridConfig, *, fingerprint: str
+    corpus: dict[str, Any], cfg: TriBridConfig, *, fingerprint: str,
+    census_scope: RunCensusScope | None = None,
 ) -> GraphSchemaProposal:
     corpus_id = str(corpus.get("repo_id") or corpus.get("corpus_id") or "").strip()
     root = _resolve_corpus_root(str(corpus.get("path") or ""))
@@ -4259,6 +4281,7 @@ async def build_proposal_from_corpus(
         input_fingerprint=fingerprint,
         timeout_s=float(cfg.graph_indexing.schema_proposal_timeout_s),
         max_output_tokens=int(cfg.graph_indexing.schema_proposal_max_output_tokens),
+        census_scope=census_scope,
     )
 
 
@@ -4322,6 +4345,7 @@ def _extract_schema_sample_text_for_path(path: Path, cfg: TriBridConfig) -> str:
     response_model=GraphSchemaProposal,
     responses={
         409: {"model": GraphSchemaPolicyConflictResponse | GraphSchemaProposalFailureResponse},
+        422: {"model": GraphSchemaProposalFailureResponse},
         502: {"model": GraphSchemaProposalFailureResponse},
         504: {"model": GraphSchemaProposalFailureResponse},
     },
@@ -4329,93 +4353,160 @@ def _extract_schema_sample_text_for_path(path: Path, cfg: TriBridConfig) -> str:
 async def propose_graph_schema(
     corpus_id: str, request: GraphSchemaProposalRequest
 ) -> GraphSchemaProposal:
-    corpus, cfg = await load_corpus_and_scoped_config(corpus_id)
-    meta = corpus.get("meta") if isinstance(corpus.get("meta"), dict) else {}
-    policy = resolve_graph_policy(
-        internal=bool((meta or {}).get("system_kind")),
-        enabled=bool(cfg.graph_indexing.enabled),
-        build_code_graph=bool(cfg.graph_indexing.build_code_graph),
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    # Config itself may be blocked. Begin below the public proxy deadline, then
+    # charge its elapsed time to the corpus budget once that budget is available.
+    bootstrap_budget = float(GraphIndexingConfig.model_fields["schema_proposal_timeout_s"].default)
+    deadline = asyncio.timeout_at(started + bootstrap_budget)
+    attempt = IndexRunSummary(
+        run_id=uuid.uuid4().hex, repo_id=corpus_id, run_kind="schema_proposal",
+        status="indexing", started_at=datetime.now(UTC),
     )
-    if policy != "semantic":
-        detail = graph_schema_policy_detail(policy)
-        raise HTTPException(status_code=409, detail=detail.model_dump(mode="json"))
-
-    fingerprint = await graph_schema_input_fingerprint(corpus, cfg)
-    postgres = PostgresClient(cfg.indexing.postgres_url)
-    await postgres.connect()
+    cfg: TriBridConfig | None = None
+    postgres: PostgresClient | None = None
+    accounting: IndexAccountingOwner | None = None
+    record_attempt = False
     try:
-        existing = await postgres.get_graph_schema_proposal(corpus_id)
-        if existing and not request.force_refresh and proposal_matches(existing, fingerprint, cfg):
-            return existing
-        try:
-            async with asyncio.timeout(cfg.graph_indexing.schema_proposal_timeout_s):
-                proposal = await build_proposal_from_corpus(corpus, cfg, fingerprint=fingerprint)
-                # Generation can outlive a settings/path change. Recheck before any
-                # write. This is not a transaction across config files and Postgres;
-                # start_index still validates the current fingerprint before use.
-                current_corpus, current_cfg = await load_corpus_and_scoped_config(corpus_id)
-                current_meta = current_corpus.get("meta") or {}
-                current_policy = resolve_graph_policy(
-                    internal=bool(current_meta.get("system_kind")),
-                    enabled=bool(current_cfg.graph_indexing.enabled),
-                    build_code_graph=bool(current_cfg.graph_indexing.build_code_graph),
-                )
-                if (
-                    current_policy != "semantic"
-                    or await graph_schema_input_fingerprint(current_corpus, current_cfg) != fingerprint
-                ):
-                    changed_detail = GraphSchemaProposalFailureDetail(
-                        code="graph_schema_context_changed", corpus_id=corpus_id,
-                        model_alias=proposal.model_alias,
-                        message="Corpus sources or schema proposal settings changed during generation.",
-                        operator_hint="Generate a new proposal for the current corpus and settings.",
-                    )
-                    raise HTTPException(status_code=409, detail=changed_detail.model_dump(mode="json"))
-        except (TimeoutError, GraphSchemaProposalError) as exc:
-            timed_out = isinstance(exc, TimeoutError) or exc.code == "graph_schema_deadline_exceeded"
-            failure_detail = GraphSchemaProposalFailureDetail(
-                code="graph_schema_deadline_exceeded" if timed_out else "graph_schema_generation_failed",
-                corpus_id=corpus_id, model_alias=_semantic_kg_model_override(cfg),
-                message=(
-                    "Schema proposal exceeded its total time budget."
-                    if timed_out else "The model gateway did not return a complete, valid schema proposal."
-                ),
-                operator_hint=(
-                    "Review the proposal time and output budgets and gateway status before generating again. "
-                    "Any existing proposal and approval were preserved."
-                ),
+        async with deadline:
+            corpus, cfg = await load_corpus_and_scoped_config(corpus_id)
+            deadline.reschedule(started + cfg.graph_indexing.schema_proposal_timeout_s)
+            # A smaller scoped budget may already have expired while loading it.
+            await asyncio.sleep(0)
+            meta = corpus.get("meta") if isinstance(corpus.get("meta"), dict) else {}
+            policy = resolve_graph_policy(
+                internal=bool((meta or {}).get("system_kind")),
+                enabled=bool(cfg.graph_indexing.enabled),
+                build_code_graph=bool(cfg.graph_indexing.build_code_graph),
             )
-            if isinstance(exc, GraphSchemaProposalError):
-                logger.warning(
-                    "Schema proposal failed for corpus %s (%s); usage=%s gateway_cost_usd=%s",
-                    corpus_id, exc.code,
-                    exc.usage.model_dump(mode="json") if exc.usage else None,
-                    exc.gateway_cost_usd,
+            if policy != "semantic":
+                detail = graph_schema_policy_detail(policy)
+                raise HTTPException(status_code=409, detail=detail.model_dump(mode="json"))
+
+            fingerprint = await graph_schema_input_fingerprint(corpus, cfg)
+            postgres = PostgresClient(cfg.indexing.postgres_url)
+            await postgres.connect()
+            existing = await postgres.get_graph_schema_proposal(corpus_id)
+            if existing and not request.force_refresh and proposal_matches(existing, fingerprint, cfg):
+                return existing
+            record_attempt = True
+            accounting = IndexAccountingOwner(
+                _run_summary_path(corpus_id, attempt.run_id), attempt,
+                config_json=cfg.model_dump_json(), config=cfg, models={"schema_proposal": _semantic_kg_model_override(cfg)},
+                coverage_complete=True, coverage_notes=[],
+                gateway_base_url=resolve_litellm_base_url(configured_url=cfg.chat.litellm.base_url).removesuffix("/v1"),
+            )
+            try:
+                proposal = await build_proposal_from_corpus(
+                    corpus, cfg, fingerprint=fingerprint,
+                    census_scope=accounting.scopes["schema_proposal"],
                 )
-            raise HTTPException(status_code=504 if timed_out else 502, detail=failure_detail.model_dump(mode="json")) from exc
-        except ValueError as exc:
-            # The proposer answered, but the domain rules rejected the shape (no node
-            # types, no relationships, a forbidden label ...). That is a review outcome
-            # the operator must read, not a server fault (Task 8 drive finding D8).
-            raise HTTPException(
-                status_code=422,
-                detail={
-                    "code": "graph_schema_unusable",
-                    "corpus_id": corpus_id,
-                    "model_alias": str(cfg.graph_indexing.semantic_kg_llm_model or "").strip()
-                    or _resolve_semantic_kg_route(cfg).model,
-                    "message": str(exc),
-                    "operator_hint": (
-                        "The sampled text did not yield a usable closed-world schema for this "
-                        "model. Provide text with named entities and relationships, or choose "
-                        "another KG model alias, then generate the proposal again."
-                    ),
-                },
-            ) from exc
-        await postgres.set_graph_schema_proposal(corpus_id, proposal)
-        return proposal
+            except (ValueError, HTTPException) as exc:
+                if isinstance(exc, HTTPException):
+                    # Sampling's plain-text 422 is an unusable proposal attempt too. Preserve
+                    # unrelated statuses and already-typed details exactly as their owner made
+                    # them instead of wrapping or erasing those contracts here.
+                    if exc.status_code != 422 or not isinstance(exc.detail, str):
+                        raise
+                    failure_message = exc.detail
+                else:
+                    failure_message = str(exc)
+                # The proposer answered, but the domain rules rejected the shape (no node
+                # types, no relationships, a forbidden label ...), or sampling found no text
+                # to send. That is an operator-review outcome, not a server fault.
+                raise HTTPException(
+                    status_code=422,
+                    detail=GraphSchemaProposalFailureDetail(
+                        code="graph_schema_unusable",
+                        corpus_id=corpus_id,
+                        accounting_run_id=attempt.run_id,
+                        accounting_started_at=attempt.started_at,
+                        model_alias=str(cfg.graph_indexing.semantic_kg_llm_model or "").strip()
+                        or _resolve_semantic_kg_route(cfg).model,
+                        message=failure_message,
+                        operator_hint=(
+                            "The sampled text did not yield a usable closed-world schema for this "
+                            "model. Provide text with named entities and relationships, or choose "
+                            "another KG model alias, then generate the proposal again."
+                        ),
+                    ).model_dump(mode="json"),
+                ) from exc
+            # This is not a transaction across config files and Postgres;
+            # start_index still validates the current fingerprint before use.
+            current_corpus, current_cfg = await load_corpus_and_scoped_config(corpus_id)
+            current_meta = current_corpus.get("meta") or {}
+            current_policy = resolve_graph_policy(
+                internal=bool(current_meta.get("system_kind")),
+                enabled=bool(current_cfg.graph_indexing.enabled),
+                build_code_graph=bool(current_cfg.graph_indexing.build_code_graph),
+            )
+            if (
+                current_policy != "semantic"
+                or await graph_schema_input_fingerprint(current_corpus, current_cfg) != fingerprint
+            ):
+                changed_detail = GraphSchemaProposalFailureDetail(
+                    code="graph_schema_context_changed", corpus_id=corpus_id,
+                    accounting_run_id=attempt.run_id, accounting_started_at=attempt.started_at,
+                    model_alias=proposal.model_alias,
+                    message="Corpus sources or schema proposal settings changed during generation.",
+                    operator_hint="Generate a new proposal for the current corpus and settings.",
+                )
+                raise HTTPException(status_code=409, detail=changed_detail.model_dump(mode="json"))
+            proposal = proposal.model_copy(update={
+                "accounting_run_id": attempt.run_id,
+                "accounting_started_at": attempt.started_at,
+            })
+            # The native transaction rolls back if cancellation interrupts its row
+            # lock or write. Persistence receives only the remaining total budget.
+            await postgres.set_graph_schema_proposal(corpus_id, proposal)
+            attempt = attempt.model_copy(update={"status": "complete", "progress": 1.0})
+            return proposal
+    except (TimeoutError, GraphSchemaProposalError) as exc:
+        record_attempt = True
+        timed_out = isinstance(exc, TimeoutError) or exc.code == "graph_schema_deadline_exceeded"
+        failure_detail = GraphSchemaProposalFailureDetail(
+            code="graph_schema_deadline_exceeded" if timed_out else "graph_schema_generation_failed",
+            accounting_run_id=attempt.run_id,
+            accounting_started_at=attempt.started_at,
+            corpus_id=corpus_id, model_alias=_semantic_kg_model_override(cfg) if cfg is not None else "",
+            message=(
+                "Schema proposal exceeded its total time budget."
+                if timed_out else "The model gateway did not return a complete, valid schema proposal."
+            ),
+            operator_hint=(
+                "Review the proposal time and output budgets and gateway status before generating again. "
+                "Any existing proposal and approval were preserved."
+            ),
+        )
+        if isinstance(exc, GraphSchemaProposalError):
+            logger.warning(
+                "Schema proposal failed for corpus %s (%s); usage=%s gateway_cost_usd=%s",
+                corpus_id, exc.code,
+                exc.usage.model_dump(mode="json") if exc.usage else None,
+                exc.gateway_cost_usd,
+            )
+        raise HTTPException(status_code=504 if timed_out else 502, detail=failure_detail.model_dump(mode="json")) from exc
     finally:
-        await postgres.disconnect()
+        if record_attempt:
+            def close_attempt() -> None:
+                try:
+                    if accounting is not None:
+                        accounting.finish(interrupted=attempt.status != "complete")
+                finally:
+                    write_run_summary(_run_summary_path(corpus_id, attempt.run_id), attempt.model_copy(update={
+                        "status": "complete" if attempt.status == "complete" else "error",
+                        "completed_at": datetime.now(UTC),
+                        "error": None if attempt.status == "complete" else "Schema proposal did not complete; any prior approval was preserved.",
+                    }))
+
+            try:
+                # Durable closure can finish in its thread if the filesystem stalls;
+                # it cannot start provider work or alter an approved proposal.
+                await asyncio.wait_for(asyncio.to_thread(close_attempt), timeout=1.0)
+            except Exception:
+                logger.exception("Schema proposal accounting closure failed for %s", attempt.run_id)
+        if postgres is not None:
+            await postgres.disconnect()
 
 
 async def require_approved_graph_schema(
@@ -4465,9 +4556,37 @@ async def require_approved_graph_schema(
     return proposal
 
 
+async def _freeze_index_estimate(request: IndexRequest, cfg: TriBridConfig) -> IndexCostEstimateSnapshot:
+    """Keep an ancillary quote failure separate from actual indexing safety gates."""
+    try:
+        await asyncio.to_thread(warm_sampler, Chunker(cfg.chunking, cfg.tokenization))
+        quote = await _estimate_index_with_config(request, cfg)
+    except Exception:
+        # A sampled ceiling or changed/unreadable source is not measured work.
+        # The indexer still enforces its real eligible-chunk and source checks.
+        logger.warning("Pre-run estimate unavailable for corpus %s", request.repo_id)
+        return IndexCostEstimateSnapshot(
+            captured_at=datetime.now(UTC),
+            detail="Pre-run estimate unavailable. The indexer's source and actual chunk-count checks still apply.",
+        )
+    return IndexCostEstimateSnapshot(
+        captured_at=datetime.now(UTC), embedding_usd=quote.embedding_cost_usd,
+        semantic_kg_usd=quote.semantic_kg_cost_usd,
+        figure_description_usd=quote.figure_description_cost_usd, total_usd=quote.total_cost_usd,
+        estimated_chunks=quote.estimated_total_chunks, estimated_tokens=quote.estimated_total_tokens,
+        detail="; ".join(quote.assumptions),
+    )
+
+
 @router.post("/index/estimate", response_model=IndexEstimate)
 async def estimate_index(request: IndexRequest) -> IndexEstimate:
     """Estimate indexing cost/time for a corpus before running the indexer."""
+    cfg = await load_scoped_config(repo_id=request.repo_id)
+    return await _estimate_index_with_config(request, cfg)
+
+
+async def _estimate_index_with_config(request: IndexRequest, cfg: TriBridConfig) -> IndexEstimate:
+    """Shared estimator with an explicit immutable run configuration."""
     repo_id = str(request.repo_id or "").strip()
     repo_path = str(request.repo_path or "").strip()
     corpus: dict[str, Any] | None = None
@@ -4490,8 +4609,6 @@ async def estimate_index(request: IndexRequest) -> IndexEstimate:
         raise HTTPException(
             status_code=422, detail="repo_path is required (or create corpus first)"
         )
-
-    cfg = await load_scoped_config(repo_id=repo_id)
 
     # Build ignore patterns from config (same as indexer).
     ignore_patterns: list[str] = []
@@ -4966,6 +5083,8 @@ async def start_index(request: IndexRequest, http_request: Request) -> IndexStat
                 queue,
                 run_id=run_id,
                 override_actor=override_actor,
+                config_snapshot=cfg.model_copy(deep=True),
+                run_started_at=started_at,
             )
         )
         _TASKS[request.repo_id] = task
@@ -5083,7 +5202,11 @@ async def get_dashboard_index_status(
     # run and leave it blank for good if that run errored. Read-only -- the cost card never
     # finalizes or rewrites a run.
     await _flush_run_events()
-    latest_run = await asyncio.to_thread(_load_latest_run_summary, repo_id, ("complete",))
+    live_generation = generation_from_corpus_row(corpus)
+    latest_run = (
+        await asyncio.to_thread(_load_run_summary, repo_id, live_generation.run_id)
+        if live_generation is not None else None
+    )
     costs = _status_costs(
         cfg=cfg,
         graph_policy=resolve_graph_policy(
@@ -5236,6 +5359,7 @@ async def get_dashboard_index_stats(
 )
 async def get_latest_index_run(
     corpus_id: str,
+    run_kind: Literal["index", "schema_proposal"] = Query(default="index"),
     finalize: bool = Query(
         default=True,
         description=(
@@ -5250,11 +5374,11 @@ async def get_latest_index_run(
     if not repo_id:
         raise HTTPException(status_code=422, detail="corpus_id is required")
 
-    if not finalize:
+    if not finalize or run_kind == "schema_proposal":
         # Read-only branch: whatever is on disk, exactly as stored. A listing that asks every
         # corpus for its latest run must not make N fence reads, N scoped-config loads and N
         # event-queue flushes -- nor rewrite a run summary as a side effect of being displayed.
-        run = await asyncio.to_thread(_load_latest_run_summary, repo_id)
+        run = await asyncio.to_thread(_load_latest_run_summary, repo_id, run_kind=run_kind)
         if run is None:
             raise HTTPException(
                 status_code=404, detail=f"No persisted index runs found for repo_id={repo_id}"
@@ -5293,6 +5417,7 @@ async def get_index_run_events(
     if not rid:
         raise HTTPException(status_code=422, detail="run_id is required")
     await _flush_run_events()
+    await get_index_run(repo_id, rid)
     events, total = await asyncio.to_thread(_load_run_events, repo_id, rid, limit=limit)
     return IndexRunEventPage(
         repo_id=repo_id,
@@ -5301,6 +5426,49 @@ async def get_index_run_events(
         total=total,
         first_index=max(0, total - len(events)),
     )
+
+
+@router.get("/index/{corpus_id}/runs/{run_id}", response_model=IndexRunSummary)
+async def get_index_run(corpus_id: str, run_id: str) -> IndexRunSummary:
+    """Read an exact index or schema-proposal attempt, including saved accounting."""
+    run = await asyncio.to_thread(_load_run_summary, corpus_id, run_id)
+    if run is None or run.repo_id != corpus_id or run.run_id != run_id:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return run
+
+
+@router.post("/index/{corpus_id}/runs/{run_id}/costs/reconcile", response_model=IndexRunSummary)
+async def reconcile_index_run_costs(corpus_id: str, run_id: str) -> IndexRunSummary:
+    """Refresh native spend after queue flush; elapsed time never proves completeness."""
+    run = await get_index_run(corpus_id, run_id)
+    if run.accounting is None:
+        return run
+    # The original gateway root survives config changes and corpus deletion;
+    # never look for historical charges at a newly selected gateway.
+    if run.accounting.gateway_base_url is None:
+        return await _record_cost_reconciliation_setup_error(run, "saved_gateway_location_unavailable")
+    try:
+        api_key = SecretStr(resolve_litellm_api_key())
+    except RuntimeError:
+        return await _record_cost_reconciliation_setup_error(run, "gateway_credentials_unavailable")
+    try:
+        reader = NativeSpendReader(
+            base_url=run.accounting.gateway_base_url,
+            api_key=api_key, request_timeout_s=3.0, total_timeout_s=12.0,
+        )
+    except (ValueError, InvalidURL):
+        return await _record_cost_reconciliation_setup_error(run, "gateway_client_configuration_invalid")
+    return await reconcile_run_costs(_run_summary_path(corpus_id, run_id), reader)
+
+
+async def _record_cost_reconciliation_setup_error(run: IndexRunSummary, error: str) -> IndexRunSummary:
+    """Save setup failures only while the captured accounting record is current."""
+    path = _run_summary_path(run.repo_id, run.run_id)
+    await asyncio.to_thread(update_run_accounting, path, lambda record: (
+        record.model_copy(update={"reconciliation_error": error, "reconciled_at": datetime.now(UTC)})
+        if record == run.accounting else record
+    ))
+    return await get_index_run(run.repo_id, run.run_id)
 
 
 @router.get(
@@ -5321,21 +5489,21 @@ async def get_index_status(corpus_id: str) -> IndexStatus:
     """Durable truth first: tombstone, then the fence, then this process's state, then persisted runs."""
     repo_id = corpus_id
     try:
-        cfg: TriBridConfig | None = await load_scoped_config(repo_id=repo_id)
-    except CorpusNotFoundError:
-        cfg = None  # persisted run summaries can outlive the corpus registration
-    if cfg is not None:
-        # The Indexing tab reads this on mount, which is the earliest honest moment to start
-        # loading what an Index Now click will need.
-        _warm_sampler_in_background(cfg)
+        cfg = await load_scoped_config(repo_id=repo_id)
+    except CorpusNotFoundError as exc:
+        # Retained attempts remain readable through /runs/*; they are not a
+        # current corpus registration or current indexing status.
+        raise HTTPException(status_code=404, detail="Corpus not found") from exc
+    # The Indexing tab reads this on mount, which is the earliest honest moment to start
+    # loading what an Index Now click will need.
+    _warm_sampler_in_background(cfg)
     live: IndexRunFence | None = None
     current_manifest: GenerationManifest | None = None
-    if cfg is not None:
-        try:
-            current_manifest = await _read_index_state(repo_id, cfg)
-            live = await _live_fence(repo_id, cfg=cfg)
-        except IndexFenceCorruptError as exc:
-            raise _fence_corrupt_conflict(repo_id, exc) from exc
+    try:
+        current_manifest = await _read_index_state(repo_id, cfg)
+        live = await _live_fence(repo_id, cfg=cfg)
+    except IndexFenceCorruptError as exc:
+        raise _fence_corrupt_conflict(repo_id, exc) from exc
     local = _STATUS.get(repo_id)
     if live is not None:
         if (
@@ -5358,7 +5526,7 @@ async def get_index_status(corpus_id: str) -> IndexStatus:
     if local is not None and local.status != "indexing":
         # A terminal state this process remembers is only current while the
         # durable manifest still belongs to the run it describes.
-        if cfg is not None and await _manifest_is_newer_than_local(repo_id, cfg, local):
+        if await _manifest_is_newer_than_local(repo_id, cfg, local):
             _STATUS.pop(repo_id, None)
             _STATUS_RUN_ID.pop(repo_id, None)
         else:
@@ -5367,7 +5535,7 @@ async def get_index_status(corpus_id: str) -> IndexStatus:
     persisted_run = await asyncio.to_thread(_load_latest_run_summary, repo_id)
     if persisted_run is not None:
         persisted_run = await _finalize_interrupted_run(repo_id, persisted_run)
-        if persisted_run.status == "complete" and cfg is not None and current_manifest is None:
+        if persisted_run.status == "complete" and current_manifest is None:
             # A completed run is history, not current state, once another worker
             # de-indexed the corpus (no manifest): report idle, never a stale complete.
             return _idle_status(repo_id)
@@ -5383,8 +5551,6 @@ async def get_index_status(corpus_id: str) -> IndexStatus:
     # No run record: infer "complete" from the DURABLE index stats only (a
     # process-cached IndexStats could outlive another worker's de-index).
     try:
-        if cfg is None:
-            raise CorpusNotFoundError(f"Corpus not found: {repo_id}")
         postgres = PostgresClient(cfg.indexing.postgres_url)
         await postgres.connect()
         try:
@@ -5512,11 +5678,9 @@ async def delete_index(corpus_id: str) -> dict[str, Any]:
     finally:
         with contextlib.suppress(Exception):
             await postgres.disconnect()
-    # The persisted runs describe an index that no longer exists. Left behind, they are what
-    # _load_latest_run_summary keeps answering with, so the ops strip reported
-    # "Indexing complete - 0 chunks, <old timestamp>" for a corpus that had just been deleted --
-    # the same dishonesty M-44 was raised to remove, pointing the other way.
-    await asyncio.to_thread(_discard_persisted_runs, repo_id)
+    # Run history and late worker checkpoints outlive the index. Current-state
+    # readers use the durable manifest; historical readers retain the original
+    # estimate and request census needed for native spend reconciliation.
     # Best-effort gauges (process-level; no per-corpus labels).
     # Reset to zero to avoid stale dashboards in single-corpus dev flows.
     try:

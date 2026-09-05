@@ -31,6 +31,55 @@ LIVE_CORPORA = ("nasa-apollo-11", "epstein-files-public")
 MAX_RATIO = 2.0
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source_case", ["removed", "sampled_ceiling"])
+async def test_run_quote_failure_is_saved_as_unavailable_without_replacing_actual_safety_checks(
+    tmp_path, source_case: str,
+) -> None:
+    from datetime import UTC, datetime
+
+    from fastapi import HTTPException
+
+    from server.api.index import _estimate_index_with_config, _freeze_index_estimate
+    from server.indexing.accounting import IndexAccountingOwner
+    from server.indexing.estimate import warm_sampler
+    from server.indexing.graph_policy import GraphChunkCeilingExceeded, require_graph_chunk_ceiling
+    from server.models.index import IndexRequest, IndexRunSummary
+    from server.models.tribrid_config_model import TriBridConfig
+
+    cfg = TriBridConfig()
+    cfg.graph_indexing.enabled = True
+    cfg.graph_indexing.build_code_graph = False
+    cfg.graph_indexing.semantic_kg_max_chunks = 1
+    cfg.graph_indexing.semantic_kg_llm_model = "openai.gpt-5.6-sol"
+    cfg.indexing.skip_dense = True
+    root = tmp_path / "source"
+    root.mkdir()
+    if source_case == "sampled_ceiling":
+        (root / "mission.md").write_text("The orbital mission uses a radar altimeter to measure surface altitude.\n" * 2000)
+    else:
+        root.rmdir()
+    request = IndexRequest(repo_id="pytest_quote_failure", repo_path=str(root))
+    await asyncio.to_thread(warm_sampler, Chunker(cfg.chunking, cfg.tokenization))
+    with pytest.raises(HTTPException) as failed:
+        await _estimate_index_with_config(request, cfg)
+    assert failed.value.status_code == (409 if source_case == "sampled_ceiling" else 422)
+
+    quote = await _freeze_index_estimate(request, cfg)
+    assert quote.total_usd is None and quote.estimated_chunks is None
+    assert "unavailable" in quote.detail.lower()
+    summary = IndexRunSummary(run_id="quote-attempt", repo_id=request.repo_id, status="indexing", started_at=datetime.now(UTC))
+    path = tmp_path / "run" / "summary.json"
+    owner = IndexAccountingOwner(path, summary, config_json=cfg.model_dump_json(), models={},
+                                 coverage_complete=True, coverage_notes=[], estimate=quote)
+    owner.finish()
+    saved = IndexRunSummary.model_validate_json(path.read_text())
+    assert saved.accounting is not None and saved.accounting.estimate == quote
+    assert require_graph_chunk_ceiling(policy="semantic", eligible_chunks=1, ceiling=1) == 1
+    with pytest.raises(GraphChunkCeilingExceeded):
+        require_graph_chunk_ceiling(policy="semantic", eligible_chunks=2, ceiling=1)
+
+
 async def _corpus_files(repo_id: str):
     cfg = await load_scoped_config(repo_id=repo_id)
     postgres = PostgresClient(cfg.indexing.postgres_url)

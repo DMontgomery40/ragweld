@@ -130,11 +130,15 @@ def test_model_list_puts_local_serving_row_first_and_routes_openrouter_by_env_ke
     ]
     assert model_list[0]["litellm_params"] == {
         "model": "openai/ragweld-local",
+        "num_retries": 0,
+        "max_retries": 0,
         "api_base": "http://host.docker.internal:58080/v1",
         "api_key": "none",
     }
     assert model_list[1]["litellm_params"] == {
         "model": "openrouter/anthropic/claude-sonnet-4.5",
+        "num_retries": 0,
+        "max_retries": 0,
         "api_key": "os.environ/OPENROUTER_API_KEY",
     }
 
@@ -143,15 +147,26 @@ def test_rendered_config_has_no_retries_or_fallbacks_and_is_file_authoritative()
     config = build_litellm_config({"models": [_local_row(), _openrouter_row("openai/gpt-5.4-mini")]})
 
     assert config["litellm_settings"] == {
+        "DEFAULT_MAX_RETRIES": 0,
         "num_retries": 0,
         "fallbacks": [],
         "context_window_fallbacks": [],
-        "callbacks": ["prometheus"],
+        "callbacks": ["prometheus", "langfuse_otel"],
+        "custom_prometheus_metadata_labels": ["metadata.lane"],
+        "turn_off_message_logging": True,
         "require_auth_for_metrics_endpoint": False,
         "include_cost_in_streaming_usage": True,
     }
-    assert config["router_settings"] == {"num_retries": 0}
-    assert config["general_settings"] == {"master_key": "os.environ/LITELLM_MASTER_KEY", "store_model_in_db": False}
+    assert config["router_settings"] == {
+        "default_fallbacks": [],
+        "num_retries": 0, "retry_policy": None, "model_group_retry_policy": {},
+        "fallbacks": [], "context_window_fallbacks": [], "content_policy_fallbacks": [],
+        "enable_weighted_failover": False,
+    }
+    assert config["general_settings"] == {
+        "master_key": "os.environ/LITELLM_MASTER_KEY", "store_model_in_db": False,
+        "store_prompts_in_spend_logs": False, "disable_spend_logs": False,
+    }
     rendered = render_litellm_config({"models": [_local_row(), _openrouter_row("openai/gpt-5.4-mini")]})
     assert rendered.startswith("# GENERATED from data/models.json")
     assert yaml.safe_load(rendered) == config
@@ -357,3 +372,39 @@ def test_checked_in_local_serving_row_names_the_lane_not_a_serving_backend() -> 
         lowered = text.lower()
         for backend_claim in ("vllm", "metal", "mlx", "apple"):
             assert backend_claim not in lowered, f"local row still claims a serving backend: {text!r}"
+
+
+def test_native_ledger_startup_keeps_enforced_migrations_and_private_payloads() -> None:
+    compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text())
+    gateway = compose["services"]["litellm"]
+    assert gateway["image"] == "ghcr.io/berriai/litellm:v1.94.0"
+    assert "--use_v2_migration_resolver" in gateway["command"]
+    assert "--enforce_prisma_migration_check" in gateway["command"]
+    assert "--use_prisma_db_push" not in gateway["command"]
+    assert "--skip_server_startup" not in gateway["command"]
+    # Compose environment wins over env_file: zero must exist at process import
+    # time, before native OpenAI client default arguments are captured.
+    assert gateway["environment"]["DEFAULT_MAX_RETRIES"] == "0"
+    from dotenv import dotenv_values
+
+    defaults = dotenv_values(ROOT / "infra/litellm.env.example", interpolate=False)
+    assert defaults["STORE_PROMPTS_IN_SPEND_LOGS"] == "false"
+    assert defaults["DEFAULT_MAX_RETRIES"] == "0"
+
+
+@pytest.mark.parametrize("overrides", [
+    {"num_retries": 2}, {"max_retries": 2}, {"silent_model": "secondary"},
+    {"retry_policy": {"RateLimitErrorRetries": 2}},
+    {"model_group_retry_policy": {"openai.gpt-5.4-mini": {"TimeoutErrorRetries": 2}}},
+    {"fallbacks": ["secondary"]}, {"context_window_fallbacks": ["secondary"]},
+    {"content_policy_fallbacks": ["secondary"]},
+])
+def test_catalog_metadata_cannot_introduce_native_attempt_multiplicity(overrides: dict[str, object]) -> None:
+    remote = _openrouter_row("openai/gpt-5.4-mini")
+    remote.update(overrides)
+    remote["litellm_params"] = dict(overrides)
+    config = build_litellm_config({"models": [_local_row(), remote]})
+    for deployment in config["model_list"]:
+        params = deployment["litellm_params"]
+        assert params["num_retries"] == params["max_retries"] == 0
+        assert set(params) <= {"model", "api_base", "api_key", "num_retries", "max_retries"}

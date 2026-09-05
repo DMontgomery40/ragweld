@@ -2,7 +2,7 @@
   "domain_modules": [
     "server.models.index"
   ],
-  "model_count": 316,
+  "model_count": 317,
   "module": "server.models.tribrid_config_model",
   "root_models": {
     "ActiveSources": {
@@ -10812,8 +10812,533 @@
       "type": "object"
     },
     "DashboardIndexCosts": {
+      "$defs": {
+        "IndexCostEstimateSnapshot": {
+          "additionalProperties": false,
+          "description": "An immutable pre-run quote, distinct from native observed charges.",
+          "properties": {
+            "captured_at": {
+              "format": "date-time",
+              "title": "Captured At",
+              "type": "string"
+            },
+            "detail": {
+              "title": "Detail",
+              "type": "string"
+            },
+            "embedding_usd": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Embedding Usd"
+            },
+            "estimated_chunks": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Estimated Chunks"
+            },
+            "estimated_tokens": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Estimated Tokens"
+            },
+            "figure_description_usd": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Figure Description Usd"
+            },
+            "semantic_kg_usd": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Semantic Kg Usd"
+            },
+            "total_usd": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Total Usd"
+            }
+          },
+          "required": [
+            "captured_at",
+            "detail"
+          ],
+          "title": "IndexCostEstimateSnapshot",
+          "type": "object"
+        },
+        "IndexRunAccounting": {
+          "additionalProperties": false,
+          "description": "Accounting extension of the existing index run summary, with no call rows.",
+          "properties": {
+            "census": {
+              "additionalProperties": {
+                "$ref": "#/$defs/RunRequestCensus"
+              },
+              "propertyNames": {
+                "enum": [
+                  "embedding",
+                  "semantic_kg",
+                  "figure_description",
+                  "schema_proposal"
+                ]
+              },
+              "title": "Census",
+              "type": "object"
+            },
+            "config_fingerprint": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Config Fingerprint",
+              "type": "string"
+            },
+            "corpus_id": {
+              "minLength": 1,
+              "title": "Corpus Id",
+              "type": "string"
+            },
+            "costs": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NativeRunCosts"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "coverage_complete": {
+              "default": false,
+              "title": "Coverage Complete",
+              "type": "boolean"
+            },
+            "coverage_notes": {
+              "items": {
+                "type": "string"
+              },
+              "title": "Coverage Notes",
+              "type": "array"
+            },
+            "ended_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Ended At"
+            },
+            "estimate": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/IndexCostEstimateSnapshot"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "gateway_attempt_policy_verified": {
+              "default": false,
+              "title": "Gateway Attempt Policy Verified",
+              "type": "boolean"
+            },
+            "gateway_base_url": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Original gateway management root without credentials; retained for historical reconciliation.",
+              "title": "Gateway Base Url"
+            },
+            "models": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "propertyNames": {
+                "enum": [
+                  "embedding",
+                  "semantic_kg",
+                  "figure_description",
+                  "schema_proposal"
+                ]
+              },
+              "title": "Models",
+              "type": "object"
+            },
+            "owner_interrupted": {
+              "default": false,
+              "description": "The owner process ended before a durable closed census; also covers runs with no paid lanes.",
+              "title": "Owner Interrupted",
+              "type": "boolean"
+            },
+            "processed_chunks": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Processed Chunks",
+              "type": "integer"
+            },
+            "processed_files": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Processed Files",
+              "type": "integer"
+            },
+            "processed_tokens": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Processed Tokens",
+              "type": "integer"
+            },
+            "reconciled_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Reconciled At"
+            },
+            "reconciliation_error": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Reconciliation Error"
+            },
+            "session_id": {
+              "minLength": 1,
+              "title": "Session Id",
+              "type": "string"
+            },
+            "started_at": {
+              "format": "date-time",
+              "title": "Started At",
+              "type": "string"
+            }
+          },
+          "required": [
+            "session_id",
+            "corpus_id",
+            "started_at",
+            "config_fingerprint"
+          ],
+          "title": "IndexRunAccounting",
+          "type": "object"
+        },
+        "NativeRunCosts": {
+          "additionalProperties": false,
+          "description": "Derived native measurements; completeness and price evidence are separate.",
+          "properties": {
+            "cached_requests": {
+              "minimum": 0,
+              "title": "Cached Requests",
+              "type": "integer"
+            },
+            "coverage_state": {
+              "enum": [
+                "pending",
+                "complete",
+                "incomplete"
+              ],
+              "title": "Coverage State",
+              "type": "string"
+            },
+            "excluded_rows": {
+              "minimum": 0,
+              "title": "Excluded Rows",
+              "type": "integer"
+            },
+            "gateway_calculated_requests": {
+              "minimum": 0,
+              "title": "Gateway Calculated Requests",
+              "type": "integer"
+            },
+            "gateway_calculated_usd": {
+              "minimum": 0,
+              "title": "Gateway Calculated Usd",
+              "type": "number"
+            },
+            "matched_gateway_requests": {
+              "minimum": 0,
+              "title": "Matched Gateway Requests",
+              "type": "integer"
+            },
+            "missing_requests": {
+              "minimum": 0,
+              "title": "Missing Requests",
+              "type": "integer"
+            },
+            "native_logged_usd": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Native Logged Usd"
+            },
+            "native_rows": {
+              "minimum": 0,
+              "title": "Native Rows",
+              "type": "integer"
+            },
+            "pages_read": {
+              "minimum": 0,
+              "title": "Pages Read",
+              "type": "integer"
+            },
+            "pricing_state": {
+              "enum": [
+                "complete",
+                "incomplete"
+              ],
+              "title": "Pricing State",
+              "type": "string"
+            },
+            "provider_reported_requests": {
+              "minimum": 0,
+              "title": "Provider Reported Requests",
+              "type": "integer"
+            },
+            "provider_reported_usd": {
+              "minimum": 0,
+              "title": "Provider Reported Usd",
+              "type": "number"
+            },
+            "reasons": {
+              "items": {
+                "type": "string"
+              },
+              "title": "Reasons",
+              "type": "array"
+            },
+            "state": {
+              "enum": [
+                "pending",
+                "complete",
+                "incomplete"
+              ],
+              "title": "State",
+              "type": "string"
+            },
+            "unmeasured_requests": {
+              "minimum": 0,
+              "title": "Unmeasured Requests",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "state",
+            "coverage_state",
+            "pricing_state",
+            "provider_reported_usd",
+            "gateway_calculated_usd",
+            "native_logged_usd",
+            "provider_reported_requests",
+            "gateway_calculated_requests",
+            "cached_requests",
+            "unmeasured_requests",
+            "matched_gateway_requests",
+            "missing_requests",
+            "native_rows",
+            "excluded_rows",
+            "pages_read",
+            "reasons"
+          ],
+          "title": "NativeRunCosts",
+          "type": "object"
+        },
+        "RunCostIdentity": {
+          "additionalProperties": false,
+          "properties": {
+            "corpus_id": {
+              "minLength": 1,
+              "title": "Corpus Id",
+              "type": "string"
+            },
+            "lane": {
+              "enum": [
+                "embedding",
+                "semantic_kg",
+                "figure_description",
+                "schema_proposal"
+              ],
+              "title": "Lane",
+              "type": "string"
+            },
+            "session_id": {
+              "minLength": 1,
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "session_id",
+            "corpus_id",
+            "lane"
+          ],
+          "title": "RunCostIdentity",
+          "type": "object"
+        },
+        "RunRequestCensus": {
+          "additionalProperties": false,
+          "description": "Acknowledged aggregate checkpoint, never an inferred request count.",
+          "properties": {
+            "active_producers": {
+              "minimum": 0,
+              "title": "Active Producers",
+              "type": "integer"
+            },
+            "completed_requests": {
+              "minimum": 0,
+              "title": "Completed Requests",
+              "type": "integer"
+            },
+            "dispatch_enabled": {
+              "title": "Dispatch Enabled",
+              "type": "boolean"
+            },
+            "failed_requests": {
+              "minimum": 0,
+              "title": "Failed Requests",
+              "type": "integer"
+            },
+            "identity": {
+              "$ref": "#/$defs/RunCostIdentity"
+            },
+            "inflight": {
+              "minimum": 0,
+              "title": "Inflight",
+              "type": "integer"
+            },
+            "owner_finished": {
+              "title": "Owner Finished",
+              "type": "boolean"
+            },
+            "revision": {
+              "minimum": 0,
+              "title": "Revision",
+              "type": "integer"
+            },
+            "started_requests": {
+              "minimum": 0,
+              "title": "Started Requests",
+              "type": "integer"
+            },
+            "state": {
+              "enum": [
+                "open",
+                "closed",
+                "interrupted"
+              ],
+              "title": "State",
+              "type": "string"
+            },
+            "uncertain_requests": {
+              "minimum": 0,
+              "title": "Uncertain Requests",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "identity",
+            "revision",
+            "started_requests",
+            "completed_requests",
+            "failed_requests",
+            "uncertain_requests",
+            "inflight",
+            "active_producers",
+            "owner_finished",
+            "dispatch_enabled",
+            "state"
+          ],
+          "title": "RunRequestCensus",
+          "type": "object"
+        }
+      },
       "description": "Indexing cost summary for dashboard display.",
       "properties": {
+        "accounting": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IndexRunAccounting"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Saved accounting for the exact live generation's index run."
+        },
         "embedding_cost": {
           "anyOf": [
             {
@@ -10825,7 +11350,7 @@
             }
           ],
           "default": null,
-          "description": "Estimated embedding cost (USD) when pricing data is available.",
+          "description": "Saved pre-run embedding estimate (USD) for the live generation; never repriced from current settings.",
           "title": "Embedding Cost"
         },
         "figure_description_cost": {
@@ -10839,12 +11364,12 @@
             }
           ],
           "default": null,
-          "description": "Ceiling on the vision-call cost (USD) of the latest run's figure descriptions, as that run recorded it; null when no run described a figure or its alias is unpriced.",
+          "description": "Saved pre-run figure-description estimate (USD) for the live generation, or its historical saved figure ceiling when no quote exists; never a measured charge.",
           "title": "Figure Description Cost"
         },
         "figures_described": {
           "default": 0,
-          "description": "Figures the latest indexing run described.",
+          "description": "Figures described by the live generation's index run.",
           "minimum": 0,
           "title": "Figures Described",
           "type": "integer"
@@ -10860,7 +11385,7 @@
             }
           ],
           "default": null,
-          "description": "Estimated GraphRAG semantic extraction cost (USD) when enabled.",
+          "description": "Saved pre-run semantic GraphRAG estimate (USD) for the live generation.",
           "title": "Semantic Kg Cost"
         },
         "total_cost": {
@@ -10874,7 +11399,7 @@
             }
           ],
           "default": null,
-          "description": "Estimated total indexing cost (USD): embedding + semantic KG + figure description (each when applicable); null when any applicable component has no known price.",
+          "description": "Saved pre-run total estimate (USD) for the live generation. Null when the original quote is unavailable or any applicable component had no known price.",
           "title": "Total Cost"
         },
         "total_tokens": {
@@ -11067,6 +11592,18 @@
         "DashboardIndexCosts": {
           "description": "Indexing cost summary for dashboard display.",
           "properties": {
+            "accounting": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/IndexRunAccounting"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Saved accounting for the exact live generation's index run."
+            },
             "embedding_cost": {
               "anyOf": [
                 {
@@ -11078,7 +11615,7 @@
                 }
               ],
               "default": null,
-              "description": "Estimated embedding cost (USD) when pricing data is available.",
+              "description": "Saved pre-run embedding estimate (USD) for the live generation; never repriced from current settings.",
               "title": "Embedding Cost"
             },
             "figure_description_cost": {
@@ -11092,12 +11629,12 @@
                 }
               ],
               "default": null,
-              "description": "Ceiling on the vision-call cost (USD) of the latest run's figure descriptions, as that run recorded it; null when no run described a figure or its alias is unpriced.",
+              "description": "Saved pre-run figure-description estimate (USD) for the live generation, or its historical saved figure ceiling when no quote exists; never a measured charge.",
               "title": "Figure Description Cost"
             },
             "figures_described": {
               "default": 0,
-              "description": "Figures the latest indexing run described.",
+              "description": "Figures described by the live generation's index run.",
               "minimum": 0,
               "title": "Figures Described",
               "type": "integer"
@@ -11113,7 +11650,7 @@
                 }
               ],
               "default": null,
-              "description": "Estimated GraphRAG semantic extraction cost (USD) when enabled.",
+              "description": "Saved pre-run semantic GraphRAG estimate (USD) for the live generation.",
               "title": "Semantic Kg Cost"
             },
             "total_cost": {
@@ -11127,7 +11664,7 @@
                 }
               ],
               "default": null,
-              "description": "Estimated total indexing cost (USD): embedding + semantic KG + figure description (each when applicable); null when any applicable component has no known price.",
+              "description": "Saved pre-run total estimate (USD) for the live generation. Null when the original quote is unavailable or any applicable component had no known price.",
               "title": "Total Cost"
             },
             "total_tokens": {
@@ -11217,6 +11754,517 @@
             "total_storage_bytes"
           ],
           "title": "DashboardIndexStorageBreakdown",
+          "type": "object"
+        },
+        "IndexCostEstimateSnapshot": {
+          "additionalProperties": false,
+          "description": "An immutable pre-run quote, distinct from native observed charges.",
+          "properties": {
+            "captured_at": {
+              "format": "date-time",
+              "title": "Captured At",
+              "type": "string"
+            },
+            "detail": {
+              "title": "Detail",
+              "type": "string"
+            },
+            "embedding_usd": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Embedding Usd"
+            },
+            "estimated_chunks": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Estimated Chunks"
+            },
+            "estimated_tokens": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Estimated Tokens"
+            },
+            "figure_description_usd": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Figure Description Usd"
+            },
+            "semantic_kg_usd": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Semantic Kg Usd"
+            },
+            "total_usd": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Total Usd"
+            }
+          },
+          "required": [
+            "captured_at",
+            "detail"
+          ],
+          "title": "IndexCostEstimateSnapshot",
+          "type": "object"
+        },
+        "IndexRunAccounting": {
+          "additionalProperties": false,
+          "description": "Accounting extension of the existing index run summary, with no call rows.",
+          "properties": {
+            "census": {
+              "additionalProperties": {
+                "$ref": "#/$defs/RunRequestCensus"
+              },
+              "propertyNames": {
+                "enum": [
+                  "embedding",
+                  "semantic_kg",
+                  "figure_description",
+                  "schema_proposal"
+                ]
+              },
+              "title": "Census",
+              "type": "object"
+            },
+            "config_fingerprint": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Config Fingerprint",
+              "type": "string"
+            },
+            "corpus_id": {
+              "minLength": 1,
+              "title": "Corpus Id",
+              "type": "string"
+            },
+            "costs": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NativeRunCosts"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "coverage_complete": {
+              "default": false,
+              "title": "Coverage Complete",
+              "type": "boolean"
+            },
+            "coverage_notes": {
+              "items": {
+                "type": "string"
+              },
+              "title": "Coverage Notes",
+              "type": "array"
+            },
+            "ended_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Ended At"
+            },
+            "estimate": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/IndexCostEstimateSnapshot"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "gateway_attempt_policy_verified": {
+              "default": false,
+              "title": "Gateway Attempt Policy Verified",
+              "type": "boolean"
+            },
+            "gateway_base_url": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Original gateway management root without credentials; retained for historical reconciliation.",
+              "title": "Gateway Base Url"
+            },
+            "models": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "propertyNames": {
+                "enum": [
+                  "embedding",
+                  "semantic_kg",
+                  "figure_description",
+                  "schema_proposal"
+                ]
+              },
+              "title": "Models",
+              "type": "object"
+            },
+            "owner_interrupted": {
+              "default": false,
+              "description": "The owner process ended before a durable closed census; also covers runs with no paid lanes.",
+              "title": "Owner Interrupted",
+              "type": "boolean"
+            },
+            "processed_chunks": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Processed Chunks",
+              "type": "integer"
+            },
+            "processed_files": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Processed Files",
+              "type": "integer"
+            },
+            "processed_tokens": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Processed Tokens",
+              "type": "integer"
+            },
+            "reconciled_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Reconciled At"
+            },
+            "reconciliation_error": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Reconciliation Error"
+            },
+            "session_id": {
+              "minLength": 1,
+              "title": "Session Id",
+              "type": "string"
+            },
+            "started_at": {
+              "format": "date-time",
+              "title": "Started At",
+              "type": "string"
+            }
+          },
+          "required": [
+            "session_id",
+            "corpus_id",
+            "started_at",
+            "config_fingerprint"
+          ],
+          "title": "IndexRunAccounting",
+          "type": "object"
+        },
+        "NativeRunCosts": {
+          "additionalProperties": false,
+          "description": "Derived native measurements; completeness and price evidence are separate.",
+          "properties": {
+            "cached_requests": {
+              "minimum": 0,
+              "title": "Cached Requests",
+              "type": "integer"
+            },
+            "coverage_state": {
+              "enum": [
+                "pending",
+                "complete",
+                "incomplete"
+              ],
+              "title": "Coverage State",
+              "type": "string"
+            },
+            "excluded_rows": {
+              "minimum": 0,
+              "title": "Excluded Rows",
+              "type": "integer"
+            },
+            "gateway_calculated_requests": {
+              "minimum": 0,
+              "title": "Gateway Calculated Requests",
+              "type": "integer"
+            },
+            "gateway_calculated_usd": {
+              "minimum": 0,
+              "title": "Gateway Calculated Usd",
+              "type": "number"
+            },
+            "matched_gateway_requests": {
+              "minimum": 0,
+              "title": "Matched Gateway Requests",
+              "type": "integer"
+            },
+            "missing_requests": {
+              "minimum": 0,
+              "title": "Missing Requests",
+              "type": "integer"
+            },
+            "native_logged_usd": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Native Logged Usd"
+            },
+            "native_rows": {
+              "minimum": 0,
+              "title": "Native Rows",
+              "type": "integer"
+            },
+            "pages_read": {
+              "minimum": 0,
+              "title": "Pages Read",
+              "type": "integer"
+            },
+            "pricing_state": {
+              "enum": [
+                "complete",
+                "incomplete"
+              ],
+              "title": "Pricing State",
+              "type": "string"
+            },
+            "provider_reported_requests": {
+              "minimum": 0,
+              "title": "Provider Reported Requests",
+              "type": "integer"
+            },
+            "provider_reported_usd": {
+              "minimum": 0,
+              "title": "Provider Reported Usd",
+              "type": "number"
+            },
+            "reasons": {
+              "items": {
+                "type": "string"
+              },
+              "title": "Reasons",
+              "type": "array"
+            },
+            "state": {
+              "enum": [
+                "pending",
+                "complete",
+                "incomplete"
+              ],
+              "title": "State",
+              "type": "string"
+            },
+            "unmeasured_requests": {
+              "minimum": 0,
+              "title": "Unmeasured Requests",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "state",
+            "coverage_state",
+            "pricing_state",
+            "provider_reported_usd",
+            "gateway_calculated_usd",
+            "native_logged_usd",
+            "provider_reported_requests",
+            "gateway_calculated_requests",
+            "cached_requests",
+            "unmeasured_requests",
+            "matched_gateway_requests",
+            "missing_requests",
+            "native_rows",
+            "excluded_rows",
+            "pages_read",
+            "reasons"
+          ],
+          "title": "NativeRunCosts",
+          "type": "object"
+        },
+        "RunCostIdentity": {
+          "additionalProperties": false,
+          "properties": {
+            "corpus_id": {
+              "minLength": 1,
+              "title": "Corpus Id",
+              "type": "string"
+            },
+            "lane": {
+              "enum": [
+                "embedding",
+                "semantic_kg",
+                "figure_description",
+                "schema_proposal"
+              ],
+              "title": "Lane",
+              "type": "string"
+            },
+            "session_id": {
+              "minLength": 1,
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "session_id",
+            "corpus_id",
+            "lane"
+          ],
+          "title": "RunCostIdentity",
+          "type": "object"
+        },
+        "RunRequestCensus": {
+          "additionalProperties": false,
+          "description": "Acknowledged aggregate checkpoint, never an inferred request count.",
+          "properties": {
+            "active_producers": {
+              "minimum": 0,
+              "title": "Active Producers",
+              "type": "integer"
+            },
+            "completed_requests": {
+              "minimum": 0,
+              "title": "Completed Requests",
+              "type": "integer"
+            },
+            "dispatch_enabled": {
+              "title": "Dispatch Enabled",
+              "type": "boolean"
+            },
+            "failed_requests": {
+              "minimum": 0,
+              "title": "Failed Requests",
+              "type": "integer"
+            },
+            "identity": {
+              "$ref": "#/$defs/RunCostIdentity"
+            },
+            "inflight": {
+              "minimum": 0,
+              "title": "Inflight",
+              "type": "integer"
+            },
+            "owner_finished": {
+              "title": "Owner Finished",
+              "type": "boolean"
+            },
+            "revision": {
+              "minimum": 0,
+              "title": "Revision",
+              "type": "integer"
+            },
+            "started_requests": {
+              "minimum": 0,
+              "title": "Started Requests",
+              "type": "integer"
+            },
+            "state": {
+              "enum": [
+                "open",
+                "closed",
+                "interrupted"
+              ],
+              "title": "State",
+              "type": "string"
+            },
+            "uncertain_requests": {
+              "minimum": 0,
+              "title": "Uncertain Requests",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "identity",
+            "revision",
+            "started_requests",
+            "completed_requests",
+            "failed_requests",
+            "uncertain_requests",
+            "inflight",
+            "active_producers",
+            "owner_finished",
+            "dispatch_enabled",
+            "state"
+          ],
+          "title": "RunRequestCensus",
           "type": "object"
         }
       },
@@ -11368,6 +12416,18 @@
         "DashboardIndexCosts": {
           "description": "Indexing cost summary for dashboard display.",
           "properties": {
+            "accounting": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/IndexRunAccounting"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Saved accounting for the exact live generation's index run."
+            },
             "embedding_cost": {
               "anyOf": [
                 {
@@ -11379,7 +12439,7 @@
                 }
               ],
               "default": null,
-              "description": "Estimated embedding cost (USD) when pricing data is available.",
+              "description": "Saved pre-run embedding estimate (USD) for the live generation; never repriced from current settings.",
               "title": "Embedding Cost"
             },
             "figure_description_cost": {
@@ -11393,12 +12453,12 @@
                 }
               ],
               "default": null,
-              "description": "Ceiling on the vision-call cost (USD) of the latest run's figure descriptions, as that run recorded it; null when no run described a figure or its alias is unpriced.",
+              "description": "Saved pre-run figure-description estimate (USD) for the live generation, or its historical saved figure ceiling when no quote exists; never a measured charge.",
               "title": "Figure Description Cost"
             },
             "figures_described": {
               "default": 0,
-              "description": "Figures the latest indexing run described.",
+              "description": "Figures described by the live generation's index run.",
               "minimum": 0,
               "title": "Figures Described",
               "type": "integer"
@@ -11414,7 +12474,7 @@
                 }
               ],
               "default": null,
-              "description": "Estimated GraphRAG semantic extraction cost (USD) when enabled.",
+              "description": "Saved pre-run semantic GraphRAG estimate (USD) for the live generation.",
               "title": "Semantic Kg Cost"
             },
             "total_cost": {
@@ -11428,7 +12488,7 @@
                 }
               ],
               "default": null,
-              "description": "Estimated total indexing cost (USD): embedding + semantic KG + figure description (each when applicable); null when any applicable component has no known price.",
+              "description": "Saved pre-run total estimate (USD) for the live generation. Null when the original quote is unavailable or any applicable component had no known price.",
               "title": "Total Cost"
             },
             "total_tokens": {
@@ -11602,6 +12662,517 @@
             "total_storage_bytes"
           ],
           "title": "DashboardIndexStorageBreakdown",
+          "type": "object"
+        },
+        "IndexCostEstimateSnapshot": {
+          "additionalProperties": false,
+          "description": "An immutable pre-run quote, distinct from native observed charges.",
+          "properties": {
+            "captured_at": {
+              "format": "date-time",
+              "title": "Captured At",
+              "type": "string"
+            },
+            "detail": {
+              "title": "Detail",
+              "type": "string"
+            },
+            "embedding_usd": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Embedding Usd"
+            },
+            "estimated_chunks": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Estimated Chunks"
+            },
+            "estimated_tokens": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Estimated Tokens"
+            },
+            "figure_description_usd": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Figure Description Usd"
+            },
+            "semantic_kg_usd": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Semantic Kg Usd"
+            },
+            "total_usd": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Total Usd"
+            }
+          },
+          "required": [
+            "captured_at",
+            "detail"
+          ],
+          "title": "IndexCostEstimateSnapshot",
+          "type": "object"
+        },
+        "IndexRunAccounting": {
+          "additionalProperties": false,
+          "description": "Accounting extension of the existing index run summary, with no call rows.",
+          "properties": {
+            "census": {
+              "additionalProperties": {
+                "$ref": "#/$defs/RunRequestCensus"
+              },
+              "propertyNames": {
+                "enum": [
+                  "embedding",
+                  "semantic_kg",
+                  "figure_description",
+                  "schema_proposal"
+                ]
+              },
+              "title": "Census",
+              "type": "object"
+            },
+            "config_fingerprint": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Config Fingerprint",
+              "type": "string"
+            },
+            "corpus_id": {
+              "minLength": 1,
+              "title": "Corpus Id",
+              "type": "string"
+            },
+            "costs": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NativeRunCosts"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "coverage_complete": {
+              "default": false,
+              "title": "Coverage Complete",
+              "type": "boolean"
+            },
+            "coverage_notes": {
+              "items": {
+                "type": "string"
+              },
+              "title": "Coverage Notes",
+              "type": "array"
+            },
+            "ended_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Ended At"
+            },
+            "estimate": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/IndexCostEstimateSnapshot"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "gateway_attempt_policy_verified": {
+              "default": false,
+              "title": "Gateway Attempt Policy Verified",
+              "type": "boolean"
+            },
+            "gateway_base_url": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Original gateway management root without credentials; retained for historical reconciliation.",
+              "title": "Gateway Base Url"
+            },
+            "models": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "propertyNames": {
+                "enum": [
+                  "embedding",
+                  "semantic_kg",
+                  "figure_description",
+                  "schema_proposal"
+                ]
+              },
+              "title": "Models",
+              "type": "object"
+            },
+            "owner_interrupted": {
+              "default": false,
+              "description": "The owner process ended before a durable closed census; also covers runs with no paid lanes.",
+              "title": "Owner Interrupted",
+              "type": "boolean"
+            },
+            "processed_chunks": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Processed Chunks",
+              "type": "integer"
+            },
+            "processed_files": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Processed Files",
+              "type": "integer"
+            },
+            "processed_tokens": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Processed Tokens",
+              "type": "integer"
+            },
+            "reconciled_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Reconciled At"
+            },
+            "reconciliation_error": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Reconciliation Error"
+            },
+            "session_id": {
+              "minLength": 1,
+              "title": "Session Id",
+              "type": "string"
+            },
+            "started_at": {
+              "format": "date-time",
+              "title": "Started At",
+              "type": "string"
+            }
+          },
+          "required": [
+            "session_id",
+            "corpus_id",
+            "started_at",
+            "config_fingerprint"
+          ],
+          "title": "IndexRunAccounting",
+          "type": "object"
+        },
+        "NativeRunCosts": {
+          "additionalProperties": false,
+          "description": "Derived native measurements; completeness and price evidence are separate.",
+          "properties": {
+            "cached_requests": {
+              "minimum": 0,
+              "title": "Cached Requests",
+              "type": "integer"
+            },
+            "coverage_state": {
+              "enum": [
+                "pending",
+                "complete",
+                "incomplete"
+              ],
+              "title": "Coverage State",
+              "type": "string"
+            },
+            "excluded_rows": {
+              "minimum": 0,
+              "title": "Excluded Rows",
+              "type": "integer"
+            },
+            "gateway_calculated_requests": {
+              "minimum": 0,
+              "title": "Gateway Calculated Requests",
+              "type": "integer"
+            },
+            "gateway_calculated_usd": {
+              "minimum": 0,
+              "title": "Gateway Calculated Usd",
+              "type": "number"
+            },
+            "matched_gateway_requests": {
+              "minimum": 0,
+              "title": "Matched Gateway Requests",
+              "type": "integer"
+            },
+            "missing_requests": {
+              "minimum": 0,
+              "title": "Missing Requests",
+              "type": "integer"
+            },
+            "native_logged_usd": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Native Logged Usd"
+            },
+            "native_rows": {
+              "minimum": 0,
+              "title": "Native Rows",
+              "type": "integer"
+            },
+            "pages_read": {
+              "minimum": 0,
+              "title": "Pages Read",
+              "type": "integer"
+            },
+            "pricing_state": {
+              "enum": [
+                "complete",
+                "incomplete"
+              ],
+              "title": "Pricing State",
+              "type": "string"
+            },
+            "provider_reported_requests": {
+              "minimum": 0,
+              "title": "Provider Reported Requests",
+              "type": "integer"
+            },
+            "provider_reported_usd": {
+              "minimum": 0,
+              "title": "Provider Reported Usd",
+              "type": "number"
+            },
+            "reasons": {
+              "items": {
+                "type": "string"
+              },
+              "title": "Reasons",
+              "type": "array"
+            },
+            "state": {
+              "enum": [
+                "pending",
+                "complete",
+                "incomplete"
+              ],
+              "title": "State",
+              "type": "string"
+            },
+            "unmeasured_requests": {
+              "minimum": 0,
+              "title": "Unmeasured Requests",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "state",
+            "coverage_state",
+            "pricing_state",
+            "provider_reported_usd",
+            "gateway_calculated_usd",
+            "native_logged_usd",
+            "provider_reported_requests",
+            "gateway_calculated_requests",
+            "cached_requests",
+            "unmeasured_requests",
+            "matched_gateway_requests",
+            "missing_requests",
+            "native_rows",
+            "excluded_rows",
+            "pages_read",
+            "reasons"
+          ],
+          "title": "NativeRunCosts",
+          "type": "object"
+        },
+        "RunCostIdentity": {
+          "additionalProperties": false,
+          "properties": {
+            "corpus_id": {
+              "minLength": 1,
+              "title": "Corpus Id",
+              "type": "string"
+            },
+            "lane": {
+              "enum": [
+                "embedding",
+                "semantic_kg",
+                "figure_description",
+                "schema_proposal"
+              ],
+              "title": "Lane",
+              "type": "string"
+            },
+            "session_id": {
+              "minLength": 1,
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "session_id",
+            "corpus_id",
+            "lane"
+          ],
+          "title": "RunCostIdentity",
+          "type": "object"
+        },
+        "RunRequestCensus": {
+          "additionalProperties": false,
+          "description": "Acknowledged aggregate checkpoint, never an inferred request count.",
+          "properties": {
+            "active_producers": {
+              "minimum": 0,
+              "title": "Active Producers",
+              "type": "integer"
+            },
+            "completed_requests": {
+              "minimum": 0,
+              "title": "Completed Requests",
+              "type": "integer"
+            },
+            "dispatch_enabled": {
+              "title": "Dispatch Enabled",
+              "type": "boolean"
+            },
+            "failed_requests": {
+              "minimum": 0,
+              "title": "Failed Requests",
+              "type": "integer"
+            },
+            "identity": {
+              "$ref": "#/$defs/RunCostIdentity"
+            },
+            "inflight": {
+              "minimum": 0,
+              "title": "Inflight",
+              "type": "integer"
+            },
+            "owner_finished": {
+              "title": "Owner Finished",
+              "type": "boolean"
+            },
+            "revision": {
+              "minimum": 0,
+              "title": "Revision",
+              "type": "integer"
+            },
+            "started_requests": {
+              "minimum": 0,
+              "title": "Started Requests",
+              "type": "integer"
+            },
+            "state": {
+              "enum": [
+                "open",
+                "closed",
+                "interrupted"
+              ],
+              "title": "State",
+              "type": "string"
+            },
+            "uncertain_requests": {
+              "minimum": 0,
+              "title": "Uncertain Requests",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "identity",
+            "revision",
+            "started_requests",
+            "completed_requests",
+            "failed_requests",
+            "uncertain_requests",
+            "inflight",
+            "active_producers",
+            "owner_finished",
+            "dispatch_enabled",
+            "state"
+          ],
+          "title": "RunRequestCensus",
           "type": "object"
         }
       },
@@ -17593,6 +19164,33 @@
         }
       },
       "properties": {
+        "accounting_run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Persisted schema-proposal attempt; separate from a later index run.",
+          "title": "Accounting Run Id"
+        },
+        "accounting_started_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Server-recorded start of the persisted schema-proposal attempt; absent on legacy proposals.",
+          "title": "Accounting Started At"
+        },
         "corpus_id": {
           "title": "Corpus Id",
           "type": "string"
@@ -17651,11 +19249,39 @@
     },
     "GraphSchemaProposalFailureDetail": {
       "properties": {
+        "accounting_run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Saved accounting attempt, including failed provider work.",
+          "title": "Accounting Run Id"
+        },
+        "accounting_started_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Server-recorded start of the saved accounting attempt; absent from legacy failures.",
+          "title": "Accounting Started At"
+        },
         "code": {
           "enum": [
             "graph_schema_generation_failed",
             "graph_schema_deadline_exceeded",
-            "graph_schema_context_changed"
+            "graph_schema_context_changed",
+            "graph_schema_unusable"
           ],
           "title": "Code",
           "type": "string"
@@ -17691,11 +19317,39 @@
       "$defs": {
         "GraphSchemaProposalFailureDetail": {
           "properties": {
+            "accounting_run_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Saved accounting attempt, including failed provider work.",
+              "title": "Accounting Run Id"
+            },
+            "accounting_started_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Server-recorded start of the saved accounting attempt; absent from legacy failures.",
+              "title": "Accounting Started At"
+            },
             "code": {
               "enum": [
                 "graph_schema_generation_failed",
                 "graph_schema_deadline_exceeded",
-                "graph_schema_context_changed"
+                "graph_schema_context_changed",
+                "graph_schema_unusable"
               ],
               "title": "Code",
               "type": "string"
@@ -18938,6 +20592,519 @@
       "title": "IndexRequest",
       "type": "object"
     },
+    "IndexRunAccounting": {
+      "$defs": {
+        "IndexCostEstimateSnapshot": {
+          "additionalProperties": false,
+          "description": "An immutable pre-run quote, distinct from native observed charges.",
+          "properties": {
+            "captured_at": {
+              "format": "date-time",
+              "title": "Captured At",
+              "type": "string"
+            },
+            "detail": {
+              "title": "Detail",
+              "type": "string"
+            },
+            "embedding_usd": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Embedding Usd"
+            },
+            "estimated_chunks": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Estimated Chunks"
+            },
+            "estimated_tokens": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Estimated Tokens"
+            },
+            "figure_description_usd": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Figure Description Usd"
+            },
+            "semantic_kg_usd": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Semantic Kg Usd"
+            },
+            "total_usd": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Total Usd"
+            }
+          },
+          "required": [
+            "captured_at",
+            "detail"
+          ],
+          "title": "IndexCostEstimateSnapshot",
+          "type": "object"
+        },
+        "NativeRunCosts": {
+          "additionalProperties": false,
+          "description": "Derived native measurements; completeness and price evidence are separate.",
+          "properties": {
+            "cached_requests": {
+              "minimum": 0,
+              "title": "Cached Requests",
+              "type": "integer"
+            },
+            "coverage_state": {
+              "enum": [
+                "pending",
+                "complete",
+                "incomplete"
+              ],
+              "title": "Coverage State",
+              "type": "string"
+            },
+            "excluded_rows": {
+              "minimum": 0,
+              "title": "Excluded Rows",
+              "type": "integer"
+            },
+            "gateway_calculated_requests": {
+              "minimum": 0,
+              "title": "Gateway Calculated Requests",
+              "type": "integer"
+            },
+            "gateway_calculated_usd": {
+              "minimum": 0,
+              "title": "Gateway Calculated Usd",
+              "type": "number"
+            },
+            "matched_gateway_requests": {
+              "minimum": 0,
+              "title": "Matched Gateway Requests",
+              "type": "integer"
+            },
+            "missing_requests": {
+              "minimum": 0,
+              "title": "Missing Requests",
+              "type": "integer"
+            },
+            "native_logged_usd": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Native Logged Usd"
+            },
+            "native_rows": {
+              "minimum": 0,
+              "title": "Native Rows",
+              "type": "integer"
+            },
+            "pages_read": {
+              "minimum": 0,
+              "title": "Pages Read",
+              "type": "integer"
+            },
+            "pricing_state": {
+              "enum": [
+                "complete",
+                "incomplete"
+              ],
+              "title": "Pricing State",
+              "type": "string"
+            },
+            "provider_reported_requests": {
+              "minimum": 0,
+              "title": "Provider Reported Requests",
+              "type": "integer"
+            },
+            "provider_reported_usd": {
+              "minimum": 0,
+              "title": "Provider Reported Usd",
+              "type": "number"
+            },
+            "reasons": {
+              "items": {
+                "type": "string"
+              },
+              "title": "Reasons",
+              "type": "array"
+            },
+            "state": {
+              "enum": [
+                "pending",
+                "complete",
+                "incomplete"
+              ],
+              "title": "State",
+              "type": "string"
+            },
+            "unmeasured_requests": {
+              "minimum": 0,
+              "title": "Unmeasured Requests",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "state",
+            "coverage_state",
+            "pricing_state",
+            "provider_reported_usd",
+            "gateway_calculated_usd",
+            "native_logged_usd",
+            "provider_reported_requests",
+            "gateway_calculated_requests",
+            "cached_requests",
+            "unmeasured_requests",
+            "matched_gateway_requests",
+            "missing_requests",
+            "native_rows",
+            "excluded_rows",
+            "pages_read",
+            "reasons"
+          ],
+          "title": "NativeRunCosts",
+          "type": "object"
+        },
+        "RunCostIdentity": {
+          "additionalProperties": false,
+          "properties": {
+            "corpus_id": {
+              "minLength": 1,
+              "title": "Corpus Id",
+              "type": "string"
+            },
+            "lane": {
+              "enum": [
+                "embedding",
+                "semantic_kg",
+                "figure_description",
+                "schema_proposal"
+              ],
+              "title": "Lane",
+              "type": "string"
+            },
+            "session_id": {
+              "minLength": 1,
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "session_id",
+            "corpus_id",
+            "lane"
+          ],
+          "title": "RunCostIdentity",
+          "type": "object"
+        },
+        "RunRequestCensus": {
+          "additionalProperties": false,
+          "description": "Acknowledged aggregate checkpoint, never an inferred request count.",
+          "properties": {
+            "active_producers": {
+              "minimum": 0,
+              "title": "Active Producers",
+              "type": "integer"
+            },
+            "completed_requests": {
+              "minimum": 0,
+              "title": "Completed Requests",
+              "type": "integer"
+            },
+            "dispatch_enabled": {
+              "title": "Dispatch Enabled",
+              "type": "boolean"
+            },
+            "failed_requests": {
+              "minimum": 0,
+              "title": "Failed Requests",
+              "type": "integer"
+            },
+            "identity": {
+              "$ref": "#/$defs/RunCostIdentity"
+            },
+            "inflight": {
+              "minimum": 0,
+              "title": "Inflight",
+              "type": "integer"
+            },
+            "owner_finished": {
+              "title": "Owner Finished",
+              "type": "boolean"
+            },
+            "revision": {
+              "minimum": 0,
+              "title": "Revision",
+              "type": "integer"
+            },
+            "started_requests": {
+              "minimum": 0,
+              "title": "Started Requests",
+              "type": "integer"
+            },
+            "state": {
+              "enum": [
+                "open",
+                "closed",
+                "interrupted"
+              ],
+              "title": "State",
+              "type": "string"
+            },
+            "uncertain_requests": {
+              "minimum": 0,
+              "title": "Uncertain Requests",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "identity",
+            "revision",
+            "started_requests",
+            "completed_requests",
+            "failed_requests",
+            "uncertain_requests",
+            "inflight",
+            "active_producers",
+            "owner_finished",
+            "dispatch_enabled",
+            "state"
+          ],
+          "title": "RunRequestCensus",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Accounting extension of the existing index run summary, with no call rows.",
+      "properties": {
+        "census": {
+          "additionalProperties": {
+            "$ref": "#/$defs/RunRequestCensus"
+          },
+          "propertyNames": {
+            "enum": [
+              "embedding",
+              "semantic_kg",
+              "figure_description",
+              "schema_proposal"
+            ]
+          },
+          "title": "Census",
+          "type": "object"
+        },
+        "config_fingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Config Fingerprint",
+          "type": "string"
+        },
+        "corpus_id": {
+          "minLength": 1,
+          "title": "Corpus Id",
+          "type": "string"
+        },
+        "costs": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NativeRunCosts"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "coverage_complete": {
+          "default": false,
+          "title": "Coverage Complete",
+          "type": "boolean"
+        },
+        "coverage_notes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Coverage Notes",
+          "type": "array"
+        },
+        "ended_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ended At"
+        },
+        "estimate": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IndexCostEstimateSnapshot"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "gateway_attempt_policy_verified": {
+          "default": false,
+          "title": "Gateway Attempt Policy Verified",
+          "type": "boolean"
+        },
+        "gateway_base_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Original gateway management root without credentials; retained for historical reconciliation.",
+          "title": "Gateway Base Url"
+        },
+        "models": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "propertyNames": {
+            "enum": [
+              "embedding",
+              "semantic_kg",
+              "figure_description",
+              "schema_proposal"
+            ]
+          },
+          "title": "Models",
+          "type": "object"
+        },
+        "owner_interrupted": {
+          "default": false,
+          "description": "The owner process ended before a durable closed census; also covers runs with no paid lanes.",
+          "title": "Owner Interrupted",
+          "type": "boolean"
+        },
+        "processed_chunks": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Processed Chunks",
+          "type": "integer"
+        },
+        "processed_files": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Processed Files",
+          "type": "integer"
+        },
+        "processed_tokens": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Processed Tokens",
+          "type": "integer"
+        },
+        "reconciled_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reconciled At"
+        },
+        "reconciliation_error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reconciliation Error"
+        },
+        "session_id": {
+          "minLength": 1,
+          "title": "Session Id",
+          "type": "string"
+        },
+        "started_at": {
+          "format": "date-time",
+          "title": "Started At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "corpus_id",
+        "started_at",
+        "config_fingerprint"
+      ],
+      "title": "IndexRunAccounting",
+      "type": "object"
+    },
     "IndexRunConflictDetail": {
       "description": "Public error detail returned (HTTP 409) when a corpus is fenced by a running index run.",
       "properties": {
@@ -19625,10 +21792,533 @@
           ],
           "title": "GraphResolutionTelemetry",
           "type": "object"
+        },
+        "IndexCostEstimateSnapshot": {
+          "additionalProperties": false,
+          "description": "An immutable pre-run quote, distinct from native observed charges.",
+          "properties": {
+            "captured_at": {
+              "format": "date-time",
+              "title": "Captured At",
+              "type": "string"
+            },
+            "detail": {
+              "title": "Detail",
+              "type": "string"
+            },
+            "embedding_usd": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Embedding Usd"
+            },
+            "estimated_chunks": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Estimated Chunks"
+            },
+            "estimated_tokens": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Estimated Tokens"
+            },
+            "figure_description_usd": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Figure Description Usd"
+            },
+            "semantic_kg_usd": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Semantic Kg Usd"
+            },
+            "total_usd": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Total Usd"
+            }
+          },
+          "required": [
+            "captured_at",
+            "detail"
+          ],
+          "title": "IndexCostEstimateSnapshot",
+          "type": "object"
+        },
+        "IndexRunAccounting": {
+          "additionalProperties": false,
+          "description": "Accounting extension of the existing index run summary, with no call rows.",
+          "properties": {
+            "census": {
+              "additionalProperties": {
+                "$ref": "#/$defs/RunRequestCensus"
+              },
+              "propertyNames": {
+                "enum": [
+                  "embedding",
+                  "semantic_kg",
+                  "figure_description",
+                  "schema_proposal"
+                ]
+              },
+              "title": "Census",
+              "type": "object"
+            },
+            "config_fingerprint": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Config Fingerprint",
+              "type": "string"
+            },
+            "corpus_id": {
+              "minLength": 1,
+              "title": "Corpus Id",
+              "type": "string"
+            },
+            "costs": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NativeRunCosts"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "coverage_complete": {
+              "default": false,
+              "title": "Coverage Complete",
+              "type": "boolean"
+            },
+            "coverage_notes": {
+              "items": {
+                "type": "string"
+              },
+              "title": "Coverage Notes",
+              "type": "array"
+            },
+            "ended_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Ended At"
+            },
+            "estimate": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/IndexCostEstimateSnapshot"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "gateway_attempt_policy_verified": {
+              "default": false,
+              "title": "Gateway Attempt Policy Verified",
+              "type": "boolean"
+            },
+            "gateway_base_url": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Original gateway management root without credentials; retained for historical reconciliation.",
+              "title": "Gateway Base Url"
+            },
+            "models": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "propertyNames": {
+                "enum": [
+                  "embedding",
+                  "semantic_kg",
+                  "figure_description",
+                  "schema_proposal"
+                ]
+              },
+              "title": "Models",
+              "type": "object"
+            },
+            "owner_interrupted": {
+              "default": false,
+              "description": "The owner process ended before a durable closed census; also covers runs with no paid lanes.",
+              "title": "Owner Interrupted",
+              "type": "boolean"
+            },
+            "processed_chunks": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Processed Chunks",
+              "type": "integer"
+            },
+            "processed_files": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Processed Files",
+              "type": "integer"
+            },
+            "processed_tokens": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Processed Tokens",
+              "type": "integer"
+            },
+            "reconciled_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Reconciled At"
+            },
+            "reconciliation_error": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Reconciliation Error"
+            },
+            "session_id": {
+              "minLength": 1,
+              "title": "Session Id",
+              "type": "string"
+            },
+            "started_at": {
+              "format": "date-time",
+              "title": "Started At",
+              "type": "string"
+            }
+          },
+          "required": [
+            "session_id",
+            "corpus_id",
+            "started_at",
+            "config_fingerprint"
+          ],
+          "title": "IndexRunAccounting",
+          "type": "object"
+        },
+        "NativeRunCosts": {
+          "additionalProperties": false,
+          "description": "Derived native measurements; completeness and price evidence are separate.",
+          "properties": {
+            "cached_requests": {
+              "minimum": 0,
+              "title": "Cached Requests",
+              "type": "integer"
+            },
+            "coverage_state": {
+              "enum": [
+                "pending",
+                "complete",
+                "incomplete"
+              ],
+              "title": "Coverage State",
+              "type": "string"
+            },
+            "excluded_rows": {
+              "minimum": 0,
+              "title": "Excluded Rows",
+              "type": "integer"
+            },
+            "gateway_calculated_requests": {
+              "minimum": 0,
+              "title": "Gateway Calculated Requests",
+              "type": "integer"
+            },
+            "gateway_calculated_usd": {
+              "minimum": 0,
+              "title": "Gateway Calculated Usd",
+              "type": "number"
+            },
+            "matched_gateway_requests": {
+              "minimum": 0,
+              "title": "Matched Gateway Requests",
+              "type": "integer"
+            },
+            "missing_requests": {
+              "minimum": 0,
+              "title": "Missing Requests",
+              "type": "integer"
+            },
+            "native_logged_usd": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Native Logged Usd"
+            },
+            "native_rows": {
+              "minimum": 0,
+              "title": "Native Rows",
+              "type": "integer"
+            },
+            "pages_read": {
+              "minimum": 0,
+              "title": "Pages Read",
+              "type": "integer"
+            },
+            "pricing_state": {
+              "enum": [
+                "complete",
+                "incomplete"
+              ],
+              "title": "Pricing State",
+              "type": "string"
+            },
+            "provider_reported_requests": {
+              "minimum": 0,
+              "title": "Provider Reported Requests",
+              "type": "integer"
+            },
+            "provider_reported_usd": {
+              "minimum": 0,
+              "title": "Provider Reported Usd",
+              "type": "number"
+            },
+            "reasons": {
+              "items": {
+                "type": "string"
+              },
+              "title": "Reasons",
+              "type": "array"
+            },
+            "state": {
+              "enum": [
+                "pending",
+                "complete",
+                "incomplete"
+              ],
+              "title": "State",
+              "type": "string"
+            },
+            "unmeasured_requests": {
+              "minimum": 0,
+              "title": "Unmeasured Requests",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "state",
+            "coverage_state",
+            "pricing_state",
+            "provider_reported_usd",
+            "gateway_calculated_usd",
+            "native_logged_usd",
+            "provider_reported_requests",
+            "gateway_calculated_requests",
+            "cached_requests",
+            "unmeasured_requests",
+            "matched_gateway_requests",
+            "missing_requests",
+            "native_rows",
+            "excluded_rows",
+            "pages_read",
+            "reasons"
+          ],
+          "title": "NativeRunCosts",
+          "type": "object"
+        },
+        "RunCostIdentity": {
+          "additionalProperties": false,
+          "properties": {
+            "corpus_id": {
+              "minLength": 1,
+              "title": "Corpus Id",
+              "type": "string"
+            },
+            "lane": {
+              "enum": [
+                "embedding",
+                "semantic_kg",
+                "figure_description",
+                "schema_proposal"
+              ],
+              "title": "Lane",
+              "type": "string"
+            },
+            "session_id": {
+              "minLength": 1,
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "session_id",
+            "corpus_id",
+            "lane"
+          ],
+          "title": "RunCostIdentity",
+          "type": "object"
+        },
+        "RunRequestCensus": {
+          "additionalProperties": false,
+          "description": "Acknowledged aggregate checkpoint, never an inferred request count.",
+          "properties": {
+            "active_producers": {
+              "minimum": 0,
+              "title": "Active Producers",
+              "type": "integer"
+            },
+            "completed_requests": {
+              "minimum": 0,
+              "title": "Completed Requests",
+              "type": "integer"
+            },
+            "dispatch_enabled": {
+              "title": "Dispatch Enabled",
+              "type": "boolean"
+            },
+            "failed_requests": {
+              "minimum": 0,
+              "title": "Failed Requests",
+              "type": "integer"
+            },
+            "identity": {
+              "$ref": "#/$defs/RunCostIdentity"
+            },
+            "inflight": {
+              "minimum": 0,
+              "title": "Inflight",
+              "type": "integer"
+            },
+            "owner_finished": {
+              "title": "Owner Finished",
+              "type": "boolean"
+            },
+            "revision": {
+              "minimum": 0,
+              "title": "Revision",
+              "type": "integer"
+            },
+            "started_requests": {
+              "minimum": 0,
+              "title": "Started Requests",
+              "type": "integer"
+            },
+            "state": {
+              "enum": [
+                "open",
+                "closed",
+                "interrupted"
+              ],
+              "title": "State",
+              "type": "string"
+            },
+            "uncertain_requests": {
+              "minimum": 0,
+              "title": "Uncertain Requests",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "identity",
+            "revision",
+            "started_requests",
+            "completed_requests",
+            "failed_requests",
+            "uncertain_requests",
+            "inflight",
+            "active_producers",
+            "owner_finished",
+            "dispatch_enabled",
+            "state"
+          ],
+          "title": "RunRequestCensus",
+          "type": "object"
         }
       },
       "description": "Persisted indexing run summary for replay/status truthfulness.",
       "properties": {
+        "accounting": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IndexRunAccounting"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Saved model-API accounting and request census; absent on runs before native attribution."
+        },
         "completed_at": {
           "anyOf": [
             {
@@ -19780,6 +22470,15 @@
         "run_id": {
           "description": "Unique indexing run identifier",
           "title": "Run Id",
+          "type": "string"
+        },
+        "run_kind": {
+          "default": "index",
+          "enum": [
+            "index",
+            "schema_proposal"
+          ],
+          "title": "Run Kind",
           "type": "string"
         },
         "started_at": {

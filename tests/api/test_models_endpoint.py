@@ -279,7 +279,13 @@ async def test_models_upsert_gen_row_becomes_gateway_route_and_regenerates_litel
         assert rendered["model_list"][2]["litellm_params"] == {
             "model": "openrouter/openai/gpt-upserted",
             "api_key": "os.environ/OPENROUTER_API_KEY",
+            "num_retries": 0,
+            "max_retries": 0,
         }
+        assert all(
+            row["litellm_params"]["num_retries"] == row["litellm_params"]["max_retries"] == 0
+            for row in rendered["model_list"]
+        )
 
 
 @pytest.mark.asyncio

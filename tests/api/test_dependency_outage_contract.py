@@ -366,7 +366,7 @@ def test_the_fence_conflict_detail_reports_what_the_holding_run_is_doing(tmp_pat
     import server.api.index as index_api
     from server.api.index import _append_run_event, _flush_run_events_sync, index_run_conflict
     from server.indexing.generations import IndexRunFence
-    from server.models.index import IndexRunConflictDetail
+    from server.models.index import IndexRunConflictDetail, IndexRunSummary
 
     started = datetime(2026, 8, 30, 9, 15, tzinfo=UTC)
     fence = IndexRunFence(
@@ -379,6 +379,9 @@ def test_the_fence_conflict_detail_reports_what_the_holding_run_is_doing(tmp_pat
     old_runs_dir = index_api._INDEX_RUNS_DIR
     index_api._INDEX_RUNS_DIR = tmp_path
     try:
+        index_api._persist_run_summary(IndexRunSummary(
+            run_id=fence.run_id, repo_id="nasa-apollo-11", status="indexing", started_at=fence.started_at,
+        ))
         _append_run_event(
             "nasa-apollo-11",
             fence.run_id,
@@ -450,7 +453,7 @@ def test_the_conflict_stage_reads_only_events_that_describe_a_stage(tmp_path: Pa
     import server.api.index as index_api
     from server.api.index import _append_run_event, _flush_run_events_sync, index_run_conflict
     from server.indexing.generations import IndexRunFence
-    from server.models.index import IndexRunConflictDetail
+    from server.models.index import IndexRunConflictDetail, IndexRunSummary
 
     fence = IndexRunFence(
         run_id="7be21c04-2f9a-4a1b-9f0e-1d2c3b4a5e6f",
@@ -461,6 +464,9 @@ def test_the_conflict_stage_reads_only_events_that_describe_a_stage(tmp_path: Pa
     old_runs_dir = index_api._INDEX_RUNS_DIR
     index_api._INDEX_RUNS_DIR = tmp_path
     try:
+        index_api._persist_run_summary(IndexRunSummary(
+            run_id=fence.run_id, repo_id="nasa-apollo-11", status="indexing", started_at=fence.started_at,
+        ))
         for ordinal in range(400):
             _append_run_event(
                 "nasa-apollo-11",
@@ -502,7 +508,7 @@ def test_the_conflict_stage_is_capped_at_the_field_length(tmp_path: Path) -> Non
     import server.api.index as index_api
     from server.api.index import _append_run_event, _flush_run_events_sync, index_run_conflict
     from server.indexing.generations import IndexRunFence
-    from server.models.index import IndexRunConflictDetail
+    from server.models.index import IndexRunConflictDetail, IndexRunSummary
 
     long_message = "Converting " + ("deeply-nested-" * 40) + "report.pdf"
     assert len(long_message) > 200
@@ -515,6 +521,9 @@ def test_the_conflict_stage_is_capped_at_the_field_length(tmp_path: Path) -> Non
     old_runs_dir = index_api._INDEX_RUNS_DIR
     index_api._INDEX_RUNS_DIR = tmp_path
     try:
+        index_api._persist_run_summary(IndexRunSummary(
+            run_id=fence.run_id, repo_id="nasa-apollo-11", status="indexing", started_at=fence.started_at,
+        ))
         _append_run_event("nasa-apollo-11", fence.run_id, {"type": "log", "message": long_message})
         _flush_run_events_sync()
         conflict = asyncio.run(index_run_conflict("nasa-apollo-11", fence))

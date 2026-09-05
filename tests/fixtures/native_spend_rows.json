@@ -1,0 +1,400 @@
+{
+  "provenance": {
+    "gateway_version": "1.94.0",
+    "recorded_at_utc": "2026-09-05",
+    "description": "Reduced native /spend/logs/v2 rows from an isolated real LiteLLM gateway, native PostgreSQL ledger, and synthetic local HTTP provider. No prompt bodies, response content, or API keys retained.",
+    "source_sha256": "d8ffb4a82a486b10c763337674401dee97bc6d35392c0d016b8b90e0bcbd089a",
+    "extra_source_sha256": "8c27b7064f4a6baf0e0a5622b07323623ec138a487de0c381cfdcc73c995e5f1"
+  },
+  "session_id": "astra-ledger-run-0afc7866db",
+  "cases": [
+    {
+      "ordinal": 0,
+      "model": "fixture-provider-cost",
+      "status": 200,
+      "response_id": "chatcmpl-astra-fixture-1-fc71fb02"
+    },
+    {
+      "ordinal": 1,
+      "model": "fixture-provider-zero",
+      "status": 200,
+      "response_id": "chatcmpl-astra-fixture-2-c976cd25"
+    },
+    {
+      "ordinal": 2,
+      "model": "fixture-priced",
+      "status": 200,
+      "response_id": "chatcmpl-astra-fixture-3-910cb2a1"
+    },
+    {
+      "ordinal": 3,
+      "model": "fixture-unpriced",
+      "status": 200,
+      "response_id": "chatcmpl-astra-fixture-4-6147a2c5"
+    },
+    {
+      "ordinal": 4,
+      "model": "fixture-failure",
+      "status": 503,
+      "response_id": null
+    },
+    {
+      "ordinal": 5,
+      "model": "fixture-priced",
+      "status": 200,
+      "response_id": "chatcmpl-astra-fixture-6-a579694c"
+    },
+    {
+      "ordinal": 6,
+      "model": "fixture-priced",
+      "status": 200,
+      "response_id": "chatcmpl-astra-fixture-6-a579694c"
+    }
+  ],
+  "listing": {
+    "data": [
+      {
+        "request_id": "chatcmpl-astra-fixture-1-fc71fb02",
+        "call_type": "acompletion",
+        "session_id": "astra-ledger-run-0afc7866db",
+        "model": "openrouter/astra/provider-cost",
+        "custom_llm_provider": "openrouter",
+        "startTime": "2026-09-05T03:02:37.594+00:00",
+        "endTime": "2026-09-05T03:02:37.606+00:00",
+        "spend": 0.0123,
+        "status": "success",
+        "cache_hit": "None",
+        "metadata": {
+          "spend_logs_metadata": {
+            "lane": "index_graph_extraction",
+            "run_id": "astra-ledger-run-0afc7866db",
+            "corpus_id": "synthetic-ledger"
+          },
+          "litellm_call_id": "30c10c1f-bf70-468d-9b2f-6dc98371bdc1",
+          "attempted_retries": 0,
+          "max_retries": 0,
+          "usage_object": {
+            "cost": 0.0123,
+            "total_tokens": 18,
+            "prompt_tokens": 11,
+            "completion_tokens": 7,
+            "prompt_tokens_details": null,
+            "completion_tokens_details": null
+          },
+          "cost_breakdown": null,
+          "model_map_information": {
+            "model_map_key": "openrouter/astra/provider-cost",
+            "model_map_value": {
+              "input_cost_per_token": 0,
+              "output_cost_per_token": 0
+            }
+          }
+        }
+      },
+      {
+        "request_id": "chatcmpl-astra-fixture-2-c976cd25",
+        "call_type": "acompletion",
+        "session_id": "astra-ledger-run-0afc7866db",
+        "model": "openrouter/astra/provider-zero",
+        "custom_llm_provider": "openrouter",
+        "startTime": "2026-09-05T03:02:37.624+00:00",
+        "endTime": "2026-09-05T03:02:37.627+00:00",
+        "spend": 0.0,
+        "status": "success",
+        "cache_hit": "None",
+        "metadata": {
+          "spend_logs_metadata": {
+            "lane": "index_graph_extraction",
+            "run_id": "astra-ledger-run-0afc7866db",
+            "corpus_id": "synthetic-ledger"
+          },
+          "litellm_call_id": "41d42649-baf9-40af-825e-90b79f9e3f5c",
+          "attempted_retries": 0,
+          "max_retries": 0,
+          "usage_object": {
+            "cost": 0.0,
+            "total_tokens": 18,
+            "prompt_tokens": 11,
+            "completion_tokens": 7,
+            "prompt_tokens_details": null,
+            "completion_tokens_details": null
+          },
+          "cost_breakdown": null,
+          "model_map_information": {
+            "model_map_key": "openrouter/astra/provider-zero",
+            "model_map_value": {
+              "input_cost_per_token": 0,
+              "output_cost_per_token": 0
+            }
+          }
+        }
+      },
+      {
+        "request_id": "chatcmpl-astra-fixture-3-910cb2a1",
+        "call_type": "acompletion",
+        "session_id": "astra-ledger-run-0afc7866db",
+        "model": "openai/gpt-5-mini",
+        "custom_llm_provider": "openai",
+        "startTime": "2026-09-05T03:02:37.639+00:00",
+        "endTime": "2026-09-05T03:02:37.743+00:00",
+        "spend": 1.675e-05,
+        "status": "success",
+        "cache_hit": "None",
+        "metadata": {
+          "spend_logs_metadata": {
+            "lane": "index_graph_extraction",
+            "run_id": "astra-ledger-run-0afc7866db",
+            "corpus_id": "synthetic-ledger"
+          },
+          "litellm_call_id": "1232f088-0aa8-490e-9342-f2468502c0d7",
+          "attempted_retries": 0,
+          "max_retries": 0,
+          "usage_object": {
+            "total_tokens": 18,
+            "prompt_tokens": 11,
+            "completion_tokens": 7,
+            "prompt_tokens_details": null,
+            "completion_tokens_details": null
+          },
+          "cost_breakdown": {
+            "input_cost": 2.75e-06,
+            "total_cost": 1.675e-05,
+            "output_cost": 1.4e-05,
+            "original_cost": 1.675e-05,
+            "margin_percent": 0.0,
+            "discount_amount": 0.0,
+            "tool_usage_cost": 0.0,
+            "discount_percent": 0.0,
+            "margin_fixed_amount": 0.0,
+            "margin_total_amount": 0.0
+          },
+          "model_map_information": {
+            "model_map_key": "openai/gpt-5-mini",
+            "model_map_value": {
+              "input_cost_per_token": 2.5e-07,
+              "output_cost_per_token": 2e-06
+            }
+          }
+        }
+      },
+      {
+        "request_id": "chatcmpl-astra-fixture-4-6147a2c5",
+        "call_type": "acompletion",
+        "session_id": "astra-ledger-run-0afc7866db",
+        "model": "openai/astra-no-price-map-unique",
+        "custom_llm_provider": "openai",
+        "startTime": "2026-09-05T03:02:37.753+00:00",
+        "endTime": "2026-09-05T03:02:37.757+00:00",
+        "spend": 0.0,
+        "status": "success",
+        "cache_hit": "None",
+        "metadata": {
+          "spend_logs_metadata": {
+            "lane": "index_graph_extraction",
+            "run_id": "astra-ledger-run-0afc7866db",
+            "corpus_id": "synthetic-ledger"
+          },
+          "litellm_call_id": "5931d122-b059-405c-a367-bc53c5279d36",
+          "attempted_retries": 0,
+          "max_retries": 0,
+          "usage_object": {
+            "total_tokens": 18,
+            "prompt_tokens": 11,
+            "completion_tokens": 7,
+            "prompt_tokens_details": null,
+            "completion_tokens_details": null
+          },
+          "cost_breakdown": {
+            "input_cost": 0.0,
+            "total_cost": 0.0,
+            "output_cost": 0.0,
+            "original_cost": 0.0,
+            "margin_percent": 0.0,
+            "discount_amount": 0.0,
+            "tool_usage_cost": 0.0,
+            "discount_percent": 0.0,
+            "margin_fixed_amount": 0.0,
+            "margin_total_amount": 0.0
+          },
+          "model_map_information": {
+            "model_map_key": "openai/astra-no-price-map-unique",
+            "model_map_value": {
+              "input_cost_per_token": 0,
+              "output_cost_per_token": 0
+            }
+          }
+        }
+      },
+      {
+        "request_id": "31103eb7-975f-4c87-9cfe-4e0c03daf330",
+        "call_type": "",
+        "session_id": "astra-ledger-run-0afc7866db",
+        "model": "openai/astra-failure",
+        "custom_llm_provider": "",
+        "startTime": "2026-09-05T03:02:37.810+00:00",
+        "endTime": "2026-09-05T03:02:37.810+00:00",
+        "spend": 0.0,
+        "status": "failure",
+        "cache_hit": "False",
+        "metadata": {
+          "spend_logs_metadata": {
+            "lane": "index_graph_extraction",
+            "run_id": "astra-ledger-run-0afc7866db",
+            "corpus_id": "synthetic-ledger"
+          },
+          "litellm_call_id": "31103eb7-975f-4c87-9cfe-4e0c03daf330",
+          "attempted_retries": 0,
+          "max_retries": 0,
+          "usage_object": null,
+          "cost_breakdown": null,
+          "model_map_information": null
+        }
+      },
+      {
+        "request_id": "chatcmpl-astra-fixture-6-a579694c",
+        "call_type": "acompletion",
+        "session_id": "astra-ledger-run-0afc7866db",
+        "model": "openai/gpt-5-mini",
+        "custom_llm_provider": "openai",
+        "startTime": "2026-09-05T03:02:37.820+00:00",
+        "endTime": "2026-09-05T03:02:37.824+00:00",
+        "spend": 1.675e-05,
+        "status": "success",
+        "cache_hit": "None",
+        "metadata": {
+          "spend_logs_metadata": {
+            "lane": "index_graph_extraction",
+            "run_id": "astra-ledger-run-0afc7866db",
+            "corpus_id": "synthetic-ledger"
+          },
+          "litellm_call_id": "a36e34de-2d12-4933-a93d-ea76145b5ff5",
+          "attempted_retries": 0,
+          "max_retries": 0,
+          "usage_object": {
+            "total_tokens": 18,
+            "prompt_tokens": 11,
+            "completion_tokens": 7,
+            "prompt_tokens_details": null,
+            "completion_tokens_details": null
+          },
+          "cost_breakdown": {
+            "input_cost": 2.75e-06,
+            "total_cost": 1.675e-05,
+            "output_cost": 1.4e-05,
+            "original_cost": 1.675e-05,
+            "margin_percent": 0.0,
+            "discount_amount": 0.0,
+            "tool_usage_cost": 0.0,
+            "discount_percent": 0.0,
+            "margin_fixed_amount": 0.0,
+            "margin_total_amount": 0.0
+          },
+          "model_map_information": {
+            "model_map_key": "openai/gpt-5-mini",
+            "model_map_value": {
+              "input_cost_per_token": 2.5e-07,
+              "output_cost_per_token": 2e-06
+            }
+          }
+        }
+      },
+      {
+        "request_id": "chatcmpl-astra-fixture-6-a579694c_cache_hit1788577357.8353918",
+        "call_type": "acompletion",
+        "session_id": "astra-ledger-run-0afc7866db",
+        "model": "openai/gpt-5-mini",
+        "custom_llm_provider": "openai",
+        "startTime": "2026-09-05T03:02:37.834+00:00",
+        "endTime": "2026-09-05T03:02:37.834+00:00",
+        "spend": 0.0,
+        "status": "success",
+        "cache_hit": "True",
+        "metadata": {
+          "spend_logs_metadata": {
+            "lane": "index_graph_extraction",
+            "run_id": "astra-ledger-run-0afc7866db",
+            "corpus_id": "synthetic-ledger"
+          },
+          "litellm_call_id": "875df308-8e37-49aa-91d5-b31626525fbe",
+          "attempted_retries": 0,
+          "max_retries": 0,
+          "usage_object": {
+            "total_tokens": 18,
+            "prompt_tokens": 11,
+            "completion_tokens": 7,
+            "prompt_tokens_details": null,
+            "completion_tokens_details": null
+          },
+          "cost_breakdown": {
+            "input_cost": 2.75e-06,
+            "total_cost": 1.675e-05,
+            "output_cost": 1.4e-05,
+            "original_cost": 1.675e-05,
+            "margin_percent": 0.0,
+            "discount_amount": 0.0,
+            "tool_usage_cost": 0.0,
+            "discount_percent": 0.0,
+            "margin_fixed_amount": 0.0,
+            "margin_total_amount": 0.0
+          },
+          "model_map_information": {
+            "model_map_key": "openai/gpt-5-mini",
+            "model_map_value": {
+              "input_cost_per_token": 2.5e-07,
+              "output_cost_per_token": 2e-06
+            }
+          }
+        }
+      }
+    ]
+  },
+  "cross_session_cache": {
+    "request_id": "chatcmpl-astra-fixture-1-ba2a22cd_cache_hit1788577490.2806277",
+    "call_type": "acompletion",
+    "session_id": "astra-ledger-match-609c2c4b56-neighbor",
+    "model": "openrouter/astra/provider-cost",
+    "custom_llm_provider": "openrouter",
+    "startTime": "2026-09-05T03:04:50.278+00:00",
+    "endTime": "2026-09-05T03:04:50.279+00:00",
+    "spend": 0.0,
+    "status": "success",
+    "cache_hit": "True",
+    "metadata": {
+      "spend_logs_metadata": {
+        "lane": "index_graph_extraction",
+        "run_id": "astra-ledger-match-609c2c4b56-neighbor",
+        "corpus_id": "synthetic-ledger"
+      },
+      "litellm_call_id": "2765524b-9296-456a-9749-2df49a04d04e",
+      "attempted_retries": 0,
+      "max_retries": 0,
+      "usage_object": {
+        "cost": 0.0123,
+        "total_tokens": 18,
+        "prompt_tokens": 11,
+        "completion_tokens": 7,
+        "prompt_tokens_details": null,
+        "completion_tokens_details": null
+      },
+      "cost_breakdown": {
+        "input_cost": 0,
+        "total_cost": 0.0,
+        "output_cost": 0,
+        "original_cost": 0.0,
+        "margin_percent": 0.0,
+        "discount_amount": 0.0,
+        "tool_usage_cost": 0.0,
+        "discount_percent": 0.0,
+        "margin_fixed_amount": 0.0,
+        "margin_total_amount": 0.0
+      },
+      "model_map_information": {
+        "model_map_key": "openrouter/astra/provider-cost",
+        "model_map_value": {
+          "input_cost_per_token": 0,
+          "output_cost_per_token": 0
+        }
+      }
+    }
+  }
+}

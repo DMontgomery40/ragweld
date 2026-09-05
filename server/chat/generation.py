@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
+from opentelemetry.trace import Span, set_span_in_context
+from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 from server.chat.prompt_budget import (
     assemble_system_prompt,
@@ -28,8 +30,10 @@ from server.models.tribrid_config_model import (
 )
 from server.observability.costing import build_trace_cost_summary, extract_provider_cost
 from server.observability.runtime import (
-    langfuse_cost_details,
-    record_langfuse_generation,
+    add_external_link,
+    current_observation,
+    langfuse_sign_in_hint,
+    langfuse_trace_url,
     set_cost_summary,
     stage_span,
     stage_span_detached,
@@ -237,8 +241,25 @@ def _guard_prompt_window(
     )
 
 
-def _headers(route: ProviderRoute) -> dict[str, str]:
-    return {"Authorization": f"Bearer {route.api_key}", "Content-Type": "application/json"}
+def _headers(route: ProviderRoute, *, span: Span | None = None, observation_name: str) -> dict[str, str]:
+    headers = {"Authorization": f"Bearer {route.api_key}", "Content-Type": "application/json"}
+    TraceContextTextMapPropagator().inject(headers, context=set_span_in_context(span) if span is not None else None)
+    obs = current_observation()
+    if obs is not None:
+        session_id = obs.run_id or obs.trace_id
+        metadata = json.dumps({"run_id": session_id, "corpus_id": obs.repo_id, "lane": "generation"}, separators=(",", ":"), sort_keys=True)
+        headers.update({
+            "langfuse_session_id": session_id,
+            "langfuse_trace_metadata": metadata,
+            "langfuse_generation_name": observation_name,
+            "x-litellm-session-id": session_id,
+            "x-litellm-spend-logs-metadata": metadata,
+        })
+        trace_url = langfuse_trace_url(obs.manager.tracing_config, obs.trace_id or None)
+        if trace_url and obs.manager.tracing_config.langfuse_enabled:
+            add_external_link(label="Look up trace in Langfuse", kind="langfuse", url=trace_url,
+                detail="Delivery is unverified; this trace may not exist in Langfuse. " + langfuse_sign_in_hint(obs.manager.tracing_config))
+    return headers
 
 
 def _url(route: ProviderRoute) -> str:
@@ -376,11 +397,11 @@ async def generate_chat_text(
     _merge_body_fields(payload, body_fields)
     with stage_span(
         "generation.gateway_call", provider_name="LiteLLM", provider_kind="litellm", model=route.model
-    ):
+    ) as gateway_span:
         async with httpx.AsyncClient(timeout=timeout_s) as client:
             try:
                 body = await asyncio.to_thread(json.dumps, payload)
-                response = await client.post(_url(route), headers=_headers(route), content=body)
+                response = await client.post(_url(route), headers=_headers(route, span=gateway_span, observation_name=observation_name), content=body)
                 response.raise_for_status()
                 data: Any = response.json()
             except httpx.HTTPStatusError as error:
@@ -401,7 +422,7 @@ async def generate_chat_text(
         # An answered request was billed for whatever it contained. A reasoning model that
         # spends its whole output budget thinking returns no assistant content and still
         # charges for the reasoning tokens (D26), so the empty-content reply is carried to the
-        # cost summary and the Langfuse generation FIRST and the typed error raised after --
+        # local cost summary FIRST and the typed error raised after --
         # before this, a billed reasoning-only reply left no trace of its cost at all.
         content_error: GatewayContentMissingError | None = None
         content_cause: GatewayContentMissingError | None = None
@@ -420,24 +441,7 @@ async def generate_chat_text(
             raise RuntimeError(f"LiteLLM response parse failed: {error}") from error
 
         set_cost_summary(cost)
-        record_langfuse_generation(
-            name=observation_name,
-            model=route.model,
-            input_payload={"system_prompt": prompt, "user_message": user_message},
-            output_text=text,
-            usage_details=usage,
-            cost_details=langfuse_cost_details(cost),
-            # Langfuse v4 does not yet surface the OTel model attribute as
-            # providedModelName, so the model rides in metadata too.
-            metadata={
-                "provider_kind": "litellm",
-                "provider_name": "LiteLLM",
-                "model": route.model,
-                "debug_trace_id": trace_id,
-                "finish_reason": finish_reason,
-                "content_missing": content_error is not None,
-            },
-        )
+
         if content_error is not None:
             raise content_error from content_cause
 
@@ -520,11 +524,11 @@ async def stream_chat_text(
     # by the endpoint coroutine priming the stream and left by the response's own task.
     with stage_span_detached(
         "generation.gateway_stream", provider_name="LiteLLM", provider_kind="litellm", model=route.model
-    ):
+    ) as gateway_span:
         async with httpx.AsyncClient(timeout=timeout_s) as client:
             try:
                 body = await asyncio.to_thread(json.dumps, payload)
-                async with client.stream("POST", _url(route), headers=_headers(route), content=body) as response:
+                async with client.stream("POST", _url(route), headers=_headers(route, span=gateway_span, observation_name="chat.generation.stream"), content=body) as response:
                     if response.is_error:
                         await response.aread()
                     response.raise_for_status()
@@ -599,22 +603,7 @@ async def stream_chat_text(
             provider="LiteLLM", model=route.model, usage=captured_usage, provider_cost_usd=captured_cost_usd
         )
         set_cost_summary(cost)
-        record_langfuse_generation(
-            name="chat.generation.stream",
-            model=route.model,
-            input_payload={"system_prompt": prompt, "user_message": user_message},
-            output_text=streamed_text,
-            usage_details=captured_usage,
-            cost_details=langfuse_cost_details(cost),
-            metadata={
-                "provider_kind": "litellm",
-                "provider_name": "LiteLLM",
-                "model": route.model,
-                "debug_trace_id": captured_trace_id,
-                "finish_reason": captured_finish_reason,
-                "content_missing": not streamed_text,
-            },
-        )
+
         if not streamed_text:
             raise GatewayContentMissingError(
                 "LiteLLM stream produced no content",

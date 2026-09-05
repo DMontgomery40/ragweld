@@ -102,23 +102,6 @@ def _first_token_count(usage: dict[str, Any], keys: tuple[str, ...]) -> int | No
     return None
 
 
-def langfuse_usage_details(usage: dict[str, Any] | None) -> dict[str, int]:
-    """Map inclusive gateway totals to Langfuse's nonoverlapping token buckets.
-
-    Low-level Langfuse observations store custom usage dictionaries unchanged.
-    Raw gateway keys (especially usage.cost) defeat OpenAI schema recognition,
-    making prompt/completion/total three additive buckets. Keep cache/reasoning
-    subsets inside their inclusive input/output totals, never additional buckets.
-    Raw provider details remain on the generation result for callers that need them.
-    """
-    counts = _extract_usage_tokens(usage)
-    return {
-        key: count
-        for key, count in zip(("input", "output", "total"), counts, strict=True)
-        if count is not None
-    }
-
-
 def usage_total_tokens(usage: dict[str, Any] | None) -> int:
     """Return the canonical nonnegative total-token count for provider usage."""
 

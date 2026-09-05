@@ -9,6 +9,8 @@ from typing import Any, Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from server.models.run_accounting import IndexRunAccounting
+
 ExtractionMethod = Literal["docling", "direct"]
 DocumentKind = Literal["text", "pdf", "rich"]
 
@@ -149,6 +151,13 @@ class GraphSchemaProposal(BaseModel):
     model_alias: str
     graphrag_version: Literal["1.19.0"] = "1.19.0"
     created_at: datetime
+    accounting_run_id: str | None = Field(
+        default=None, description="Persisted schema-proposal attempt; separate from a later index run.",
+    )
+    accounting_started_at: datetime | None = Field(
+        default=None,
+        description="Server-recorded start of the persisted schema-proposal attempt; absent on legacy proposals.",
+    )
 
     @model_validator(mode="after")
     def _schema_hash_matches(self) -> GraphSchemaProposal:
@@ -167,12 +176,18 @@ class GraphSchemaProposalRequest(BaseModel):
 
 class GraphSchemaProposalFailureDetail(BaseModel):
     code: Literal[
-        "graph_schema_generation_failed", "graph_schema_deadline_exceeded", "graph_schema_context_changed"
+        "graph_schema_generation_failed", "graph_schema_deadline_exceeded", "graph_schema_context_changed",
+        "graph_schema_unusable",
     ]
     corpus_id: str
     model_alias: str
     message: str
     operator_hint: str
+    accounting_run_id: str | None = Field(default=None, description="Saved accounting attempt, including failed provider work.")
+    accounting_started_at: datetime | None = Field(
+        default=None,
+        description="Server-recorded start of the saved accounting attempt; absent from legacy failures.",
+    )
 
 
 class GraphSchemaProposalFailureResponse(BaseModel):
@@ -297,6 +312,7 @@ class IndexRunSummary(BaseModel):
     """Persisted indexing run summary for replay/status truthfulness."""
 
     run_id: str = Field(description="Unique indexing run identifier")
+    run_kind: Literal["index", "schema_proposal"] = Field(default="index")
     repo_id: str = Field(
         description="Corpus identifier",
         validation_alias=AliasChoices("repo_id", "corpus_id"),
@@ -311,6 +327,10 @@ class IndexRunSummary(BaseModel):
         default=0.0, ge=0.0, le=1.0, description="Best-effort progress for this run"
     )
     error: str | None = Field(default=None, description="Error message when status='error'")
+    accounting: IndexRunAccounting | None = Field(
+        default=None,
+        description="Saved model-API accounting and request census; absent on runs before native attribution.",
+    )
     graph_metadata: GraphGenerationMetadata | None = Field(
         default=None,
         description="Graph extraction, resolution, community, and override telemetry for this run",
@@ -357,6 +377,14 @@ class IndexRunSummary(BaseModel):
             "max_completion_tokens budget; null when nothing was described or the alias is unpriced"
         ),
     )
+
+    @model_validator(mode="after")
+    def _accounting_identity_matches(self) -> IndexRunSummary:
+        if self.accounting is not None and (
+            self.accounting.session_id != self.run_id or self.accounting.corpus_id != self.repo_id
+        ):
+            raise ValueError("Accounting must name the owning index run and corpus")
+        return self
 
 
 class IndexRunEvent(BaseModel):

@@ -98,21 +98,21 @@ def test_priced_totals_charge_the_run_alias_ceiling_for_what_was_described() -> 
     assert totals.failed == 2
     assert totals.undescribed == 17
     expected = _estimate_figure_description_cost_usd(
-        alias="z-ai.glm-5.3-flash", figures=125, max_completion_tokens=2500
+        alias="z-ai.glm-5.3-flash", figures=127, max_completion_tokens=2500
     )
     assert expected is not None and expected > 0
     assert totals.cost_usd == expected
 
 
 def test_a_run_that_described_nothing_carries_no_price() -> None:
-    """Skipped and failed figures cost nothing, so quoting $0.0000 would put a cost line on the
-    dashboard for a run that never made a vision call. The absent price is the honest answer.
+    """A run without attempted descriptions has no ceiling; skipped figures alone
+    do not prove any provider charge. Failed calls are covered by the attempt matrix.
     """
     cfg = TriBridConfig()
     cfg.indexing.figures.enabled = True
-    totals = _figure_run_totals(cfg, described=0, failed=3, undescribed=8)
+    totals = _figure_run_totals(cfg, described=0, failed=0, undescribed=8)
     assert totals.described == 0
-    assert totals.failed == 3
+    assert totals.failed == 0
     assert totals.undescribed == 8
     assert totals.cost_usd is None
 

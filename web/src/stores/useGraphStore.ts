@@ -33,6 +33,13 @@ export interface EntityExpansion {
   detail: string;
 }
 
+export type GraphRequestKind = 'view' | 'stats' | 'communities';
+export interface GraphRequest {
+  readonly id: number;
+  readonly corpusId: string;
+  readonly kind: GraphRequestKind;
+}
+
 interface GraphStore {
   // State
   entities: Entity[];
@@ -51,6 +58,11 @@ interface GraphStore {
   totalMatched: number;
   /** Search term the currently displayed entities were loaded with; '' means the whole corpus. */
   activeQuery: string;
+  /** Shared across hook mounts; reset/corpus changes invalidate all old responses. */
+  requestSerial: number;
+  requestCorpus: string | null;
+  requestTokens: Partial<Record<GraphRequestKind, number>>;
+  pendingRequests: Partial<Record<GraphRequestKind, boolean>>;
 
   // Filter state
   /** `null` means every type; `[]` truthfully means none. */
@@ -76,6 +88,9 @@ interface GraphStore {
   setVisibleEntityTypes: (types: string[] | null) => void;
   setVisibleRelationTypes: (types: string[] | null) => void;
   setMaxHops: (hops: number) => void;
+  beginRequest: (corpusId: string, kind: GraphRequestKind) => GraphRequest;
+  isCurrentRequest: (request: GraphRequest) => boolean;
+  finishRequest: (request: GraphRequest) => void;
   reset: () => void;
 }
 
@@ -87,7 +102,7 @@ export const ENTITY_LIMIT_CHOICES = [100, 200, 500, 1000, MAX_ENTITY_LIMIT] as c
 const defaultEntityTypes: string[] | null = null;
 const defaultRelationTypes: string[] | null = null;
 
-export const useGraphStore = create<GraphStore>()((set) => ({
+export const useGraphStore = create<GraphStore>()((set, get) => ({
   // Initial state
   entities: [],
   relationships: [],
@@ -102,6 +117,10 @@ export const useGraphStore = create<GraphStore>()((set) => ({
   viewMode: 'viz',
   totalMatched: 0,
   activeQuery: '',
+  requestSerial: 0,
+  requestCorpus: null,
+  requestTokens: {},
+  pendingRequests: {},
   visibleEntityTypes: defaultEntityTypes,
   visibleRelationTypes: defaultRelationTypes,
   maxHops: 2,
@@ -123,6 +142,28 @@ export const useGraphStore = create<GraphStore>()((set) => ({
   setVisibleEntityTypes: (visibleEntityTypes) => set({ visibleEntityTypes }),
   setVisibleRelationTypes: (visibleRelationTypes) => set({ visibleRelationTypes }),
   setMaxHops: (maxHops) => set({ maxHops }),
+  beginRequest: (corpusId, kind) => {
+    const request = { id: get().requestSerial + 1, corpusId, kind };
+    set((state) => ({
+      requestSerial: request.id,
+      requestCorpus: corpusId,
+      requestTokens: { ...(state.requestCorpus === corpusId ? state.requestTokens : {}), [kind]: request.id },
+      pendingRequests: { ...(state.requestCorpus === corpusId ? state.pendingRequests : {}), [kind]: true },
+      isLoading: true,
+    }));
+    return request;
+  },
+  isCurrentRequest: (request) => {
+    const state = get();
+    return state.requestCorpus === request.corpusId && state.requestTokens[request.kind] === request.id;
+  },
+  finishRequest: (request) => {
+    if (!get().isCurrentRequest(request)) return;
+    set((state) => {
+      const pendingRequests = { ...state.pendingRequests, [request.kind]: false };
+      return { pendingRequests, isLoading: Object.values(pendingRequests).some(Boolean) };
+    });
+  },
   reset: () =>
     set((state) => ({
       entities: [],
@@ -137,6 +178,10 @@ export const useGraphStore = create<GraphStore>()((set) => ({
       scope: { kind: 'none' },
       totalMatched: 0,
       activeQuery: '',
+      requestSerial: state.requestSerial + 1,
+      requestCorpus: null,
+      requestTokens: {},
+      pendingRequests: {},
       viewMode: state.viewMode,
       visibleEntityTypes: defaultEntityTypes,
       visibleRelationTypes: defaultRelationTypes,

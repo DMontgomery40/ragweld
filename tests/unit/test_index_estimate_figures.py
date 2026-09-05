@@ -17,6 +17,7 @@ from server.api.index import (
     _estimate_figure_description_cost_usd,
     _estimate_figure_seconds,
     _estimate_figures,
+    _figure_run_totals,
     _figure_seconds_assumption,
     _index_time_model,
 )
@@ -35,6 +36,27 @@ def test_cost_uses_catalog_prices_for_the_alias() -> None:
 def test_cost_is_zero_for_no_figures_and_none_for_unknown_alias() -> None:
     assert _estimate_figure_description_cost_usd(alias="z-ai.glm-5.3-flash", figures=0, max_completion_tokens=600) == 0.0
     assert _estimate_figure_description_cost_usd(alias="nope.not-a-model", figures=5, max_completion_tokens=600) is None
+
+
+@pytest.mark.parametrize(("described", "failed", "undescribed"), [
+    (0, 4, 0), (3, 2, 7), (4, 0, 0), (0, 0, 8), (-1, -2, -3),
+])
+@pytest.mark.parametrize("alias", ["z-ai.glm-5.3-flash", "unpriced-vision-alias"])
+def test_run_figure_ceiling_counts_attempted_calls_including_failures(
+    described: int, failed: int, undescribed: int, alias: str,
+) -> None:
+    cfg = TriBridConfig()
+    cfg.indexing.figures.vision_model = alias
+    totals = _figure_run_totals(cfg, described=described, failed=failed, undescribed=undescribed)
+    attempts = max(0, described) + max(0, failed)
+    expected = _estimate_figure_description_cost_usd(
+        alias=alias, figures=attempts,
+        max_completion_tokens=cfg.indexing.figures.max_completion_tokens,
+    ) if attempts else None
+    assert totals.cost_usd == expected
+    assert (totals.described, totals.failed, totals.undescribed) == (
+        max(0, described), max(0, failed), max(0, undescribed),
+    )
 
 
 def test_pdf_page_count_reads_real_pages() -> None:

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -40,7 +39,7 @@ from server.training.control_plane import build_agent_control_plane_status
 def _langfuse_ingestion_detail(config: TriBridConfig) -> str:
     blockers = langfuse_client_blockers(config.tracing)
     if blockers:
-        return f"blocked ({'; '.join(blockers)})"
+        return f"API root/stage exporter blocked ({'; '.join(blockers)}); native LiteLLM owns generation export; native delivery unverified"
     return langfuse_ingestion_state()
 
 
@@ -347,6 +346,24 @@ def _decorate_component(
     )
 
 
+
+def _langfuse_ui_component(config: TriBridConfig, probe: ProbeResult, mode: str) -> ObservabilityComponentStatus:
+    """The web health endpoint cannot inspect the gateway's callback activation."""
+    base = str(config.tracing.langfuse_base_url or "").strip()
+    public = str(config.tracing.langfuse_public_base_url or "").strip()
+    return _decorate_component(
+        failure_threshold=int(config.tracing.probe_failure_threshold),
+        component_id="langfuse", label="Langfuse UI",
+        enabled=config.tracing.langfuse_enabled and mode == "otel_langfuse",
+        configured=bool(base), reachable=probe.reachable, probeable=probe.probeable,
+        detail=(f"UI reachability only: {probe.detail or 'not checked'}; "
+                "native callback activation and delivery are unverified by this probe. "
+                + _langfuse_ingestion_detail(config)),
+        url=public or None,
+        links=_make_links("Langfuse UI", public,
+            "Open the Langfuse UI; this link does not prove trace delivery. " + langfuse_sign_in_hint(config.tracing), kind="langfuse"),
+    )
+
 def _build_operator_hint(cfg: TriBridConfig, mode: str, components: list[ObservabilityComponentStatus]) -> str:
     if mode == "off":
         return "Turn observability on by setting tracing mode to local, OTel, or OTel + Langfuse."
@@ -357,9 +374,7 @@ def _build_operator_hint(cfg: TriBridConfig, mode: str, components: list[Observa
     ):
         return "Set an OTLP endpoint or switch tracing mode back to local until your collector path is ready."
     if mode == "otel_langfuse" and not str(cfg.tracing.langfuse_base_url or "").strip():
-        return "Set a Langfuse base URL and env keys before enabling OTel + Langfuse mode."
-    if mode == "otel_langfuse" and (not os.getenv("LANGFUSE_PUBLIC_KEY") or not os.getenv("LANGFUSE_SECRET_KEY")):
-        return "Langfuse mode is selected, but LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY are missing."
+        return "Set a Langfuse UI base URL before enabling OTel + Langfuse mode."
     # `probeable` excludes exactly one thing: a component the API cannot probe
     # because a protected ingress redirects it off-host (M-82). It must NOT
     # excuse a component that is enabled and simply unconfigured - that has no
@@ -375,6 +390,8 @@ def _build_operator_hint(cfg: TriBridConfig, mode: str, components: list[Observa
     ]
     if down:
         return f"Operator attention needed across: {', '.join(down)}."
+    if mode == "otel_langfuse":
+        return "Observability endpoints are configured. Langfuse UI health does not verify native callback activation or trace delivery."
     return "Observability is configured. Start with Grafana Overview, then drill into incidents, dashboards, and ML-quality surfaces."
 
 
@@ -393,7 +410,6 @@ async def build_observability_status(config: TriBridConfig, *, repo_id: str | No
     opencost_url = str(config.tracing.opencost_base_url or "").strip()
     alertmanager_url = str(config.tracing.alertmanager_base_url or "").strip()
     langfuse_url = str(config.tracing.langfuse_base_url or "").strip()
-    langfuse_public_url = str(config.tracing.langfuse_public_base_url or "").strip()
     litellm_enabled = bool(config.chat.litellm.enabled)
     vllm_enabled = bool(config.chat.vllm.enabled)
     litellm_key: str | None = None
@@ -559,32 +575,7 @@ async def build_observability_status(config: TriBridConfig, *, repo_id: str | No
             url=alertmanager_url or None,
             links=_make_links("Alertmanager", alertmanager_url, "Alert routing surface."),
         ),
-        _decorate_component(
-            failure_threshold=failure_threshold,
-            component_id="langfuse",
-            label="Langfuse",
-            enabled=config.tracing.langfuse_enabled and mode == "otel_langfuse",
-            # A reachable web UI is not enough: this process must also be able
-            # to build an ingestion client (keys + SDK), or generations are
-            # silently dropped while the health endpoint stays green.
-            configured=bool(langfuse_url) and not langfuse_client_blockers(config.tracing),
-            reachable=langfuse_probe.reachable,
-            probeable=langfuse_probe.probeable,
-            detail=(
-                f"{langfuse_probe.detail or 'Generation trace drilldown substrate.'}"
-                f"; ingestion: {_langfuse_ingestion_detail(config)}"
-            ),
-            url=langfuse_public_url or None,
-            links=_make_links(
-                "Langfuse",
-                langfuse_public_url,
-                # Every Langfuse link states the membership requirement, not just
-                # the per-trace one: Langfuse enforces project membership on the
-                # signed-in browser identity, which no server-side check covers.
-                f"Langfuse base URL. {langfuse_sign_in_hint(config.tracing)}",
-                kind="langfuse",
-            ),
-        ),
+        _langfuse_ui_component(config, langfuse_probe, mode),
         _decorate_component(
             failure_threshold=failure_threshold,
             component_id="grafana",

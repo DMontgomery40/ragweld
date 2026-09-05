@@ -45,6 +45,7 @@ from server.models.graph_sources import (
     GraphSourceReindexRequiredResponse as GraphSourceReindexRequiredResponse,
 )
 from server.models.index import ChunkProvenance, IndexStats
+from server.models.run_accounting import IndexRunAccounting
 from server.models.runtime_gateway import BenchmarkConfig as BenchmarkConfig
 from server.models.runtime_gateway import ChatModelInfo as ChatModelInfo
 from server.models.runtime_gateway import ChatModelsResponse as ChatModelsResponse
@@ -150,34 +151,38 @@ class DashboardEmbeddingConfigSummary(BaseModel):
 class DashboardIndexCosts(BaseModel):
     """Indexing cost summary for dashboard display."""
 
+    accounting: IndexRunAccounting | None = Field(
+        default=None, description="Saved accounting for the exact live generation's index run.",
+    )
+
     total_tokens: int = Field(default=0, ge=0, description="Total tokens processed during indexing.")
     embedding_cost: float | None = Field(
         default=None,
         ge=0.0,
-        description="Estimated embedding cost (USD) when pricing data is available.",
+        description="Saved pre-run embedding estimate (USD) for the live generation; never repriced from current settings.",
     )
     semantic_kg_cost: float | None = Field(
         default=None,
         ge=0.0,
-        description="Estimated GraphRAG semantic extraction cost (USD) when enabled.",
+        description="Saved pre-run semantic GraphRAG estimate (USD) for the live generation.",
     )
     figure_description_cost: float | None = Field(
         default=None,
         ge=0.0,
         description=(
-            "Ceiling on the vision-call cost (USD) of the latest run's figure descriptions, "
-            "as that run recorded it; null when no run described a figure or its alias is unpriced."
+            "Saved pre-run figure-description estimate (USD) for the live generation, or its "
+            "historical saved figure ceiling when no quote exists; never a measured charge."
         ),
     )
     figures_described: int = Field(
-        default=0, ge=0, description="Figures the latest indexing run described."
+        default=0, ge=0, description="Figures described by the live generation's index run."
     )
     total_cost: float | None = Field(
         default=None,
         ge=0.0,
         description=(
-            "Estimated total indexing cost (USD): embedding + semantic KG + figure description "
-            "(each when applicable); null when any applicable component has no known price."
+            "Saved pre-run total estimate (USD) for the live generation. Null when the original "
+            "quote is unavailable or any applicable component had no known price."
         ),
     )
 

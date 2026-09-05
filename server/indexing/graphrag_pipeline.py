@@ -6,10 +6,11 @@ import re
 import uuid
 from collections.abc import Callable, Coroutine
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, TypeVar
 
+import httpx
 from neo4j import Driver
 from neo4j_graphrag.components.entity_relation_extractor import (
     LLMEntityRelationExtractor,
@@ -40,6 +41,7 @@ from server.indexing.graphrag_schema import closed_graph_schema
 from server.model_policy import ensure_model_allowed
 from server.models.index import Chunk, GraphResolutionTelemetry
 from server.models.tribrid_config_model import TriBridConfig
+from server.observability.run_census import CensusAsyncTransport, CensusTransport, RunCensusScope
 
 ResultT = TypeVar("ResultT")
 
@@ -466,6 +468,7 @@ def semantic_extraction_llm(
     route_upstream: str,
     llm_timeout_s: int,
     reasoning_effort: str,
+    census_scope: RunCensusScope | None = None,
 ) -> OpenAILLM:
     """The official OpenAILLM for semantic extraction, carrying the operator's controls.
 
@@ -484,7 +487,14 @@ def semantic_extraction_llm(
         raise RuntimeError("GraphRAG semantic extraction requires an authenticated route")
     if int(llm_timeout_s) <= 0:
         raise RuntimeError("GraphRAG semantic extraction requires a positive per-chunk timeout")
-    return OpenAILLM(
+    if census_scope is not None and census_scope.identity.lane != "semantic_kg":
+        raise ValueError("semantic extraction requires the semantic_kg census lane")
+    client_options: dict[str, Any] = {}
+    if census_scope is not None:
+        client_options["http_client"] = httpx.AsyncClient(
+            transport=CensusAsyncTransport(census_scope), timeout=float(llm_timeout_s),
+        )
+    llm = OpenAILLM(
         model_name=str(route_model).strip(),
         model_params=reasoning_model_params(
             reasoning_effort=reasoning_effort, route_upstream=route_upstream
@@ -492,7 +502,17 @@ def semantic_extraction_llm(
         api_key=str(route_api_key).strip(),
         base_url=str(route_base_url).strip(),
         timeout=float(int(llm_timeout_s)),
+        **client_options,
     )
+    if census_scope is not None:
+        # The official wrapper accepts one HTTP client and splits it by sync/async
+        # type. The public OpenAI copy API attaches the other without replacing it.
+        original = llm.client
+        llm.client = original.with_options(http_client=httpx.Client(
+            transport=CensusTransport(census_scope), timeout=float(llm_timeout_s),
+        ))
+        original.close()
+    return llm
 
 
 # The official extractor formats the template with these keyword arguments
@@ -528,14 +548,125 @@ def extraction_prompt_template(text: str) -> ERExtractionTemplate:
     return ERExtractionTemplate(template=template)
 
 
+
+@dataclass
+class _ExtractionBatch:
+    tasks: set[asyncio.Task[Any]] = field(default_factory=set)
+    closing: bool = False
+
+
+_EXTRACTION_BATCH: ContextVar[_ExtractionBatch | None] = ContextVar(
+    "graphrag_extraction_batch", default=None,
+)
+
+
+class _DrainingExtractor(LLMEntityRelationExtractor):
+    """Keep official extraction, but drain gather siblings before releasing its producer."""
+
+    def __init__(self, *, census_scope: RunCensusScope | None, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.census_scope = census_scope
+        self.active_runs: set[asyncio.Task[Any]] = set()
+        self.drains: set[asyncio.Task[None]] = set()
+        self.closed = False
+
+    async def run(
+        self, chunks: TextChunks, document_info: DocumentInfo | None = None,
+        lexical_graph_config: LexicalGraphConfig | None = None,
+        schema: GraphSchema | None = None, examples: str = "", **kwargs: Any,
+    ) -> Neo4jGraph:
+        if self.closed:
+            raise RuntimeError("semantic pipeline is closed")
+        lease = self.census_scope.producer_started() if self.census_scope else None
+        owner = asyncio.current_task()
+        assert owner is not None
+        self.active_runs.add(owner)
+        batch = _ExtractionBatch()
+        token = _EXTRACTION_BATCH.set(batch)
+        try:
+            return await super().run(
+                chunks=chunks, document_info=document_info,
+                lexical_graph_config=lexical_graph_config, schema=schema,
+                examples=examples, **kwargs,
+            )
+        finally:
+            batch.closing = True
+            _EXTRACTION_BATCH.reset(token)
+
+            async def drain() -> None:
+                try:
+                    for task in batch.tasks:
+                        if not task.done():
+                            task.cancel()
+                    await asyncio.gather(*batch.tasks, return_exceptions=True)
+                finally:
+                    if lease is not None:
+                        lease.close()
+
+            cleanup = asyncio.create_task(drain())
+            self.drains.add(cleanup)
+            try:
+                # A second cancellation must not release the producer while siblings
+                # still own HTTP requests. Pipeline close also waits for this task.
+                await asyncio.shield(cleanup)
+            finally:
+                self.active_runs.discard(owner)
+                if cleanup.done():
+                    self.drains.discard(cleanup)
+
+    async def run_for_chunk(
+        self, sem: asyncio.Semaphore, chunk: TextChunk, schema: GraphSchema,
+        examples: str, lexical_graph_builder: LexicalGraphBuilder | None = None,
+    ) -> Neo4jGraph:
+        batch = _EXTRACTION_BATCH.get()
+        if batch is not None:
+            if batch.closing:
+                raise asyncio.CancelledError()
+            task = asyncio.current_task()
+            assert task is not None
+            batch.tasks.add(task)
+        return await super().run_for_chunk(
+            sem, chunk, schema, examples, lexical_graph_builder,
+        )
+
+    async def cancel_and_drain(self) -> None:
+        self.closed = True
+        owners = tuple(self.active_runs)
+        for task in owners:
+            task.cancel()
+        await asyncio.gather(*owners, return_exceptions=True)
+        await asyncio.gather(*self.drains)
+        self.drains.clear()
+
+
+class SemanticPipeline(Pipeline):
+    """Official pipeline with explicit ownership of extractor work and SDK clients."""
+
+    def __init__(self, llm: OpenAILLM, extractor: _DrainingExtractor) -> None:
+        super().__init__()
+        self._owned_llm = llm
+        self._owned_extractor = extractor
+
+    async def aclose(self) -> None:
+        await self._owned_extractor.cancel_and_drain()
+        await self._owned_llm.aclose()
+
+
+async def close_semantic_pipeline(pipeline: Pipeline) -> None:
+    if isinstance(pipeline, SemanticPipeline):
+        await pipeline.aclose()
+
+
 def semantic_entity_relation_extractor(
     *,
     llm: OpenAILLM,
     prompt_template: str,
     max_concurrency: int,
-) -> LLMEntityRelationExtractor:
+    census_scope: RunCensusScope | None = None,
+) -> _DrainingExtractor:
     """The official extractor over the operator's template, strict structured output, fail closed."""
-    return LLMEntityRelationExtractor(
+    return _DrainingExtractor(
+        census_scope=census_scope,
         llm=llm,
         prompt_template=extraction_prompt_template(prompt_template),
         create_lexical_graph=True,
@@ -559,7 +690,14 @@ def build_semantic_pipeline(
     llm_timeout_s: int,
     reasoning_effort: str,
     prompt_template: str,
-) -> Pipeline:
+    census_scope: RunCensusScope | None = None,
+) -> SemanticPipeline:
+    if census_scope is not None:
+        staging_id = require_staging_graph_id(repo_id)
+        corpus_id = staging_id[len("__staging__"):].rsplit("__", 1)[0]
+        if (census_scope.identity.session_id != run_id
+                or census_scope.identity.corpus_id != corpus_id):
+            raise ValueError("semantic census identity does not match the staging run")
     llm = semantic_extraction_llm(
         route_model=route_model,
         route_base_url=route_base_url,
@@ -567,9 +705,11 @@ def build_semantic_pipeline(
         route_upstream=route_upstream,
         llm_timeout_s=llm_timeout_s,
         reasoning_effort=reasoning_effort,
+        census_scope=census_scope,
     )
     extractor = semantic_entity_relation_extractor(
-        llm=llm, prompt_template=prompt_template, max_concurrency=max_concurrency
+        llm=llm, prompt_template=prompt_template, max_concurrency=max_concurrency,
+        census_scope=census_scope,
     )
     writer = ScopedNeo4jWriter(
         driver=driver,
@@ -577,7 +717,7 @@ def build_semantic_pipeline(
         repo_id=repo_id,
         run_id=run_id,
     )
-    pipeline = Pipeline()
+    pipeline = SemanticPipeline(llm, extractor)
     pipeline.add_component(extractor, "extractor")
     pipeline.add_component(GraphPruning(), "pruner")
     pipeline.add_component(writer, "writer")
@@ -724,6 +864,8 @@ __all__ = [
     "RESERVED_SCOPE_KEYS",
     "ScopedNeo4jWriter",
     "build_semantic_pipeline",
+    "close_semantic_pipeline",
+    "SemanticPipeline",
     "chunks_to_text_chunks",
     "cypher_literal",
     "document_info",

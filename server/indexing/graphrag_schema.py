@@ -33,6 +33,7 @@ from pydantic import ValidationError
 from server.gateway_reasoning import reasoning_model_params
 from server.model_policy import ensure_model_allowed
 from server.models.index import Chunk, GraphSchemaProposal, GraphSchemaSample
+from server.observability.run_census import CensusAsyncTransport, CensusTransport, RunCensusScope
 
 _GRAPH_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 _GENERIC_NODE_LABELS = {"OBJECT"}
@@ -86,11 +87,17 @@ class GraphSchemaProposalError(RuntimeError):
         )
 
 
-class _ProposalTransport(httpx.AsyncHTTPTransport):
+class _ProposalTransport(httpx.AsyncBaseTransport):
     """Delegate HTTP to HTTPX, bounding decoded bytes before the SDK parses JSON."""
 
+    def __init__(self, transport: httpx.AsyncBaseTransport | None = None) -> None:
+        self.transport = transport if transport is not None else httpx.AsyncHTTPTransport()
+
+    async def aclose(self) -> None:
+        await self.transport.aclose()
+
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
-        response = await super().handle_async_request(request)
+        response = await self.transport.handle_async_request(request)
         try:
             body = bytearray()
             async for part in response.aiter_bytes():
@@ -353,9 +360,15 @@ async def derive_graph_schema_proposal(
     input_fingerprint: str,
     timeout_s: float,
     max_output_tokens: int,
+    census_scope: RunCensusScope | None = None,
 ) -> GraphSchemaProposal:
     for identifier in (model_alias, route_model, route_upstream):
         ensure_model_allowed(identifier)
+    if census_scope is not None and (
+        census_scope.identity.lane != "schema_proposal"
+        or census_scope.identity.corpus_id != corpus_id
+    ):
+        raise ValueError("schema proposal census identity does not match its corpus and lane")
     sample = select_schema_chunks(chunks, corpus_id=corpus_id)
     if not sample:
         raise ValueError("graph schema proposal requires at least one nonempty chunk")
@@ -406,11 +419,21 @@ async def derive_graph_schema_proposal(
         timeout=timeout_s,
         max_retries=0,
         http_client=httpx.AsyncClient(
-            transport=_ProposalTransport(), timeout=timeout_s,
+            transport=_ProposalTransport(
+                CensusAsyncTransport(census_scope) if census_scope is not None else None,
+            ), timeout=timeout_s,
             event_hooks={"response": [check_completion]},
         ),
     )
+    if census_scope is not None:
+        original = llm.client
+        llm.client = original.with_options(http_client=httpx.Client(
+            transport=CensusTransport(census_scope), timeout=timeout_s,
+        ))
+        original.close()
+    lease = None
     try:
+        lease = census_scope.producer_started() if census_scope is not None else None
         async with asyncio.timeout(timeout_s):
             extracted = await SchemaFromTextExtractor(
                 llm=llm,
@@ -427,8 +450,15 @@ async def derive_graph_schema_proposal(
     finally:
         # The API's outer deadline may cancel this call while sampling/generating;
         # cleanup gets its own short bound and never resumes generation or persistence.
-        with contextlib.suppress(Exception):
-            await asyncio.wait_for(llm.aclose(), timeout=_PROPOSAL_CLEANUP_TIMEOUT_S)
+        async def cleanup() -> None:
+            try:
+                with contextlib.suppress(Exception):
+                    await asyncio.wait_for(llm.aclose(), timeout=_PROPOSAL_CLEANUP_TIMEOUT_S)
+            finally:
+                if lease is not None:
+                    lease.close()
+
+        await asyncio.shield(asyncio.create_task(cleanup()))
     schema = canonical_schema_dict(normalize_domain_schema(extracted))
     validate_domain_schema(schema)
     return GraphSchemaProposal(

@@ -131,14 +131,15 @@ async def test_observability_status_reports_langfuse_key_and_reachability_failur
 
         assert data["ok"] is False
         assert data["mode"] == "otel_langfuse"
-        assert "LANGFUSE_PUBLIC_KEY" in str(data.get("operator_hint") or "")
         langfuse = next(component for component in data["components"] if component["id"] == "langfuse")
         assert langfuse["enabled"] is True
-        # A URL alone is not "configured": without ingestion keys this process
-        # would silently drop generations while the web UI stays green.
-        assert langfuse["configured"] is False
+        # UI reachability is independent of app SDK keys and proves no native
+        # gateway callback activation or generation delivery.
+        assert langfuse["label"] == "Langfuse UI"
+        assert langfuse["configured"] is True
         assert langfuse["reachable"] is False
-        assert "LANGFUSE_PUBLIC_KEY" in str(langfuse.get("detail") or "")
+        assert "UI reachability only" in str(langfuse.get("detail") or "")
+        assert "native callback activation and delivery are unverified" in str(langfuse.get("detail") or "")
     finally:
         if old_public is not None:
             os.environ["LANGFUSE_PUBLIC_KEY"] = old_public
@@ -183,7 +184,7 @@ async def test_observability_status_uses_public_langfuse_url_for_operator_links(
     assert langfuse["reachable"] is False
     assert langfuse["url"] == "https://langfuse.ragweld.com"
     assert any(
-        link["label"] == "Langfuse" and link["url"] == "https://langfuse.ragweld.com"
+        link["label"] == "Langfuse UI" and link["url"] == "https://langfuse.ragweld.com"
         for link in langfuse["links"]
     )
 

@@ -741,12 +741,18 @@ def test_generation_gateway_topology_is_pinned_local_and_has_no_paid_fallback() 
         "model": "openai/ragweld-local",
         "api_base": "http://host.docker.internal:58080/v1",
         "api_key": "none",
+        "num_retries": 0,
+        "max_retries": 0,
     }
     routed = gateway["model_list"][1:]
     assert len(routed) >= 300
     assert all(row["litellm_params"]["model"].startswith("openrouter/") for row in routed)
     assert all(row["litellm_params"]["api_key"] == "os.environ/OPENROUTER_API_KEY" for row in routed)
     assert all("api_base" not in row["litellm_params"] for row in routed)
+    assert all(
+        row["litellm_params"]["num_retries"] == row["litellm_params"]["max_retries"] == 0
+        for row in gateway["model_list"]
+    )
     assert "ragweld-openrouter-smoke" not in {row["model_name"] for row in gateway["model_list"]}
 
     assert "unset OPENROUTER_API_KEY ANTHROPIC_API_KEY GOOGLE_API_KEY" in launcher
@@ -754,7 +760,8 @@ def test_generation_gateway_topology_is_pinned_local_and_has_no_paid_fallback() 
     assert gateway["litellm_settings"]["num_retries"] == 0
     assert gateway["litellm_settings"].get("fallbacks", []) == []
     assert gateway["litellm_settings"].get("context_window_fallbacks", []) == []
-    assert gateway["litellm_settings"]["callbacks"] == ["prometheus"]
+    assert gateway["litellm_settings"]["callbacks"] == ["prometheus", "langfuse_otel"]
+    assert gateway["litellm_settings"]["turn_off_message_logging"] is True
     assert gateway["litellm_settings"]["require_auth_for_metrics_endpoint"] is False
 
     litellm_health = " ".join(str(part) for part in litellm["healthcheck"]["test"])
