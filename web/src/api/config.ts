@@ -15,10 +15,14 @@ let inFlightRegistry: Promise<ConfigRegistryResponse> | null = null;
 
 export const configApi = {
   /**
-   * Load full TriBrid configuration (tribrid_config.json)
+   * Load full TriBrid configuration. Null pins global scope; an omitted argument
+   * retains active URL/storage scope for existing callers.
    */
-  async load(): Promise<TriBridConfig> {
-    const { data } = await apiClient.get<TriBridConfig>(withCorpusScope(api('/config')));
+  async load(corpusId?: string | null): Promise<TriBridConfig> {
+    const path = corpusId === undefined ? withCorpusScope(api('/config'))
+      : corpusId === null ? api('/config')
+        : `${api('/config')}?corpus_id=${encodeURIComponent(corpusId)}`;
+    const { data } = await apiClient.get<TriBridConfig>(path);
     return data;
   },
 

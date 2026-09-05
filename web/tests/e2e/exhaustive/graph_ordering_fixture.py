@@ -1,7 +1,8 @@
 """Private real-app/real-store response scheduler for Graph browser regressions.
 
-It holds complete responses from the actual API, then forwards their original
-ASGI messages byte-for-byte. It never manufactures graph responses.
+It holds complete responses from the actual API, then forwards their original ASGI messages
+byte-for-byte. One registry-only fault mode captures the complete real response before raising so
+Uvicorn exposes an actual server failure. It never manufactures browser response payloads.
 """
 from __future__ import annotations
 
@@ -35,10 +36,13 @@ class RemoveRequest(BaseModel):
 @dataclass
 class HeldResponse:
     rule: HoldRequest
+    fail_before_forward: bool = False
+    wait_before_failure: bool = False
     release: asyncio.Event = field(default_factory=asyncio.Event)
     captured: bool = False
     claimed: bool = False
     delivered: bool = False
+    faulted: bool = False
     status: int | None = None
     sha256: str | None = None
 
@@ -65,6 +69,10 @@ class GraphOrderingApp:
         self.app = app
         self.holds: dict[str, HeldResponse] = {}
         self.corpora: dict[str, str] = {}
+        self.reserved_corpora: set[str] = set()
+
+    def owned_corpus_ids(self) -> set[str]:
+        return set(self.corpora) | self.reserved_corpora
 
     async def stores(self):
         from server.db.neo4j import Neo4jClient
@@ -123,6 +131,10 @@ class GraphOrderingApp:
             return JSONResponse({"fixture": "real-graph-ordering"})
         if operation == "seed" and request.method == "POST":
             return JSONResponse({"corpora": await self.seed()})
+        if operation == "reserve-corpus" and request.method == "POST":
+            corpus = f"pytest_graph_ordering_{uuid4().hex}_created"
+            self.reserved_corpora.add(corpus)
+            return JSONResponse({"corpus": corpus, "path": tempfile.gettempdir()})
         if operation == "remove-entity" and request.method == "POST":
             target = RemoveRequest.model_validate(await request.json())
             if target.corpus not in self.corpora:
@@ -138,16 +150,30 @@ class GraphOrderingApp:
                 await neo.disconnect()
                 await pg.disconnect()
             return JSONResponse({"removed": True})
-        if operation == "hold" and request.method == "POST":
+        if operation in {"hold", "fail-after-capture", "fail-after-release"} and request.method == "POST":
             rule = HoldRequest.model_validate(await request.json())
-            if not any(rule.path.startswith(f"/api/graph/{corpus}/") for corpus in self.corpora):
-                return JSONResponse({"error": "Only owned graph routes can be held"}, status_code=400)
+            owned_graph = any(rule.path.startswith(f"/api/graph/{corpus}/") for corpus in self.corpora)
+            owned_config = rule.path == "/api/config" and rule.query in self.corpora
+            owned_registry = rule.path == "/api/corpora" and rule.query is None and bool(self.owned_corpus_ids())
+            if not (owned_graph or owned_config or owned_registry):
+                return JSONResponse({
+                    "error": "Only the isolated corpus registry, owned graph routes, or scoped config GETs can be held",
+                }, status_code=400)
+            if operation != "hold" and not owned_registry:
+                return JSONResponse({
+                    "error": "Transport failure is limited to the isolated owned corpus registry",
+                }, status_code=400)
             token = uuid4().hex
-            self.holds[token] = HeldResponse(rule)
+            self.holds[token] = HeldResponse(
+                rule,
+                fail_before_forward=operation != "hold",
+                wait_before_failure=operation == "fail-after-release",
+            )
             return JSONResponse({"token": token})
         if operation.startswith("state/"):
             held = self.holds[operation.split("/", 1)[1]]
             return JSONResponse({"captured": held.captured, "delivered": held.delivered,
+                                 "faulted": held.faulted,
                                  "status": held.status, "sha256": held.sha256,
                                  "path": held.rule.path, "query": held.rule.query})
         if operation.startswith("release/") and request.method == "POST":
@@ -158,10 +184,12 @@ class GraphOrderingApp:
                 held.release.set()
             pg, neo = await self.stores()
             try:
-                for corpus, graph in list(self.corpora.items()):
+                for graph in self.corpora.values():
                     await neo.delete_graph(graph)
+                for corpus in self.owned_corpus_ids():
                     await pg.delete_corpus(corpus)
-                    self.corpora.pop(corpus)
+                self.corpora.clear()
+                self.reserved_corpora.clear()
                 self.holds.clear()
             finally:
                 await neo.disconnect()
@@ -177,8 +205,10 @@ class GraphOrderingApp:
             response = await self.control(Request(scope, receive))
             await response(scope, receive, send)
             return
-        query = parse_qs(scope["query_string"].decode()).get("q", [None])[0]
+        query_key = "corpus_id" if scope["path"] == "/api/config" else "q"
+        query = parse_qs(scope["query_string"].decode()).get(query_key, [None])[0]
         held = next((item for item in self.holds.values() if not item.claimed
+                     and scope["method"] == "GET"
                      and item.rule.path == scope["path"] and item.rule.query == query), None)
         if held is None:
             await self.app(scope, receive, send)
@@ -193,6 +223,11 @@ class GraphOrderingApp:
         held.status = next(item["status"] for item in messages if item["type"] == "http.response.start")
         held.sha256 = hashlib.sha256(b"".join(item.get("body", b"") for item in messages)).hexdigest()
         held.captured = True
+        if held.wait_before_failure:
+            await asyncio.wait_for(held.release.wait(), timeout=30)
+        if held.fail_before_forward:
+            held.faulted = True
+            raise RuntimeError("Fixture transport failure after complete private API response capture")
         await asyncio.wait_for(held.release.wait(), timeout=30)
         for message in messages:
             await send(message)

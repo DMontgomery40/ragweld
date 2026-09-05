@@ -3,7 +3,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
-import { API_BASE, provisionExhaustiveCorpus, type ExhaustiveCorpus } from './corpus_fixture';
+import { API_BASE, patchCorpusConfigSection, provisionExhaustiveCorpus, type ExhaustiveCorpus } from './corpus_fixture';
 
 test.describe.configure({ mode: 'serial' });
 test.setTimeout(6 * 60 * 1000);
@@ -127,7 +127,7 @@ test('the Synthetic Lab jump keeps the corpus and announces the preset on arriva
 
   const notice = page.getByTestId('synthetic-preset-notice');
   await expect(notice).toBeVisible();
-  await expect(notice).toContainText(/keywords/);
+  await expect(notice).toContainText(/keywords/i);
   await expect(notice).toContainText(/Nothing has run/i);
 
   // The destination URL is reloadable without losing the corpus.
@@ -262,6 +262,9 @@ test('the Get Started wizard opens no dialog until the estimator has measured', 
   const dialog = page.getByTestId('confirm-dialog');
   await expect(dialog).toBeVisible({ timeout: 150_000 });
   const message = await page.getByTestId('confirm-dialog-message').innerText();
+  await expect(page.getByTestId('confirm-dialog-details')).not.toBeVisible();
+  await dialog.getByText('Estimate details', { exact: true }).click();
+  const details = await page.getByTestId('confirm-dialog-details').innerText();
   clearInterval(watcher);
 
   // Cancel: this spec must never start an index run.
@@ -275,6 +278,98 @@ test('the Get Started wizard opens no dialog until the estimator has measured', 
     );
   }
   expect(message).toContain('Index estimate for');
-  expect(message).toMatch(/Estimated tokens: [1-9][\d,]*/);
-  expect(message).toMatch(/Estimated chunks: [1-9][\d,]*/);
+  expect(message).toMatch(/Chunks \(est\): [1-9][\d,]*/);
+  expect(details).toMatch(/Estimated tokens: [1-9][\d,]*/);
+  expect(details).toMatch(/Estimated chunks: [1-9][\d,]*/);
+});
+
+test('estimate consent keeps unknown totals and material uncertainty visible with details collapsed', async ({ page }) => {
+  await page.goto(`rag?subtab=indexing&corpus=${encodeURIComponent(corpus.corpusId)}`, {
+    waitUntil: 'domcontentloaded',
+  });
+  const assumptions = [
+    'Output baseline: 3 successful native requests from run fixture (status=error), with 2 processed chunks and 4 HTTP attempts. Requests are not unique-chunk coverage.',
+    '1 dispatched attempts have no usable output sample; delayed native ingestion can change this forecast.',
+    'Historical configuration differs; the sampled output baseline may not reflect the current prompt or reasoning settings.',
+    'Semantic KG scenario $1.00–$7.00: observed output minimum/maximum. This is not a confidence interval or spending limit.',
+    'Forecast assumes one request per chunk at catalog input/output rates; retries can alter charges.',
+  ];
+  // Exercise the real presentation component with explicit boundary scenarios.
+  // The source estimate is measured by the real API; no endpoint is intercepted
+  // and the dialog is never connected to an index start or paid request.
+  for (const total of [null, 0, 0.000715]) {
+    await page.evaluate(async ({ corpusId, corpusPath, total, assumptions }) => {
+      const { indexingApi } = await import('/web/src/api/indexing.ts');
+      const { indexEstimateConsent } = await import('/web/src/components/RAG/indexEstimateConsent.tsx');
+      const { confirmDialog } = await import('/web/src/components/ui/confirmDialog.tsx');
+      const measured = await indexingApi.estimate({ corpus_id: corpusId, repo_path: corpusPath });
+      const scenario = {
+        ...measured, embedding_cost_usd: 0, total_cost_usd: total,
+        semantic_kg_cost_usd: total, estimated_seconds_semantic_kg: 1, assumptions,
+      };
+      void confirmDialog({
+        title: 'Measured estimate presentation contract',
+        ...indexEstimateConsent(scenario, { corpusName: corpusId }),
+      });
+    }, { corpusId: corpus.corpusId, corpusPath: corpus.corpusPath, total, assumptions });
+    const dialog = page.getByTestId('confirm-dialog');
+    await expect(dialog).toBeVisible();
+    const message = page.getByTestId('confirm-dialog-message');
+    await expect(message).toContainText(`Estimated cost: ${total == null ? 'Unknown' : total === 0 ? '$0.00' : '$0.000715'}`);
+    if (total == null) await expect(message).toContainText('Semantic KG cost unknown');
+    await expect(message).toContainText('failed or cancelled run');
+    await expect(message).toContainText('partial output evidence');
+    await expect(message).toContainText('historical settings differ');
+    await expect(message).toContainText('not a spending limit');
+    const details = page.getByTestId('confirm-dialog-details');
+    await expect(details).not.toBeVisible();
+    await expect(page.getByTestId('confirm-dialog-accept')).toBeFocused();
+    await dialog.getByText('Estimate details', { exact: true }).click();
+    await expect(details).toBeVisible();
+    for (const assumption of assumptions) await expect(details).toContainText(assumption);
+    await expect(details).toContainText('Time range:');
+    await expect(details).toContainText('Estimated tokens:');
+    await expect(details).toContainText('Embedding:');
+    await page.getByTestId('confirm-dialog-cancel').click();
+    await expect(dialog).toHaveCount(0);
+  }
+});
+
+test('quick start reads the wizard corpus graph policy and requires semantic schema review', async ({ page, request }) => {
+  const indexPosts: string[] = [];
+  page.on('request', (req) => {
+    if (req.method() === 'POST' && /\/api\/index(?:\?|$)/.test(req.url())) indexPosts.push(req.url());
+  });
+  try {
+    for (const policy of ['off', 'code', 'semantic'] as const) {
+      await patchCorpusConfigSection(request, corpus.corpusId, 'graph_indexing', {
+        enabled: policy !== 'off', build_code_graph: policy === 'code',
+      });
+      await page.goto(`start?corpus=${encodeURIComponent(corpus.corpusId)}`, { waitUntil: 'domcontentloaded' });
+      await page.getByTestId('onboarding-dot-2').click();
+      await page.getByTestId('onboarding-existing-corpus').selectOption(corpus.corpusId);
+      await page.getByTestId('onboarding-dot-3').click();
+      const scopedConfig = page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return url.pathname.endsWith('/api/config') && url.searchParams.get('corpus_id') === corpus.corpusId;
+      });
+      await page.getByTestId('onboarding-index-start').click();
+      expect((await scopedConfig).ok()).toBe(true);
+      if (policy === 'semantic') {
+        await expect(page.getByTestId('onboarding-index-error')).toContainText('Review the graph schema');
+        await expect(page.getByTestId('confirm-dialog')).toHaveCount(0);
+        const review = page.getByTestId('onboarding-review-graph');
+        await expect(review).toHaveAttribute('href', `/web/rag?subtab=indexing&component=enrichment&corpus=${encodeURIComponent(corpus.corpusId)}`);
+        await review.click();
+        await expect(page.getByTestId('generate-graph-schema')).toBeVisible();
+      } else {
+        await expect(page.getByTestId('confirm-dialog')).toBeVisible({ timeout: 150_000 });
+        await expect(page.getByTestId('onboarding-review-graph')).toHaveCount(0);
+        await page.getByTestId('confirm-dialog-cancel').click();
+      }
+    }
+    expect(indexPosts).toEqual([]);
+  } finally {
+    await patchCorpusConfigSection(request, corpus.corpusId, 'graph_indexing', { enabled: false, build_code_graph: false });
+  }
 });

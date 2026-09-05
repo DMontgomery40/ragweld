@@ -15,6 +15,7 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
 import {
   API_BASE,
   acceptanceCorpusPath,
+  patchCorpusConfigSection,
   provisionExhaustiveCorpus,
   uniqueCorpusId,
   type ExhaustiveCorpus,
@@ -52,6 +53,7 @@ test.beforeAll(async ({ request }) => {
     data: { corpus_id: corpusId, name: corpusId, path: vanishing },
   });
   expect(created.ok(), `POST /api/corpora (${corpusId}) -> ${created.status()}`).toBe(true);
+  await patchCorpusConfigSection(request, corpusId, 'graph_indexing', { enabled: false, build_code_graph: false });
   rmSync(vanishing, { recursive: true, force: true });
   unresolvable = {
     corpusId,
@@ -78,7 +80,11 @@ test('the estimate dialog opens for a corpus whose estimate answers 200', async 
 
   const dialog = page.getByTestId('confirm-dialog');
   await expect(dialog).toBeVisible();
+  await expect(page.getByTestId('confirm-dialog-message')).not.toContainText('Semantic KG');
   await expect(page.getByTestId('confirm-dialog-message')).toContainText('Chunks (est)');
+  await expect(page.getByTestId('confirm-dialog-details')).not.toBeVisible();
+  await dialog.getByText('Estimate details', { exact: true }).click();
+  await expect(page.getByTestId('confirm-dialog-details')).toContainText('Saved estimate assumptions');
   await page.getByTestId('confirm-dialog-cancel').click();
   await expect(dialog).toHaveCount(0);
 });
@@ -158,9 +164,12 @@ test('the dialog states the generation swap and a breakdown drawn from one model
     await page.getByTestId('index-now-button').click();
     await expect(page.getByTestId('confirm-dialog')).toBeVisible();
     const message = page.getByTestId('confirm-dialog-message');
-    await expect(message).toContainText('Time breakdown (est): Embed');
-    await expect(message).toContainText('startup');
-    await expect(message).toContainText('retires the one now serving searches');
+    await expect(message).toContainText('replaces the current index after validation');
+    const details = page.getByTestId('confirm-dialog-details');
+    await expect(details).not.toBeVisible();
+    await page.getByText('Estimate details', { exact: true }).click();
+    await expect(details).toContainText('Time breakdown (est): Embed');
+    await expect(details).toContainText('startup');
     await page.getByTestId('confirm-dialog-cancel').click();
     await expect(page.getByTestId('confirm-dialog')).toHaveCount(0);
   } finally {

@@ -174,7 +174,8 @@ def test_resolution_property_rejects_policies_without_a_graph(policy: str) -> No
         resolution_property_for_policy(policy)
 
 
-def test_semantic_extraction_llm_binds_the_operator_timeout_and_reasoning_effort() -> None:
+@pytest.mark.asyncio
+async def test_semantic_extraction_llm_binds_the_operator_timeout_and_reasoning_effort() -> None:
     """Task 8 drive defect D9: the Indexing page offers "Per-chunk timeout (seconds)" and
     "Reasoning effort", but neither reached the extraction LLM - a 5 s timeout with
     ``xhigh`` effort still let a 13 s Luna call promote a graph. The official OpenAILLM
@@ -188,12 +189,17 @@ def test_semantic_extraction_llm_binds_the_operator_timeout_and_reasoning_effort
         llm_timeout_s=5,
         reasoning_effort="xhigh",
     )
-    assert llm.model_name == "openai.gpt-5.6-luna"
-    # OpenRouter upstream: the effort travels as OpenRouter's native reasoning object (D25).
-    assert llm.model_params == {"temperature": 0, "extra_body": {"reasoning": {"effort": "xhigh"}}}
-    assert float(llm.async_client.timeout) == 5.0
-    assert float(llm.client.timeout) == 5.0
-    assert str(llm.async_client.base_url).rstrip("/") == "http://127.0.0.1:54000/v1"
+    try:
+        assert llm.model_name == "openai.gpt-5.6-luna"
+        # OpenRouter upstream: the effort travels as OpenRouter's native reasoning object (D25).
+        assert llm.model_params == {"temperature": 0, "extra_body": {"reasoning": {"effort": "xhigh"}}}
+        assert float(llm.async_client.timeout) == 5.0
+        assert float(llm.client.timeout) == 5.0
+        assert llm.client.max_retries == llm.async_client.max_retries == 0
+        assert str(llm.async_client.base_url).rstrip("/") == "http://127.0.0.1:54000/v1"
+    finally:
+        await llm.aclose()
+    assert llm.client.is_closed() and llm.async_client.is_closed()
 
 
 @pytest.mark.parametrize(

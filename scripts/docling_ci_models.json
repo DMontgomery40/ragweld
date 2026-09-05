@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "packages": {
+    "docling": "2.81.0",
+    "docling-ibm-models": "3.12.0",
+    "rapidocr": "3.7.0"
+  },
+  "huggingface": [
+    {
+      "repo_id": "docling-project/DocumentFigureClassifier-v2.0",
+      "revision": "2a12e02668b98ca40216eab41cdf19530577cba4",
+      "files": [
+        {"path": "config.json", "sha256": "dbed0349fb8b12fad95d8ff7f43b062c40971e06d9d957b25e90d91dfd3bd77e", "size": 2522},
+        {"path": "preprocessor_config.json", "sha256": "118dc069572036346fbacc3e15586089d3f8a9aaf9036c0c54b4666236a28032", "size": 377},
+        {"path": "model.safetensors", "sha256": "e8232c0c1e4a25551e496ccaf548e469e321f78997d18c9be7f3af9ccb5d222b", "size": 16378200}
+      ]
+    },
+    {
+      "repo_id": "docling-project/docling-layout-heron",
+      "revision": "8f39ad3c0b4c58e9c2d2c84a38465abf757272d8",
+      "files": [
+        {"path": "config.json", "sha256": "fdea30805ce2f5666b147fca941dcdd27ad468e27d6ed21902207d3da056a97d", "size": 3268},
+        {"path": "preprocessor_config.json", "sha256": "cd38cd59999e7a95d68e487fbe5132df3d4e5c32a0836add57e6126ba0c4eaf1", "size": 444},
+        {"path": "model.safetensors", "sha256": "00333a43451945aaf89db8ca9c0a17e75d1537c17db60fdb91aa95f4c7929e0c", "size": 171658996}
+      ]
+    },
+    {
+      "repo_id": "docling-project/docling-models",
+      "revision": "fc0f2d45e2218ea24bce5045f58a389aed16dc23",
+      "files": [
+        {"path": "model_artifacts/tableformer/accurate/tm_config.json", "sha256": "984e122ceb8ccf84d84c9d2882f6f2302a44b4f1e577babd6289892c36f3cffd", "size": 7060},
+        {"path": "model_artifacts/tableformer/accurate/tableformer_accurate.safetensors", "sha256": "2a7d6c924b3cd12fb99a09280ca9c33a89c5d60b93253617d2e088c1a40374d9", "size": 212758388}
+      ]
+    }
+  ],
+  "downloads": [
+    {"url": "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.5.0/resources/fonts/FZYTK.TTF", "path": "RapidOcr/fonts/FZYTK.TTF", "sha256": "4065a23df6823c8e2b69a0e76d02f02a6470b8774a5e91086609701ad95cc33f", "size": 3241748}
+  ],
+  "bundled_ocr": [
+    {"source": "models/ch_PP-OCRv4_det_infer.onnx", "path": "RapidOcr/onnx/PP-OCRv4/det/ch_PP-OCRv4_det_infer.onnx", "sha256": "d2a7720d45a54257208b1e13e36a8479894cb74155a5efe29462512d42f49da9", "size": 4745517},
+    {"source": "models/ch_ppocr_mobile_v2.0_cls_infer.onnx", "path": "RapidOcr/onnx/PP-OCRv4/cls/ch_ppocr_mobile_v2.0_cls_infer.onnx", "sha256": "e47acedf663230f8863ff1ab0e64dd2d82b838fceb5957146dab185a89d6215c", "size": 585532},
+    {"source": "models/ch_PP-OCRv4_rec_infer.onnx", "path": "RapidOcr/onnx/PP-OCRv4/rec/ch_PP-OCRv4_rec_infer.onnx", "sha256": "48fc40f24f6d2a207a2b1091d3437eb3cc3eb6b676dc3ef9c37384005483683b", "size": 10857958},
+    {"source": "models/ppocr_keys_v1.txt", "path": "RapidOcr/paddle/PP-OCRv4/rec/ch_PP-OCRv4_rec_infer/ppocr_keys_v1.txt", "sha256": "28b2362ad4ab2dc38769aa72feb535e3a9ddb3fd2a7585a05920e6393b1dc7f7", "size": 26249}
+  ]
+}

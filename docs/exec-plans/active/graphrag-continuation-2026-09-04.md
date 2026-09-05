@@ -831,3 +831,173 @@ shared-code scope: 70 files, 1,006 symbols and 95 affected flows. The CLI still
 caps its displayed names with a larger limit, while reporting that its counts and
 risk cover all changes; exact staged paths were checked separately. A fresh PR
 review and full CI run follow.
+
+The amended PR90 head `9c3bb56b` passed full CI with 2,922 tests and 68
+environment-gated skips in 860.85 seconds. GitHub Codex review reported no major
+issues on that exact head. PR90 merged as `2a3555a7` on September 5 at 08:42 UTC;
+post-merge CI passed, including the Docker build and container test. Production
+activation completed at 09:05 UTC on that exact commit. All nine preexisting
+GitNexus tooling paths were preserved byte-for-byte. The native ledger migration
+verified 140 completed migrations; native gateway readiness and the deployed marker
+were verified after startup.
+
+### Separate operator follow-ups
+
+The Cost & Capacity dashboard follow-up uses UTC midnight for Today and retains
+explicit selected-range and seven-day meanings. Native model/lane counters use
+reset-aware queries and normalize absent lane labels to unattributed. The pinned
+collector experiment confirmed that an asynchronous OTLP export failure does not
+necessarily emit a callback-failure counter sample. Scoped terminal-error logs
+therefore remain separate evidence. Their zero is guarded by the presence of logs
+from the same gateway service; absent or foreign-only logs remain unavailable.
+Five real Loki cases, the real Prometheus reset/midnight matrix and nine dashboard
+tests pass. Sol approved the final presence correction. No production dashboard
+change has been made yet.
+
+Shared config loads now pin corpus/global scope and reject older selection epochs,
+including A to B to A. The private Graph browser suite passed 14 cases after a
+test-observer correction: Vite's actual timestamped module URL must be reused to
+inspect the rendered app's store. Frontend lint, 21 unit tests and build passed in
+that Graph overlay. Sol then found a further upstream recurrence: an older corpus
+registry response can resurrect a deleted corpus after a newer forced refresh.
+The new held-response regression reproduced that recurrence against the prior
+store. Registry publication now fences success, failure, loading, URL/storage
+canonicalization and events by request generation. All 16 Graph browser cases
+pass, including old and new concurrent registry loads. All nine accounting UI
+cases also pass with these shared-store changes. Final frontend lint, 23 unit
+tests, build, nine dashboard tests with the real Prometheus query engine, Ruff,
+banned-pattern and generated-type checks pass. Sol approved the final registry
+correction; E5 and this config correction are frozen for their own publication.
+
+The cloud-embedding transport continuation has begun as a separate source slice.
+It will route existing OpenAI embedding calls through the native gateway with
+explicit identities while preserving local embedding paths and dense contracts.
+It is excluded from the pending PR90 deployment and NASA rebuild.
+
+
+### September 5: live accounting and corpus recovery follow-through
+
+The approved NASA schema attempt `e3e16387536941029e634ea4bddbc9da` completed
+at 09:09:14 UTC after 33 seconds. The browser recovered the cached schema after a
+usage interruption without generating another paid proposal. Its 26 node types,
+34 relationship types and 89 directed patterns cover alarms, programs, trajectories,
+anomalies, failure causes and corrective actions; schema hash is
+`faa5b42a4876bd8e2c8ba43751fe856d2e69c288e45301efd1d600378e16375c`.
+Native reconciliation matched one request and $0.0649835 provider-reported spend,
+with 10,602 input and 3,848 output tokens. The delivered Langfuse generation and
+historical Mimir schema-proposal counters agree with that usage and cost. Native
+ledger content is absent; Langfuse input/output contain redaction placeholders.
+The browser correctly retains the unverified gateway-attempt-policy qualifier.
+
+The ordinary NASA rebuild attempt `f899295ba26d4b179d64ef714378bf69` refused
+at 15:10:47 UTC before any extraction dispatch: the embedding guard reported stored
+deterministic versus configured provider. The active generation remains unchanged.
+The authoritative Postgres column is provider; the guard incorrectly read the absent
+nested metadata key as deterministic. NASA, Epstein and code share that promotion
+metadata shape. The guard correction reads only the canonical column and refuses
+unknown identities. Its 10-case matrix reproduced nine failures on the old guard;
+all 13 relevant promoted-lane cases pass with the correction, and Sol approved it.
+No production metadata was manually repaired.
+
+GitHub PR91 identified two further corpus recovery cases: an initial registry
+failure followed by a pending retry could switch config to global, and stale forced
+refresh callers could return before the winning registry published. Both behavioral
+regressions failed on the prior stores. Successful registry resolution now has
+explicit state, and forced/shared callers follow successive winning request promises.
+All 18 real private Graph browser cases pass, including both new recovery cases.
+The first chain harness attempt held three identical requests and reached its
+fixture deadline; the corrected test holds at most two while exercising A-to-B-to-C
+supersession. This intermediate 18-case result was superseded by the final 26-case matrix
+and nine accounting cases described below.
+
+The first focused D3 embedding suite passed 133 tests with one environment-gated
+skip. Its core Sol review found three valid issues: application processes could
+retain the upstream key, catalog upserts filled an invalid embedding base URL, and
+HTTP 408/409 did not receive configured application retries. Corrections and broader
+family tests are in progress. D3 remains excluded from deployment.
+
+### September 5: failed full NASA replacement and remaining blockers
+
+The explicitly forced staged replacement `0152e29560bf4d1fa9216375891b9d4f`
+started at 15:21:38 UTC. Docling completed at 15:42:36; semantic KG requests began
+at 15:42:39. Extraction failed with a request timeout at 15:46:17, before resolution
+or community summaries. The active generation `3054ecc26d3649a086758e04ece30488`
+and its 1,002 chunks/dense points remain intact. Failed staging rows, graph and
+Qdrant collection were reclaimed, and the run fence was released.
+
+The native census contains 131 actual HTTP attempts with nine uncertain outcomes.
+The ledger subsequently recorded 130 successful provider rows totaling $3.0555729;
+the browser's manual refresh at 15:57:55 matched that amount and retained incomplete
+coverage with one missing request. Six native requests exceeded the configured
+30-second timeout (maximum 41.093 seconds), and five provider completions arrived
+after application failure. Four application OpenAI SDK retry delays were logged
+even though native gateway retry fields were zero. The official wrapper also has
+an independent rate-limit retry handler. Both hidden retry layers are now explicitly disabled in the pending PR91
+source. The real HTTP matrix failed 33 cases on the old source; all 92 relevant
+KG/census tests pass after the correction, and independent Sol review approved it.
+
+The graph telemetry's 1,002 attempted/failed count is a whole-file exception count,
+not actual dispatch evidence. All chunks ran inside one official pipeline execution;
+successful per-chunk results were in memory and cannot be recovered from the
+content-free ledger or redacted traces. The estimate of $3.2875 also omitted most
+serialized schema/prompt overhead and understated output: observed requests averaged
+7,646 input and 493 output tokens. A retry must follow corrected estimation and
+timeout/retry handling; durable extraction reuse and truthful progress are being
+assessed. No additional paid full run has been started.
+
+D3's reviewed 38-source suite passed 249 tests with one provider-capability skip.
+Sol's further catalog-family finding reproduced 13 failures in the broader upsert
+matrix; all 32 endpoint cases now pass. Existing model families are preserved, and
+new families derive from model identifiers rather than request capability labels.
+Final Sol review approved this correction. Ruff, mypy (179 source files), banned
+patterns, generated types, contract bundle and the 454-key config reality check pass.
+D3 is still undeployed.
+
+PR91's final failure correction returns an explicit non-rejecting registry-load
+outcome and preserves the newest settled result for older mutation callers. An
+actual failed winning refresh reproduced the old mutation falsely reporting success.
+Sol approved the source correction. All 26 real Graph browser cases and all nine
+native-accounting browser cases pass on the final stores. The browser test driver
+now keeps async operations rooted in the actual rendered page: raw CDP evidence
+identified a collected evaluation promise, rather than application navigation. A
+separate update assertion now uses the supported corpus name field. Independent
+Sol review approved the driver changes. One earlier private rerun collided with
+pytest corpus cleanup sharing Neo4j; the final suites ran exclusively. Production
+was unaffected. Frontend lint, 23 unit tests, build, Ruff, mypy (178 source files),
+banned patterns and generated-type checks pass. GitNexus reports 14 changed files,
+66 symbols and 36 expected shared-store flows at critical risk.
+
+The extraction recovery plan is recorded separately in
+`graphrag-extraction-recovery-2026-09-05.md`. Checkpoint persistence and a forecast
+that includes approved schema/prompt overhead are under implementation; neither
+is deployed or claimed accepted. No additional paid NASA rebuild has started.
+
+### September 5: compact indexing results and release verification
+
+The operator identified excessive permanently expanded accounting and schema text.
+Run and proposal costs now start with a short recorded amount and qualified status;
+exact amounts, estimates, census, provenance and refresh notes are in closed Details.
+Schema review shows entity/relationship names and properties; raw JSON, versions,
+identifiers and source hashes are under technical details. Run and graph diagnostics
+also start closed. Errors and cost uncertainty remain visible. Both estimate consent
+callers use a short summary with expandable assumptions; unknown totals never become
+an embedding-only price. Semantic quick-start leads to the existing schema review.
+
+Private browser verification covered 24 scenarios: the combined rerun passed 23,
+and the remaining quick-start case passed after correcting its expected /web route.
+Earlier fixture corrections made the missing-path case explicitly graph-off and
+matched the current Keywords label without case sensitivity. The last status-helper
+review correction has a terminal/live/idle/missing-state matrix; all 36 frontend
+unit tests, lint and build pass. Independent Sol approved the final UI corrections.
+The rendered main/dock/narrow cost and schema screenshots were inspected; production
+activation is still pending the release gates.
+
+PR91 head 53bb7b90 passed GitHub review but CI had four failures with 2,965 passes
+and 69 skips. Three real PDF tests hit Hugging Face classifier download rate limits;
+the fourth assumed every catalog vision model had a documented formula. The pending
+CI correction provisions and verifies pinned Docling model files before testing,
+without changing other Hugging Face clients. The vision family regression also
+found undocumented model prefixes inheriting known image bounds: the old source
+failed 72 of 112 new cases. Unknown image formulas now fail explicitly. A fresh
+private artifact directory and verify-only preflight both pass. Full release tests
+and independent review of this CI correction are running.

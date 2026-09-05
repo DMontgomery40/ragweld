@@ -33,6 +33,7 @@ from neo4j_graphrag.components.types import (
 from neo4j_graphrag.experimental.pipeline import Pipeline
 from neo4j_graphrag.generation.prompts import ERExtractionTemplate
 from neo4j_graphrag.llm import OpenAILLM
+from neo4j_graphrag.utils.rate_limit import NoOpRateLimitHandler
 
 from server.gateway_reasoning import reasoning_model_params
 from server.indexing.code_graph import CODE_GRAPH_LANGUAGES, extract_code_graph
@@ -502,6 +503,10 @@ def semantic_extraction_llm(
         api_key=str(route_api_key).strip(),
         base_url=str(route_base_url).strip(),
         timeout=float(int(llm_timeout_s)),
+        # Both libraries retry independently by default. One extraction call
+        # must dispatch once so a timeout cannot silently multiply paid work.
+        max_retries=0,
+        rate_limit_handler=NoOpRateLimitHandler(),
         **client_options,
     )
     if census_scope is not None:

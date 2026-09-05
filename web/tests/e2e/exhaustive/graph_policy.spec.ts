@@ -59,6 +59,9 @@ test('operator reviews the proposed schema before approving a semantic run', asy
   await expect(proposal).toContainText(SCHEMA_MODEL);
   await expect(page.getByTestId('graph-schema-hash')).toHaveText(/^[0-9a-f]{64}$/);
 
+  await expect(page.getByTestId('graph-schema-review')).toHaveJSProperty('open', false);
+  await page.getByTestId('graph-schema-review').locator('summary').first().click();
+  await page.getByTestId('graph-schema-technical').locator('summary').first().click();
   for (const section of [
     'graph-schema-node-types',
     'graph-schema-relationship-types',
@@ -88,6 +91,7 @@ test('operator reviews the proposed schema before approving a semantic run', asy
   // Task 8 drive observation D2: the run panel used to keep the PREVIOUS run's id and
   // graph verdict under the new run's "indexing" badge for the whole run. The panel must
   // name the run the API is actually executing, and nothing else, while it is live.
+  await page.getByTestId('index-run-details').locator('summary').click();
   let liveRunId = '';
   for (let attempt = 0; attempt < 15 && !liveRunId; attempt += 1) {
     const latest = await request.get(`${API_BASE}/index/${encodeURIComponent(corpus.corpusId)}/runs/latest`);
