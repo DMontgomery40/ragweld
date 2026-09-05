@@ -21,10 +21,10 @@ from server.api.generation_errors import (
     generation_unavailable_http_exception,
 )
 from server.api.retrieval_errors import (
-    answer_retrieval_failed_http_exception,
-    reranker_failed_http_exception,
     RETRIEVAL_RUNTIME_UNAVAILABLE_RESPONSES,
+    answer_retrieval_failed_http_exception,
     required_retrieval_leg_http_exception,
+    reranker_failed_http_exception,
     retrieval_contract_mismatch_http_exception,
 )
 from server.config import load_config

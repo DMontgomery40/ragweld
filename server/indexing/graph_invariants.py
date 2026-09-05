@@ -43,6 +43,7 @@ class GraphInvariantReport:
     duplicate_groups: int
     cross_scope_nodes: int
     cross_scope_relationships: int
+    orphan_entities: int = 0
 
     @property
     def promotable(self) -> bool:
@@ -74,6 +75,7 @@ def evaluate_graph_invariants(
     semantic_relationships = int(counts.get("semantic_relationships", 0) or 0)
     from_chunk_relationships = int(counts.get("from_chunk_relationships", 0) or 0)
     linked_chunks = int(counts.get("linked_chunks", 0) or 0)
+    orphan_entities = int(counts.get("orphan_entities", 0) or 0)
     duplicate_groups = int(counts.get("duplicate_groups", 0) or 0)
     cross_scope_nodes = int(counts.get("cross_scope_nodes", 0) or 0)
     cross_scope_relationships = int(counts.get("cross_scope_relationships", 0) or 0)
@@ -98,8 +100,10 @@ def evaluate_graph_invariants(
         failures.append("zero_semantic_relationships")
     # An intentionally empty semantic graph can be audited through the sparse
     # override. Once any entity exists, every accepted graph must carry real
-    # chunk provenance and touch at least one staged chunk.
-    if total_entities > 0 and (from_chunk_relationships == 0 or linked_chunks == 0):
+    # chunk provenance for every entity, not merely one surviving edge elsewhere.
+    if total_entities > 0 and (
+        from_chunk_relationships == 0 or linked_chunks == 0 or orphan_entities > 0
+    ):
         failures.append("missing_from_chunk_provenance")
     if cross_scope_nodes > 0:
         failures.append("cross_generation_node")
@@ -121,6 +125,7 @@ def evaluate_graph_invariants(
         duplicate_groups=duplicate_groups,
         cross_scope_nodes=cross_scope_nodes,
         cross_scope_relationships=cross_scope_relationships,
+        orphan_entities=orphan_entities,
     )
 
 

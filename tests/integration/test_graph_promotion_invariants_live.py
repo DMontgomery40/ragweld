@@ -103,12 +103,13 @@ async def _mutate(driver, database: str, case: str, repo_id: str, run_id: str) -
             "MATCH (:__Entity__ {repo_id: $repo_id})-[r:CREATED]->(:__Entity__) DELETE r",
             {"repo_id": repo_id},
         )
-    elif case == "missing_from_chunk_provenance":
+    elif case in {"missing_from_chunk_provenance", "one_orphan_entity"}:
         await _write(
             driver,
             database,
-            "MATCH (:__Entity__ {repo_id: $repo_id})-[r:FROM_CHUNK]->(:Chunk) DELETE r",
-            {"repo_id": repo_id},
+            "MATCH (e:__Entity__ {repo_id: $repo_id})-[r:FROM_CHUNK]->(:Chunk) "
+            "WHERE $all_entities OR e.entity_id = 'ada' DELETE r",
+            {"repo_id": repo_id, "all_entities": case == "missing_from_chunk_provenance"},
         )
     elif case == "cross_generation_node":
         await _write(
@@ -129,10 +130,12 @@ async def _mutate(driver, database: str, case: str, repo_id: str, run_id: str) -
             driver,
             database,
             """
-            CREATE (:__Entity__:Person {
+            MATCH (chunk:Chunk {repo_id: $repo_id, chunk_id: 'c1'})
+            CREATE (duplicate:__Entity__:Person {
                 repo_id: $repo_id, run_id: $run_id,
                 entity_id: 'ada-duplicate', name: 'Ada'
             })
+            CREATE (duplicate)-[:FROM_CHUNK {repo_id: $repo_id, run_id: $run_id}]->(chunk)
             """,
             {"repo_id": repo_id, "run_id": run_id},
         )
@@ -146,6 +149,7 @@ async def _mutate(driver, database: str, case: str, repo_id: str, run_id: str) -
         "zero_entities",
         "zero_semantic_relationships",
         "missing_from_chunk_provenance",
+        "one_orphan_entity",
         "cross_generation_node",
         "cross_generation_relationship",
         "unresolved_duplicate_entity",
@@ -202,7 +206,8 @@ async def test_each_invalid_staged_graph_is_typed_and_cannot_replace_active_mani
                 schema_hash="a" * 64,
             )
 
-        assert case in raised.value.report.failure_codes
+        failure_code = "missing_from_chunk_provenance" if case == "one_orphan_entity" else case
+        assert failure_code in raised.value.report.failure_codes
         active = await pg.get_corpus(active_id)
         manifest = GenerationManifest.model_validate((active or {})["meta"]["generation"])
         assert manifest.run_id == active_run
@@ -231,6 +236,7 @@ async def _wait_for_terminal(client: AsyncClient, corpus_id: str) -> dict:
     raise AssertionError("index run did not reach a terminal state")
 
 
+@pytest.mark.requires_model_gateway
 async def test_real_empty_semantic_run_is_refused_then_authenticated_chunk_only_override_is_audited(
     client: AsyncClient,
     tmp_path: Path,

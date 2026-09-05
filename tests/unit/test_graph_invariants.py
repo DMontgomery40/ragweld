@@ -64,6 +64,11 @@ def _counts(**updates: int) -> dict[str, int]:
             _counts(from_chunk_relationships=0, linked_chunks=0),
             "missing_from_chunk_provenance",
         ),
+        (
+            _extraction(),
+            _counts(orphan_entities=1),
+            "missing_from_chunk_provenance",
+        ),
         (_extraction(), _counts(cross_scope_nodes=1), "cross_generation_node"),
         (
             _extraction(),

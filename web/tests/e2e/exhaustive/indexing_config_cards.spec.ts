@@ -66,12 +66,13 @@ test('both file-size ceilings name their own scope and the limit that actually b
   expect(await tokenizationNote.innerText()).toBe(chunkingText);
 });
 
-test('Force reindex says that it destroys the current index', async ({ page }) => {
+test('Force reindex explains replacement and contract migration availability', async ({ page }) => {
   await openTab(page);
   const toggle = page.getByTestId('force-reindex-toggle');
   await expect(toggle).toBeVisible();
-  await expect(toggle).toContainText(/destructive/i);
-  await expect(toggle).toContainText(/clears the current index before rebuilding/i);
+  await expect(toggle).toContainText(/replacement becomes active after validation/i);
+  await expect(toggle).toContainText(/changed settings may make searches unavailable/i);
+  await expect(toggle).not.toContainText(/clears the current index|destructive/i);
 });
 
 test('the Figures header points at where the estimate really is', async ({ page }) => {

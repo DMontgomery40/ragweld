@@ -3,6 +3,30 @@
   "generated_from": "data/glossary.json",
   "terms": [
     {
+      "term": "Schema Proposal Reasoning Effort",
+      "key": "SCHEMA_PROPOSAL_REASONING_EFFORT",
+      "definition": "Reasoning effort used to generate a GraphRAG schema proposal. The default is low to keep proposals within their time budget. This setting is separate from semantic KG extraction effort. Changing it invalidates proposal reuse so approval remains tied to the actual generation settings.",
+      "category": "graph",
+      "related": ["SCHEMA_PROPOSAL_TIMEOUT_S", "SCHEMA_PROPOSAL_MAX_OUTPUT_TOKENS"],
+      "links": []
+    },
+    {
+      "term": "Schema Proposal Timeout",
+      "key": "SCHEMA_PROPOSAL_TIMEOUT_S",
+      "definition": "Total time budget for sampling corpus text and generating a GraphRAG schema proposal. This is separate from the per-chunk extraction timeout. A timed-out proposal fails without replacing the previous proposal or approval. The maximum stays below the public HTTP deadline.",
+      "category": "graph",
+      "related": ["SCHEMA_PROPOSAL_MAX_OUTPUT_TOKENS"],
+      "links": []
+    },
+    {
+      "term": "Schema Proposal Output Tokens",
+      "key": "SCHEMA_PROPOSAL_MAX_OUTPUT_TOKENS",
+      "definition": "Maximum output tokens requested for a GraphRAG schema proposal. The output must be a complete valid schema; truncated or refused responses are rejected. Changing this budget invalidates proposal reuse so approval remains tied to the actual generation settings.",
+      "category": "graph",
+      "related": ["SCHEMA_PROPOSAL_TIMEOUT_S"],
+      "links": []
+    },
+    {
       "term": "Active Repository",
       "key": "REPO",
       "definition": "Logical repository identifier used to scope indexing, retrieval, and tool routing. In multi-repo setups this is the namespace key that keeps embeddings, sparse indexes, and metadata partitions separated so queries do not leak across projects. Keep this value stable and aligned with your repository registry (repos.json or equivalent), because mismatched names can produce empty retrievals or cross-repo contamination. Use deterministic naming conventions when onboarding new repositories.",
@@ -1139,7 +1163,7 @@
     {
       "term": "Cloud Model",
       "key": "RERANKER_CLOUD_MODEL",
-      "definition": "The model the cloud reranker calls: a LiteLLM gateway alias for provider `litellm` (a cheap non-reasoning instruct model such as openai.gpt-4.1-nano keeps the listwise scoring fast and deterministic), or a Cohere rerank model id for provider `cohere`. This parameter directly controls the quality/latency/cost tradeoff of the rerank stage; the scores it returns are min-max normalized and blended with the fusion score by the reranker alpha.",
+      "definition": "The model the cloud reranker calls: a LiteLLM gateway alias for provider `litellm` (select an allowed catalog model and verify listwise scoring quality and latency), or a Cohere rerank model id for provider `cohere`. This parameter directly controls the quality/latency/cost tradeoff of the rerank stage; the scores it returns are min-max normalized and blended with the fusion score by the reranker alpha.",
       "category": "reranking",
       "related": [],
       "links": [

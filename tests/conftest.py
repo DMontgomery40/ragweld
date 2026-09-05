@@ -1,4 +1,10 @@
-"""Pytest fixtures for TriBridRAG tests."""
+"""Pytest fixtures for TriBridRAG tests.
+
+Non-strict disposable runs may set RAGWELD_TEST_CONFIG_PATH to validated service
+bindings. Pytest copies that input into its own temporary runtime file; the
+input and tracked source config remain untouched. Omit it for checkout defaults.
+Strict acceptance continues to require its launcher-owned RAGWELD_CONFIG_PATH.
+"""
 
 import asyncio
 import os
@@ -12,6 +18,7 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from server.gateway_catalog import warm_gateway_catalog
+from tests.service_requirements import _strict_mode
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -20,7 +27,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 os.environ.setdefault("RAGWELD_DISABLE_PROFILING", "1")
 
 _TEST_CONFIG_RUNTIME_DIR: str | None = None
-if os.environ.get("RAGWELD_STRICT_INTEGRATION", "").strip() == "1":
+if _strict_mode():
     strict_config_raw = os.environ.get("RAGWELD_CONFIG_PATH", "").strip()
     if not strict_config_raw:
         raise RuntimeError("Strict integration requires a private RAGWELD_CONFIG_PATH")
@@ -40,7 +47,21 @@ if os.environ.get("RAGWELD_STRICT_INTEGRATION", "").strip() == "1":
 else:
     _TEST_CONFIG_RUNTIME_DIR = tempfile.mkdtemp(prefix="ragweld-pytest-config-")
     test_config_path = Path(_TEST_CONFIG_RUNTIME_DIR) / "tribrid_config.json"
-    shutil.copy2(PROJECT_ROOT / "tribrid_config.json", test_config_path)
+    # Disposable service bindings may be supplied without changing tracked defaults.
+    test_source_path = PROJECT_ROOT / "tribrid_config.json"
+    explicit_test_source = os.environ.get("RAGWELD_TEST_CONFIG_PATH")
+    if explicit_test_source is not None:
+        from server.models.tribrid_config_model import TriBridConfig as _TestConfig
+
+        try:
+            if not explicit_test_source.strip():
+                raise ValueError("the explicit path is empty")
+            test_source_path = Path(explicit_test_source).expanduser().resolve()
+            _TestConfig.model_validate_json(test_source_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            shutil.rmtree(_TEST_CONFIG_RUNTIME_DIR)
+            raise RuntimeError("RAGWELD_TEST_CONFIG_PATH must name a readable, valid config") from exc
+    shutil.copy2(test_source_path, test_config_path)
     test_config_path.chmod(0o600)
     os.environ["RAGWELD_CONFIG_PATH"] = str(test_config_path)
     os.environ["RAGWELD_SOURCE_CONFIG_PATH"] = str(PROJECT_ROOT / "tribrid_config.json")

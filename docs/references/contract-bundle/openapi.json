@@ -1600,6 +1600,64 @@
         "title": "AnswerResponse",
         "type": "object"
       },
+      "AnswerRetrievalFailureDetail": {
+        "description": "Public error detail returned when answer retrieval fails for an untyped reason (HTTP 503).",
+        "properties": {
+          "code": {
+            "const": "answer_retrieval_failed",
+            "default": "answer_retrieval_failed",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "description": "Stable, non-sensitive failure summary",
+            "title": "Message",
+            "type": "string"
+          },
+          "operation": {
+            "description": "Retrieval operation that could not complete",
+            "title": "Operation",
+            "type": "string"
+          },
+          "operator_hint": {
+            "description": "High-signal next step for the operator",
+            "title": "Operator Hint",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Sanitised reason from the retrieval lane (no secrets, no raw payloads)",
+            "title": "Reason",
+            "type": "string"
+          },
+          "retryable": {
+            "default": true,
+            "description": "Whether the caller may retry after remediation",
+            "title": "Retryable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "operation",
+          "message",
+          "reason",
+          "operator_hint"
+        ],
+        "title": "AnswerRetrievalFailureDetail",
+        "type": "object"
+      },
+      "AnswerRetrievalFailureResponse": {
+        "description": "FastAPI response envelope for an untyped answer-retrieval failure.",
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/AnswerRetrievalFailureDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "AnswerRetrievalFailureResponse",
+        "type": "object"
+      },
       "BenchmarkBreakdownDelta": {
         "description": "Per-phase benchmark timing delta.",
         "properties": {
@@ -1866,6 +1924,17 @@
             "title": "Context Chunks Used",
             "type": "integer"
           },
+          "cost_summary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TraceCostSummary"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Per-call reported charge or explicitly marked catalog estimate; null when no accounting was returned."
+          },
           "error": {
             "anyOf": [
               {
@@ -1919,6 +1988,19 @@
             "description": "Best-effort generated response.",
             "title": "Response",
             "type": "string"
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Raw gateway usage for this model call, including billed reasoning-only failures.",
+            "title": "Usage"
           }
         },
         "required": [
@@ -2007,6 +2089,24 @@
             ],
             "description": "Optional corpus identifier when benchmarking within a corpus scope.",
             "title": "Corpus Id"
+          },
+          "cost_scope": {
+            "const": "generation",
+            "default": "generation",
+            "description": "This run's cost summary covers answer generation only; shared retrieval is excluded.",
+            "title": "Cost Scope",
+            "type": "string"
+          },
+          "cost_summary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TraceCostSummary"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Sum of answer-generation costs only, excluding shared retrieval; unavailable if any generation call lacks accounting; null on older saved runs."
           },
           "ended_at_ms": {
             "default": 0,
@@ -8008,6 +8108,104 @@
         "title": "GraphCommunityTelemetry",
         "type": "object"
       },
+      "GraphEntitySource": {
+        "properties": {
+          "chunk_id": {
+            "description": "Chunk directly linked to the entity by FROM_CHUNK",
+            "minLength": 1,
+            "title": "Chunk Id",
+            "type": "string"
+          },
+          "content": {
+            "description": "Source text stored in the graph generation",
+            "title": "Content",
+            "type": "string"
+          },
+          "end_line": {
+            "description": "Last line of the source chunk",
+            "minimum": 1.0,
+            "title": "End Line",
+            "type": "integer"
+          },
+          "file_path": {
+            "description": "Stored corpus-relative source path",
+            "minLength": 1,
+            "title": "File Path",
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "description": "Matching indexed chunk location metadata, when present",
+            "title": "Metadata",
+            "type": "object"
+          },
+          "provenance": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChunkProvenance"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Matching indexed chunk page provenance, when present"
+          },
+          "start_line": {
+            "description": "First line of the source chunk",
+            "minimum": 1.0,
+            "title": "Start Line",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "chunk_id",
+          "file_path",
+          "start_line",
+          "end_line",
+          "content"
+        ],
+        "title": "GraphEntitySource",
+        "type": "object"
+      },
+      "GraphEntitySourcesResponse": {
+        "properties": {
+          "entity_id": {
+            "title": "Entity Id",
+            "type": "string"
+          },
+          "next_offset": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Offset"
+          },
+          "run_id": {
+            "description": "Active manifest token; pass it when requesting another source page",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/GraphEntitySource"
+            },
+            "title": "Sources",
+            "type": "array"
+          }
+        },
+        "required": [
+          "entity_id",
+          "run_id",
+          "sources"
+        ],
+        "title": "GraphEntitySourcesResponse",
+        "type": "object"
+      },
       "GraphExtractionTelemetry": {
         "properties": {
           "attempted_chunks": {
@@ -8206,6 +8404,35 @@
             "description": "Enable graph building during indexing (Neo4j)",
             "title": "Enabled",
             "type": "boolean"
+          },
+          "schema_proposal_max_output_tokens": {
+            "default": 16384,
+            "description": "Maximum output tokens for one schema proposal; incomplete responses fail without approval",
+            "maximum": 32768.0,
+            "minimum": 256.0,
+            "title": "Schema Proposal Max Output Tokens",
+            "type": "integer"
+          },
+          "schema_proposal_reasoning_effort": {
+            "default": "low",
+            "description": "Reasoning effort for schema proposals, independent of semantic KG extraction effort",
+            "enum": [
+              "minimal",
+              "low",
+              "medium",
+              "high",
+              "xhigh"
+            ],
+            "title": "Schema Proposal Reasoning Effort",
+            "type": "string"
+          },
+          "schema_proposal_timeout_s": {
+            "default": 60,
+            "description": "Total seconds allowed for schema proposal sampling and generation, below the public HTTP deadline",
+            "maximum": 80.0,
+            "minimum": 5.0,
+            "title": "Schema Proposal Timeout S",
+            "type": "integer"
           },
           "semantic_kg_llm_model": {
             "default": "",
@@ -8463,6 +8690,56 @@
         "title": "GraphSchemaProposal",
         "type": "object"
       },
+      "GraphSchemaProposalFailureDetail": {
+        "properties": {
+          "code": {
+            "enum": [
+              "graph_schema_generation_failed",
+              "graph_schema_deadline_exceeded",
+              "graph_schema_context_changed"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "corpus_id": {
+            "title": "Corpus Id",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "model_alias": {
+            "title": "Model Alias",
+            "type": "string"
+          },
+          "operator_hint": {
+            "title": "Operator Hint",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "corpus_id",
+          "model_alias",
+          "message",
+          "operator_hint"
+        ],
+        "title": "GraphSchemaProposalFailureDetail",
+        "type": "object"
+      },
+      "GraphSchemaProposalFailureResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/GraphSchemaProposalFailureDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "GraphSchemaProposalFailureResponse",
+        "type": "object"
+      },
       "GraphSchemaProposalRequest": {
         "properties": {
           "force_refresh": {
@@ -8491,8 +8768,11 @@
             "type": "array"
           },
           "recipe": {
-            "const": "documents-and-positions-v1",
-            "default": "documents-and-positions-v1",
+            "default": "documents-and-positions-v2",
+            "enum": [
+              "documents-and-positions-v1",
+              "documents-and-positions-v2"
+            ],
             "title": "Recipe",
             "type": "string"
           },
@@ -8540,6 +8820,14 @@
             "title": "Max Hops",
             "type": "integer"
           },
+          "max_related_entities_per_seed": {
+            "default": 50,
+            "description": "Maximum related entities kept per seed entity during graph traversal, nearest first then most connected. Bounds how far a hub entity can expand.",
+            "maximum": 1000.0,
+            "minimum": 1.0,
+            "title": "Max Related Entities Per Seed",
+            "type": "integer"
+          },
           "top_k": {
             "default": 30,
             "description": "Number of results to retrieve from graph search",
@@ -8550,6 +8838,69 @@
           }
         },
         "title": "GraphSearchConfig",
+        "type": "object"
+      },
+      "GraphSourceGenerationChangedDetail": {
+        "properties": {
+          "code": {
+            "const": "graph_generation_changed",
+            "default": "graph_generation_changed",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "default": "The graph generation changed. Reload this entity's sources.",
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "title": "GraphSourceGenerationChangedDetail",
+        "type": "object"
+      },
+      "GraphSourceGenerationChangedResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/GraphSourceGenerationChangedDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "GraphSourceGenerationChangedResponse",
+        "type": "object"
+      },
+      "GraphSourceReindexRequiredDetail": {
+        "properties": {
+          "code": {
+            "const": "graph_source_reindex_required",
+            "default": "graph_source_reindex_required",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "default": "Source navigation requires a graph rebuilt with generation-scoped source links.",
+            "title": "Message",
+            "type": "string"
+          },
+          "operator_hint": {
+            "default": "Open Indexing, review the graph schema if prompted, and rebuild this corpus.",
+            "title": "Operator Hint",
+            "type": "string"
+          }
+        },
+        "title": "GraphSourceReindexRequiredDetail",
+        "type": "object"
+      },
+      "GraphSourceReindexRequiredResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/GraphSourceReindexRequiredDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "GraphSourceReindexRequiredResponse",
         "type": "object"
       },
       "GraphStats": {
@@ -9408,7 +9759,7 @@
           },
           "force_reindex": {
             "default": false,
-            "description": "Force full reindex even if up-to-date",
+            "description": "Allow changed embedding settings during a full rebuild. The active index is replaced only after validation.",
             "title": "Force Reindex",
             "type": "boolean"
           },
@@ -11357,7 +11708,7 @@
             "type": "string"
           },
           "mode": {
-            "description": "Retrieval mode the tool resolved (request override or mcp.default_mode).",
+            "description": "Retrieval mode the tool actually applied: the request override, or the default the MOUNTED server captured at process start (not the persisted `mcp.default_mode`, which only takes effect on a restart).",
             "title": "Mode",
             "type": "string"
           },
@@ -11376,7 +11727,7 @@
             "type": "string"
           },
           "top_k": {
-            "description": "Result count the tool resolved.",
+            "description": "Result count the tool actually applied: the request override, or the MOUNTED server's captured `default_top_k`.",
             "minimum": 1.0,
             "title": "Top K",
             "type": "integer"
@@ -11399,6 +11750,62 @@
       "MCPStatusResponse": {
         "description": "Status of MCP transports built into TriBridRAG.",
         "properties": {
+          "config_default_mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`config.mcp.default_mode` as persisted right now (what a restart would mount).",
+            "title": "Config Default Mode"
+          },
+          "config_default_top_k": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`config.mcp.default_top_k` as persisted right now (what a restart would mount).",
+            "title": "Config Default Top K"
+          },
+          "default_mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Retrieval mode the MOUNTED `search`/`answer` tools apply when a call sends no `mode`. Captured when this process built the MCP server; null when no server is built in this process.",
+            "title": "Default Mode"
+          },
+          "default_top_k": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Result count the MOUNTED tools apply when a call sends no `top_k`. Captured when this process built the MCP server; null when no server is built in this process.",
+            "title": "Default Top K"
+          },
+          "defaults_restart_pending": {
+            "default": false,
+            "description": "True when the persisted MCP tool defaults differ from the ones the mounted tools captured, so the API must be restarted before an MCP client sees the new values.",
+            "title": "Defaults Restart Pending",
+            "type": "boolean"
+          },
           "details": {
             "description": "Human-readable diagnostic details (best-effort).",
             "items": {
@@ -14620,6 +15027,68 @@
         "title": "RerankerEvaluateResponse",
         "type": "object"
       },
+      "RerankerFailureDetail": {
+        "description": "Public error detail returned when a configured reranker cannot rerank (HTTP 503).",
+        "properties": {
+          "code": {
+            "const": "reranker_failed",
+            "default": "reranker_failed",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "description": "Stable, non-sensitive failure summary",
+            "title": "Message",
+            "type": "string"
+          },
+          "mode": {
+            "description": "Configured reranker mode that failed",
+            "enum": [
+              "learning",
+              "cloud"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "operator_hint": {
+            "description": "High-signal next step for the operator",
+            "title": "Operator Hint",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Sanitised reason from the reranker lane (no secrets, no raw payloads)",
+            "title": "Reason",
+            "type": "string"
+          },
+          "retryable": {
+            "default": true,
+            "description": "Whether the caller may retry after remediation",
+            "title": "Retryable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "mode",
+          "message",
+          "reason",
+          "operator_hint"
+        ],
+        "title": "RerankerFailureDetail",
+        "type": "object"
+      },
+      "RerankerFailureResponse": {
+        "description": "FastAPI response envelope for a configured-reranker failure.",
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/RerankerFailureDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "RerankerFailureResponse",
+        "type": "object"
+      },
       "RerankerInfoResponse": {
         "description": "Response payload for GET /api/reranker/info (no secrets).",
         "properties": {
@@ -16388,8 +16857,8 @@
             "type": "integer"
           },
           "reranker_cloud_model": {
-            "default": "openai.gpt-4.1-nano",
-            "description": "Cloud reranker model when mode=cloud: a LiteLLM gateway alias for provider 'litellm' (a cheap non-reasoning instruct model is ideal), or a Cohere rerank model id for provider 'cohere'.",
+            "default": "",
+            "description": "Cloud reranker model when mode=cloud: a LiteLLM gateway alias for provider 'litellm' or a Cohere rerank model id for provider 'cohere'. Select an allowed model before enabling cloud reranking.",
             "title": "Reranker Cloud Model",
             "type": "string"
           },
@@ -18308,7 +18777,7 @@
             "type": "string"
           },
           "semantic_kg_extraction": {
-            "default": "You are a top-tier algorithm designed for extracting information in structured formats to build a knowledge graph.\n\nExtract the entities (nodes) and specify their type from the following text. Also extract the relationships between these nodes.\n\nReturn result as JSON using the following format:\n{{\"nodes\": [ {{\"id\": \"0\", \"label\": \"Person\", \"properties\": {{\"name\": \"John\"}} }}],\n\"relationships\": [{{\"type\": \"KNOWS\", \"start_node_id\": \"0\", \"end_node_id\": \"1\", \"properties\": {{\"since\": \"2024-08-01\"}} }}] }}\n\nUse only the following node and relationship types (if provided):\n{schema}\n\nNaming rules. Every node carries a \"name\" property; it is the entity's identity for merging across chunks and for display:\n- \"name\" must be an identifier a reader would recognise: a person's full name as written, an organisation's name, a place name, a document's subject line or title, a dated event.\n- Name an email or message by its subject line when the text shows one. When the subject is empty or is only reply/forward markers such as \"Re:\", \"RE: Re:\" or \"Fw:\", name it \"<sender> to <recipient>, <date>\" from the message metadata instead.\n- Never use OCR artifacts, scanner noise, bare numbers, punctuation runs, redaction bars or redaction markers such as \"<REDACTED>\", single letters or fragments such as \"-11>\", \"<=11IM11.11>\", \"777\" or \"Re:\" as a name. A redacted party is not an entity: leave it out. If the text gives an entity no readable identifier, leave that entity out rather than inventing one.\n- Copy names exactly as written (no expansions or aliases you did not read) and reuse one spelling for the same entity within the chunk.\n\nAssign a unique ID (string) to each node, and reuse it to define relationships.\nDo respect the source and target node types for relationship and the relationship direction.\n\nMake sure you adhere to the following rules to produce valid JSON objects:\n- Do not return any additional information other than the JSON in it.\n- Omit any backticks around the JSON - simply output the JSON on its own.\n- The JSON object must not wrapped into a list - it is its own JSON object.\n- Property names must be enclosed in double quotes\n\nExamples:\n{examples}\n\nInput text:\n\n{text}",
+            "default": "You are a top-tier algorithm designed for extracting information in structured formats to build a knowledge graph.\n\nExtract the entities (nodes) and specify their type from the following text. Also extract the relationships between these nodes.\n\nReturn result as JSON using the following format:\n{{\"nodes\": [ {{\"id\": \"0\", \"label\": \"Person\", \"properties\": {{\"name\": \"John\"}} }}],\n\"relationships\": [{{\"type\": \"KNOWS\", \"start_node_id\": \"0\", \"end_node_id\": \"1\", \"properties\": {{\"since\": \"2024-08-01\"}} }}] }}\n\nUse only the following node and relationship types (if provided):\n{schema}\n\nNaming rules. Every node carries a \"name\" property; it is the entity's identity for merging across chunks and for display:\n- \"name\" must be an identifier a reader would recognise: a person's full name as written, an organisation's name, a place name, a document's subject line or title, a dated event.\n- Name an email or message by its subject line when the text shows one. When the subject is empty or is only reply/forward markers such as \"Re:\", \"RE: Re:\" or \"Fw:\", name it \"<sender> to <recipient>, <date>\" from the message metadata instead.\n- Never use OCR artifacts, scanner noise, bare numbers, punctuation runs, redaction bars or redaction markers such as \"<REDACTED>\", single letters or fragments such as \"-11>\", \"<=11IM11.11>\", \"777\" or \"Re:\" as a name. A redacted party is not an entity: leave it out. If the text gives an entity no readable identifier, leave that entity out rather than inventing one.\n- Copy names exactly as written (no expansions or aliases you did not read) and reuse one spelling for the same entity within the chunk.\n\nAssign a unique ID (string) to each node, and reuse it to define relationships.\nDo respect the source and target node types for relationship and the relationship direction.\n\nGrounding rules:\n- Extract a relationship only when this passage explicitly supports that relationship between those exact entities. The schema lists allowed relationships; it is not evidence that any relationship occurred. Omit unsupported edges even when both entities appear.\n- Adjacency, temporal order, shared headings, and neighboring table rows do not establish causality, inhibition, correction, or any other relationship. Preserve a relationship stated within a table row only when its columns or wording establish the endpoints and meaning; never connect separate event rows merely because one follows another.\n- Respect clause scope and distinguish context from mechanism. In a list of separate changes or actions, do not transfer one clause's target or condition to another. \"An alarm was prevented during an operation\" does not say that the operation prevented the alarm; omit a causal or preventive edge when the text does not identify its agent.\n- Keep every status and other attribute attached to the entity and section that states it. A new heading starts a new section. Do not carry \"closed\", \"resolved\", \"failed\", dates, or other attributes from the preceding section into the next one. If a chunk starts mid-section and an attribute's subject is unclear, omit that attribute.\n- Preserve negation and uncertainty. Do not turn \"did not cause\", \"may have caused\", \"possible\", \"suspected\", or an open investigation into an affirmative causal fact. Represent a negated or uncertain relationship only if the supplied schema can express its negation or uncertainty explicitly; otherwise omit that relationship. Evaluate each claim independently: negation or uncertainty in one claim must not suppress a separately confirmed relationship or its named entities elsewhere in the passage.\n\nMake sure you adhere to the following rules to produce valid JSON objects:\n- Do not return any additional information other than the JSON in it.\n- Omit any backticks around the JSON - simply output the JSON on its own.\n- The JSON object must not wrapped into a list - it is its own JSON object.\n- Property names must be enclosed in double quotes\n\nExamples:\n{examples}\n\nInput text:\n\n{text}",
             "description": "Template the official Neo4j GraphRAG extractor formats for every chunk during semantic KG extraction (must keep the {schema} and {text} placeholders; {examples} is optional). Carries the naming rules that keep OCR noise out of entity names.",
             "title": "Semantic Kg Extraction",
             "type": "string"
@@ -20847,6 +21316,15 @@
                       "$ref": "#/components/schemas/RequiredRetrievalLegFailureResponse"
                     },
                     {
+                      "$ref": "#/components/schemas/RerankerFailureResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AnswerRetrievalFailureResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/GenerationUnavailableResponse"
+                    },
+                    {
                       "$ref": "#/components/schemas/IndexDeletionIncompleteResponse"
                     }
                   ],
@@ -20854,7 +21332,7 @@
                 }
               }
             },
-            "description": "A required storage dependency or requested retrieval leg is unavailable, or the corpus is being de-indexed and its external cleanup has not completed."
+            "description": "Answer storage, retrieval, the configured reranker, or generation is unavailable, or the corpus is being de-indexed and its external cleanup has not completed."
           }
         },
         "summary": "Answer",
@@ -20917,6 +21395,12 @@
                       "$ref": "#/components/schemas/RequiredRetrievalLegFailureResponse"
                     },
                     {
+                      "$ref": "#/components/schemas/RerankerFailureResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AnswerRetrievalFailureResponse"
+                    },
+                    {
                       "$ref": "#/components/schemas/IndexDeletionIncompleteResponse"
                     }
                   ],
@@ -20924,7 +21408,7 @@
                 }
               }
             },
-            "description": "A required storage dependency or requested retrieval leg is unavailable, or the corpus is being de-indexed and its external cleanup has not completed."
+            "description": "Answer storage, retrieval or the configured reranker is unavailable before the stream starts, or the corpus is being de-indexed; generation failures arrive in-band as the stream's typed error event."
           }
         },
         "summary": "Answer Stream",
@@ -21215,6 +21699,9 @@
                       "$ref": "#/components/schemas/RequiredRetrievalLegFailureResponse"
                     },
                     {
+                      "$ref": "#/components/schemas/RerankerFailureResponse"
+                    },
+                    {
                       "$ref": "#/components/schemas/IndexDeletionIncompleteResponse"
                     }
                   ],
@@ -21222,7 +21709,7 @@
                 }
               }
             },
-            "description": "A required storage dependency or requested retrieval leg is unavailable, or the corpus is being de-indexed and its external cleanup has not completed."
+            "description": "A required storage dependency or requested retrieval leg is unavailable, the configured reranker failed, or the corpus is being de-indexed and its external cleanup has not completed."
           }
         },
         "summary": "Benchmark Run",
@@ -21288,6 +21775,9 @@
                       "$ref": "#/components/schemas/RequiredRetrievalLegFailureResponse"
                     },
                     {
+                      "$ref": "#/components/schemas/RerankerFailureResponse"
+                    },
+                    {
                       "$ref": "#/components/schemas/GenerationUnavailableResponse"
                     },
                     {
@@ -21298,7 +21788,7 @@
                 }
               }
             },
-            "description": "Chat storage, retrieval, or generation is unavailable, or the corpus is being de-indexed and its external cleanup has not completed."
+            "description": "Chat storage, retrieval, the configured reranker, or generation is unavailable, or the corpus is being de-indexed and its external cleanup has not completed."
           }
         },
         "summary": "Chat",
@@ -21638,6 +22128,9 @@
                       "$ref": "#/components/schemas/RequiredRetrievalLegFailureResponse"
                     },
                     {
+                      "$ref": "#/components/schemas/RerankerFailureResponse"
+                    },
+                    {
                       "$ref": "#/components/schemas/IndexDeletionIncompleteResponse"
                     }
                   ],
@@ -21645,7 +22138,7 @@
                 }
               }
             },
-            "description": "A required storage dependency or requested retrieval leg is unavailable, or the corpus is being de-indexed and its external cleanup has not completed."
+            "description": "A required storage dependency or requested retrieval leg is unavailable, the configured reranker failed, or the corpus is being de-indexed and its external cleanup has not completed."
           }
         },
         "summary": "Chat Stream",
@@ -25504,6 +25997,137 @@
         ]
       }
     },
+    "/api/graph/{corpus_id}/entity/sources": {
+      "get": {
+        "description": "Direct entity mention sources; these do not establish evidence for an edge.",
+        "operationId": "get_entity_sources_api_graph__corpus_id__entity_sources_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "corpus_id",
+            "required": true,
+            "schema": {
+              "title": "Corpus Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Entity id within the corpus graph",
+            "in": "query",
+            "name": "entity_id",
+            "required": true,
+            "schema": {
+              "description": "Entity id within the corpus graph",
+              "minLength": 1,
+              "title": "Entity Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "run_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GraphEntitySourcesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/GraphSourceGenerationChangedResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/GraphSourceReindexRequiredResponse"
+                    }
+                  ],
+                  "title": "Response 409 Get Entity Sources Api Graph  Corpus Id  Entity Sources Get"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/IndexDeletionIncompleteResponse"
+                    }
+                  ],
+                  "title": "Response 503 Get Entity Sources Api Graph  Corpus Id  Entity Sources Get"
+                }
+              }
+            },
+            "description": "A required runtime dependency is unavailable, or the corpus is being de-indexed and its external cleanup has not completed."
+          }
+        },
+        "summary": "Get Entity Sources",
+        "tags": [
+          "graph"
+        ]
+      }
+    },
     "/api/graph/{corpus_id}/query": {
       "post": {
         "operationId": "graph_query_api_graph__corpus_id__query_post",
@@ -26234,7 +26858,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/GraphSchemaPolicyConflictResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/GraphSchemaPolicyConflictResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/GraphSchemaProposalFailureResponse"
+                    }
+                  ],
+                  "title": "Response 409 Propose Graph Schema Api Index  Corpus Id  Graph Schema Proposal Post"
                 }
               }
             },
@@ -26249,6 +26881,26 @@
               }
             },
             "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GraphSchemaProposalFailureResponse"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GraphSchemaProposalFailureResponse"
+                }
+              }
+            },
+            "description": "Gateway Timeout"
           }
         },
         "summary": "Propose Graph Schema",
@@ -27390,6 +28042,9 @@
                       "$ref": "#/components/schemas/RequiredRetrievalLegFailureResponse"
                     },
                     {
+                      "$ref": "#/components/schemas/RerankerFailureResponse"
+                    },
+                    {
                       "$ref": "#/components/schemas/IndexDeletionIncompleteResponse"
                     }
                   ],
@@ -27397,7 +28052,7 @@
                 }
               }
             },
-            "description": "A required storage dependency or requested retrieval leg is unavailable, or the corpus is being de-indexed and its external cleanup has not completed."
+            "description": "A required storage dependency or requested retrieval leg is unavailable, the configured reranker failed, or the corpus is being de-indexed and its external cleanup has not completed."
           }
         },
         "summary": "Mcp Probe",
@@ -30477,6 +31132,9 @@
                       "$ref": "#/components/schemas/RequiredRetrievalLegFailureResponse"
                     },
                     {
+                      "$ref": "#/components/schemas/RerankerFailureResponse"
+                    },
+                    {
                       "$ref": "#/components/schemas/IndexDeletionIncompleteResponse"
                     }
                   ],
@@ -30484,7 +31142,7 @@
                 }
               }
             },
-            "description": "A required storage dependency or requested retrieval leg is unavailable, or the corpus is being de-indexed and its external cleanup has not completed."
+            "description": "A required storage dependency or requested retrieval leg is unavailable, the configured reranker failed, or the corpus is being de-indexed and its external cleanup has not completed."
           }
         },
         "summary": "Search",

@@ -5,6 +5,7 @@ import ForceGraph2D from 'react-force-graph-2d';
 import { useGraph } from '@/hooks/useGraph';
 import { useIndexing } from '@/hooks/useIndexing';
 import { SyntheticCallout } from '@/components/RAG/SyntheticCallout';
+import { GraphEntitySources } from '@/components/RAG/GraphEntitySources';
 import { NumberField } from '@/components/ui/NumberField';
 import { useRepoStore } from '@/stores/useRepoStore';
 import { DEFAULT_ENTITY_LIMIT, ENTITY_LIMIT_CHOICES } from '@/stores/useGraphStore';
@@ -84,7 +85,7 @@ function formatRelProvenance(r: Relationship): string {
   if (filePath) bits.push(`file:${filePath}`);
   if (runId) bits.push(`run:${runId}`);
   if (model) bits.push(`model:${model}`);
-  if (!bits.length) return 'No provenance';
+  if (!bits.length) return 'Edge-specific evidence not recorded';
   return bits.join(' • ');
 }
 
@@ -759,6 +760,9 @@ export function GraphSubtab() {
 
   /** Room for a third column? Below this the visualization gets its own row. */
   const wideLayout = layoutWidth === 0 || layoutWidth >= 1080;
+  // A fixed 320px Communities column needs another 320px plus the gap
+  // for usable entity controls. Stack in narrower main panes and docks.
+  const narrowLayout = layoutWidth > 0 && layoutWidth < 656;
 
   const indexProgressPercent = useMemo(() => {
     const raw = Number(activeIndexStatus?.progress ?? 0);
@@ -1220,7 +1224,11 @@ export function GraphSubtab() {
         style={{
           display: 'grid',
           gridTemplateColumns:
-            viewMode === 'table' || !wideLayout ? '320px minmax(0, 1fr)' : '320px minmax(0, 1fr) minmax(0, 1.5fr)',
+            narrowLayout
+              ? 'minmax(0, 1fr)'
+              : viewMode === 'table' || !wideLayout
+                ? '320px minmax(0, 1fr)'
+                : '320px minmax(0, 1fr) minmax(0, 1.5fr)',
           gap: '16px',
           alignItems: 'start',
         }}
@@ -1466,6 +1474,12 @@ export function GraphSubtab() {
               </div>
             )}
           </div>
+          {activeRepo && selectedEntity ? (
+            <div style={{ maxHeight: '420px', overflowY: 'auto', marginTop: '14px' }}>
+              <strong style={{ fontSize: '12px' }}>{selectedEntity.name}</strong>
+              <GraphEntitySources key={`${activeRepo}:${selectedEntity.entity_id}`} corpusId={activeRepo} entityId={selectedEntity.entity_id} />
+            </div>
+          ) : null}
         </div>
 
         {viewMode === 'table' ? (
@@ -1617,7 +1631,7 @@ export function GraphSubtab() {
                     <th style={thStyle}>Source</th>
                     <th style={thStyle}>Relation</th>
                     <th style={thStyle}>Target</th>
-                    <th style={thStyle}>Provenance</th>
+                    <th style={thStyle}>Edge evidence</th>
                   </tr>
                 </thead>
                 <tbody>

@@ -120,7 +120,8 @@ class Chunk(BaseModel):
 
 
 class GraphSchemaSample(BaseModel):
-    recipe: Literal["documents-and-positions-v1"] = "documents-and-positions-v1"
+    # Old run/proposal records remain readable; reuse requires the current recipe.
+    recipe: Literal["documents-and-positions-v1", "documents-and-positions-v2"] = "documents-and-positions-v2"
     seed: int = 0
     chunk_ids: list[str]
     chunk_hashes: list[str]
@@ -162,6 +163,20 @@ class GraphSchemaProposal(BaseModel):
 
 class GraphSchemaProposalRequest(BaseModel):
     force_refresh: bool = False
+
+
+class GraphSchemaProposalFailureDetail(BaseModel):
+    code: Literal[
+        "graph_schema_generation_failed", "graph_schema_deadline_exceeded", "graph_schema_context_changed"
+    ]
+    corpus_id: str
+    model_alias: str
+    message: str
+    operator_hint: str
+
+
+class GraphSchemaProposalFailureResponse(BaseModel):
+    detail: GraphSchemaProposalFailureDetail
 
 
 class GraphExtractionTelemetry(BaseModel):
@@ -231,7 +246,13 @@ class IndexRequest(BaseModel):
         serialization_alias="corpus_id",
     )
     repo_path: str = Field(description="Path to repository on disk")
-    force_reindex: bool = Field(default=False, description="Force full reindex even if up-to-date")
+    force_reindex: bool = Field(
+        default=False,
+        description=(
+            "Allow changed embedding settings during a full rebuild. "
+            "The active index is replaced only after validation."
+        ),
+    )
     approved_graph_schema_hash: str | None = Field(
         default=None,
         pattern=r"^[0-9a-f]{64}$",
@@ -821,6 +842,8 @@ __all__ = [
     "GraphSchemaPolicyConflictDetail",
     "GraphSchemaPolicyConflictResponse",
     "GraphSchemaProposal",
+    "GraphSchemaProposalFailureDetail",
+    "GraphSchemaProposalFailureResponse",
     "GraphSchemaProposalRequest",
     "GraphSchemaSample",
     "IndexFenceCorruptDetail",

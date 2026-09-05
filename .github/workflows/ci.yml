@@ -32,6 +32,30 @@ jobs:
     needs: [docs-ownership]
 
     services:
+      neo4j:
+        image: neo4j:5.26.20-community
+        env:
+          NEO4J_AUTH: neo4j/ci-fixture-only
+          NEO4J_PLUGINS: '["apoc", "graph-data-science"]'
+          NEO4J_dbms_security_procedures_unrestricted: apoc.*,gds.*
+          NEO4J_dbms_security_procedures_allowlist: apoc.*,gds.*
+          NEO4J_server_memory_heap_initial__size: 512m
+          NEO4J_server_memory_heap_max__size: 1G
+          NEO4J_server_memory_pagecache_size: 256m
+        ports:
+          - 7687:7687
+        options: >-
+          --health-cmd "cypher-shell -u neo4j -p ci-fixture-only 'RETURN gds.version(), apoc.version()'"
+          --health-interval 10s
+          --health-timeout 10s
+          --health-retries 30
+          --memory 3g
+
+      qdrant:
+        image: qdrant/qdrant:v1.17.1
+        ports:
+          - 56333:6333
+
       postgres:
         image: pgvector/pgvector:pg16
         env:
@@ -70,6 +94,11 @@ jobs:
       - name: Contract Bundle Check
         run: uv run scripts/validate_contract_bundle.py
 
+      - name: Prepare integration dependencies
+        run: |
+          cp .env.example .env
+          curl --fail --retry 20 --retry-connrefused --retry-delay 1 http://127.0.0.1:56333/readyz
+
       - name: Run tests
         env:
           POSTGRES_HOST: localhost
@@ -77,6 +106,10 @@ jobs:
           POSTGRES_DB: tribrid_test
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
+          QDRANT_URL: http://127.0.0.1:56333
+          NEO4J_URI: bolt://127.0.0.1:7687
+          NEO4J_USER: neo4j
+          NEO4J_PASSWORD: ci-fixture-only
         run: uv run pytest tests/ -v --cov=server
 
   test-frontend:

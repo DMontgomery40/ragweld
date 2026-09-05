@@ -135,40 +135,47 @@ async def test_the_old_byte_ratio_would_have_failed_this_test(repo_id: str) -> N
 # turns the first Index Now after a service restart into an error banner.
 CLIENT_TIMEOUT_SECONDS = 30.0
 
-# Cold means a fresh interpreter. Clearing the tokenizer's lru_cache in-process does NOT restore
-# it: measured here, a first-in-process sample of ragweld_code costs ~28 s while the same sample
-# after a cache_clear costs ~4.6 s, because the `transformers` import and the model files stay
-# hot. Anything claiming to measure the cold path from inside a warm process measures the warm one.
+# A fresh interpreter proves tokenizer readiness independently of machine speed or the OS
+# file cache. The endpoint must defer cold work and publish measured results once warm.
 _COLD_PROBE = r"""
 import asyncio, json, time, sys
 
 async def main():
+    import httpx
+    from server.main import app
     from server.services.config_store import get_config
     from server.indexing.chunker import Chunker
-    from server.indexing.loader import FileLoader
-    from server.indexing.estimate import sample_corpus, warm_sampler
+    from server.indexing.estimate import sampler_is_warm, warm_sampler
+    from server.indexing.tokenizer import TextTokenizer
 
     mode, repo_id, root = sys.argv[1], sys.argv[2], sys.argv[3]
     cfg = await get_config(repo_id=repo_id)
     chunker = Chunker(cfg.chunking, cfg.tokenization)
-    loader = FileLoader(ignore_patterns=[])
-    files = []
-    for _rel, path in loader.iter_repo_files(root):
-        try:
-            files.append((path, path.stat().st_size))
-        except OSError:
-            pass
+    was_cold = not sampler_is_warm()
 
-    warmup = 0.0
     if mode == "warm":
-        started = time.monotonic()
-        warm_sampler(chunker)
-        warmup = time.monotonic() - started
+        await asyncio.to_thread(warm_sampler, chunker)
 
-    started = time.monotonic()
-    sample_corpus(files=files, chunker=chunker)
-    sampling = time.monotonic() - started
-    print(json.dumps({"files": len(files), "warmup": warmup, "sampling": sampling}))
+    def tokenizer_misses():
+        return [TextTokenizer._get_hf_tokenizer.cache_info().misses,
+                TextTokenizer._get_tiktoken_encoding.cache_info().misses]
+
+    warm_before_request = sampler_is_warm()
+    misses_before = tokenizer_misses()
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test", timeout=600) as client:
+        started = time.monotonic()
+        response = await client.post("/api/index/estimate", json={"corpus_id": repo_id, "repo_path": root})
+        request_seconds = time.monotonic() - started
+    print(json.dumps({
+        "was_cold": was_cold,
+        "warm_before_request": warm_before_request,
+        "misses_before": misses_before,
+        "misses_after": tokenizer_misses(),
+        "request_seconds": request_seconds,
+        "http": response.status_code,
+        "body": response.json(),
+    }))
 
 asyncio.run(main())
 """
@@ -177,8 +184,8 @@ WIDEST_CORPUS = "ragweld_code"
 WIDEST_ROOT = "/opt/ragweld"
 
 
-def _cold_process_timings(mode: str, repo_id: str, root: str) -> dict[str, float]:
-    """Run one estimate in a genuinely fresh interpreter, with or without the warm-up first."""
+def _cold_process_timings(mode: str, repo_id: str, root: str) -> dict:
+    """Measure the real endpoint and tokenizer state in a fresh interpreter."""
     import json
     import os
     import subprocess
@@ -192,8 +199,7 @@ def _cold_process_timings(mode: str, repo_id: str, root: str) -> dict[str, float
         timeout=300,
         check=False,
     )
-    if completed.returncode != 0:
-        pytest.skip(f"cold probe could not run here: {completed.stderr.strip()[-300:]}")
+    assert completed.returncode == 0, f"cold endpoint probe failed: {completed.stderr.strip()[-500:]}"
     return json.loads(completed.stdout.strip().splitlines()[-1])
 
 
@@ -208,39 +214,40 @@ async def _require_widest_corpus() -> None:
 
 @pytest.mark.integration
 async def test_measuring_cold_is_too_slow_to_do_on_the_request_path() -> None:
-    """Why the endpoint answers "warming" instead of sampling: measuring cold does not fit.
-
-    A fresh process with no warm-up, on the widest corpus on this box. This was originally
-    asserted the other way -- that a cold sample squeaks inside the timeout -- and it did, at
-    27.8 s against 30 s. It then failed at 34.8 s on a busier box, which is the point: the
-    margin was never real, so the endpoint no longer gambles on it.
-    """
+    """A cold request defers measurement promptly, regardless of this host's tokenizer speed."""
     await _require_widest_corpus()
 
     timings = _cold_process_timings("nowarm", WIDEST_CORPUS, WIDEST_ROOT)
 
-    assert timings["sampling"] > CLIENT_TIMEOUT_SECONDS / 3, (
-        f"a cold sample took only {timings['sampling']:.1f}s -- if measuring cold were this "
-        "cheap, the warming response would be unnecessary complexity"
-    )
+    assert timings["was_cold"] is True
+    assert timings["warm_before_request"] is False
+    assert timings["http"] == 200
+    assert timings["request_seconds"] < CLIENT_TIMEOUT_SECONDS / 3
+    body = timings["body"]
+    assert body["status"] == "warming", body
+    assert body["total_files"] == 0
+    for field in ("estimated_total_tokens", "estimated_total_chunks", "sampled_files", "sampled_bytes"):
+        assert body[field] is None, f"cold response published an unmeasured {field}"
 
 
 @pytest.mark.integration
 async def test_the_warmup_moves_the_load_off_the_estimate() -> None:
-    """With the warm-up done, the estimate the operator waits for is a fraction of the budget."""
+    """Warm-up loads the tokenizer before a measured endpoint response; request latency stays bounded."""
     await _require_widest_corpus()
 
     timings = _cold_process_timings("warm", WIDEST_CORPUS, WIDEST_ROOT)
 
-    assert timings["sampling"] < CLIENT_TIMEOUT_SECONDS / 3, (
-        f"a warmed estimate took {timings['sampling']:.1f}s, which leaves no margin"
+    assert timings["was_cold"] is True
+    assert timings["warm_before_request"] is True
+    assert timings["misses_after"] == timings["misses_before"], "the warmed request loaded another tokenizer"
+    assert timings["http"] == 200
+    assert timings["request_seconds"] < CLIENT_TIMEOUT_SECONDS / 3, (
+        f"a warmed estimate took {timings['request_seconds']:.1f}s, which leaves no margin"
     )
-    # Not a vacuous bound: the warm-up really is most of the cold cost, which is the whole
-    # reason moving it off the request path helps.
-    assert timings["warmup"] > timings["sampling"], (
-        f"warmup {timings['warmup']:.1f}s vs sampling {timings['sampling']:.1f}s -- if sampling "
-        "dominated, warming would buy nothing"
-    )
+    body = timings["body"]
+    assert body["status"] == "ready", body
+    for field in ("estimated_total_tokens", "estimated_total_chunks", "sampled_files", "sampled_bytes"):
+        assert body[field] > 0, f"warm response did not measure {field}"
 
 
 # A cold estimate must never publish a number it did not measure. The probe drives the real

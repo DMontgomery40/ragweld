@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import hashlib
 import json
+import math
 import re
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
+import httpx
 from neo4j_graphrag.components.schema import (
     ConstraintType,
     GraphConstraintType,
@@ -17,9 +22,16 @@ from neo4j_graphrag.components.schema import (
     RelationshipType,
     SchemaFromTextExtractor,
 )
+from neo4j_graphrag.exceptions import SchemaExtractionError
+from neo4j_graphrag.generation.prompts import SchemaExtractionTemplate
 from neo4j_graphrag.llm import OpenAILLM
+from neo4j_graphrag.utils.rate_limit import NoOpRateLimitHandler
+from openai.types.chat import ChatCompletion
+from openai.types.completion_usage import CompletionUsage
+from pydantic import ValidationError
 
 from server.gateway_reasoning import reasoning_model_params
+from server.model_policy import ensure_model_allowed
 from server.models.index import Chunk, GraphSchemaProposal, GraphSchemaSample
 
 _GRAPH_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
@@ -48,10 +60,96 @@ DOCUMENT_TEXT_PROPERTIES = frozenset(
     }
 )
 
+# Generous for the supported 32K-token schema budget (including UTF-8 and JSON
+# overhead), but bounded even when an upstream ignores the requested token limit.
+_PROPOSAL_MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+_PROPOSAL_CLEANUP_TIMEOUT_S = 1.0
+
+
+class GraphSchemaProposalError(RuntimeError):
+    """Sanitized proposal failure; retain received accounting outside public text."""
+
+    def __init__(
+        self,
+        code: Literal["graph_schema_generation_failed", "graph_schema_deadline_exceeded"],
+        *,
+        usage: CompletionUsage | None = None,
+        gateway_cost_usd: float | None = None,
+    ) -> None:
+        self.code = code
+        self.usage = usage
+        self.gateway_cost_usd = gateway_cost_usd
+        super().__init__(
+            "Schema proposal exceeded its total time budget."
+            if code == "graph_schema_deadline_exceeded"
+            else "The model gateway did not return a complete, valid schema proposal."
+        )
+
+
+class _ProposalTransport(httpx.AsyncHTTPTransport):
+    """Delegate HTTP to HTTPX, bounding decoded bytes before the SDK parses JSON."""
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        response = await super().handle_async_request(request)
+        try:
+            body = bytearray()
+            async for part in response.aiter_bytes():
+                if len(body) + len(part) > _PROPOSAL_MAX_RESPONSE_BYTES:
+                    raise GraphSchemaProposalError("graph_schema_generation_failed")
+                body.extend(part)
+            headers = httpx.Headers(response.headers)
+            # aiter_bytes has decoded the content; this new buffered response must
+            # not decompress it again or advertise the original compressed length.
+            for name in ("content-encoding", "content-length", "transfer-encoding"):
+                headers.pop(name, None)
+            return httpx.Response(
+                response.status_code, headers=headers, content=bytes(body),
+                extensions=response.extensions, request=request,
+            )
+        finally:
+            await response.aclose()
+
+
+def schema_proposal_prompt() -> SchemaExtractionTemplate:
+    """Keep the official schema contract while preserving less frequent facts.
+
+    The upstream minimal-schema instruction can omit whole diagnostic domains
+    from mixed reports. Override that instruction through the supported template
+    API; fail explicitly if a dependency upgrade changes the instruction.
+    """
+    minimal_rule = (
+        "7. Keep your schema minimal and focused on clearly identifiable patterns in the text."
+    )
+    coverage_rule = (
+        "7. Cover the distinct concepts and explicit relationships represented across the entire "
+        "supplied sample. Preserve causal, diagnostic, and operational relationships when the "
+        "text states them; do not reduce the schema to only its most common topics or "
+        "participant/containment relationships. Keep types general enough to reuse across "
+        "examples, but do not collapse distinct roles or omit less frequent concepts needed "
+        "to express the sample's facts. Do not invent types or relationships unsupported by the text."
+        "\n7.1 Use meaningful domain types. These generic labels are prohibited (case-insensitive): "
+        f"node labels {', '.join(sorted(_GENERIC_NODE_LABELS))}; "
+        f"relationship labels {', '.join(sorted(_GENERIC_RELATIONSHIP_LABELS))}. "
+        "Omit a relationship whose meaning the text does not establish; never substitute a catch-all link."
+    )
+    template = SchemaExtractionTemplate.DEFAULT_TEMPLATE
+    if template.count(minimal_rule) != 1:
+        raise RuntimeError("GraphRAG schema template changed; review the domain-coverage override")
+    return SchemaExtractionTemplate(template=template.replace(minimal_rule, coverage_rule))
+
 
 def select_schema_chunks(
     chunks: Sequence[Chunk], *, corpus_id: str, max_documents: int = 12
 ) -> list[Chunk]:
+    """Spread a fixed 36-chunk budget over documents and their full length.
+
+    Three chunks per document undersamples a corpus made of one long report.
+    Allocate that same bounded total across the available documents instead.
+    Selecting an already selected sample is idempotent.
+    """
+    if max_documents < 1:
+        raise ValueError("max_documents must be positive")
+    max_documents = min(max_documents, 36)
     grouped: dict[str, list[Chunk]] = defaultdict(list)
     for chunk in chunks:
         if str(chunk.content or "").strip():
@@ -62,13 +160,23 @@ def select_schema_chunks(
     )
     if len(paths) > max_documents:
         paths = [
-            paths[round(index * (len(paths) - 1) / (max_documents - 1))]
+            paths[round(index * (len(paths) - 1) / max(1, max_documents - 1))]
             for index in range(max_documents)
         ]
+    budgets = dict.fromkeys(paths, 0)
+    remaining = min(36, sum(len(grouped[path]) for path in paths))
+    while remaining:
+        for path in paths:
+            if budgets[path] < len(grouped[path]):
+                budgets[path] += 1
+                remaining -= 1
+                if not remaining:
+                    break
     selected: list[Chunk] = []
     for path in paths:
         ordered = sorted(grouped[path], key=lambda chunk: (chunk.start_line, chunk.chunk_id))
-        for index in sorted({0, len(ordered) // 2, len(ordered) - 1}):
+        count = budgets[path]
+        for index in sorted({round(i * (len(ordered) - 1) / max(1, count - 1)) for i in range(count)}):
             selected.append(ordered[index])
     return selected
 
@@ -79,6 +187,29 @@ def _is_document_text(name: str) -> bool:
 
 def _keeps_attributes(properties: Sequence[PropertyType]) -> list[PropertyType]:
     return [prop for prop in properties if not _is_document_text(prop.name)]
+
+
+def closed_graph_schema(schema: GraphSchema | Mapping[str, Any]) -> GraphSchema:
+    """Validate a schema, then apply its closed-world execution contract to a copy.
+
+    GraphRAG 1.19 reopens an empty-property RelationshipType during validation.
+    Its extractor and official pruner honor a closed validated instance, including
+    through Pipeline inputs. Apply the flags after validation, both when persisting
+    the approved shape and after loading it for execution; never add fake attributes
+    merely to suppress the upstream default.
+    """
+    closed = GraphSchema.model_validate(deepcopy(schema)).model_copy(
+        update={
+            "additional_node_types": False,
+            "additional_relationship_types": False,
+            "additional_patterns": False,
+        },
+    )
+    for node in closed.node_types:
+        node.additional_properties = False
+    for relationship in closed.relationship_types:
+        relationship.additional_properties = False
+    return closed
 
 
 def normalize_domain_schema(schema: GraphSchema) -> GraphSchema:
@@ -130,7 +261,7 @@ def normalize_domain_schema(schema: GraphSchema) -> GraphSchema:
                     property_names=(IDENTITY_PROPERTY,),
                 )
             )
-    return GraphSchema(
+    return closed_graph_schema(GraphSchema(
         node_types=tuple(node_types),
         relationship_types=tuple(relationship_types),
         patterns=schema.patterns,
@@ -138,19 +269,11 @@ def normalize_domain_schema(schema: GraphSchema) -> GraphSchema:
         additional_node_types=False,
         additional_relationship_types=False,
         additional_patterns=False,
-    )
+    ))
 
 
 def canonical_schema_dict(schema: GraphSchema) -> dict[str, Any]:
-    return GraphSchema(
-        node_types=schema.node_types,
-        relationship_types=schema.relationship_types,
-        patterns=schema.patterns,
-        constraints=schema.constraints,
-        additional_node_types=False,
-        additional_relationship_types=False,
-        additional_patterns=False,
-    ).model_dump(mode="json")
+    return closed_graph_schema(schema).model_dump(mode="json")
 
 
 def graph_schema_hash(schema_dict: Mapping[str, Any]) -> str:
@@ -169,7 +292,7 @@ def validate_domain_schema(schema_dict: Mapping[str, Any]) -> None:
             label = str(raw.get("label") or "").strip()
             if label.upper() in _GENERIC_RELATIONSHIP_LABELS:
                 raise ValueError(f"generic graph label is prohibited: {label}")
-    schema = GraphSchema.model_validate(schema_dict)
+    schema = GraphSchema.model_validate(deepcopy(schema_dict))
     if not schema.node_types or not schema.relationship_types or not schema.patterns:
         raise ValueError("graph schema requires node types, relationship types, and patterns")
     for node in schema.node_types:
@@ -186,6 +309,12 @@ def validate_domain_schema(schema_dict: Mapping[str, Any]) -> None:
             raise ValueError(f"invalid Neo4j relationship label: {label}")
     if schema.additional_node_types or schema.additional_relationship_types or schema.additional_patterns:
         raise ValueError("graph schema must be closed to additional nodes, relationships, and patterns")
+    # Inspect the serialized flags: validating an empty-property RelationshipType
+    # reopens its instance in 1.19, but the reviewed/persisted contract must be closed.
+    for kind in ("node_types", "relationship_types"):
+        for raw in schema_dict.get(kind, []):
+            if isinstance(raw, Mapping) and raw.get("additional_properties") is not False:
+                raise ValueError("graph schema must be closed to additional properties")
     for node in schema.node_types:
         identity = [prop for prop in node.properties if prop.name == IDENTITY_PROPERTY]
         if not identity or identity[0].type != "STRING":
@@ -222,7 +351,11 @@ async def derive_graph_schema_proposal(
     route_upstream: str,
     reasoning_effort: str,
     input_fingerprint: str,
+    timeout_s: float,
+    max_output_tokens: int,
 ) -> GraphSchemaProposal:
+    for identifier in (model_alias, route_model, route_upstream):
+        ensure_model_allowed(identifier)
     sample = select_schema_chunks(chunks, corpus_id=corpus_id)
     if not sample:
         raise ValueError("graph schema proposal requires at least one nonempty chunk")
@@ -230,17 +363,72 @@ async def derive_graph_schema_proposal(
         f"## {chunk.file_path} lines {chunk.start_line}-{chunk.end_line}\n{chunk.content[:6000]}"
         for chunk in sample
     )
-    # The proposal deliberately carries the effort but no per-chunk timeout (D9); the
-    # effort travels in the upstream's protocol like every extraction call (D25).
+    if timeout_s <= 0 or max_output_tokens <= 0:
+        raise ValueError("schema proposal requires positive time and output budgets")
+    received: ChatCompletion | None = None
+    gateway_cost_usd: float | None = None
+
+    async def check_completion(response: httpx.Response) -> None:
+        nonlocal received, gateway_cost_usd
+        if response.is_error:
+            return  # Let the official SDK preserve its transport/status exception.
+        try:
+            received = ChatCompletion.model_validate(response.json())
+        except (ValueError, ValidationError) as exc:
+            raise GraphSchemaProposalError("graph_schema_generation_failed") from exc
+        try:
+            raw_cost = response.headers.get("x-litellm-response-cost")
+            cost = float(raw_cost) if raw_cost is not None else None
+            if cost is not None and math.isfinite(cost) and cost >= 0:
+                gateway_cost_usd = cost
+        except ValueError:
+            pass
+        if (
+            len(received.choices) != 1
+            or received.choices[0].finish_reason != "stop"
+            or received.choices[0].message.refusal
+            or not received.choices[0].message.content
+        ):
+            raise GraphSchemaProposalError(
+                "graph_schema_generation_failed", usage=received.usage,
+                gateway_cost_usd=gateway_cost_usd,
+            )
+
     llm = OpenAILLM(
         model_name=route_model,
-        model_params=reasoning_model_params(
-            reasoning_effort=reasoning_effort, route_upstream=route_upstream
-        ),
+        model_params={
+            **reasoning_model_params(reasoning_effort=reasoning_effort, route_upstream=route_upstream),
+            "max_tokens": max_output_tokens,
+        },
+        rate_limit_handler=NoOpRateLimitHandler(),
         api_key=route_api_key,
         base_url=route_base_url,
+        timeout=timeout_s,
+        max_retries=0,
+        http_client=httpx.AsyncClient(
+            transport=_ProposalTransport(), timeout=timeout_s,
+            event_hooks={"response": [check_completion]},
+        ),
     )
-    extracted = await SchemaFromTextExtractor(llm=llm, use_structured_output=True).run(text)
+    try:
+        async with asyncio.timeout(timeout_s):
+            extracted = await SchemaFromTextExtractor(
+                llm=llm,
+                prompt_template=schema_proposal_prompt(),
+                use_structured_output=True,
+            ).run(text)
+    except TimeoutError as exc:
+        raise GraphSchemaProposalError("graph_schema_deadline_exceeded") from exc
+    except SchemaExtractionError as exc:
+        raise GraphSchemaProposalError(
+            "graph_schema_generation_failed",
+            usage=received.usage if received else None, gateway_cost_usd=gateway_cost_usd,
+        ) from exc
+    finally:
+        # The API's outer deadline may cancel this call while sampling/generating;
+        # cleanup gets its own short bound and never resumes generation or persistence.
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(llm.aclose(), timeout=_PROPOSAL_CLEANUP_TIMEOUT_S)
     schema = canonical_schema_dict(normalize_domain_schema(extracted))
     validate_domain_schema(schema)
     return GraphSchemaProposal(

@@ -2,7 +2,7 @@
   "domain_modules": [
     "server.models.index"
   ],
-  "model_count": 303,
+  "model_count": 316,
   "module": "server.models.tribrid_config_model",
   "root_models": {
     "ActiveSources": {
@@ -3171,6 +3171,111 @@
       "title": "AnswerResponse",
       "type": "object"
     },
+    "AnswerRetrievalFailureDetail": {
+      "description": "Public error detail returned when answer retrieval fails for an untyped reason (HTTP 503).",
+      "properties": {
+        "code": {
+          "const": "answer_retrieval_failed",
+          "default": "answer_retrieval_failed",
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "description": "Stable, non-sensitive failure summary",
+          "title": "Message",
+          "type": "string"
+        },
+        "operation": {
+          "description": "Retrieval operation that could not complete",
+          "title": "Operation",
+          "type": "string"
+        },
+        "operator_hint": {
+          "description": "High-signal next step for the operator",
+          "title": "Operator Hint",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Sanitised reason from the retrieval lane (no secrets, no raw payloads)",
+          "title": "Reason",
+          "type": "string"
+        },
+        "retryable": {
+          "default": true,
+          "description": "Whether the caller may retry after remediation",
+          "title": "Retryable",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "operation",
+        "message",
+        "reason",
+        "operator_hint"
+      ],
+      "title": "AnswerRetrievalFailureDetail",
+      "type": "object"
+    },
+    "AnswerRetrievalFailureResponse": {
+      "$defs": {
+        "AnswerRetrievalFailureDetail": {
+          "description": "Public error detail returned when answer retrieval fails for an untyped reason (HTTP 503).",
+          "properties": {
+            "code": {
+              "const": "answer_retrieval_failed",
+              "default": "answer_retrieval_failed",
+              "title": "Code",
+              "type": "string"
+            },
+            "message": {
+              "description": "Stable, non-sensitive failure summary",
+              "title": "Message",
+              "type": "string"
+            },
+            "operation": {
+              "description": "Retrieval operation that could not complete",
+              "title": "Operation",
+              "type": "string"
+            },
+            "operator_hint": {
+              "description": "High-signal next step for the operator",
+              "title": "Operator Hint",
+              "type": "string"
+            },
+            "reason": {
+              "description": "Sanitised reason from the retrieval lane (no secrets, no raw payloads)",
+              "title": "Reason",
+              "type": "string"
+            },
+            "retryable": {
+              "default": true,
+              "description": "Whether the caller may retry after remediation",
+              "title": "Retryable",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "operation",
+            "message",
+            "reason",
+            "operator_hint"
+          ],
+          "title": "AnswerRetrievalFailureDetail",
+          "type": "object"
+        }
+      },
+      "description": "FastAPI response envelope for an untyped answer-retrieval failure.",
+      "properties": {
+        "detail": {
+          "$ref": "#/$defs/AnswerRetrievalFailureDetail"
+        }
+      },
+      "required": [
+        "detail"
+      ],
+      "title": "AnswerRetrievalFailureResponse",
+      "type": "object"
+    },
     "BenchmarkBreakdownDelta": {
       "description": "Per-phase benchmark timing delta.",
       "properties": {
@@ -3599,6 +3704,133 @@
       "type": "object"
     },
     "BenchmarkResult": {
+      "$defs": {
+        "TraceCostSummary": {
+          "description": "Cost attribution summary for one online request.",
+          "properties": {
+            "authoritative": {
+              "default": false,
+              "description": "Whether the cost value came directly from provider/gateway response data.",
+              "title": "Authoritative",
+              "type": "boolean"
+            },
+            "cost_source": {
+              "default": "unavailable",
+              "description": "Whether cost came from provider/gateway truth, catalog fallback, or was unavailable.",
+              "enum": [
+                "provider",
+                "catalog",
+                "unavailable"
+              ],
+              "title": "Cost Source",
+              "type": "string"
+            },
+            "currency": {
+              "default": "USD",
+              "description": "Currency for the attributed cost.",
+              "title": "Currency",
+              "type": "string"
+            },
+            "detail": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Short note about how the cost was derived.",
+              "title": "Detail"
+            },
+            "estimated_cost_usd": {
+              "anyOf": [
+                {
+                  "minimum": 0.0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Best-effort USD cost for this request when available.",
+              "title": "Estimated Cost Usd"
+            },
+            "input_tokens": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Prompt/input tokens when available.",
+              "title": "Input Tokens"
+            },
+            "model": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Model identifier used for the generation call.",
+              "title": "Model"
+            },
+            "output_tokens": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Completion/output tokens when available.",
+              "title": "Output Tokens"
+            },
+            "provider": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Provider/gateway used for the generation call.",
+              "title": "Provider"
+            },
+            "total_tokens": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Total tokens when available.",
+              "title": "Total Tokens"
+            }
+          },
+          "title": "TraceCostSummary",
+          "type": "object"
+        }
+      },
       "description": "Per-model result from a benchmark run.",
       "properties": {
         "breakdown_ms": {
@@ -3615,6 +3847,18 @@
           "minimum": 0,
           "title": "Context Chunks Used",
           "type": "integer"
+        },
+        "cost_summary": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TraceCostSummary"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Per-call reported charge or explicitly marked catalog estimate; null when no accounting was returned."
         },
         "error": {
           "anyOf": [
@@ -3672,6 +3916,20 @@
           "description": "Best-effort generated response.",
           "title": "Response",
           "type": "string"
+        },
+        "usage": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Raw gateway usage for this model call, including billed reasoning-only failures.",
+          "title": "Usage"
         }
       },
       "required": [
@@ -3756,6 +4014,18 @@
               "title": "Context Chunks Used",
               "type": "integer"
             },
+            "cost_summary": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TraceCostSummary"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Per-call reported charge or explicitly marked catalog estimate; null when no accounting was returned."
+            },
             "error": {
               "anyOf": [
                 {
@@ -3812,6 +4082,20 @@
               "description": "Best-effort generated response.",
               "title": "Response",
               "type": "string"
+            },
+            "usage": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Raw gateway usage for this model call, including billed reasoning-only failures.",
+              "title": "Usage"
             }
           },
           "required": [
@@ -3926,6 +4210,131 @@
           ],
           "title": "LineageRef",
           "type": "object"
+        },
+        "TraceCostSummary": {
+          "description": "Cost attribution summary for one online request.",
+          "properties": {
+            "authoritative": {
+              "default": false,
+              "description": "Whether the cost value came directly from provider/gateway response data.",
+              "title": "Authoritative",
+              "type": "boolean"
+            },
+            "cost_source": {
+              "default": "unavailable",
+              "description": "Whether cost came from provider/gateway truth, catalog fallback, or was unavailable.",
+              "enum": [
+                "provider",
+                "catalog",
+                "unavailable"
+              ],
+              "title": "Cost Source",
+              "type": "string"
+            },
+            "currency": {
+              "default": "USD",
+              "description": "Currency for the attributed cost.",
+              "title": "Currency",
+              "type": "string"
+            },
+            "detail": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Short note about how the cost was derived.",
+              "title": "Detail"
+            },
+            "estimated_cost_usd": {
+              "anyOf": [
+                {
+                  "minimum": 0.0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Best-effort USD cost for this request when available.",
+              "title": "Estimated Cost Usd"
+            },
+            "input_tokens": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Prompt/input tokens when available.",
+              "title": "Input Tokens"
+            },
+            "model": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Model identifier used for the generation call.",
+              "title": "Model"
+            },
+            "output_tokens": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Completion/output tokens when available.",
+              "title": "Output Tokens"
+            },
+            "provider": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Provider/gateway used for the generation call.",
+              "title": "Provider"
+            },
+            "total_tokens": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Total tokens when available.",
+              "title": "Total Tokens"
+            }
+          },
+          "title": "TraceCostSummary",
+          "type": "object"
         }
       },
       "description": "Persisted benchmark run record.",
@@ -3942,6 +4351,25 @@
           "default": null,
           "description": "Bundle id after attaching this run to lineage.",
           "title": "Bundle Id"
+        },
+        "cost_scope": {
+          "const": "generation",
+          "default": "generation",
+          "description": "This run's cost summary covers answer generation only; shared retrieval is excluded.",
+          "title": "Cost Scope",
+          "type": "string"
+        },
+        "cost_summary": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TraceCostSummary"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Sum of answer-generation costs only, excluding shared retrieval; unavailable if any generation call lacks accounting; null on older saved runs."
         },
         "ended_at_ms": {
           "default": 0,
@@ -4087,6 +4515,18 @@
               "title": "Context Chunks Used",
               "type": "integer"
             },
+            "cost_summary": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TraceCostSummary"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Per-call reported charge or explicitly marked catalog estimate; null when no accounting was returned."
+            },
             "error": {
               "anyOf": [
                 {
@@ -4143,6 +4583,20 @@
               "description": "Best-effort generated response.",
               "title": "Response",
               "type": "string"
+            },
+            "usage": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Raw gateway usage for this model call, including billed reasoning-only failures.",
+              "title": "Usage"
             }
           },
           "required": [
@@ -4222,6 +4676,25 @@
               "default": null,
               "description": "Bundle id after attaching this run to lineage.",
               "title": "Bundle Id"
+            },
+            "cost_scope": {
+              "const": "generation",
+              "default": "generation",
+              "description": "This run's cost summary covers answer generation only; shared retrieval is excluded.",
+              "title": "Cost Scope",
+              "type": "string"
+            },
+            "cost_summary": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TraceCostSummary"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Sum of answer-generation costs only, excluding shared retrieval; unavailable if any generation call lacks accounting; null on older saved runs."
             },
             "ended_at_ms": {
               "default": 0,
@@ -4370,6 +4843,131 @@
             "version_id"
           ],
           "title": "LineageRef",
+          "type": "object"
+        },
+        "TraceCostSummary": {
+          "description": "Cost attribution summary for one online request.",
+          "properties": {
+            "authoritative": {
+              "default": false,
+              "description": "Whether the cost value came directly from provider/gateway response data.",
+              "title": "Authoritative",
+              "type": "boolean"
+            },
+            "cost_source": {
+              "default": "unavailable",
+              "description": "Whether cost came from provider/gateway truth, catalog fallback, or was unavailable.",
+              "enum": [
+                "provider",
+                "catalog",
+                "unavailable"
+              ],
+              "title": "Cost Source",
+              "type": "string"
+            },
+            "currency": {
+              "default": "USD",
+              "description": "Currency for the attributed cost.",
+              "title": "Currency",
+              "type": "string"
+            },
+            "detail": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Short note about how the cost was derived.",
+              "title": "Detail"
+            },
+            "estimated_cost_usd": {
+              "anyOf": [
+                {
+                  "minimum": 0.0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Best-effort USD cost for this request when available.",
+              "title": "Estimated Cost Usd"
+            },
+            "input_tokens": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Prompt/input tokens when available.",
+              "title": "Input Tokens"
+            },
+            "model": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Model identifier used for the generation call.",
+              "title": "Model"
+            },
+            "output_tokens": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Completion/output tokens when available.",
+              "title": "Output Tokens"
+            },
+            "provider": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Provider/gateway used for the generation call.",
+              "title": "Provider"
+            },
+            "total_tokens": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Total tokens when available.",
+              "title": "Total Tokens"
+            }
+          },
+          "title": "TraceCostSummary",
           "type": "object"
         }
       },
@@ -15824,6 +16422,376 @@
       "title": "GraphCommunityTelemetry",
       "type": "object"
     },
+    "GraphEntitySource": {
+      "$defs": {
+        "ChunkProvenance": {
+          "description": "Where a chunk came from in its source document: extraction method plus page regions.\n\nDirect text/code extraction has line spans only (``regions`` empty, pages ``None``).\nDocling extraction carries one region per contributing layout item.",
+          "properties": {
+            "extraction": {
+              "description": "How the source text was extracted",
+              "enum": [
+                "docling",
+                "direct"
+              ],
+              "title": "Extraction",
+              "type": "string"
+            },
+            "page_end": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Last cited page (1-based)",
+              "title": "Page End"
+            },
+            "page_start": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "First cited page (1-based)",
+              "title": "Page Start"
+            },
+            "regions": {
+              "description": "Layout regions the chunk text was taken from",
+              "items": {
+                "$ref": "#/$defs/PageRegion"
+              },
+              "title": "Regions",
+              "type": "array"
+            }
+          },
+          "required": [
+            "extraction"
+          ],
+          "title": "ChunkProvenance",
+          "type": "object"
+        },
+        "PageRegion": {
+          "description": "One cited region on a page: top-left origin, normalized to the page size (0..1).",
+          "properties": {
+            "bottom": {
+              "description": "Bottom edge as a fraction of page height",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Bottom",
+              "type": "number"
+            },
+            "left": {
+              "description": "Left edge as a fraction of page width",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Left",
+              "type": "number"
+            },
+            "page": {
+              "description": "1-based page number",
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            },
+            "right": {
+              "description": "Right edge as a fraction of page width",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Right",
+              "type": "number"
+            },
+            "top": {
+              "description": "Top edge as a fraction of page height",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Top",
+              "type": "number"
+            }
+          },
+          "required": [
+            "page",
+            "left",
+            "top",
+            "right",
+            "bottom"
+          ],
+          "title": "PageRegion",
+          "type": "object"
+        }
+      },
+      "properties": {
+        "chunk_id": {
+          "description": "Chunk directly linked to the entity by FROM_CHUNK",
+          "minLength": 1,
+          "title": "Chunk Id",
+          "type": "string"
+        },
+        "content": {
+          "description": "Source text stored in the graph generation",
+          "title": "Content",
+          "type": "string"
+        },
+        "end_line": {
+          "description": "Last line of the source chunk",
+          "minimum": 1,
+          "title": "End Line",
+          "type": "integer"
+        },
+        "file_path": {
+          "description": "Stored corpus-relative source path",
+          "minLength": 1,
+          "title": "File Path",
+          "type": "string"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "description": "Matching indexed chunk location metadata, when present",
+          "title": "Metadata",
+          "type": "object"
+        },
+        "provenance": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChunkProvenance"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Matching indexed chunk page provenance, when present"
+        },
+        "start_line": {
+          "description": "First line of the source chunk",
+          "minimum": 1,
+          "title": "Start Line",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "chunk_id",
+        "file_path",
+        "start_line",
+        "end_line",
+        "content"
+      ],
+      "title": "GraphEntitySource",
+      "type": "object"
+    },
+    "GraphEntitySourcesResponse": {
+      "$defs": {
+        "ChunkProvenance": {
+          "description": "Where a chunk came from in its source document: extraction method plus page regions.\n\nDirect text/code extraction has line spans only (``regions`` empty, pages ``None``).\nDocling extraction carries one region per contributing layout item.",
+          "properties": {
+            "extraction": {
+              "description": "How the source text was extracted",
+              "enum": [
+                "docling",
+                "direct"
+              ],
+              "title": "Extraction",
+              "type": "string"
+            },
+            "page_end": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Last cited page (1-based)",
+              "title": "Page End"
+            },
+            "page_start": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "First cited page (1-based)",
+              "title": "Page Start"
+            },
+            "regions": {
+              "description": "Layout regions the chunk text was taken from",
+              "items": {
+                "$ref": "#/$defs/PageRegion"
+              },
+              "title": "Regions",
+              "type": "array"
+            }
+          },
+          "required": [
+            "extraction"
+          ],
+          "title": "ChunkProvenance",
+          "type": "object"
+        },
+        "GraphEntitySource": {
+          "properties": {
+            "chunk_id": {
+              "description": "Chunk directly linked to the entity by FROM_CHUNK",
+              "minLength": 1,
+              "title": "Chunk Id",
+              "type": "string"
+            },
+            "content": {
+              "description": "Source text stored in the graph generation",
+              "title": "Content",
+              "type": "string"
+            },
+            "end_line": {
+              "description": "Last line of the source chunk",
+              "minimum": 1,
+              "title": "End Line",
+              "type": "integer"
+            },
+            "file_path": {
+              "description": "Stored corpus-relative source path",
+              "minLength": 1,
+              "title": "File Path",
+              "type": "string"
+            },
+            "metadata": {
+              "additionalProperties": true,
+              "description": "Matching indexed chunk location metadata, when present",
+              "title": "Metadata",
+              "type": "object"
+            },
+            "provenance": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ChunkProvenance"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Matching indexed chunk page provenance, when present"
+            },
+            "start_line": {
+              "description": "First line of the source chunk",
+              "minimum": 1,
+              "title": "Start Line",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "chunk_id",
+            "file_path",
+            "start_line",
+            "end_line",
+            "content"
+          ],
+          "title": "GraphEntitySource",
+          "type": "object"
+        },
+        "PageRegion": {
+          "description": "One cited region on a page: top-left origin, normalized to the page size (0..1).",
+          "properties": {
+            "bottom": {
+              "description": "Bottom edge as a fraction of page height",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Bottom",
+              "type": "number"
+            },
+            "left": {
+              "description": "Left edge as a fraction of page width",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Left",
+              "type": "number"
+            },
+            "page": {
+              "description": "1-based page number",
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            },
+            "right": {
+              "description": "Right edge as a fraction of page width",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Right",
+              "type": "number"
+            },
+            "top": {
+              "description": "Top edge as a fraction of page height",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Top",
+              "type": "number"
+            }
+          },
+          "required": [
+            "page",
+            "left",
+            "top",
+            "right",
+            "bottom"
+          ],
+          "title": "PageRegion",
+          "type": "object"
+        }
+      },
+      "properties": {
+        "entity_id": {
+          "title": "Entity Id",
+          "type": "string"
+        },
+        "next_offset": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Next Offset"
+        },
+        "run_id": {
+          "description": "Active manifest token; pass it when requesting another source page",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/GraphEntitySource"
+          },
+          "title": "Sources",
+          "type": "array"
+        }
+      },
+      "required": [
+        "entity_id",
+        "run_id",
+        "sources"
+      ],
+      "title": "GraphEntitySourcesResponse",
+      "type": "object"
+    },
     "GraphExtractionTelemetry": {
       "properties": {
         "attempted_chunks": {
@@ -16214,6 +17182,35 @@
           "title": "Enabled",
           "type": "boolean"
         },
+        "schema_proposal_max_output_tokens": {
+          "default": 16384,
+          "description": "Maximum output tokens for one schema proposal; incomplete responses fail without approval",
+          "maximum": 32768,
+          "minimum": 256,
+          "title": "Schema Proposal Max Output Tokens",
+          "type": "integer"
+        },
+        "schema_proposal_reasoning_effort": {
+          "default": "low",
+          "description": "Reasoning effort for schema proposals, independent of semantic KG extraction effort",
+          "enum": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "title": "Schema Proposal Reasoning Effort",
+          "type": "string"
+        },
+        "schema_proposal_timeout_s": {
+          "default": 60,
+          "description": "Total seconds allowed for schema proposal sampling and generation, below the public HTTP deadline",
+          "maximum": 80,
+          "minimum": 5,
+          "title": "Schema Proposal Timeout S",
+          "type": "integer"
+        },
         "semantic_kg_llm_model": {
           "default": "",
           "description": "Optional LiteLLM alias for GraphRAG semantic extraction; empty uses the gateway default",
@@ -16573,8 +17570,11 @@
               "type": "array"
             },
             "recipe": {
-              "const": "documents-and-positions-v1",
-              "default": "documents-and-positions-v1",
+              "default": "documents-and-positions-v2",
+              "enum": [
+                "documents-and-positions-v1",
+                "documents-and-positions-v2"
+              ],
               "title": "Recipe",
               "type": "string"
             },
@@ -16649,6 +17649,96 @@
       "title": "GraphSchemaProposal",
       "type": "object"
     },
+    "GraphSchemaProposalFailureDetail": {
+      "properties": {
+        "code": {
+          "enum": [
+            "graph_schema_generation_failed",
+            "graph_schema_deadline_exceeded",
+            "graph_schema_context_changed"
+          ],
+          "title": "Code",
+          "type": "string"
+        },
+        "corpus_id": {
+          "title": "Corpus Id",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "model_alias": {
+          "title": "Model Alias",
+          "type": "string"
+        },
+        "operator_hint": {
+          "title": "Operator Hint",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "corpus_id",
+        "model_alias",
+        "message",
+        "operator_hint"
+      ],
+      "title": "GraphSchemaProposalFailureDetail",
+      "type": "object"
+    },
+    "GraphSchemaProposalFailureResponse": {
+      "$defs": {
+        "GraphSchemaProposalFailureDetail": {
+          "properties": {
+            "code": {
+              "enum": [
+                "graph_schema_generation_failed",
+                "graph_schema_deadline_exceeded",
+                "graph_schema_context_changed"
+              ],
+              "title": "Code",
+              "type": "string"
+            },
+            "corpus_id": {
+              "title": "Corpus Id",
+              "type": "string"
+            },
+            "message": {
+              "title": "Message",
+              "type": "string"
+            },
+            "model_alias": {
+              "title": "Model Alias",
+              "type": "string"
+            },
+            "operator_hint": {
+              "title": "Operator Hint",
+              "type": "string"
+            }
+          },
+          "required": [
+            "code",
+            "corpus_id",
+            "model_alias",
+            "message",
+            "operator_hint"
+          ],
+          "title": "GraphSchemaProposalFailureDetail",
+          "type": "object"
+        }
+      },
+      "properties": {
+        "detail": {
+          "$ref": "#/$defs/GraphSchemaProposalFailureDetail"
+        }
+      },
+      "required": [
+        "detail"
+      ],
+      "title": "GraphSchemaProposalFailureResponse",
+      "type": "object"
+    },
     "GraphSchemaProposalRequest": {
       "properties": {
         "force_refresh": {
@@ -16677,8 +17767,11 @@
           "type": "array"
         },
         "recipe": {
-          "const": "documents-and-positions-v1",
-          "default": "documents-and-positions-v1",
+          "default": "documents-and-positions-v2",
+          "enum": [
+            "documents-and-positions-v1",
+            "documents-and-positions-v2"
+          ],
           "title": "Recipe",
           "type": "string"
         },
@@ -16726,6 +17819,14 @@
           "title": "Max Hops",
           "type": "integer"
         },
+        "max_related_entities_per_seed": {
+          "default": 50,
+          "description": "Maximum related entities kept per seed entity during graph traversal, nearest first then most connected. Bounds how far a hub entity can expand.",
+          "maximum": 1000,
+          "minimum": 1,
+          "title": "Max Related Entities Per Seed",
+          "type": "integer"
+        },
         "top_k": {
           "default": 30,
           "description": "Number of results to retrieve from graph search",
@@ -16736,6 +17837,112 @@
         }
       },
       "title": "GraphSearchConfig",
+      "type": "object"
+    },
+    "GraphSourceGenerationChangedDetail": {
+      "properties": {
+        "code": {
+          "const": "graph_generation_changed",
+          "default": "graph_generation_changed",
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "default": "The graph generation changed. Reload this entity's sources.",
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "title": "GraphSourceGenerationChangedDetail",
+      "type": "object"
+    },
+    "GraphSourceGenerationChangedResponse": {
+      "$defs": {
+        "GraphSourceGenerationChangedDetail": {
+          "properties": {
+            "code": {
+              "const": "graph_generation_changed",
+              "default": "graph_generation_changed",
+              "title": "Code",
+              "type": "string"
+            },
+            "message": {
+              "default": "The graph generation changed. Reload this entity's sources.",
+              "title": "Message",
+              "type": "string"
+            }
+          },
+          "title": "GraphSourceGenerationChangedDetail",
+          "type": "object"
+        }
+      },
+      "properties": {
+        "detail": {
+          "$ref": "#/$defs/GraphSourceGenerationChangedDetail"
+        }
+      },
+      "required": [
+        "detail"
+      ],
+      "title": "GraphSourceGenerationChangedResponse",
+      "type": "object"
+    },
+    "GraphSourceReindexRequiredDetail": {
+      "properties": {
+        "code": {
+          "const": "graph_source_reindex_required",
+          "default": "graph_source_reindex_required",
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "default": "Source navigation requires a graph rebuilt with generation-scoped source links.",
+          "title": "Message",
+          "type": "string"
+        },
+        "operator_hint": {
+          "default": "Open Indexing, review the graph schema if prompted, and rebuild this corpus.",
+          "title": "Operator Hint",
+          "type": "string"
+        }
+      },
+      "title": "GraphSourceReindexRequiredDetail",
+      "type": "object"
+    },
+    "GraphSourceReindexRequiredResponse": {
+      "$defs": {
+        "GraphSourceReindexRequiredDetail": {
+          "properties": {
+            "code": {
+              "const": "graph_source_reindex_required",
+              "default": "graph_source_reindex_required",
+              "title": "Code",
+              "type": "string"
+            },
+            "message": {
+              "default": "Source navigation requires a graph rebuilt with generation-scoped source links.",
+              "title": "Message",
+              "type": "string"
+            },
+            "operator_hint": {
+              "default": "Open Indexing, review the graph schema if prompted, and rebuild this corpus.",
+              "title": "Operator Hint",
+              "type": "string"
+            }
+          },
+          "title": "GraphSourceReindexRequiredDetail",
+          "type": "object"
+        }
+      },
+      "properties": {
+        "detail": {
+          "$ref": "#/$defs/GraphSourceReindexRequiredDetail"
+        }
+      },
+      "required": [
+        "detail"
+      ],
+      "title": "GraphSourceReindexRequiredResponse",
       "type": "object"
     },
     "GraphStats": {
@@ -17695,7 +18902,7 @@
         },
         "force_reindex": {
           "default": false,
-          "description": "Force full reindex even if up-to-date",
+          "description": "Allow changed embedding settings during a full rebuild. The active index is replaced only after validation.",
           "title": "Force Reindex",
           "type": "boolean"
         },
@@ -21271,6 +22478,1370 @@
       "title": "LokiStatus",
       "type": "object"
     },
+    "MCPAnswerToolResult": {
+      "$defs": {
+        "AnswerResponse": {
+          "description": "Response from AI answer generation.",
+          "properties": {
+            "answer": {
+              "description": "Generated answer",
+              "title": "Answer",
+              "type": "string"
+            },
+            "debug": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ChatDebugInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Developer debug metadata (best-effort)"
+            },
+            "latency_ms": {
+              "description": "Generation latency in milliseconds",
+              "title": "Latency Ms",
+              "type": "number"
+            },
+            "model": {
+              "description": "Model used for generation",
+              "title": "Model",
+              "type": "string"
+            },
+            "query": {
+              "description": "The original question",
+              "title": "Query",
+              "type": "string"
+            },
+            "sources": {
+              "description": "Chunks used to generate answer",
+              "items": {
+                "$ref": "#/$defs/ChunkMatch"
+              },
+              "title": "Sources",
+              "type": "array"
+            },
+            "tokens_used": {
+              "description": "Total tokens consumed",
+              "title": "Tokens Used",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "query",
+            "answer",
+            "sources",
+            "model",
+            "tokens_used",
+            "latency_ms"
+          ],
+          "title": "AnswerResponse",
+          "type": "object"
+        },
+        "AnswerRetrievalFailureDetail": {
+          "description": "Public error detail returned when answer retrieval fails for an untyped reason (HTTP 503).",
+          "properties": {
+            "code": {
+              "const": "answer_retrieval_failed",
+              "default": "answer_retrieval_failed",
+              "title": "Code",
+              "type": "string"
+            },
+            "message": {
+              "description": "Stable, non-sensitive failure summary",
+              "title": "Message",
+              "type": "string"
+            },
+            "operation": {
+              "description": "Retrieval operation that could not complete",
+              "title": "Operation",
+              "type": "string"
+            },
+            "operator_hint": {
+              "description": "High-signal next step for the operator",
+              "title": "Operator Hint",
+              "type": "string"
+            },
+            "reason": {
+              "description": "Sanitised reason from the retrieval lane (no secrets, no raw payloads)",
+              "title": "Reason",
+              "type": "string"
+            },
+            "retryable": {
+              "default": true,
+              "description": "Whether the caller may retry after remediation",
+              "title": "Retryable",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "operation",
+            "message",
+            "reason",
+            "operator_hint"
+          ],
+          "title": "AnswerRetrievalFailureDetail",
+          "type": "object"
+        },
+        "ChatDebugInfo": {
+          "description": "Developer-facing debug metadata for a single chat answer.",
+          "properties": {
+            "avg5_score": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Average fused score for top-5 (raw)",
+              "title": "Avg5 Score"
+            },
+            "conf_avg5_thresh": {
+              "anyOf": [
+                {
+                  "maximum": 1.0,
+                  "minimum": 0.0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Configured avg-5 confidence threshold",
+              "title": "Conf Avg5 Thresh"
+            },
+            "conf_top1_thresh": {
+              "anyOf": [
+                {
+                  "maximum": 1.0,
+                  "minimum": 0.0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Configured top-1 confidence threshold",
+              "title": "Conf Top1 Thresh"
+            },
+            "confidence": {
+              "anyOf": [
+                {
+                  "maximum": 1.0,
+                  "minimum": 0.0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Heuristic confidence score for this answer (0-1).",
+              "title": "Confidence"
+            },
+            "final_k_used": {
+              "anyOf": [
+                {
+                  "maximum": 500,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Final K used for retrieval context",
+              "title": "Final K Used"
+            },
+            "final_results": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Final fused results returned",
+              "title": "Final Results"
+            },
+            "fusion_debug": {
+              "additionalProperties": true,
+              "description": "Raw fusion debug payload (for developers).",
+              "title": "Fusion Debug",
+              "type": "object"
+            },
+            "fusion_method": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "rrf",
+                    "weighted"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Fusion method used for retrieval results",
+              "title": "Fusion Method"
+            },
+            "graph_community_expansion_hits": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Chunks found through graph communities",
+              "title": "Graph Community Expansion Hits"
+            },
+            "graph_enabled": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Graph leg enabled in config",
+              "title": "Graph Enabled"
+            },
+            "graph_hydrated_chunks": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Graph hydrated chunks returned",
+              "title": "Graph Hydrated Chunks"
+            },
+            "graph_qdrant_seed_chunks": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Qdrant seed chunks passed to graph traversal",
+              "title": "Graph Qdrant Seed Chunks"
+            },
+            "graph_relationship_expansion_hits": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Chunks found through entity relationships",
+              "title": "Graph Relationship Expansion Hits"
+            },
+            "graph_resolved_entities": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Unique graph entities resolved during traversal",
+              "title": "Graph Resolved Entities"
+            },
+            "graph_weight": {
+              "anyOf": [
+                {
+                  "maximum": 1.0,
+                  "minimum": 0.0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Graph weight (if fusion_method is weighted)",
+              "title": "Graph Weight"
+            },
+            "include_graph": {
+              "default": true,
+              "description": "Graph leg requested for this message",
+              "title": "Include Graph",
+              "type": "boolean"
+            },
+            "include_sparse": {
+              "default": true,
+              "description": "Sparse/BM25 leg requested for this message",
+              "title": "Include Sparse",
+              "type": "boolean"
+            },
+            "include_vector": {
+              "default": true,
+              "description": "Vector leg requested for this message",
+              "title": "Include Vector",
+              "type": "boolean"
+            },
+            "llm_error": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Short best-effort reason generation failed or was unavailable (never includes secrets).",
+              "title": "Llm Error"
+            },
+            "llm_used": {
+              "default": true,
+              "description": "Whether an LLM/provider response was successfully used for the answer.",
+              "title": "Llm Used",
+              "type": "boolean"
+            },
+            "normalize_scores": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Whether leg score normalization was enabled",
+              "title": "Normalize Scores"
+            },
+            "provider": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ChatProviderInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Provider route selected for this answer."
+            },
+            "recall_plan": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/RecallPlan"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Recall gate decision for this message (Recall only; RAG corpora are always queried when checked)."
+            },
+            "rerank": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/RerankDebugInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Reranker status for the non-Recall (RAG) retrieval stage, when available."
+            },
+            "rrf_k": {
+              "anyOf": [
+                {
+                  "maximum": 200,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "RRF k (if fusion_method is rrf)",
+              "title": "Rrf K"
+            },
+            "sparse_enabled": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Sparse leg enabled in config",
+              "title": "Sparse Enabled"
+            },
+            "sparse_results": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Sparse leg results returned",
+              "title": "Sparse Results"
+            },
+            "sparse_weight": {
+              "anyOf": [
+                {
+                  "maximum": 1.0,
+                  "minimum": 0.0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Sparse weight (if fusion_method is weighted)",
+              "title": "Sparse Weight"
+            },
+            "top1_score": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Top-1 fused score (raw)",
+              "title": "Top1 Score"
+            },
+            "vector_enabled": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Vector leg enabled in config",
+              "title": "Vector Enabled"
+            },
+            "vector_results": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Vector leg results returned",
+              "title": "Vector Results"
+            },
+            "vector_weight": {
+              "anyOf": [
+                {
+                  "maximum": 1.0,
+                  "minimum": 0.0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Vector weight (if fusion_method is weighted)",
+              "title": "Vector Weight"
+            }
+          },
+          "title": "ChatDebugInfo",
+          "type": "object"
+        },
+        "ChatProviderInfo": {
+          "description": "Selected provider route for a chat answer.",
+          "properties": {
+            "base_url": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "LiteLLM OpenAI-compatible base URL",
+              "title": "Base Url"
+            },
+            "kind": {
+              "const": "litellm",
+              "description": "Application-visible generation boundary",
+              "title": "Kind",
+              "type": "string"
+            },
+            "model": {
+              "description": "LiteLLM model alias",
+              "title": "Model",
+              "type": "string"
+            },
+            "provider_name": {
+              "description": "Gateway display name",
+              "title": "Provider Name",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "provider_name",
+            "model"
+          ],
+          "title": "ChatProviderInfo",
+          "type": "object"
+        },
+        "ChunkMatch": {
+          "description": "Unified result shape for vector/sparse/graph retrieval.",
+          "properties": {
+            "chunk_id": {
+              "description": "Unique identifier for matched chunk",
+              "title": "Chunk Id",
+              "type": "string"
+            },
+            "content": {
+              "description": "The matched code/text content",
+              "title": "Content",
+              "type": "string"
+            },
+            "end_line": {
+              "description": "Ending line number",
+              "title": "End Line",
+              "type": "integer"
+            },
+            "file_path": {
+              "description": "Path to the source file",
+              "title": "File Path",
+              "type": "string"
+            },
+            "language": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Programming language",
+              "title": "Language"
+            },
+            "metadata": {
+              "additionalProperties": true,
+              "description": "Additional match metadata",
+              "title": "Metadata",
+              "type": "object"
+            },
+            "provenance": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ChunkProvenance"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Extraction and page provenance; None for chunks indexed before provenance capture"
+            },
+            "score": {
+              "description": "Relevance score from retrieval",
+              "title": "Score",
+              "type": "number"
+            },
+            "source": {
+              "description": "Which retrieval leg found this",
+              "enum": [
+                "vector",
+                "sparse",
+                "graph"
+              ],
+              "title": "Source",
+              "type": "string"
+            },
+            "start_line": {
+              "description": "Starting line number",
+              "title": "Start Line",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "chunk_id",
+            "content",
+            "file_path",
+            "start_line",
+            "end_line",
+            "score",
+            "source"
+          ],
+          "title": "ChunkMatch",
+          "type": "object"
+        },
+        "ChunkProvenance": {
+          "description": "Where a chunk came from in its source document: extraction method plus page regions.\n\nDirect text/code extraction has line spans only (``regions`` empty, pages ``None``).\nDocling extraction carries one region per contributing layout item.",
+          "properties": {
+            "extraction": {
+              "description": "How the source text was extracted",
+              "enum": [
+                "docling",
+                "direct"
+              ],
+              "title": "Extraction",
+              "type": "string"
+            },
+            "page_end": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Last cited page (1-based)",
+              "title": "Page End"
+            },
+            "page_start": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "First cited page (1-based)",
+              "title": "Page Start"
+            },
+            "regions": {
+              "description": "Layout regions the chunk text was taken from",
+              "items": {
+                "$ref": "#/$defs/PageRegion"
+              },
+              "title": "Regions",
+              "type": "array"
+            }
+          },
+          "required": [
+            "extraction"
+          ],
+          "title": "ChunkProvenance",
+          "type": "object"
+        },
+        "DependencyUnavailableDetail": {
+          "description": "Public error detail returned when a required runtime dependency is unavailable.",
+          "properties": {
+            "code": {
+              "const": "dependency_unavailable",
+              "default": "dependency_unavailable",
+              "title": "Code",
+              "type": "string"
+            },
+            "dependency": {
+              "description": "Unavailable required dependency",
+              "enum": [
+                "postgres",
+                "neo4j",
+                "qdrant",
+                "embedding_provider",
+                "ragas",
+                "promptfoo",
+                "feedback_log",
+                "lineage_store"
+              ],
+              "title": "Dependency",
+              "type": "string"
+            },
+            "message": {
+              "description": "Stable, non-sensitive failure summary",
+              "title": "Message",
+              "type": "string"
+            },
+            "operation": {
+              "description": "API operation that could not complete",
+              "title": "Operation",
+              "type": "string"
+            },
+            "operator_hint": {
+              "description": "High-signal next step for the operator",
+              "title": "Operator Hint",
+              "type": "string"
+            },
+            "retryable": {
+              "default": true,
+              "description": "Whether the caller may retry after operator remediation",
+              "title": "Retryable",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "dependency",
+            "operation",
+            "message",
+            "operator_hint"
+          ],
+          "title": "DependencyUnavailableDetail",
+          "type": "object"
+        },
+        "GenerationUnavailableDetail": {
+          "description": "Public error detail returned when the generation gateway cannot complete.",
+          "properties": {
+            "code": {
+              "const": "generation_unavailable",
+              "default": "generation_unavailable",
+              "title": "Code",
+              "type": "string"
+            },
+            "failure_kind": {
+              "description": "Why generation could not complete, classified from the sanitised reason: a provider key spending limit, a rejected key, an unreachable serving lane behind the gateway, an unreachable gateway, or an unclassified gateway failure",
+              "enum": [
+                "spend_limit",
+                "auth",
+                "upstream_unreachable",
+                "gateway_unreachable",
+                "gateway"
+              ],
+              "title": "Failure Kind",
+              "type": "string"
+            },
+            "gateway_reason": {
+              "description": "Sanitised reason the gateway or provider returned (secrets and URLs removed, truncated)",
+              "title": "Gateway Reason",
+              "type": "string"
+            },
+            "message": {
+              "description": "Stable, non-sensitive failure summary",
+              "title": "Message",
+              "type": "string"
+            },
+            "operation": {
+              "description": "Generation operation that could not complete",
+              "title": "Operation",
+              "type": "string"
+            },
+            "operator_hint": {
+              "description": "High-signal next step for the operator, chosen from failure_kind",
+              "title": "Operator Hint",
+              "type": "string"
+            },
+            "retryable": {
+              "default": true,
+              "description": "Whether the caller may retry after remediation",
+              "title": "Retryable",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "operation",
+            "message",
+            "operator_hint",
+            "failure_kind",
+            "gateway_reason"
+          ],
+          "title": "GenerationUnavailableDetail",
+          "type": "object"
+        },
+        "PageRegion": {
+          "description": "One cited region on a page: top-left origin, normalized to the page size (0..1).",
+          "properties": {
+            "bottom": {
+              "description": "Bottom edge as a fraction of page height",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Bottom",
+              "type": "number"
+            },
+            "left": {
+              "description": "Left edge as a fraction of page width",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Left",
+              "type": "number"
+            },
+            "page": {
+              "description": "1-based page number",
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            },
+            "right": {
+              "description": "Right edge as a fraction of page width",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Right",
+              "type": "number"
+            },
+            "top": {
+              "description": "Top edge as a fraction of page height",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Top",
+              "type": "number"
+            }
+          },
+          "required": [
+            "page",
+            "left",
+            "top",
+            "right",
+            "bottom"
+          ],
+          "title": "PageRegion",
+          "type": "object"
+        },
+        "RecallFusionOverrides": {
+          "description": "Per-message overrides applied when querying Recall.\n\nThe gate generates these. They do not permanently change config.\nThey are applied only for this single Recall query.",
+          "properties": {
+            "enable_rerank": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Override reranker for Recall. None=use config default.",
+              "title": "Enable Rerank"
+            },
+            "include_sparse": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Override sparse leg. None=use request/default.",
+              "title": "Include Sparse"
+            },
+            "include_vector": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Override vector leg. None=use request/default.",
+              "title": "Include Vector"
+            },
+            "recency_weight": {
+              "anyOf": [
+                {
+                  "maximum": 1.0,
+                  "minimum": 0.0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "How much to weight recent messages over relevance (0=relevance, 1=recency).",
+              "title": "Recency Weight"
+            },
+            "top_k": {
+              "anyOf": [
+                {
+                  "maximum": 50,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Override final_k for the Recall query. Lower than RAG since chat chunks are smaller.",
+              "title": "Top K"
+            }
+          },
+          "title": "RecallFusionOverrides",
+          "type": "object"
+        },
+        "RecallIntensity": {
+          "description": "How aggressively to query Recall (chat memory) for a single message.\n\nNOTE:\n- This is an optimization hint decided per-message (or overridden by the user).\n- It only applies to the Recall corpus. Non-Recall RAG corpora are always queried when checked.",
+          "enum": [
+            "skip",
+            "light",
+            "standard",
+            "deep"
+          ],
+          "title": "RecallIntensity",
+          "type": "string"
+        },
+        "RecallPlan": {
+          "description": "The gate's decision for whether/how to query Recall for a single message.",
+          "properties": {
+            "fusion_overrides": {
+              "$ref": "#/$defs/RecallFusionOverrides",
+              "description": "Per-message parameter patches for Recall query."
+            },
+            "intensity": {
+              "$ref": "#/$defs/RecallIntensity",
+              "description": "How aggressively to query Recall."
+            },
+            "reason": {
+              "description": "Human-readable explanation for the decision. E.g., 'Greeting \u2014 skipping Recall' or 'Past reference \u2014 querying Recall'",
+              "title": "Reason",
+              "type": "string"
+            },
+            "signals": {
+              "$ref": "#/$defs/RecallSignals",
+              "description": "Signals that drove this decision."
+            },
+            "user_override": {
+              "default": false,
+              "description": "True if the user manually overrode intensity for this message.",
+              "title": "User Override",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "intensity",
+            "signals",
+            "reason"
+          ],
+          "title": "RecallPlan",
+          "type": "object"
+        },
+        "RecallSignals": {
+          "description": "Signals extracted from the user's message + conversation context.\n\nUsed by the Recall gate to decide Recall intensity. Exposed in debug metadata.\nAll fields are cheap to compute (no LLM calls, no embeddings).",
+          "properties": {
+            "conversation_turn": {
+              "description": "0-indexed user turn number in current conversation",
+              "title": "Conversation Turn",
+              "type": "integer"
+            },
+            "has_definite_article": {
+              "description": "'the function', 'the bug', 'the config' \u2014 assumes shared context",
+              "title": "Has Definite Article",
+              "type": "boolean"
+            },
+            "is_acknowledgment": {
+              "description": "'ok', 'thanks', 'got it', etc.",
+              "title": "Is Acknowledgment",
+              "type": "boolean"
+            },
+            "is_follow_up": {
+              "description": "Continuation of prior topic \u2014 short message after retrieval-backed reply",
+              "title": "Is Follow Up",
+              "type": "boolean"
+            },
+            "is_greeting": {
+              "description": "Matches greeting/farewell patterns",
+              "title": "Is Greeting",
+              "type": "boolean"
+            },
+            "is_question": {
+              "description": "Contains ? or interrogative pattern",
+              "title": "Is Question",
+              "type": "boolean"
+            },
+            "is_recall_trigger": {
+              "description": "Explicit past reference: 'we discussed', 'you mentioned', 'last time', 'remember when', 'as I said before'",
+              "title": "Is Recall Trigger",
+              "type": "boolean"
+            },
+            "is_standalone_question": {
+              "description": "Question that makes sense without conversation history (code/concept questions vs 'what did we decide?')",
+              "title": "Is Standalone Question",
+              "type": "boolean"
+            },
+            "last_recall_had_results": {
+              "default": true,
+              "description": "Did the previous message's Recall query return >0 chunks?",
+              "title": "Last Recall Had Results",
+              "type": "boolean"
+            },
+            "rag_corpora_active": {
+              "description": "Are any non-Recall corpora checked?",
+              "title": "Rag Corpora Active",
+              "type": "boolean"
+            },
+            "token_count": {
+              "description": "Approximate token count of message",
+              "title": "Token Count",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "token_count",
+            "is_question",
+            "is_greeting",
+            "is_acknowledgment",
+            "is_follow_up",
+            "is_recall_trigger",
+            "has_definite_article",
+            "is_standalone_question",
+            "conversation_turn",
+            "rag_corpora_active"
+          ],
+          "title": "RecallSignals",
+          "type": "object"
+        },
+        "RequiredRetrievalLegFailureDetail": {
+          "description": "Public error detail returned when a requested retrieval leg fails.",
+          "properties": {
+            "code": {
+              "const": "required_retrieval_leg_failed",
+              "default": "required_retrieval_leg_failed",
+              "title": "Code",
+              "type": "string"
+            },
+            "leg": {
+              "description": "Requested retrieval leg",
+              "enum": [
+                "vector",
+                "sparse",
+                "graph"
+              ],
+              "title": "Leg",
+              "type": "string"
+            },
+            "message": {
+              "description": "Stable, non-sensitive failure summary",
+              "title": "Message",
+              "type": "string"
+            },
+            "operation": {
+              "description": "Retrieval operation that could not complete",
+              "title": "Operation",
+              "type": "string"
+            },
+            "operator_hint": {
+              "description": "High-signal next step for the operator",
+              "title": "Operator Hint",
+              "type": "string"
+            },
+            "retryable": {
+              "default": true,
+              "description": "Whether the caller may retry after remediation",
+              "title": "Retryable",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "leg",
+            "operation",
+            "message",
+            "operator_hint"
+          ],
+          "title": "RequiredRetrievalLegFailureDetail",
+          "type": "object"
+        },
+        "RerankDebugInfo": {
+          "description": "Reranker status for a single retrieval run (best-effort).",
+          "properties": {
+            "applied": {
+              "description": "Whether reranking was actually applied to the results.",
+              "title": "Applied",
+              "type": "boolean"
+            },
+            "candidates_reranked": {
+              "default": 0,
+              "description": "Number of candidates reranked.",
+              "minimum": 0,
+              "title": "Candidates Reranked",
+              "type": "integer"
+            },
+            "config_corpus_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Corpus id whose config was used for reranking (for mixed-corpus queries).",
+              "title": "Config Corpus Id"
+            },
+            "debug_trace_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Provider debug trace id when available (e.g., x-debug-trace-id).",
+              "title": "Debug Trace Id"
+            },
+            "enabled": {
+              "description": "Whether reranking was enabled for this run.",
+              "title": "Enabled",
+              "type": "boolean"
+            },
+            "error": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Raw reranker error (if any).",
+              "title": "Error"
+            },
+            "error_message": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Short user-facing error message (if available).",
+              "title": "Error Message"
+            },
+            "mode": {
+              "description": "Reranker mode used (cloud/local/learning/none).",
+              "title": "Mode",
+              "type": "string"
+            },
+            "ok": {
+              "description": "Whether reranking completed without error.",
+              "title": "Ok",
+              "type": "boolean"
+            },
+            "skipped_reason": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Reason reranking was skipped (if any).",
+              "title": "Skipped Reason"
+            }
+          },
+          "required": [
+            "enabled",
+            "mode",
+            "ok",
+            "applied"
+          ],
+          "title": "RerankDebugInfo",
+          "type": "object"
+        },
+        "RerankerFailureDetail": {
+          "description": "Public error detail returned when a configured reranker cannot rerank (HTTP 503).",
+          "properties": {
+            "code": {
+              "const": "reranker_failed",
+              "default": "reranker_failed",
+              "title": "Code",
+              "type": "string"
+            },
+            "message": {
+              "description": "Stable, non-sensitive failure summary",
+              "title": "Message",
+              "type": "string"
+            },
+            "mode": {
+              "description": "Configured reranker mode that failed",
+              "enum": [
+                "learning",
+                "cloud"
+              ],
+              "title": "Mode",
+              "type": "string"
+            },
+            "operator_hint": {
+              "description": "High-signal next step for the operator",
+              "title": "Operator Hint",
+              "type": "string"
+            },
+            "reason": {
+              "description": "Sanitised reason from the reranker lane (no secrets, no raw payloads)",
+              "title": "Reason",
+              "type": "string"
+            },
+            "retryable": {
+              "default": true,
+              "description": "Whether the caller may retry after remediation",
+              "title": "Retryable",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "mode",
+            "message",
+            "reason",
+            "operator_hint"
+          ],
+          "title": "RerankerFailureDetail",
+          "type": "object"
+        },
+        "RetrievalContractMismatchDetail": {
+          "description": "Public error detail returned when a stored index contract blocks a retrieval request.",
+          "properties": {
+            "code": {
+              "description": "Stable mismatch code, e.g. embedding_contract_mismatch",
+              "title": "Code",
+              "type": "string"
+            },
+            "corpus_id": {
+              "description": "Corpus whose stored index contract conflicts with the current configuration",
+              "title": "Corpus Id",
+              "type": "string"
+            },
+            "current_contract": {
+              "additionalProperties": true,
+              "description": "Contract implied by the current runtime configuration",
+              "title": "Current Contract",
+              "type": "object"
+            },
+            "expected_contract": {
+              "additionalProperties": true,
+              "description": "Contract recorded when the corpus was indexed",
+              "title": "Expected Contract",
+              "type": "object"
+            },
+            "leg": {
+              "description": "Retrieval leg governed by the mismatched contract",
+              "enum": [
+                "vector",
+                "sparse",
+                "graph"
+              ],
+              "title": "Leg",
+              "type": "string"
+            },
+            "required_action": {
+              "description": "Exact operator action required to resolve the mismatch",
+              "title": "Required Action",
+              "type": "string"
+            }
+          },
+          "required": [
+            "code",
+            "corpus_id",
+            "leg",
+            "expected_contract",
+            "current_contract",
+            "required_action"
+          ],
+          "title": "RetrievalContractMismatchDetail",
+          "type": "object"
+        }
+      },
+      "description": "Structured MCP answer result, including typed fail-closed tool errors.",
+      "properties": {
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DependencyUnavailableDetail"
+            },
+            {
+              "$ref": "#/$defs/RequiredRetrievalLegFailureDetail"
+            },
+            {
+              "$ref": "#/$defs/RerankerFailureDetail"
+            },
+            {
+              "$ref": "#/$defs/RetrievalContractMismatchDetail"
+            },
+            {
+              "$ref": "#/$defs/AnswerRetrievalFailureDetail"
+            },
+            {
+              "$ref": "#/$defs/GenerationUnavailableDetail"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Typed failure returned with isError=true.",
+          "title": "Error"
+        },
+        "result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AnswerResponse"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The answer when the tool succeeded."
+        }
+      },
+      "title": "MCPAnswerToolResult",
+      "type": "object"
+    },
     "MCPConfig": {
       "description": "Inbound MCP (Model Context Protocol) server configuration.\n\nThis config controls TriBridRAG's embedded MCP Streamable HTTP endpoint.",
       "properties": {
@@ -21688,7 +24259,7 @@
           "type": "string"
         },
         "mode": {
-          "description": "Retrieval mode the tool resolved (request override or mcp.default_mode).",
+          "description": "Retrieval mode the tool actually applied: the request override, or the default the MOUNTED server captured at process start (not the persisted `mcp.default_mode`, which only takes effect on a restart).",
           "title": "Mode",
           "type": "string"
         },
@@ -21707,7 +24278,7 @@
           "type": "string"
         },
         "top_k": {
-          "description": "Result count the tool resolved.",
+          "description": "Result count the tool actually applied: the request override, or the MOUNTED server's captured `default_top_k`.",
           "minimum": 1,
           "title": "Top K",
           "type": "integer"
@@ -22024,6 +24595,55 @@
           "title": "RequiredRetrievalLegFailureDetail",
           "type": "object"
         },
+        "RerankerFailureDetail": {
+          "description": "Public error detail returned when a configured reranker cannot rerank (HTTP 503).",
+          "properties": {
+            "code": {
+              "const": "reranker_failed",
+              "default": "reranker_failed",
+              "title": "Code",
+              "type": "string"
+            },
+            "message": {
+              "description": "Stable, non-sensitive failure summary",
+              "title": "Message",
+              "type": "string"
+            },
+            "mode": {
+              "description": "Configured reranker mode that failed",
+              "enum": [
+                "learning",
+                "cloud"
+              ],
+              "title": "Mode",
+              "type": "string"
+            },
+            "operator_hint": {
+              "description": "High-signal next step for the operator",
+              "title": "Operator Hint",
+              "type": "string"
+            },
+            "reason": {
+              "description": "Sanitised reason from the reranker lane (no secrets, no raw payloads)",
+              "title": "Reason",
+              "type": "string"
+            },
+            "retryable": {
+              "default": true,
+              "description": "Whether the caller may retry after remediation",
+              "title": "Retryable",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "mode",
+            "message",
+            "reason",
+            "operator_hint"
+          ],
+          "title": "RerankerFailureDetail",
+          "type": "object"
+        },
         "RetrievalContractMismatchDetail": {
           "description": "Public error detail returned when a stored index contract blocks a retrieval request.",
           "properties": {
@@ -22086,6 +24706,9 @@
             },
             {
               "$ref": "#/$defs/RequiredRetrievalLegFailureDetail"
+            },
+            {
+              "$ref": "#/$defs/RerankerFailureDetail"
             },
             {
               "$ref": "#/$defs/RetrievalContractMismatchDetail"
@@ -22210,6 +24833,66 @@
       },
       "description": "Status of MCP transports built into TriBridRAG.",
       "properties": {
+        "config_default_mode": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "`config.mcp.default_mode` as persisted right now (what a restart would mount).",
+          "title": "Config Default Mode"
+        },
+        "config_default_top_k": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "`config.mcp.default_top_k` as persisted right now (what a restart would mount).",
+          "title": "Config Default Top K"
+        },
+        "default_mode": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Retrieval mode the MOUNTED `search`/`answer` tools apply when a call sends no `mode`. Captured when this process built the MCP server; null when no server is built in this process.",
+          "title": "Default Mode"
+        },
+        "default_top_k": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Result count the MOUNTED tools apply when a call sends no `top_k`. Captured when this process built the MCP server; null when no server is built in this process.",
+          "title": "Default Top K"
+        },
+        "defaults_restart_pending": {
+          "default": false,
+          "description": "True when the persisted MCP tool defaults differ from the ones the mounted tools captured, so the API must be restarted before an MCP client sees the new values.",
+          "title": "Defaults Restart Pending",
+          "type": "boolean"
+        },
         "details": {
           "description": "Human-readable diagnostic details (best-effort).",
           "items": {
@@ -28174,6 +30857,119 @@
       "title": "RerankerEvaluateResponse",
       "type": "object"
     },
+    "RerankerFailureDetail": {
+      "description": "Public error detail returned when a configured reranker cannot rerank (HTTP 503).",
+      "properties": {
+        "code": {
+          "const": "reranker_failed",
+          "default": "reranker_failed",
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "description": "Stable, non-sensitive failure summary",
+          "title": "Message",
+          "type": "string"
+        },
+        "mode": {
+          "description": "Configured reranker mode that failed",
+          "enum": [
+            "learning",
+            "cloud"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "operator_hint": {
+          "description": "High-signal next step for the operator",
+          "title": "Operator Hint",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Sanitised reason from the reranker lane (no secrets, no raw payloads)",
+          "title": "Reason",
+          "type": "string"
+        },
+        "retryable": {
+          "default": true,
+          "description": "Whether the caller may retry after remediation",
+          "title": "Retryable",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "mode",
+        "message",
+        "reason",
+        "operator_hint"
+      ],
+      "title": "RerankerFailureDetail",
+      "type": "object"
+    },
+    "RerankerFailureResponse": {
+      "$defs": {
+        "RerankerFailureDetail": {
+          "description": "Public error detail returned when a configured reranker cannot rerank (HTTP 503).",
+          "properties": {
+            "code": {
+              "const": "reranker_failed",
+              "default": "reranker_failed",
+              "title": "Code",
+              "type": "string"
+            },
+            "message": {
+              "description": "Stable, non-sensitive failure summary",
+              "title": "Message",
+              "type": "string"
+            },
+            "mode": {
+              "description": "Configured reranker mode that failed",
+              "enum": [
+                "learning",
+                "cloud"
+              ],
+              "title": "Mode",
+              "type": "string"
+            },
+            "operator_hint": {
+              "description": "High-signal next step for the operator",
+              "title": "Operator Hint",
+              "type": "string"
+            },
+            "reason": {
+              "description": "Sanitised reason from the reranker lane (no secrets, no raw payloads)",
+              "title": "Reason",
+              "type": "string"
+            },
+            "retryable": {
+              "default": true,
+              "description": "Whether the caller may retry after remediation",
+              "title": "Retryable",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "mode",
+            "message",
+            "reason",
+            "operator_hint"
+          ],
+          "title": "RerankerFailureDetail",
+          "type": "object"
+        }
+      },
+      "description": "FastAPI response envelope for a configured-reranker failure.",
+      "properties": {
+        "detail": {
+          "$ref": "#/$defs/RerankerFailureDetail"
+        }
+      },
+      "required": [
+        "detail"
+      ],
+      "title": "RerankerFailureResponse",
+      "type": "object"
+    },
     "RerankerInfoResponse": {
       "description": "Response payload for GET /api/reranker/info (no secrets).",
       "properties": {
@@ -31226,8 +34022,8 @@
           "type": "integer"
         },
         "reranker_cloud_model": {
-          "default": "openai.gpt-4.1-nano",
-          "description": "Cloud reranker model when mode=cloud: a LiteLLM gateway alias for provider 'litellm' (a cheap non-reasoning instruct model is ideal), or a Cohere rerank model id for provider 'cohere'.",
+          "default": "",
+          "description": "Cloud reranker model when mode=cloud: a LiteLLM gateway alias for provider 'litellm' or a Cohere rerank model id for provider 'cohere'. Select an allowed model before enabling cloud reranking.",
           "title": "Reranker Cloud Model",
           "type": "string"
         },
@@ -34745,7 +37541,7 @@
           "type": "string"
         },
         "semantic_kg_extraction": {
-          "default": "You are a top-tier algorithm designed for extracting information in structured formats to build a knowledge graph.\n\nExtract the entities (nodes) and specify their type from the following text. Also extract the relationships between these nodes.\n\nReturn result as JSON using the following format:\n{{\"nodes\": [ {{\"id\": \"0\", \"label\": \"Person\", \"properties\": {{\"name\": \"John\"}} }}],\n\"relationships\": [{{\"type\": \"KNOWS\", \"start_node_id\": \"0\", \"end_node_id\": \"1\", \"properties\": {{\"since\": \"2024-08-01\"}} }}] }}\n\nUse only the following node and relationship types (if provided):\n{schema}\n\nNaming rules. Every node carries a \"name\" property; it is the entity's identity for merging across chunks and for display:\n- \"name\" must be an identifier a reader would recognise: a person's full name as written, an organisation's name, a place name, a document's subject line or title, a dated event.\n- Name an email or message by its subject line when the text shows one. When the subject is empty or is only reply/forward markers such as \"Re:\", \"RE: Re:\" or \"Fw:\", name it \"<sender> to <recipient>, <date>\" from the message metadata instead.\n- Never use OCR artifacts, scanner noise, bare numbers, punctuation runs, redaction bars or redaction markers such as \"<REDACTED>\", single letters or fragments such as \"-11>\", \"<=11IM11.11>\", \"777\" or \"Re:\" as a name. A redacted party is not an entity: leave it out. If the text gives an entity no readable identifier, leave that entity out rather than inventing one.\n- Copy names exactly as written (no expansions or aliases you did not read) and reuse one spelling for the same entity within the chunk.\n\nAssign a unique ID (string) to each node, and reuse it to define relationships.\nDo respect the source and target node types for relationship and the relationship direction.\n\nMake sure you adhere to the following rules to produce valid JSON objects:\n- Do not return any additional information other than the JSON in it.\n- Omit any backticks around the JSON - simply output the JSON on its own.\n- The JSON object must not wrapped into a list - it is its own JSON object.\n- Property names must be enclosed in double quotes\n\nExamples:\n{examples}\n\nInput text:\n\n{text}",
+          "default": "You are a top-tier algorithm designed for extracting information in structured formats to build a knowledge graph.\n\nExtract the entities (nodes) and specify their type from the following text. Also extract the relationships between these nodes.\n\nReturn result as JSON using the following format:\n{{\"nodes\": [ {{\"id\": \"0\", \"label\": \"Person\", \"properties\": {{\"name\": \"John\"}} }}],\n\"relationships\": [{{\"type\": \"KNOWS\", \"start_node_id\": \"0\", \"end_node_id\": \"1\", \"properties\": {{\"since\": \"2024-08-01\"}} }}] }}\n\nUse only the following node and relationship types (if provided):\n{schema}\n\nNaming rules. Every node carries a \"name\" property; it is the entity's identity for merging across chunks and for display:\n- \"name\" must be an identifier a reader would recognise: a person's full name as written, an organisation's name, a place name, a document's subject line or title, a dated event.\n- Name an email or message by its subject line when the text shows one. When the subject is empty or is only reply/forward markers such as \"Re:\", \"RE: Re:\" or \"Fw:\", name it \"<sender> to <recipient>, <date>\" from the message metadata instead.\n- Never use OCR artifacts, scanner noise, bare numbers, punctuation runs, redaction bars or redaction markers such as \"<REDACTED>\", single letters or fragments such as \"-11>\", \"<=11IM11.11>\", \"777\" or \"Re:\" as a name. A redacted party is not an entity: leave it out. If the text gives an entity no readable identifier, leave that entity out rather than inventing one.\n- Copy names exactly as written (no expansions or aliases you did not read) and reuse one spelling for the same entity within the chunk.\n\nAssign a unique ID (string) to each node, and reuse it to define relationships.\nDo respect the source and target node types for relationship and the relationship direction.\n\nGrounding rules:\n- Extract a relationship only when this passage explicitly supports that relationship between those exact entities. The schema lists allowed relationships; it is not evidence that any relationship occurred. Omit unsupported edges even when both entities appear.\n- Adjacency, temporal order, shared headings, and neighboring table rows do not establish causality, inhibition, correction, or any other relationship. Preserve a relationship stated within a table row only when its columns or wording establish the endpoints and meaning; never connect separate event rows merely because one follows another.\n- Respect clause scope and distinguish context from mechanism. In a list of separate changes or actions, do not transfer one clause's target or condition to another. \"An alarm was prevented during an operation\" does not say that the operation prevented the alarm; omit a causal or preventive edge when the text does not identify its agent.\n- Keep every status and other attribute attached to the entity and section that states it. A new heading starts a new section. Do not carry \"closed\", \"resolved\", \"failed\", dates, or other attributes from the preceding section into the next one. If a chunk starts mid-section and an attribute's subject is unclear, omit that attribute.\n- Preserve negation and uncertainty. Do not turn \"did not cause\", \"may have caused\", \"possible\", \"suspected\", or an open investigation into an affirmative causal fact. Represent a negated or uncertain relationship only if the supplied schema can express its negation or uncertainty explicitly; otherwise omit that relationship. Evaluate each claim independently: negation or uncertainty in one claim must not suppress a separately confirmed relationship or its named entities elsewhere in the passage.\n\nMake sure you adhere to the following rules to produce valid JSON objects:\n- Do not return any additional information other than the JSON in it.\n- Omit any backticks around the JSON - simply output the JSON on its own.\n- The JSON object must not wrapped into a list - it is its own JSON object.\n- Property names must be enclosed in double quotes\n\nExamples:\n{examples}\n\nInput text:\n\n{text}",
           "description": "Template the official Neo4j GraphRAG extractor formats for every chunk during semantic KG extraction (must keep the {schema} and {text} placeholders; {examples} is optional). Carries the naming rules that keep OCR noise out of entity names.",
           "title": "Semantic Kg Extraction",
           "type": "string"
@@ -38197,6 +40993,35 @@
               "title": "Enabled",
               "type": "boolean"
             },
+            "schema_proposal_max_output_tokens": {
+              "default": 16384,
+              "description": "Maximum output tokens for one schema proposal; incomplete responses fail without approval",
+              "maximum": 32768,
+              "minimum": 256,
+              "title": "Schema Proposal Max Output Tokens",
+              "type": "integer"
+            },
+            "schema_proposal_reasoning_effort": {
+              "default": "low",
+              "description": "Reasoning effort for schema proposals, independent of semantic KG extraction effort",
+              "enum": [
+                "minimal",
+                "low",
+                "medium",
+                "high",
+                "xhigh"
+              ],
+              "title": "Schema Proposal Reasoning Effort",
+              "type": "string"
+            },
+            "schema_proposal_timeout_s": {
+              "default": 60,
+              "description": "Total seconds allowed for schema proposal sampling and generation, below the public HTTP deadline",
+              "maximum": 80,
+              "minimum": 5,
+              "title": "Schema Proposal Timeout S",
+              "type": "integer"
+            },
             "semantic_kg_llm_model": {
               "default": "",
               "description": "Optional LiteLLM alias for GraphRAG semantic extraction; empty uses the gateway default",
@@ -38265,6 +41090,14 @@
               "maximum": 5,
               "minimum": 1,
               "title": "Max Hops",
+              "type": "integer"
+            },
+            "max_related_entities_per_seed": {
+              "default": 50,
+              "description": "Maximum related entities kept per seed entity during graph traversal, nearest first then most connected. Bounds how far a hub entity can expand.",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Max Related Entities Per Seed",
               "type": "integer"
             },
             "top_k": {
@@ -39149,8 +41982,8 @@
               "type": "integer"
             },
             "reranker_cloud_model": {
-              "default": "openai.gpt-4.1-nano",
-              "description": "Cloud reranker model when mode=cloud: a LiteLLM gateway alias for provider 'litellm' (a cheap non-reasoning instruct model is ideal), or a Cohere rerank model id for provider 'cohere'.",
+              "default": "",
+              "description": "Cloud reranker model when mode=cloud: a LiteLLM gateway alias for provider 'litellm' or a Cohere rerank model id for provider 'cohere'. Select an allowed model before enabling cloud reranking.",
               "title": "Reranker Cloud Model",
               "type": "string"
             },
@@ -39793,7 +42626,7 @@
               "type": "string"
             },
             "semantic_kg_extraction": {
-              "default": "You are a top-tier algorithm designed for extracting information in structured formats to build a knowledge graph.\n\nExtract the entities (nodes) and specify their type from the following text. Also extract the relationships between these nodes.\n\nReturn result as JSON using the following format:\n{{\"nodes\": [ {{\"id\": \"0\", \"label\": \"Person\", \"properties\": {{\"name\": \"John\"}} }}],\n\"relationships\": [{{\"type\": \"KNOWS\", \"start_node_id\": \"0\", \"end_node_id\": \"1\", \"properties\": {{\"since\": \"2024-08-01\"}} }}] }}\n\nUse only the following node and relationship types (if provided):\n{schema}\n\nNaming rules. Every node carries a \"name\" property; it is the entity's identity for merging across chunks and for display:\n- \"name\" must be an identifier a reader would recognise: a person's full name as written, an organisation's name, a place name, a document's subject line or title, a dated event.\n- Name an email or message by its subject line when the text shows one. When the subject is empty or is only reply/forward markers such as \"Re:\", \"RE: Re:\" or \"Fw:\", name it \"<sender> to <recipient>, <date>\" from the message metadata instead.\n- Never use OCR artifacts, scanner noise, bare numbers, punctuation runs, redaction bars or redaction markers such as \"<REDACTED>\", single letters or fragments such as \"-11>\", \"<=11IM11.11>\", \"777\" or \"Re:\" as a name. A redacted party is not an entity: leave it out. If the text gives an entity no readable identifier, leave that entity out rather than inventing one.\n- Copy names exactly as written (no expansions or aliases you did not read) and reuse one spelling for the same entity within the chunk.\n\nAssign a unique ID (string) to each node, and reuse it to define relationships.\nDo respect the source and target node types for relationship and the relationship direction.\n\nMake sure you adhere to the following rules to produce valid JSON objects:\n- Do not return any additional information other than the JSON in it.\n- Omit any backticks around the JSON - simply output the JSON on its own.\n- The JSON object must not wrapped into a list - it is its own JSON object.\n- Property names must be enclosed in double quotes\n\nExamples:\n{examples}\n\nInput text:\n\n{text}",
+              "default": "You are a top-tier algorithm designed for extracting information in structured formats to build a knowledge graph.\n\nExtract the entities (nodes) and specify their type from the following text. Also extract the relationships between these nodes.\n\nReturn result as JSON using the following format:\n{{\"nodes\": [ {{\"id\": \"0\", \"label\": \"Person\", \"properties\": {{\"name\": \"John\"}} }}],\n\"relationships\": [{{\"type\": \"KNOWS\", \"start_node_id\": \"0\", \"end_node_id\": \"1\", \"properties\": {{\"since\": \"2024-08-01\"}} }}] }}\n\nUse only the following node and relationship types (if provided):\n{schema}\n\nNaming rules. Every node carries a \"name\" property; it is the entity's identity for merging across chunks and for display:\n- \"name\" must be an identifier a reader would recognise: a person's full name as written, an organisation's name, a place name, a document's subject line or title, a dated event.\n- Name an email or message by its subject line when the text shows one. When the subject is empty or is only reply/forward markers such as \"Re:\", \"RE: Re:\" or \"Fw:\", name it \"<sender> to <recipient>, <date>\" from the message metadata instead.\n- Never use OCR artifacts, scanner noise, bare numbers, punctuation runs, redaction bars or redaction markers such as \"<REDACTED>\", single letters or fragments such as \"-11>\", \"<=11IM11.11>\", \"777\" or \"Re:\" as a name. A redacted party is not an entity: leave it out. If the text gives an entity no readable identifier, leave that entity out rather than inventing one.\n- Copy names exactly as written (no expansions or aliases you did not read) and reuse one spelling for the same entity within the chunk.\n\nAssign a unique ID (string) to each node, and reuse it to define relationships.\nDo respect the source and target node types for relationship and the relationship direction.\n\nGrounding rules:\n- Extract a relationship only when this passage explicitly supports that relationship between those exact entities. The schema lists allowed relationships; it is not evidence that any relationship occurred. Omit unsupported edges even when both entities appear.\n- Adjacency, temporal order, shared headings, and neighboring table rows do not establish causality, inhibition, correction, or any other relationship. Preserve a relationship stated within a table row only when its columns or wording establish the endpoints and meaning; never connect separate event rows merely because one follows another.\n- Respect clause scope and distinguish context from mechanism. In a list of separate changes or actions, do not transfer one clause's target or condition to another. \"An alarm was prevented during an operation\" does not say that the operation prevented the alarm; omit a causal or preventive edge when the text does not identify its agent.\n- Keep every status and other attribute attached to the entity and section that states it. A new heading starts a new section. Do not carry \"closed\", \"resolved\", \"failed\", dates, or other attributes from the preceding section into the next one. If a chunk starts mid-section and an attribute's subject is unclear, omit that attribute.\n- Preserve negation and uncertainty. Do not turn \"did not cause\", \"may have caused\", \"possible\", \"suspected\", or an open investigation into an affirmative causal fact. Represent a negated or uncertain relationship only if the supplied schema can express its negation or uncertainty explicitly; otherwise omit that relationship. Evaluate each claim independently: negation or uncertainty in one claim must not suppress a separately confirmed relationship or its named entities elsewhere in the passage.\n\nMake sure you adhere to the following rules to produce valid JSON objects:\n- Do not return any additional information other than the JSON in it.\n- Omit any backticks around the JSON - simply output the JSON on its own.\n- The JSON object must not wrapped into a list - it is its own JSON object.\n- Property names must be enclosed in double quotes\n\nExamples:\n{examples}\n\nInput text:\n\n{text}",
               "description": "Template the official Neo4j GraphRAG extractor formats for every chunk during semantic KG extraction (must keep the {schema} and {text} placeholders; {examples} is optional). Carries the naming rules that keep OCR noise out of entity names.",
               "title": "Semantic Kg Extraction",
               "type": "string"

@@ -170,6 +170,10 @@ export interface BenchmarkResult {
   model_id?: string | null; // default: None
   /** Optional human-readable model name. */
   model_name?: string | null; // default: None
+  /** Raw gateway usage for this model call, including billed reasoning-only failures. */
+  usage?: Record<string, unknown> | null; // default: None
+  /** Per-call reported charge or explicitly marked catalog estimate; null when no accounting was returned. */
+  cost_summary?: TraceCostSummary | null; // default: None
 }
 
 /** How a benchmark run grounded its prompt before generation. */
@@ -202,6 +206,10 @@ export interface BenchmarkRun {
   ended_at_ms?: number; // default: 0
   /** Per-model benchmark results. */
   results?: BenchmarkResult[];
+  /** This run's cost summary covers answer generation only; shared retrieval is excluded. */
+  cost_scope?: "generation"; // default: "generation"
+  /** Sum of answer-generation costs only, excluding shared retrieval; unavailable if any generation call lacks accounting; null on older saved runs. */
+  cost_summary?: TraceCostSummary | null; // default: None
   /** Grounding used for this run; null on records persisted before retrieval-backed benchmarks. */
   retrieval?: BenchmarkRetrieval | null; // default: None
   /** Current bundle id captured before the run started. */
@@ -1159,6 +1167,23 @@ export interface GraphCommunityTelemetry {
   nodes_written: number;
 }
 
+export interface GraphEntitySource {
+  /** Chunk directly linked to the entity by FROM_CHUNK */
+  chunk_id: string;
+  /** Stored corpus-relative source path */
+  file_path: string;
+  /** First line of the source chunk */
+  start_line: number;
+  /** Last line of the source chunk */
+  end_line: number;
+  /** Source text stored in the graph generation */
+  content: string;
+  /** Matching indexed chunk location metadata, when present */
+  metadata?: Record<string, unknown>;
+  /** Matching indexed chunk page provenance, when present */
+  provenance?: ChunkProvenance | null; // default: None
+}
+
 export interface GraphExtractionTelemetry {
   selected_chunks: number;
   attempted_chunks: number;
@@ -1208,6 +1233,12 @@ export interface GraphIndexingConfig {
   semantic_kg_llm_model?: string; // default: ""
   /** Timeout (seconds) for semantic KG LLM extraction per chunk */
   semantic_kg_llm_timeout_s?: number; // default: 90
+  /** Total seconds allowed for schema proposal sampling and generation, below the public HTTP deadline */
+  schema_proposal_timeout_s?: number; // default: 60
+  /** Reasoning effort for schema proposals, independent of semantic KG extraction effort */
+  schema_proposal_reasoning_effort?: "minimal" | "low" | "medium" | "high" | "xhigh"; // default: "low"
+  /** Maximum output tokens for one schema proposal; incomplete responses fail without approval */
+  schema_proposal_max_output_tokens?: number; // default: 16384
 }
 
 export interface GraphPromotionOverride {
@@ -1232,8 +1263,16 @@ export interface GraphSchemaPolicyConflictDetail {
   operator_hint: string;
 }
 
+export interface GraphSchemaProposalFailureDetail {
+  code: "graph_schema_generation_failed" | "graph_schema_deadline_exceeded" | "graph_schema_context_changed";
+  corpus_id: string;
+  model_alias: string;
+  message: string;
+  operator_hint: string;
+}
+
 export interface GraphSchemaSample {
-  recipe?: "documents-and-positions-v1"; // default: "documents-and-positions-v1"
+  recipe?: "documents-and-positions-v1" | "documents-and-positions-v2"; // default: "documents-and-positions-v2"
   seed?: number; // default: 0
   chunk_ids: string[];
   chunk_hashes: string[];
@@ -1253,6 +1292,17 @@ export interface GraphSearchConfig {
   include_communities?: boolean; // default: True
   /** Number of results to retrieve from graph search */
   top_k?: number; // default: 30
+}
+
+export interface GraphSourceGenerationChangedDetail {
+  code?: "graph_generation_changed"; // default: "graph_generation_changed"
+  message?: string; // default: "The graph generation changed. Reload this entit..."
+}
+
+export interface GraphSourceReindexRequiredDetail {
+  code?: "graph_source_reindex_required"; // default: "graph_source_reindex_required"
+  message?: string; // default: "Source navigation requires a graph rebuilt with..."
+  operator_hint?: string; // default: "Open Indexing, review the graph schema if promp..."
 }
 
 /** Statistics about a repository's knowledge graph. */
@@ -2466,8 +2516,8 @@ export interface RerankingConfig {
   reranker_mode?: string; // default: "none"
   /** Cloud reranker provider when mode=cloud: 'litellm' scores candidates listwise through a LiteLLM gateway alias (no local model, no extra credential); 'cohere' calls the Cohere rerank API (COHERE_API_KEY). */
   reranker_cloud_provider?: string; // default: "litellm"
-  /** Cloud reranker model when mode=cloud: a LiteLLM gateway alias for provider 'litellm' (a cheap non-reasoning instruct model is ideal), or a Cohere rerank model id for provider 'cohere'. */
-  reranker_cloud_model?: string; // default: "openai.gpt-4.1-nano"
+  /** Cloud reranker model when mode=cloud: a LiteLLM gateway alias for provider 'litellm' or a Cohere rerank model id for provider 'cohere'. Select an allowed model before enabling cloud reranking. */
+  reranker_cloud_model?: string; // default: ""
   /** Blend weight for reranker scores */
   tribrid_reranker_alpha?: number; // default: 0.7
   /** Number of candidates to rerank (learning mode) */
@@ -4065,6 +4115,14 @@ export interface GenerationUnavailableResponse {
   detail: GenerationUnavailableDetail;
 }
 
+export interface GraphEntitySourcesResponse {
+  entity_id: string;
+  /** Active manifest token; pass it when requesting another source page */
+  run_id: string;
+  sources: GraphEntitySource[];
+  next_offset?: number | null;
+}
+
 /** A graph slice: entities plus the relationships induced among exactly those entities.  Used for an entity neighborhood, a community, and the whole-corpus/search view. ``total_matched`` is what the query found before ``limit`` was applied, so the UI can say "showing 200 of 5,179" instead of an undenominated "200 shown". */
 export interface GraphNeighborsResponse {
   /** Entities in the neighborhood (includes the center entity) */
@@ -4093,8 +4151,20 @@ export interface GraphSchemaProposal {
   created_at: string;
 }
 
+export interface GraphSchemaProposalFailureResponse {
+  detail: GraphSchemaProposalFailureDetail;
+}
+
 export interface GraphSchemaProposalRequest {
   force_refresh?: boolean;
+}
+
+export interface GraphSourceGenerationChangedResponse {
+  detail: GraphSourceGenerationChangedDetail;
+}
+
+export interface GraphSourceReindexRequiredResponse {
+  detail: GraphSourceReindexRequiredDetail;
 }
 
 /** System health status payload for /api/health. */
@@ -4192,7 +4262,7 @@ export interface IndexRequest {
   corpus_id: string;
   /** Path to repository on disk */
   repo_path: string;
-  /** Force full reindex even if up-to-date */
+  /** Allow changed embedding settings during a full rebuild. The active index is replaced only after validation. */
   force_reindex?: boolean;
   /** Exact reviewed graph schema hash required for semantic indexing */
   approved_graph_schema_hash?: string | null;

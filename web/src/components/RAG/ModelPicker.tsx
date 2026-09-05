@@ -173,6 +173,8 @@ export function ModelPicker({
           onChange={handleSelectChange}
           disabled={disabled}
         >
+          {!value && providerModels.length > 0 && <option value="" disabled>Select a model</option>}
+          {isValueCustom && !allowCustom && <option value="__custom__" disabled>Unavailable: {value}</option>}
           {groupedModels ? (
             // No provider given: show all grouped by provider
             groupedModels.length === 0 ? (

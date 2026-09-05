@@ -13,6 +13,7 @@ through ``/api/search``.
 from __future__ import annotations
 
 import asyncio
+import math
 import os
 from uuid import uuid4
 
@@ -357,4 +358,109 @@ async def test_co_mention_is_not_a_hop_and_hub_expansion_is_capped() -> None:
         await postgres.delete_corpus_with_data(corpus_id)
         await neo4j.disconnect()
         await postgres.disconnect()
+        await asyncio.to_thread(driver.close)
+
+
+async def test_equal_graph_evidence_uses_query_relevance_before_chunk_id() -> None:
+    """A shared entity must not return an alphabetically fixed set for every query.
+
+    Two nearby query vectors share the same seeds and graph evidence, but prefer
+    different source chunks. Both direct traversal and API fusion must preserve
+    that order, without reintroducing seeds as graph credit.
+    """
+    cfg = load_config()
+    cid = f"pytest_graph_relevance_{uuid4().hex[:8]}"
+    run_id = uuid4().hex
+    graph_id = f"__staging__{cid}__{run_id}"
+    cfg.embedding.embedding_backend = "deterministic"
+    cfg.embedding.embedding_dim = 128
+    cfg.graph_search.enabled = True
+    cfg.graph_search.max_hops = 1
+    cfg.graph_search.chunk_neighbor_window = 0
+    cfg.retrieval.neighbor_window = 0
+    cfg.retrieval.max_chunks_per_file = 10
+    cfg.sparse_search.enabled = False
+    cfg.reranking.reranker_mode = "none"
+    cfg.semantic_cache.enabled = False
+    question = "Which source explains the spacecraft guidance alarm?"
+    query = await Embedder(cfg.embedding, cfg.tokenization).embed(question)
+    norm = math.sqrt(sum(value * value for value in query))
+    unit = [value / norm for value in query]
+    # An exactly perpendicular direction, without a model or random fixture.
+    axis = min(range(len(unit)), key=lambda i: abs(unit[i]))
+    perpendicular = [-unit[axis] * value for value in unit]
+    perpendicular[axis] += 1.0
+    length = math.sqrt(sum(value * value for value in perpendicular))
+    perpendicular = [value / length for value in perpendicular]
+
+    def shifted(offset: float) -> list[float]:
+        return [value + offset * noise for value, noise in zip(unit, perpendicular, strict=True)]
+
+    vectors = {
+        "seed": shifted(-0.1), "seed-filler": shifted(-0.11),
+        "z-guidance": shifted(0.4), "a-propulsion": shifted(-0.6),
+        "b-unrelated": shifted(2.0),
+    }
+    chunks = [
+        _chunk(chunk_id, f"Synthetic source {chunk_id}.", i).model_copy(update={"embedding": vector})
+        for i, (chunk_id, vector) in enumerate(vectors.items())
+    ]
+    pg = PostgresClient(require_env("POSTGRES_DSN"))
+    store = QdrantChunkStore(cfg)
+    database = cfg.graph_storage.resolve_database(cid)
+    driver = GraphDatabase.driver(cfg.graph_storage.neo4j_uri,
+        auth=(cfg.graph_storage.neo4j_user, cfg.graph_storage.resolve_password()))
+    neo4j = Neo4jClient(cfg.graph_storage.neo4j_uri, cfg.graph_storage.neo4j_user,
+        cfg.graph_storage.resolve_password(), database=database)
+    await pg.connect()
+    await neo4j.connect()
+    try:
+        await pg.upsert_corpus(cid, name=cid, root_path=".")
+        await pg.upsert_corpus_config_json(cid, cfg.model_dump(mode="serialization"))
+        await pg.update_corpus_embedding_meta(cid, backend=cfg.embedding.embedding_backend,
+            provider=cfg.embedding.embedding_type, model=cfg.embedding.effective_model,
+            dimensions=len(query), sparse_contract=sparse_contract_from_config(cfg))
+        config_store._store = None
+        collection = await store.create_generation(cid, embedding_dim=len(query))
+        await store.write_chunks(cid, collection, chunks, embedding_dim=len(query), graph_repo_id=graph_id)
+        lexical, lexical_cfg = await write_lexical_graph_with_graphrag(
+            repo_id=graph_id, run_id=run_id, file_path=_FILE, chunks=chunks)
+        graph = Neo4jGraph(nodes=[*lexical.nodes, Neo4jNode(id="hub", label="Spacecraft", properties={"name":"Lander"})],
+            relationships=[*lexical.relationships, *[
+                Neo4jRelationship(start_node_id="hub", end_node_id=chunk.chunk_id, type="FROM_CHUNK")
+                for chunk in chunks if chunk.chunk_id != "seed-filler"
+            ]])
+        await ScopedNeo4jWriter(driver=driver, neo4j_database=database,
+            repo_id=graph_id, run_id=run_id).run(graph, lexical_cfg)
+        await pg.upsert_chunks(cid, chunks)
+        await pg.set_generation(cid, build_generation(run_id=run_id,
+            qdrant_collection=collection, graph_repo_id=graph_id))
+
+        for vector, expected in [(query, ["z-guidance", "a-propulsion"]),
+                                 (shifted(-0.2), ["a-propulsion", "z-guidance"])]:
+            seeds = await store.vector_search(cid, vector, 2, physical=collection)
+            assert {chunk.chunk_id for chunk in seeds} == {"seed", "seed-filler"}
+            result = await retrieve_graph_chunks(neo4j_uri=cfg.graph_storage.neo4j_uri,
+                neo4j_user=cfg.graph_storage.neo4j_user,
+                neo4j_password=cfg.graph_storage.resolve_password(), neo4j_database=database,
+                qdrant_url=store.url, collection_name=collection, graph_repo_id=graph_id,
+                query_vector=vector, top_k=2, max_hops=0, neighbor_window=0,
+                max_related_entities_per_seed=1)
+            assert [chunk_id for chunk_id, _ in result.chunk_scores] == expected
+            assert result.chunk_scores[0][1] == result.chunk_scores[1][1]
+            assert result.qdrant_seed_chunks == 2
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post("/api/search", json={"query":question, "corpus_id":cid,
+                "top_k":2, "include_vector":False, "include_sparse":False,
+                "include_graph":True, "cache_mode":"bypass"})
+            assert response.status_code == 200, response.text
+            assert [row["chunk_id"] for row in response.json()["matches"]] == ["z-guidance", "a-propulsion"]
+    finally:
+        config_store._store = None
+        await store.delete_corpus(cid)
+        await neo4j.delete_graph(graph_id)
+        await pg.delete_corpus_with_data(cid)
+        await neo4j.disconnect()
+        await pg.disconnect()
         await asyncio.to_thread(driver.close)

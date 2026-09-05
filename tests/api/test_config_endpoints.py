@@ -10,6 +10,61 @@ from server.models.tribrid_config_model import TriBridConfig
 from server.services.config_store import get_config as load_scoped_config
 
 
+@pytest.mark.parametrize("method,path", [
+    ("GET", "/api/config"),
+    ("GET", "/api/config/validate"),
+    ("GET", "/api/config/readiness"),
+    ("PUT", "/api/config"),
+    ("PATCH", "/api/config/vector_search"),
+    ("POST", "/api/config/reset"),
+])
+@pytest.mark.parametrize("params", [
+    [("corpus", "pytest_scope_typo")],
+    [("corpud_id", "pytest_scope_typo")],
+    [("corpus_id", " ")],
+    [("corpus_id", "pytest_scope_a"), ("repo_id", "pytest_scope_b")],
+    [("corpus_id", "pytest_scope_a"), ("corpus_id", "pytest_scope_b")],
+], ids=["unsupported-corpus", "misspelled", "blank", "conflicting-aliases", "repeated-key"])
+@pytest.mark.asyncio
+async def test_config_rejects_invalid_scope_without_reading_or_changing_global(
+    client: AsyncClient, method: str, path: str, params: list[tuple[str, str]],
+) -> None:
+    """A mistaken scope must never become a successful global read or write (S15)."""
+    baseline = (await client.get("/api/config")).json()
+    body = baseline if method == "PUT" else {"top_k": 31} if method == "PATCH" else None
+    response = await client.request(method, path, params=params, json=body)
+    assert response.status_code == 422, response.text
+    detail = response.json()["detail"]
+    assert isinstance(detail, list)
+    assert detail and all(error["loc"][0] == "query" for error in detail)
+    assert (await client.get("/api/config")).json() == baseline
+
+
+@pytest.mark.requires_postgres
+@pytest.mark.asyncio
+async def test_config_supported_scope_names_address_the_same_corpus(client: AsyncClient) -> None:
+    corpus_id = "pytest_config_scope_contract"
+    global_config = (await client.get("/api/config")).json()
+    created = await client.post("/api/corpora", json={
+        "corpus_id": corpus_id, "name": "Config scope contract", "path": ".",
+    })
+    assert created.status_code == 200, created.text
+    try:
+        top_k = 31 if global_config["vector_search"]["top_k"] != 31 else 32
+        saved = await client.patch(
+            "/api/config/vector_search", params={"corpus_id": corpus_id}, json={"top_k": top_k},
+        )
+        assert saved.status_code == 200, saved.text
+        for alias in ("corpus_id", "repo_id", "repo"):
+            scoped = await client.get("/api/config", params={alias: corpus_id})
+            assert scoped.status_code == 200, scoped.text
+            assert scoped.json()["vector_search"]["top_k"] == top_k
+        assert (await client.get("/api/config")).json() == global_config
+    finally:
+        deleted = await client.delete(f"/api/corpora/{corpus_id}")
+        assert deleted.status_code == 200, deleted.text
+
+
 @pytest.mark.asyncio
 async def test_get_config(client: AsyncClient) -> None:
     """Test GET /api/config endpoint."""

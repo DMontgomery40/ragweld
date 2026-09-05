@@ -18,6 +18,7 @@ _APOLLO_SOURCE = Path("/srv/ragweld/corpora/nasa-apollo-11/A11_MissionReport.pdf
 _MODEL = os.environ.get("GRAPH_E2E_KG_MODEL", "openai.gpt-5.6-luna")
 
 
+@pytest.mark.requires_model_gateway
 async def test_real_full_apollo_pdf_schema_proposal_fits_the_public_edge_window(
     client: AsyncClient,
 ) -> None:
@@ -58,6 +59,7 @@ async def test_real_full_apollo_pdf_schema_proposal_fits_the_public_edge_window(
         await client.delete(f"/api/corpora/{corpus_id}")
 
 
+@pytest.mark.requires_model_gateway
 async def test_real_apollo_schema_proposal_persists_reuses_and_invalidates_approval(
     client: AsyncClient, tmp_path: Path
 ) -> None:
@@ -187,6 +189,7 @@ async def test_real_apollo_schema_proposal_persists_reuses_and_invalidates_appro
         await pg.disconnect()
 
 
+@pytest.mark.requires_model_gateway
 async def test_numeric_only_corpus_proposal_is_a_typed_422_not_a_500(
     client: AsyncClient, tmp_path: Path
 ) -> None:

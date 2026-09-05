@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -258,6 +260,32 @@ def test_upgrade_raw_config_keeps_an_operator_edited_kg_extraction_prompt() -> N
     )
     assert "system_prompts.semantic_kg_extraction" not in migrated
     assert cfg.system_prompts.semantic_kg_extraction == edited
+
+
+@pytest.mark.parametrize("version", ["pre_redaction", "pre_grounding"])
+@pytest.mark.parametrize("edited", [False, True])
+def test_grounding_prompt_upgrade_replaces_only_exact_shipped_defaults(
+    version: str, edited: bool,
+) -> None:
+    historical = (Path(__file__).parents[1] / "fixtures" /
+                  f"semantic_kg_extraction_{version}.txt").read_text()
+    stored = historical + "\nPreserve the operator's domain terminology." if edited else historical
+    raw = {"system_prompts": {"semantic_kg_extraction": stored}}
+    cfg, _changed, migrated = _upgrade_raw_config(raw)
+    if edited:
+        assert "system_prompts.semantic_kg_extraction" not in migrated
+        assert cfg.system_prompts.semantic_kg_extraction == stored
+    else:
+        assert "system_prompts.semantic_kg_extraction" in migrated
+        assert cfg.system_prompts.semantic_kg_extraction != stored
+        assert cfg.system_prompts.semantic_kg_extraction == TriBridConfig().system_prompts.semantic_kg_extraction
+    # The global JSON loader has the same behavior as the corpus config path.
+    global_cfg = TriBridConfig.model_validate(_strip_removed_keys(raw))
+    assert global_cfg.system_prompts.semantic_kg_extraction == cfg.system_prompts.semantic_kg_extraction
+    # Loading the upgraded representation again preserves it without another migration.
+    reloaded, _changed, migrated_again = _upgrade_raw_config(cfg.model_dump(mode="json"))
+    assert "system_prompts.semantic_kg_extraction" not in migrated_again
+    assert reloaded.system_prompts.semantic_kg_extraction == cfg.system_prompts.semantic_kg_extraction
 
 
 def test_flat_config_loader_drops_the_retired_kg_extraction_prompt_too() -> None:

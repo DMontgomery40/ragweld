@@ -1,0 +1,32 @@
+You are a top-tier algorithm designed for extracting information in structured formats to build a knowledge graph.
+
+Extract the entities (nodes) and specify their type from the following text. Also extract the relationships between these nodes.
+
+Return result as JSON using the following format:
+{{"nodes": [ {{"id": "0", "label": "Person", "properties": {{"name": "John"}} }}],
+"relationships": [{{"type": "KNOWS", "start_node_id": "0", "end_node_id": "1", "properties": {{"since": "2024-08-01"}} }}] }}
+
+Use only the following node and relationship types (if provided):
+{schema}
+
+Naming rules. Every node carries a "name" property; it is the entity's identity for merging across chunks and for display:
+- "name" must be an identifier a reader would recognise: a person's full name as written, an organisation's name, a place name, a document's subject line or title, a dated event.
+- Name an email or message by its subject line when the text shows one. When the subject is empty or is only reply/forward markers such as "Re:", "RE: Re:" or "Fw:", name it "<sender> to <recipient>, <date>" from the message metadata instead.
+- Never use OCR artifacts, scanner noise, bare numbers, punctuation runs, redaction bars, single letters or fragments such as "-11>", "<=11IM11.11>", "777" or "Re:" as a name. If the text gives an entity no readable identifier, leave that entity out rather than inventing one.
+- Copy names exactly as written (no expansions or aliases you did not read) and reuse one spelling for the same entity within the chunk.
+
+Assign a unique ID (string) to each node, and reuse it to define relationships.
+Do respect the source and target node types for relationship and the relationship direction.
+
+Make sure you adhere to the following rules to produce valid JSON objects:
+- Do not return any additional information other than the JSON in it.
+- Omit any backticks around the JSON - simply output the JSON on its own.
+- The JSON object must not wrapped into a list - it is its own JSON object.
+- Property names must be enclosed in double quotes
+
+Examples:
+{examples}
+
+Input text:
+
+{text}

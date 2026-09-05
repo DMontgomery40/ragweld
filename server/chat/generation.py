@@ -17,6 +17,7 @@ from server.chat.prompt_budget import (
     image_sizes_from_attachments,
 )
 from server.chat.provider_router import ProviderRoute
+from server.model_policy import ensure_model_allowed
 from server.models.chat_config import ImageAttachment
 from server.models.retrieval import ChunkMatch
 from server.models.tribrid_config_model import (
@@ -55,10 +56,18 @@ class GatewayContentMissingError(RuntimeError):
     bare parse failure.
     """
 
-    def __init__(self, message: str, *, finish_reason: str | None, usage: dict[str, Any] | None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        finish_reason: str | None,
+        usage: dict[str, Any] | None,
+        cost_summary: TraceCostSummary | None = None,
+    ) -> None:
         super().__init__(message)
         self.finish_reason = finish_reason
         self.usage = usage
+        self.cost_summary = cost_summary
 
 
 # Body keys the transport owns; a caller's extra body fields may not redefine them.
@@ -336,6 +345,7 @@ async def generate_chat_text(
     the keys the transport owns.
     """
 
+    ensure_model_allowed(route.model)
     prompt = _prompt_with_context(
         system_prompt=system_prompt, context_text=context_text, context_chunks=context_chunks
     )
@@ -382,7 +392,7 @@ async def generate_chat_text(
                 ) from error
 
         usage = _usage(data)
-        provider_cost_usd = extract_provider_cost(data)
+        provider_cost_usd = extract_provider_cost(data, headers=response.headers)
         cost = build_trace_cost_summary(
             provider="LiteLLM", model=route.model, usage=usage, provider_cost_usd=provider_cost_usd
         )
@@ -401,7 +411,10 @@ async def generate_chat_text(
             text = ""
             content_cause = error
             content_error = GatewayContentMissingError(
-                f"LiteLLM response parse failed: {error}", finish_reason=error.finish_reason, usage=error.usage
+                f"LiteLLM response parse failed: {error}",
+                finish_reason=error.finish_reason,
+                usage=error.usage,
+                cost_summary=cost,
             )
         except Exception as error:
             raise RuntimeError(f"LiteLLM response parse failed: {error}") from error
@@ -467,6 +480,7 @@ async def stream_chat_text(
 ) -> AsyncIterator[str]:
     """Stream OpenAI Chat Completions deltas through LiteLLM."""
 
+    ensure_model_allowed(route.model)
     prompt = _prompt_with_context(
         system_prompt=system_prompt, context_text=context_text, context_chunks=context_chunks
     )
@@ -498,6 +512,7 @@ async def stream_chat_text(
     sent_response_id = False
     streamed_text = ""
     captured_usage: dict[str, Any] | None = None
+    captured_cost_usd: float | None = None
     captured_trace_id: str | None = None
     captured_annotations: list[Any] = []
     captured_finish_reason: str | None = None
@@ -513,6 +528,9 @@ async def stream_chat_text(
                     if response.is_error:
                         await response.aread()
                     response.raise_for_status()
+                    # Streaming headers precede completion and may contain a
+                    # provisional cost. Only terminal SSE metadata can report
+                    # the charge for the completed generation.
                     captured_trace_id = _debug_trace_id(response)
                     if captured_trace_id and on_debug_trace_id:
                         on_debug_trace_id(captured_trace_id)
@@ -546,6 +564,14 @@ async def stream_chat_text(
                             if on_usage:
                                 on_usage(event_usage)
                         choices = event.get("choices")
+                        terminal_event = choices == [] or (
+                            isinstance(choices, list)
+                            and any(isinstance(choice, dict) and choice.get("finish_reason") for choice in choices)
+                        )
+                        if terminal_event:
+                            event_cost = extract_provider_cost(event)
+                            if event_cost is not None:
+                                captured_cost_usd = event_cost
                         if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
                             continue
                         event_finish_reason = choices[0].get("finish_reason")
@@ -570,7 +596,7 @@ async def stream_chat_text(
         # no content (a reasoning model that spent the budget thinking) is recorded before the
         # typed error is raised, so its cost never disappears from the trace.
         cost = build_trace_cost_summary(
-            provider="LiteLLM", model=route.model, usage=captured_usage, provider_cost_usd=None
+            provider="LiteLLM", model=route.model, usage=captured_usage, provider_cost_usd=captured_cost_usd
         )
         set_cost_summary(cost)
         record_langfuse_generation(
@@ -594,6 +620,7 @@ async def stream_chat_text(
                 "LiteLLM stream produced no content",
                 finish_reason=captured_finish_reason,
                 usage=captured_usage,
+                cost_summary=cost,
             )
         grounding = _web_grounding(
             requested=web_config is not None,

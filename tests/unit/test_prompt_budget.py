@@ -131,7 +131,7 @@ TILE_STANDARD_MAX = 85 + 8 * 170  # 1,445 (gpt-4o / gpt-4.1 / gpt-4-turbo)
 TILE_MINI_MAX = 2833 + 8 * 5667  # 48,169 (gpt-4o-mini)
 TILE_GPT5_MAX = 70 + 8 * 140  # 1,190 (gpt-5 family, tile-based)
 TILE_O_SERIES_MAX = 75 + 8 * 150  # 1,275 (o1 / o3, tile-based)
-OPENAI_DOCUMENTED_IMAGE_MAX: dict[str, int | None] = {
+HISTORICAL_OPENAI_DOCUMENTED_IMAGE_MAX: dict[str, int] = {
     "openai/gpt-4-turbo": TILE_STANDARD_MAX,
     "openai/gpt-4.1": TILE_STANDARD_MAX,
     "openai/gpt-4.1-mini": math.ceil(1536 * 1.62),
@@ -142,6 +142,8 @@ OPENAI_DOCUMENTED_IMAGE_MAX: dict[str, int | None] = {
     "openai/gpt-4o-2024-11-20": TILE_STANDARD_MAX,
     "openai/gpt-4o-mini": TILE_MINI_MAX,
     "openai/gpt-4o-mini-2024-07-18": TILE_MINI_MAX,
+}
+OPENAI_DOCUMENTED_IMAGE_MAX: dict[str, int | None] = {
     "openai/gpt-5": TILE_GPT5_MAX,
     "openai/gpt-5-image": None,
     "openai/gpt-5-image-mini": None,
@@ -178,6 +180,13 @@ OPENAI_DOCUMENTED_IMAGE_MAX: dict[str, int | None] = {
     "openai/o4-mini": math.ceil(1536 * 1.72),
     "openai/o4-mini-high": math.ceil(1536 * 1.72),
 }
+
+
+@pytest.mark.parametrize("model, documented", HISTORICAL_OPENAI_DOCUMENTED_IMAGE_MAX.items())
+def test_historical_image_bounds_remain_correct_without_publishing_retired_models(model: str, documented: int) -> None:
+    """Historical image accounting remains testable without restoring an executable catalog row."""
+    bound = image_tokens_for_attachment("openai", model, supports_vision=True, size=(4096, 4096))
+    assert documented <= bound <= 3 * documented
 
 
 def test_every_openai_vision_alias_in_the_catalog_is_bounded_at_or_above_its_documented_maximum() -> None:
@@ -283,7 +292,7 @@ def test_warmed_catalog_resolves_real_aliases_to_their_family_bounds() -> None:
     warm_gateway_catalog()
     with pytest.raises(ImageBoundError, match="does not accept image attachments"):
         image_tokens_for_alias("ragweld-local")  # text-only serving row
-    assert image_tokens_for_alias("openai.gpt-4o-mini") == 2833 + 8 * 5667
+    assert image_tokens_for_alias("openai.gpt-5-pro") == TILE_STANDARD_MAX
     assert image_tokens_for_alias("openai.gpt-5.5") == math.ceil(10000 * 2.46)
     assert image_tokens_for_alias("openai.gpt-5.4") == math.ceil(2500 * 2.46)
     assert image_tokens_for_alias("openai.gpt-5.4-mini") == math.ceil(1536 * 2.46)

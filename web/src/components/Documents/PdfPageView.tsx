@@ -3,14 +3,15 @@ import { documentPageUrl } from '@/api/documents';
 import { FigureBadge } from '@/components/Documents/FigureBadge';
 import { RegionOverlay } from '@/components/Documents/RegionOverlay';
 import { distinctRegionPages, figureBadgeLabel, regionsForPage } from '@/components/Documents/sourceLabels';
-import type { ChunkMatch, PageSize } from '@/types/generated';
+import type { PageSize } from '@/types/generated';
+import type { DocumentSource } from '@/stores/useDockStore';
 
 type Props = {
   corpusId: string;
   path: string;
   pageCount: number;
   pageSizes: PageSize[];
-  source: ChunkMatch;
+  source: DocumentSource;
 };
 
 const navButton: React.CSSProperties = {

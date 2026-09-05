@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -488,7 +489,6 @@ def test_alloy_faro_receiver_feeds_loki_and_tempo() -> None:
 
 
 def test_active_observability_urls_match_namespaced_loopback_ports() -> None:
-    from server.api.docker import _loki_candidate_urls
     from server.models.tribrid_config_model import TriBridConfig
 
     active = json.loads((ROOT / "tribrid_config.json").read_text(encoding="utf-8"))
@@ -507,8 +507,17 @@ def test_active_observability_urls_match_namespaced_loopback_ports() -> None:
     assert active["tracing"]["langfuse_base_url"] == "http://127.0.0.1:53000"
     assert active["tracing"]["opencost_base_url"] == ""
     assert TriBridConfig().ui.grafana_base_url == "http://127.0.0.1:3301"
-    assert "http://127.0.0.1:53100" in _loki_candidate_urls()
-    assert "http://127.0.0.1:3100" not in _loki_candidate_urls()
+    # This is a source-default contract, independent of the runner's live Loki binding.
+    env = dict(os.environ)
+    env.pop("LOKI_BASE_URL", None)
+    env["RAGWELD_LOAD_DOTENV"] = "0"
+    result = subprocess.run(
+        [sys.executable, "-c", "import json; from server.api.docker import _loki_candidate_urls; print(json.dumps(_loki_candidate_urls()))"],
+        cwd=ROOT, env=env, check=True, capture_output=True, text=True,
+    )
+    candidates = json.loads(result.stdout)
+    assert "http://127.0.0.1:53100" in candidates
+    assert "http://127.0.0.1:3100" not in candidates
 
 
 def test_generated_wire_types_include_split_public_operator_urls_without_extra_faro_field() -> None:

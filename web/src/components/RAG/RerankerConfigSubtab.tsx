@@ -30,7 +30,7 @@ export function RerankerConfigSubtab() {
   // Config (LAW)
   const [mode, setMode] = useConfigField<RerankerMode>('reranking.reranker_mode', 'none');
   const [cloudProvider, setCloudProvider] = useConfigField<string>('reranking.reranker_cloud_provider', 'litellm');
-  const [cloudModel, setCloudModel] = useConfigField<string>('reranking.reranker_cloud_model', 'openai.gpt-4.1-nano');
+  const [cloudModel, setCloudModel] = useConfigField<string>('reranking.reranker_cloud_model', '');
   const [cloudTopN, setCloudTopN] = useConfigField<number>('reranking.reranker_cloud_top_n', 50);
 
   // Learning reranker is configured under training + reranking
@@ -60,7 +60,6 @@ export function RerankerConfigSubtab() {
   // Model catalog (via useModels hook)
   const {
     providers: allRerankProviders,
-    getModelsForProvider: getRerankModelsForProvider,
     loading: modelsLoading,
     error: modelsError,
   } = useModels('RERANK', { selectionRole: 'reranker_cloud' });
@@ -75,17 +74,9 @@ export function RerankerConfigSubtab() {
     if (!cloudProviders.length) return;
     if (!cloudProviders.includes(cloudProvider)) {
       setCloudProvider(cloudProviders[0]);
+      setCloudModel('');
     }
-  }, [mode, cloudProviders, cloudProvider, setCloudProvider]);
-
-  useEffect(() => {
-    if (mode !== 'cloud') return;
-    const models = getRerankModelsForProvider(cloudProvider);
-    if (!models.length) return;
-    if (!models.some((m) => m.model === cloudModel)) {
-      setCloudModel(models[0].model);
-    }
-  }, [mode, cloudProvider, cloudModel, getRerankModelsForProvider, setCloudModel]);
+  }, [mode, cloudProviders, cloudProvider, setCloudProvider, setCloudModel]);
 
   // Runtime info (server)
   const { getInfo } = useReranker();
@@ -203,7 +194,10 @@ export function RerankerConfigSubtab() {
               <select
                 data-testid="reranker-cloud-provider"
                 value={cloudProvider}
-                onChange={(e) => setCloudProvider(e.target.value)}
+                onChange={(e) => {
+                  setCloudProvider(e.target.value);
+                  setCloudModel('');
+                }}
                 disabled={modelsLoading || cloudProviders.length === 0}
               >
                 {cloudProviders.length === 0 && <option value="">No providers found</option>}

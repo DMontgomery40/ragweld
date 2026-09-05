@@ -34,6 +34,28 @@ from server.models.tribrid_config_model import ModelCatalogEntry
 ROOT = Path(__file__).resolve().parents[2]
 
 
+@pytest.mark.parametrize("model_id", [
+    "openai/gpt-4", "openai/gpt-4-turbo-preview", "openai/gpt-4o",
+    "openai/gpt-4o-mini:batch", "openai/gpt-4o-mini-2024-07-18",
+    "openai/gpt-4.1", "openai/gpt-4.1-nano:batch",
+])
+def test_blocked_model_family_cannot_become_a_gateway_alias(model_id: str) -> None:
+    with pytest.raises(GatewayCatalogError, match="GPT-4-class models are blocked"):
+        gateway_alias_for_openrouter_id(model_id)
+
+
+def test_gateway_catalog_rejects_blocked_upstream_behind_local_alias() -> None:
+    row = _local_row(model="openai/gpt-4o-mini")
+    with pytest.raises(GatewayCatalogError, match="GPT-4-class models are blocked"):
+        gateway_rows({"models": [row]})
+
+
+def test_published_catalog_model_identities_are_unique() -> None:
+    rows = load_catalog()["models"]
+    identities = [(row["provider"], row["model"]) for row in rows]
+    assert len(identities) == len(set(identities)), "duplicate model identities produce duplicate picker choices"
+
+
 def _local_row(**overrides: Any) -> dict[str, Any]:
     row: dict[str, Any] = {
         "provider": "ragweld",
@@ -126,6 +148,7 @@ def test_rendered_config_has_no_retries_or_fallbacks_and_is_file_authoritative()
         "context_window_fallbacks": [],
         "callbacks": ["prometheus"],
         "require_auth_for_metrics_endpoint": False,
+        "include_cost_in_streaming_usage": True,
     }
     assert config["router_settings"] == {"num_retries": 0}
     assert config["general_settings"] == {"master_key": "os.environ/LITELLM_MASTER_KEY", "store_model_in_db": False}
@@ -151,8 +174,8 @@ def test_gateway_rows_expose_catalog_metadata_for_discovery_join() -> None:
 def _direct_gen_row() -> dict[str, Any]:
     return {
         "provider": "openai",
-        "family": "gpt-4.1",
-        "model": "gpt-4.1",
+        "family": "gpt-5.6",
+        "model": "gpt-5.6",
         "components": ["GEN"],
         "unit": "1k_tokens",
         "context": 1_000_000,

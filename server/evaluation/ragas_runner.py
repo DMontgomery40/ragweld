@@ -19,6 +19,7 @@ import httpx
 from pydantic import SecretStr
 
 from server.chat.gateway_runtime import resolve_litellm_api_key, resolve_litellm_base_url
+from server.model_policy import ensure_model_allowed
 from server.models.tribrid_config_model import TriBridConfig
 
 SUPPORTED_METRICS: tuple[str, ...] = ("faithfulness", "answer_relevancy")
@@ -40,10 +41,12 @@ def ragas_importable() -> bool:
 
 
 def _judge_alias(cfg: TriBridConfig) -> str:
-    alias = str(cfg.evaluation.ragas_judge_model or "").strip()
-    if alias:
-        return alias
-    return str(cfg.chat.litellm.default_model or "").strip()
+    alias = str(cfg.evaluation.ragas_judge_model or cfg.chat.litellm.default_model or "").strip()
+    try:
+        ensure_model_allowed(alias)
+    except ValueError as exc:
+        raise RagasUnavailableError(str(exc)) from exc
+    return alias
 
 
 def _gateway(cfg: TriBridConfig) -> tuple[str, str]:
@@ -55,6 +58,7 @@ def _gateway(cfg: TriBridConfig) -> tuple[str, str]:
 
 def preflight(cfg: TriBridConfig) -> None:
     """Verify every Ragas prerequisite with real probes; raise on the first gap."""
+    alias = _judge_alias(cfg)
     if not ragas_importable():
         raise RagasUnavailableError("ragas package is not installed")
     metrics = [str(m).strip().lower() for m in (cfg.evaluation.ragas_metrics or []) if str(m).strip()]
@@ -68,7 +72,6 @@ def preflight(cfg: TriBridConfig) -> None:
         raise RagasUnavailableError(
             f"ragas answer relevancy needs a local sentence-transformers embedding provider; configured: {provider!r}"
         )
-    alias = _judge_alias(cfg)
     if not alias:
         raise RagasUnavailableError("no LiteLLM judge alias configured (evaluation.ragas_judge_model / chat default)")
     try:

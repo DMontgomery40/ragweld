@@ -9,6 +9,17 @@ type Props = {
   traceId?: string | null;
 };
 
+type AccessCheck = {
+  traceId: string;
+  access: LangfuseTraceAccess | null;
+  error: string | null;
+  pending: boolean;
+};
+
+// Six sequential checks over about half a minute cover normal asynchronous ingestion.
+// A terminal failure or exhausted schedule stays explicit and can be retried by the user.
+const INGESTION_RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 16000];
+
 function isLangfuseTraceLink(link: TraceExternalLink): boolean {
   return link.kind === 'langfuse' && String(link.url || '').includes('/traces/');
 }
@@ -25,41 +36,56 @@ function isLangfuseTraceLink(link: TraceExternalLink): boolean {
  * one-line swap instead of each growing their own copy.
  */
 export function TraceExternalLinks({ links, traceId }: Props) {
-  const [access, setAccess] = useState<LangfuseTraceAccess | null>(null);
-  const [accessError, setAccessError] = useState<string | null>(null);
+  const [check, setCheck] = useState<AccessCheck | null>(null);
+  const [retry, setRetry] = useState(0);
   const id = String(traceId || '').trim();
+  const hasLangfuseLink = (links || []).some(isLangfuseTraceLink);
+  // Never grant the new trace access during the render before its effect runs.
+  const currentCheck = check?.traceId === id ? check : null;
+  const access = currentCheck?.access ?? null;
+  const accessError = currentCheck?.error ?? null;
+  const pending = Boolean(id && hasLangfuseLink && (currentCheck === null || currentCheck.pending));
 
   useEffect(() => {
     let cancelled = false;
-    if (!id) {
-      setAccess(null);
-      setAccessError(null);
+    let timer: number | undefined;
+    let attempt = 0;
+    if (!id || !hasLangfuseLink) {
+      setCheck(null);
       return;
     }
-    void DashAPI.getLangfuseTraceAccess(id)
-      .then((next) => {
-        if (!cancelled) {
-          setAccess(next);
-          setAccessError(null);
-        }
-      })
-      .catch((error: unknown) => {
+    setCheck({ traceId: id, access: null, error: null, pending: true });
+    const checkAccess = async () => {
+      try {
+        const next = await DashAPI.getLangfuseTraceAccess(id);
         if (cancelled) return;
-        setAccess(null);
+        const delay = next?.checked && !next.exists ? INGESTION_RETRY_DELAYS_MS[attempt++] : undefined;
+        setCheck({ traceId: id, access: next, error: null, pending: delay !== undefined });
+        if (delay !== undefined) {
+          timer = window.setTimeout(() => { void checkAccess(); }, delay);
+        }
+      } catch (error: unknown) {
+        if (cancelled) return;
         // The check failing is not the same as Langfuse saying no; say which.
-        setAccessError(error instanceof Error ? error.message : 'the check did not complete');
-      });
+        setCheck({
+          traceId: id, access: null, pending: false,
+          error: error instanceof Error ? error.message : 'the check did not complete',
+        });
+      }
+    };
+    void checkAccess();
     return () => {
       cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [id]);
+  }, [hasLangfuseLink, id, retry]);
 
   const visible = (links || []).filter(
     (link) => !isLangfuseTraceLink(link) || access?.exists === true
   );
-  const withheld = (links || []).some(isLangfuseTraceLink) && access !== null && !access.exists;
+  const withheld = hasLangfuseLink && !pending && access !== null && !access.exists;
 
-  if (!visible.length && !withheld && !accessError) return null;
+  if (!visible.length && !withheld && !accessError && !pending) return null;
 
   return (
     <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -90,6 +116,12 @@ export function TraceExternalLinks({ links, traceId }: Props) {
           </a>
         ))}
       </div>
+      {pending ? (
+        <div data-testid="trace-langfuse-pending" role="status"
+          style={{ fontSize: '11.5px', color: 'var(--fg-muted)', lineHeight: 1.5 }}>
+          Waiting for Langfuse to receive this trace…
+        </div>
+      ) : null}
       {withheld ? (
         <div
           data-testid="trace-langfuse-withheld"
@@ -105,6 +137,12 @@ export function TraceExternalLinks({ links, traceId }: Props) {
         >
           {`Could not check the Langfuse trace (${accessError}), so its link is not offered.`}
         </div>
+      ) : null}
+      {!pending && (withheld || accessError) ? (
+        <button type="button" onClick={() => setRetry((value) => value + 1)}
+          style={{ alignSelf: 'flex-start', fontSize: '11.5px' }}>
+          Check Langfuse again
+        </button>
       ) : null}
       {access?.exists ? (
         <div

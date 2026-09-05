@@ -1,4 +1,12 @@
-"""Pytest service-capability gates for honest local and strict integration runs."""
+"""Pytest service-capability gates for honest local and strict integration runs.
+
+Mark only tests that issue real provider calls with requires_model_gateway.
+They require explicit LITELLM_BASE_URL/LITELLM_API_KEY and the selected
+GRAPH_E2E_KG_MODEL in the authenticated model listing. Collection never generates
+text. Unconfigured capabilities skip ordinary CI and fail strict acceptance;
+explicitly configured model gateway failures always fail collection;
+local HTTP contract fixtures must remain unmarked.
+"""
 
 from __future__ import annotations
 
@@ -238,7 +246,34 @@ def probe_flyte(
     return ServiceCapability(service="Flyte", available=True, reason=f"Flyte admin is reachable at {url}")
 
 
+def probe_model_gateway(
+    env: Mapping[str, str] | None = None, *, timeout_seconds: float = 2.0,
+) -> ServiceCapability:
+    """Verify authenticated model availability without issuing a generation request."""
+    from server.model_policy import ensure_model_allowed
+
+    values = os.environ if env is None else env
+    base = str(values.get("LITELLM_BASE_URL") or "").strip().rstrip("/")
+    key = str(values.get("LITELLM_API_KEY") or "").strip()
+    model = str(values.get("GRAPH_E2E_KG_MODEL") or "openai.gpt-5.6-luna").strip()
+    if not base or not key:
+        return ServiceCapability("Model gateway", False, "Model gateway not configured: LITELLM_BASE_URL and LITELLM_API_KEY are required")
+    try:
+        ensure_model_allowed(model)
+        response = httpx.get(f"{base}/models", headers={"Authorization": f"Bearer {key}"}, timeout=timeout_seconds)
+        if response.status_code != 200:
+            return ServiceCapability("Model gateway", False, f"Authenticated model listing returned HTTP {response.status_code}")
+        payload = response.json()
+        rows = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(rows, list) or not any(isinstance(row, dict) and row.get("id") == model for row in rows):
+            return ServiceCapability("Model gateway", False, f"Configured model {model!r} is absent from the authenticated model listing")
+    except Exception as exc:
+        return ServiceCapability("Model gateway", False, f"Model gateway probe failed: {type(exc).__name__}")
+    return ServiceCapability("Model gateway", True, f"Authenticated model gateway lists {model!r}")
+
+
 def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line("markers", "requires_model_gateway: requires an authenticated real model gateway; missing capability fails strict integration")
     config.addinivalue_line("markers", "requires_postgres: requires a live authenticated PostgreSQL connection")
     config.addinivalue_line("markers", "requires_neo4j: requires a live authenticated Neo4j connection")
     config.addinivalue_line("markers", "requires_qdrant: requires a live Qdrant vector-store service")
@@ -247,8 +282,10 @@ def pytest_configure(config: pytest.Config) -> None:
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     del config
-    required: dict[str, list[pytest.Item]] = {"postgres": [], "neo4j": [], "qdrant": [], "flyte": []}
+    required: dict[str, list[pytest.Item]] = {"postgres": [], "neo4j": [], "qdrant": [], "flyte": [], "model_gateway": []}
     for item in items:
+        if item.get_closest_marker("requires_model_gateway") is not None:
+            required["model_gateway"].append(item)
         if item.get_closest_marker("requires_postgres") is not None:
             required["postgres"].append(item)
         if item.get_closest_marker("requires_neo4j") is not None:
@@ -263,6 +300,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         "neo4j": probe_neo4j,
         "qdrant": probe_qdrant,
         "flyte": probe_flyte,
+        "model_gateway": probe_model_gateway,
     }
     unavailable: dict[str, ServiceCapability] = {}
     for name, marked_items in required.items():
@@ -275,6 +313,9 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     if unavailable and _strict_mode():
         details = "; ".join(capability.reason for capability in unavailable.values())
         raise pytest.UsageError(f"Strict integration requirements unavailable: {details}")
+
+    if "model_gateway" in unavailable and str(os.environ.get("LITELLM_BASE_URL") or "").strip():
+        raise pytest.UsageError(f"Configured model gateway unavailable: {unavailable['model_gateway'].reason}")
 
     for name, capability in unavailable.items():
         skip = pytest.mark.skip(reason=capability.reason)

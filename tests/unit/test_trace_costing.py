@@ -10,6 +10,24 @@ from server.gateway_catalog import CATALOG_PATH, warm_gateway_catalog
 from server.observability.costing import build_trace_cost_summary
 
 
+@pytest.mark.parametrize("usage", [
+    {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+    {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+    {"input": 0, "output": 0, "total": 0},
+])
+def test_zero_usage_is_known_not_missing(usage: dict) -> None:
+    summary = build_trace_cost_summary(provider="LiteLLM", model="ragweld-local", usage=usage, provider_cost_usd=None)
+    assert (summary.input_tokens, summary.output_tokens, summary.total_tokens) == (0, 0, 0)
+    assert summary.cost_source == "catalog" and summary.estimated_cost_usd == 0
+
+
+@pytest.mark.parametrize("invalid", [float("inf"), float("nan"), -0.01, True])
+def test_invalid_reported_cost_cannot_become_authoritative(invalid: object) -> None:
+    from server.observability.costing import extract_provider_cost
+
+    assert extract_provider_cost({"usage": {"cost": invalid}}) is None
+
+
 @pytest.fixture(autouse=True)
 def _warm_catalog_snapshot() -> None:
     warm_gateway_catalog()

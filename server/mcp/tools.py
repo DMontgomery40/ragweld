@@ -10,29 +10,29 @@ from typing import Annotated, Literal
 from mcp.server.fastmcp import FastMCP
 from mcp.types import CallToolResult, TextContent
 
+from server.chat.generation_failure import generation_unavailable_detail
 from server.config import load_config
 from server.db.postgres import PostgresClient
-from server.dependency_errors import DependencyUnavailableError
-from server.models.tribrid_config_model import (
-    AnswerResponse,
-    ChunkMatch,
-    Corpus,
-    DependencyUnavailableDetail,
-    MCPConfig,
-    MCPSearchToolResult,
-    RequiredRetrievalLegFailureDetail,
-    AnswerRetrievalFailureDetail,
-    GenerationUnavailableDetail,
-    MCPAnswerToolResult,
-    RerankerFailureDetail,
-    RetrievalContractMismatchDetail,
-)
-from server.chat.generation_failure import generation_unavailable_detail
 from server.dependency_errors import (
     DependencyName,
+    DependencyUnavailableError,
     is_neo4j_unavailable,
     is_postgres_unavailable,
     is_required_dependency_unavailable,
+)
+from server.models.tribrid_config_model import (
+    AnswerResponse,
+    AnswerRetrievalFailureDetail,
+    ChunkMatch,
+    Corpus,
+    DependencyUnavailableDetail,
+    GenerationUnavailableDetail,
+    MCPAnswerToolResult,
+    MCPConfig,
+    MCPSearchToolResult,
+    RequiredRetrievalLegFailureDetail,
+    RerankerFailureDetail,
+    RetrievalContractMismatchDetail,
 )
 from server.retrieval.errors import (
     AnswerRetrievalFailedError,

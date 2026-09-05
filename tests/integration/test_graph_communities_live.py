@@ -94,7 +94,8 @@ async def test_gds_leiden_communities_are_scoped_stable_and_feed_the_subgraph(cl
     active = f"pytest_graph_comm_{uuid4().hex[:8]}"
     run_id = uuid4().hex
     staging = f"__staging__{active}__{run_id}"
-    foreign = f"__staging__pytest_foreign_{uuid4().hex[:8]}__{uuid4().hex}"
+    foreign_run = uuid4().hex
+    foreign = f"__staging__pytest_foreign_{uuid4().hex[:8]}__{foreign_run}"
     neo = Neo4jClient(
         os.environ.get("NEO4J_URI", "bolt://127.0.0.1:7687"),
         os.environ.get("NEO4J_USER", "neo4j"),
@@ -161,7 +162,7 @@ async def test_gds_leiden_communities_are_scoped_stable_and_feed_the_subgraph(cl
             await asyncio.to_thread(compatibility_driver.close)
         await _write_graph(
             foreign,
-            run_id,
+            foreign_run,
             Neo4jGraph(
                 nodes=[_entity("foreign-1", "Untouched entity", "concept", "Concept")],
                 relationships=[],
@@ -963,7 +964,6 @@ async def test_scoped_writer_survives_a_repeated_node_id_inside_one_chunk(
                     _schema_entity("email-1:0", "Ada", "Person"),
                     _schema_entity("email-1:1", "Babbage", "Person"),
                     _schema_entity("email-1:0", "Ada", "Person"),
-                    _schema_entity("email-1:0", "London", "Place"),
                 ],
                 relationships=[_rel("email-1:0", "email-1:1", relationship_type="WROTE_TO")],
             ),
@@ -980,7 +980,6 @@ async def test_scoped_writer_survives_a_repeated_node_id_inside_one_chunk(
         )
         assert [(row["entity_id"], row["name"], row["targets"]) for row in rows] == [
             ("email-1:0", "Ada", ["email-1:1"]),
-            ("email-1:0#2", "London", []),
             ("email-1:1", "Babbage", []),
         ]
     finally:
@@ -988,4 +987,36 @@ async def test_scoped_writer_survives_a_repeated_node_id_inside_one_chunk(
             await neo.delete_graph(staging)
         except Exception:
             pass
+        await neo.disconnect()
+
+
+@pytest.mark.parametrize(("label", "name"), [("Place", "London"), ("Person", "Grace")])
+async def test_scoped_writer_refuses_ambiguous_entity_identity_before_any_write(
+    label: str, name: str
+) -> None:
+    run_id = uuid4().hex
+    staging = f"__staging__pytest_graph_identity_{uuid4().hex[:8]}__{run_id}"
+    neo = Neo4jClient(
+        os.environ.get("NEO4J_URI", "bolt://127.0.0.1:7687"),
+        os.environ.get("NEO4J_USER", "neo4j"),
+        os.environ.get("NEO4J_PASSWORD", "password"),
+    )
+    await neo.connect()
+    try:
+        graph = Neo4jGraph(
+            nodes=[
+                Neo4jNode(id="c1", label="Chunk", properties={"chunk_id": "c1"}),
+                _schema_entity("c1:0", "Ada", "Person"),
+                _schema_entity("c1:0", name, label),
+            ],
+            relationships=[_rel("c1:0", "c1", relationship_type="FROM_CHUNK")],
+        )
+        with pytest.raises(ValueError, match="conflicting identity"):
+            await _write_graph(staging, run_id, graph, LexicalGraphConfig())
+        rows = await neo.execute_cypher(
+            "MATCH (n {repo_id: $repo_id}) RETURN count(n) AS nodes", {"repo_id": staging}
+        )
+        assert rows == [{"nodes": 0}]
+    finally:
+        await neo.delete_graph(staging)
         await neo.disconnect()

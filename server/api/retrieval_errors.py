@@ -9,11 +9,10 @@ from server.models.index import (
     IndexDeletionIncompleteResponse,
 )
 from server.models.tribrid_config_model import (
+    AnswerRetrievalFailureDetail,
     DependencyUnavailableResponse,
     RequiredRetrievalLegFailureDetail,
     RequiredRetrievalLegFailureResponse,
-    AnswerRetrievalFailureDetail,
-    AnswerRetrievalFailureResponse,
     RerankerFailureDetail,
     RerankerFailureResponse,
     RetrievalContractMismatchDetail,

@@ -28,7 +28,7 @@ def test_reranker_active_status_makes_configured_vs_active_explicit() -> None:
     """
     # Disabled: configured=none => not active, and the reason says why.
     active, reason = _reranker_active_status(
-        mode="none", cloud_provider="litellm", cloud_model="openai.gpt-4.1-nano",
+        mode="none", cloud_provider="litellm", cloud_model="openai.gpt-5.6-luna",
         learning_path="", learning_resolved="",
     )
     assert active is False
@@ -36,11 +36,11 @@ def test_reranker_active_status_makes_configured_vs_active_explicit() -> None:
 
     # Cloud fully configured => active, and the reason names provider/model.
     active, reason = _reranker_active_status(
-        mode="cloud", cloud_provider="litellm", cloud_model="openai.gpt-4.1-nano",
+        mode="cloud", cloud_provider="litellm", cloud_model="openai.gpt-5.6-luna",
         learning_path="", learning_resolved="",
     )
     assert active is True
-    assert "litellm" in reason and "openai.gpt-4.1-nano" in reason
+    assert "litellm" in reason and "openai.gpt-5.6-luna" in reason
 
     # Cloud selected but not configured => the configured-vs-active gap is explained.
     active, reason = _reranker_active_status(
@@ -84,14 +84,14 @@ async def test_reranker_info_reflects_corpus_scope_not_global(client: AsyncClien
     corpus_id = "pytest_m06_reranker_scope"
     await _create_corpus(client, corpus_id)
     try:
-        # Configure CLOUD reranking for THIS corpus only (defaults pass validation).
+        # Configure an allowed CLOUD reranker explicitly for THIS corpus only.
         patch = await client.request(
             "PATCH",
             f"/api/config/reranking?corpus_id={corpus_id}",
             json={
                 "reranker_mode": "cloud",
                 "reranker_cloud_provider": "litellm",
-                "reranker_cloud_model": "openai.gpt-4.1-nano",
+                "reranker_cloud_model": "openai.gpt-5.6-luna",
             },
         )
         assert patch.status_code == 200, patch.text
@@ -103,7 +103,7 @@ async def test_reranker_info_reflects_corpus_scope_not_global(client: AsyncClien
         assert body["reranker_mode"] == "cloud"
         assert body["enabled"] is True
         assert body["active"] is True
-        assert "openai.gpt-4.1-nano" in body["active_reason"]
+        assert "openai.gpt-5.6-luna" in body["active_reason"]
 
         # Global (no corpus) is independent and stays at its own mode - the two scopes
         # are genuinely different, which is exactly why /info must honor corpus_id.

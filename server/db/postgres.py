@@ -65,6 +65,24 @@ _STAGING_ROW_TABLES: tuple[str, ...] = (
 )
 
 
+async def _existing_corpus_data_tables(conn: asyncpg.Connection) -> dict[str, str]:
+    """Return qualified child-first tables present in this connection's schema.
+
+    A fresh control store owns only corpora and corpus_configs. Explicit deletes
+    also support upgraded tables without foreign keys; schema qualification
+    prevents an absent table from resolving elsewhere on the search path.
+    """
+    rows = await conn.fetch(
+        "SELECT c.relname AS name, format('%I.%I', n.nspname, c.relname) AS qualified_name "
+        "FROM unnest($1::text[]) WITH ORDINALITY AS owned(name, ordinal) "
+        "JOIN pg_namespace n ON n.nspname = current_schema() "
+        "JOIN pg_class c ON c.relnamespace = n.oid AND c.relname = owned.name "
+        "WHERE c.relkind IN ('r', 'p') ORDER BY owned.ordinal",
+        list(_STAGING_ROW_TABLES),
+    )
+    return {row["name"]: row["qualified_name"] for row in rows}
+
+
 async def _delete_corpus_staging_rows(conn: asyncpg.Connection, repo_id: str) -> None:
     """Drop every staging row of ``repo_id`` (``__staging__<repo_id>__<run>``), all runs.
 
@@ -77,12 +95,19 @@ async def _delete_corpus_staging_rows(conn: asyncpg.Connection, repo_id: str) ->
     from server.indexing.generations import staging_repo_id
 
     staging_prefix = staging_repo_id(repo_id, "")
-    for table in _STAGING_ROW_TABLES:
+    for table in (await _existing_corpus_data_tables(conn)).values():
         await conn.execute(
             f"DELETE FROM {table} WHERE starts_with(repo_id, $1) "
             "AND position('__' in substr(repo_id, length($1) + 1)) = 0;",
             staging_prefix,
         )
+
+
+async def _delete_corpus_data_rows(conn: asyncpg.Connection, repo_id: str) -> None:
+    """Clear one corpus and its staging inventory within the caller's transaction."""
+    await _delete_corpus_staging_rows(conn, repo_id)
+    for table in (await _existing_corpus_data_tables(conn)).values():
+        await conn.execute(f"DELETE FROM {table} WHERE repo_id = $1;", repo_id)
 
 
 def _coerce_jsonb_dict(value: Any) -> dict[str, Any]:
@@ -1089,13 +1114,13 @@ class PostgresClient:
             )
 
     async def delete_corpus(self, repo_id: str) -> None:
-        """Remove the registry row under the corpus lock (no writer can slip a generation in meanwhile)."""
+        """Remove owned rows under the corpus lock after the caller finishes external cleanup."""
         await self._require_pool()
         assert self._pool is not None
         async with self._pool.acquire() as conn:
             async with conn.transaction():
                 await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1));", repo_id)
-                await conn.execute("DELETE FROM corpora WHERE repo_id = $1;", repo_id)
+                await _delete_corpus_data_rows(conn, repo_id)
 
     async def get_corpus_config_json(self, repo_id: str) -> dict[str, Any] | None:
         await self._require_pool()
@@ -2424,6 +2449,7 @@ class PostgresClient:
                 from server.indexing.generations import ReclaimEntry as _ReclaimEntry
                 from server.indexing.generations import staging_repo_id
 
+                owned_tables = await _existing_corpus_data_tables(conn)
                 raw_backlog = meta.get("reclaim_backlog")
                 backlog_collections: list[str] = []
                 backlog_graphs: list[str] = []
@@ -2441,7 +2467,7 @@ class PostgresClient:
                         if entry.staged_graph_repo_id:
                             backlog_graphs.append(entry.staged_graph_repo_id)
                         staged_id = staging_repo_id(repo_id, entry.run_id)
-                        for table in _STAGING_ROW_TABLES:
+                        for table in owned_tables.values():
                             await conn.execute(
                                 f"DELETE FROM {table} WHERE repo_id = $1;", staged_id
                             )
@@ -2474,15 +2500,13 @@ class PostgresClient:
                         intent=tombstone.intent,
                     )
 
-                deleted = await conn.fetchval(
-                    "WITH d AS (DELETE FROM chunks WHERE repo_id = $1 RETURNING 1) SELECT count(*) FROM d;",
-                    repo_id,
-                )
-                await conn.execute("DELETE FROM documents WHERE repo_id = $1;", repo_id)
-                await conn.execute("DELETE FROM chunk_summaries WHERE repo_id = $1;", repo_id)
-                await conn.execute(
-                    "DELETE FROM chunk_summaries_last_build WHERE repo_id = $1;", repo_id
-                )
+                deleted = 0
+                for name, table in owned_tables.items():
+                    if name in {"corpora", "corpus_configs"}:
+                        continue
+                    result = await conn.execute(f"DELETE FROM {table} WHERE repo_id = $1;", repo_id)
+                    if name == "chunks":
+                        deleted = int(result.split()[-1])
                 if row is not None:
                     await conn.execute(
                         """
@@ -2618,9 +2642,15 @@ class PostgresClient:
         assert self._pool is not None
         async with self._pool.acquire() as conn:
             async with conn.transaction():
-                await conn.execute("DELETE FROM documents WHERE repo_id = $1;", repo_id)
-                result = await conn.execute("DELETE FROM chunks WHERE repo_id = $1;", repo_id)
-        return int(result.split()[-1])
+                owned_tables = await _existing_corpus_data_tables(conn)
+                deleted = 0
+                for name in ("documents", "chunks"):
+                    table = owned_tables.get(name)
+                    if table is not None:
+                        result = await conn.execute(f"DELETE FROM {table} WHERE repo_id = $1;", repo_id)
+                        if name == "chunks":
+                            deleted = int(result.split()[-1])
+        return deleted
 
     async def delete_corpus_with_data(self, repo_id: str) -> None:
         """Delete a corpus row, all index data tied to it, and its staging rows, in one transaction.
@@ -2633,15 +2663,7 @@ class PostgresClient:
         assert self._pool is not None
         async with self._pool.acquire() as conn:
             async with conn.transaction():
-                await _delete_corpus_staging_rows(conn, repo_id)
-                await conn.execute(
-                    "DELETE FROM chunk_summaries_last_build WHERE repo_id = $1;", repo_id
-                )
-                await conn.execute("DELETE FROM chunk_summaries WHERE repo_id = $1;", repo_id)
-                await conn.execute("DELETE FROM documents WHERE repo_id = $1;", repo_id)
-                await conn.execute("DELETE FROM chunks WHERE repo_id = $1;", repo_id)
-                await conn.execute("DELETE FROM corpus_configs WHERE repo_id = $1;", repo_id)
-                await conn.execute("DELETE FROM corpora WHERE repo_id = $1;", repo_id)
+                await _delete_corpus_data_rows(conn, repo_id)
 
     async def promote_staging_index(
         self,

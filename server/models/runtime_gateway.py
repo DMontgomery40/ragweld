@@ -12,6 +12,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from server.model_policy import ensure_model_allowed
+
 _LITELLM_ALIAS_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
@@ -19,6 +21,7 @@ def validate_litellm_alias(value: str, *, allow_empty: bool) -> str:
     """Normalize one application-visible LiteLLM alias and reject provider IDs."""
 
     alias = str(value or "").strip()
+    ensure_model_allowed(alias)
     if not alias and allow_empty:
         return ""
     if not _LITELLM_ALIAS_PATTERN.fullmatch(alias):

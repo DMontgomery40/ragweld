@@ -827,78 +827,6 @@ model_list:
   litellm_params:
     model: openrouter/openai/gpt-3.5-turbo:batch
     api_key: os.environ/OPENROUTER_API_KEY
-- model_name: openai.gpt-4
-  litellm_params:
-    model: openrouter/openai/gpt-4
-    api_key: os.environ/OPENROUTER_API_KEY
-- model_name: openai.gpt-4-turbo
-  litellm_params:
-    model: openrouter/openai/gpt-4-turbo
-    api_key: os.environ/OPENROUTER_API_KEY
-- model_name: openai.gpt-4-turbo-preview
-  litellm_params:
-    model: openrouter/openai/gpt-4-turbo-preview
-    api_key: os.environ/OPENROUTER_API_KEY
-- model_name: openai.gpt-4-turbo.batch
-  litellm_params:
-    model: openrouter/openai/gpt-4-turbo:batch
-    api_key: os.environ/OPENROUTER_API_KEY
-- model_name: openai.gpt-4.1
-  litellm_params:
-    model: openrouter/openai/gpt-4.1
-    api_key: os.environ/OPENROUTER_API_KEY
-- model_name: openai.gpt-4.1-mini
-  litellm_params:
-    model: openrouter/openai/gpt-4.1-mini
-    api_key: os.environ/OPENROUTER_API_KEY
-- model_name: openai.gpt-4.1-mini.batch
-  litellm_params:
-    model: openrouter/openai/gpt-4.1-mini:batch
-    api_key: os.environ/OPENROUTER_API_KEY
-- model_name: openai.gpt-4.1-nano
-  litellm_params:
-    model: openrouter/openai/gpt-4.1-nano
-    api_key: os.environ/OPENROUTER_API_KEY
-- model_name: openai.gpt-4.1-nano.batch
-  litellm_params:
-    model: openrouter/openai/gpt-4.1-nano:batch
-    api_key: os.environ/OPENROUTER_API_KEY
-- model_name: openai.gpt-4.1.batch
-  litellm_params:
-    model: openrouter/openai/gpt-4.1:batch
-    api_key: os.environ/OPENROUTER_API_KEY
-- model_name: openai.gpt-4o
-  litellm_params:
-    model: openrouter/openai/gpt-4o
-    api_key: os.environ/OPENROUTER_API_KEY
-- model_name: openai.gpt-4o-2024-05-13
-  litellm_params:
-    model: openrouter/openai/gpt-4o-2024-05-13
-    api_key: os.environ/OPENROUTER_API_KEY
-- model_name: openai.gpt-4o-2024-08-06
-  litellm_params:
-    model: openrouter/openai/gpt-4o-2024-08-06
-    api_key: os.environ/OPENROUTER_API_KEY
-- model_name: openai.gpt-4o-2024-11-20
-  litellm_params:
-    model: openrouter/openai/gpt-4o-2024-11-20
-    api_key: os.environ/OPENROUTER_API_KEY
-- model_name: openai.gpt-4o-mini
-  litellm_params:
-    model: openrouter/openai/gpt-4o-mini
-    api_key: os.environ/OPENROUTER_API_KEY
-- model_name: openai.gpt-4o-mini-2024-07-18
-  litellm_params:
-    model: openrouter/openai/gpt-4o-mini-2024-07-18
-    api_key: os.environ/OPENROUTER_API_KEY
-- model_name: openai.gpt-4o-mini.batch
-  litellm_params:
-    model: openrouter/openai/gpt-4o-mini:batch
-    api_key: os.environ/OPENROUTER_API_KEY
-- model_name: openai.gpt-4o.batch
-  litellm_params:
-    model: openrouter/openai/gpt-4o:batch
-    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-5
   litellm_params:
     model: openrouter/openai/gpt-5
@@ -1646,6 +1574,7 @@ litellm_settings:
   callbacks:
   - prometheus
   require_auth_for_metrics_endpoint: false
+  include_cost_in_streaming_usage: true
 router_settings:
   num_retries: 0
 general_settings:

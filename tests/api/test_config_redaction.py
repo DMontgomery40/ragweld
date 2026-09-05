@@ -8,9 +8,15 @@ than through the redacting endpoint that is under test.
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
+import sys
+import uuid
 from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 from httpx import AsyncClient
@@ -39,18 +45,24 @@ async def _stored_config():
     return await load_scoped_config(repo_id=None)
 
 
-@pytest.fixture
-async def seeded_secrets():
+@asynccontextmanager
+async def _seeded_secret_config(repo_id: str | None = None):
     """Put known credentials in the store and restore whatever was there afterwards."""
-    original = await load_scoped_config(repo_id=None)
+    original = await load_scoped_config(repo_id=repo_id)
     seeded = original.model_copy(deep=True)
     seeded.indexing.postgres_url = REAL_DSN
     seeded.tracing.otlp_headers = REAL_HEADERS
-    await save_scoped_config(seeded, repo_id=None)
     try:
+        await save_scoped_config(seeded, repo_id=repo_id)
         yield seeded
     finally:
-        await save_scoped_config(original, repo_id=None)
+        await save_scoped_config(original, repo_id=repo_id)
+
+
+@pytest.fixture
+async def seeded_secrets():
+    async with _seeded_secret_config() as seeded:
+        yield seeded
 
 
 @pytest.mark.asyncio
@@ -295,30 +307,112 @@ def _no_parameter_get_routes() -> list[str]:
     return sorted(paths)
 
 
+@asynccontextmanager
+async def _seeded_sweep_corpus(
+    client: AsyncClient, *, api_delete: bool = False,
+) -> AsyncGenerator[str, None]:
+    """Provision our own corpus so a clean registry exercises every scoped read."""
+    assert (await load_scoped_config(repo_id=None)).indexing.postgres_url != REAL_DSN, "corpus creation must precede secret seeding"
+    corpus_id = f"pytest_redaction_sweep_{uuid.uuid4().hex[:8]}"
+    created = await client.post("/api/corpora", json={
+        "corpus_id": corpus_id, "name": corpus_id, "path": "tests/fixtures/acceptance_corpus",
+    })
+    assert created.status_code == 200, created.text
+    originals = {
+        scope: (await load_scoped_config(repo_id=scope)).model_dump(mode="json")
+        for scope in (None, corpus_id)
+    }
+    try:
+        async with _seeded_secret_config(repo_id=corpus_id), _seeded_secret_config():
+            yield corpus_id
+    finally:
+        for scope, original in originals.items():
+            restored = await load_scoped_config(repo_id=scope)
+            assert restored.model_dump(mode="json") == original
+        if api_delete:
+            deleted = await client.delete(f"/api/corpora/{corpus_id}")
+            assert deleted.status_code == 200, deleted.text
+        else:
+            # This owned corpus was never indexed: only registry/config rows exist.
+            # Keep credential coverage runnable without unrelated vector/graph stores.
+            from server.db.postgres import PostgresClient
+
+            pg = PostgresClient(originals[None]["indexing"]["postgres_url"], schema_mode="control")
+            await pg.connect()
+            try:
+                await pg.delete_corpus_with_data(corpus_id)
+            finally:
+                await pg.disconnect()
+
+
 @pytest.fixture
 async def sweep_corpus_id(client: AsyncClient) -> AsyncGenerator[str, None]:
-    """A corpus the scoped routes will accept, so the sweep actually reaches them.
+    async with _seeded_sweep_corpus(client) as corpus_id:
+        yield corpus_id
 
-    Read-only, and taken through the API rather than an internal helper: an existing
-    corpus is used rather than provisioned, because the routes that need one are
-    corpus-scoped reads and any registered corpus satisfies them. Without this, 24 of the
-    64 routes answered 422 for a missing `corpus_id` and were never inspected --
-    including `/api/agent/train/runs` and `/api/reranker/train/runs`, two of the families
-    this very file is about.
-    """
-    try:
-        listing = await client.get("/api/corpora")
-    except Exception:
-        yield ""
-        return
-    if listing.status_code >= 400:
-        yield ""
-        return
-    rows = listing.json()
-    if not isinstance(rows, list):
-        yield ""
-        return
-    yield next((str(row.get("corpus_id") or "") for row in rows if row.get("corpus_id")), "")
+
+@pytest.mark.requires_postgres
+@pytest.mark.asyncio
+@pytest.mark.parametrize("body_fails", [False, True])
+@pytest.mark.parametrize("api_delete", [
+    pytest.param(False, id="postgres-only"),
+    pytest.param(True, id="api-delete", marks=[pytest.mark.requires_neo4j, pytest.mark.requires_qdrant]),
+])
+async def test_secret_sweep_restores_config_before_deleting_without_dsn_override(
+    tmp_path: Path, body_fails: bool, api_delete: bool,
+) -> None:
+    from tests.service_requirements import require_env
+
+    # A fresh process must bind its ConfigStore to this config before any global
+    # singleton is created; removing env overrides from an existing store does not rebind it.
+    reachable = (await load_scoped_config(repo_id=None)).model_copy(deep=True)
+    reachable.indexing.postgres_url = require_env("POSTGRES_DSN")
+    runtime = tmp_path / "runtime.json"
+    runtime.write_text(reachable.model_dump_json(indent=2))
+    env = dict(os.environ)
+    for name in ("POSTGRES_DSN", "POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD"):
+        env.pop(name, None)
+    env["RAGWELD_CONFIG_PATH"] = str(runtime)
+    env["RAGWELD_LOAD_DOTENV"] = "0"
+    script = """
+import asyncio, sys
+from contextlib import nullcontext
+import pytest
+from httpx import ASGITransport, AsyncClient
+from server.main import app
+from server.db.postgres import PostgresClient
+from server.services.config_store import get_config
+from tests.api.test_config_redaction import (
+    _seeded_sweep_corpus, REAL_DSN, REAL_HEADERS, REAL_DSN_PASSWORD,
+    REAL_HEADER_TOKEN, SECRET_REDACTED,
+)
+async def main():
+    original = (await get_config()).model_dump(mode='json')
+    body_fails = sys.argv[1] == 'true'
+    api_delete = sys.argv[2] == 'true'
+    async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test') as client:
+        with pytest.raises(RuntimeError, match='sweep body failed') if body_fails else nullcontext():
+            async with _seeded_sweep_corpus(client, api_delete=api_delete) as corpus_id:
+                assert (await get_config()).indexing.postgres_url == REAL_DSN
+                scoped = await get_config(repo_id=corpus_id)
+                assert scoped.indexing.postgres_url == REAL_DSN
+                assert scoped.tracing.otlp_headers == REAL_HEADERS
+                response = await client.get('/api/config', params={'corpus_id': corpus_id})
+                assert response.status_code == 200, response.text
+                assert REAL_DSN_PASSWORD not in response.text
+                assert REAL_HEADER_TOKEN not in response.text
+                assert SECRET_REDACTED in response.json()['indexing']['postgres_url']
+                assert SECRET_REDACTED in response.json()['tracing']['otlp_headers']
+                if body_fails:
+                    raise RuntimeError('sweep body failed')
+        assert (await get_config()).model_dump(mode='json') == original
+        assert (await client.get(f'/api/corpora/{corpus_id}')).status_code == 404
+    await PostgresClient.close_shared_pools()
+asyncio.run(main())
+"""
+    result = subprocess.run([sys.executable, "-c", script, str(body_fails).lower(), str(api_delete).lower()],
+                            cwd=Path(__file__).resolve().parents[2], env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 # How many routes may remain uninspectable. Measured, not guessed: with a corpus seeded the
@@ -336,9 +430,10 @@ async def sweep_corpus_id(client: AsyncClient) -> AsyncGenerator[str, None]:
 _MAX_UNINSPECTABLE_ROUTES = 16
 
 
+@pytest.mark.requires_postgres
 @pytest.mark.asyncio
 async def test_no_api_route_ships_a_credential_to_the_browser(
-    client: AsyncClient, seeded_secrets, sweep_corpus_id: str
+    client: AsyncClient, sweep_corpus_id: str
 ) -> None:
     """The sweep IS the invariant: a new carrier fails this without anyone listing it.
 
@@ -392,6 +487,7 @@ async def test_no_api_route_ships_a_credential_to_the_browser(
 
     # Coverage is part of the invariant. A sweep that silently inspects half the surface
     # is the same false comfort as the hand-written list it replaced.
+    assert len(inspected) >= 40, f"the credential sweep inspected only {len(inspected)} routes"
     assert len(uninspectable) <= _MAX_UNINSPECTABLE_ROUTES, (
         f"the sweep reached only {len(inspected)} of "
         f"{len(inspected) + len(uninspectable)} routes; uninspectable: "
@@ -642,4 +738,3 @@ def test_the_fixture_secrets_are_actually_derivable() -> None:
     # And each is a credential the matcher recognises, not an artefact of the split.
     assert _exposed_credentials({"u": REAL_DSN}) == [REAL_DSN_PASSWORD]
     assert _exposed_credentials({"h": REAL_HEADERS})
-

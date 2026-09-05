@@ -11,7 +11,7 @@ import { expect, test } from '@playwright/test';
 import { API_BASE, activateCorpusInBrowser, provisionExhaustiveCorpus } from './corpus_fixture';
 import { ACCEPTANCE_CORPUS_PROBES } from './suite_config';
 
-const BENCHMARK_MODELS = ['openai.gpt-4.1-nano', 'openai.gpt-5.6-luna'];
+const BENCHMARK_MODELS = ['z-ai.glm-5.3-flash', 'openai.gpt-5.6-luna'];
 
 type AliasRow = { alias: string; bundle_id: string };
 

@@ -1,4 +1,5 @@
 import type { ChunkMatch, ChunkProvenance, PageRegion } from '@/types/generated';
+import type { DocumentSource } from '@/stores/useDockStore';
 
 /** True when the citation has real page regions to draw (Docling PDF provenance). */
 export function hasPageRegions(source: ChunkMatch): boolean {
@@ -17,7 +18,7 @@ export function distinctRegionPages(prov: ChunkProvenance | null | undefined): n
 }
 
 /** "p. 3" / "p. 3–4" for page-anchored citations, "L 12–40" for line-anchored ones. */
-export function formatSourceLocation(source: ChunkMatch): string {
+export function formatSourceLocation(source: DocumentSource): string {
   const prov = source.provenance;
   if (prov && typeof prov.page_start === 'number' && typeof prov.page_end === 'number') {
     return prov.page_start === prov.page_end ? `p. ${prov.page_start}` : `p. ${prov.page_start}–${prov.page_end}`;
@@ -52,7 +53,7 @@ type FigureMetadataView = { kind?: unknown };
  * "Figure", or "Figure · chart" when the vision model named a kind, for a citation whose
  * chunk is a figure description rather than page text. Null for every other citation.
  */
-export function figureBadgeLabel(source: ChunkMatch): string | null {
+export function figureBadgeLabel(source: Pick<DocumentSource, 'metadata'>): string | null {
   if (source.metadata?.chunk_kind !== 'figure') return null;
   const raw = source.metadata?.figure;
   const figure: FigureMetadataView | null =
@@ -61,7 +62,7 @@ export function figureBadgeLabel(source: ChunkMatch): string | null {
   return kind && kind !== 'other' ? `Figure · ${kind}` : 'Figure';
 }
 
-export function charSpanOf(source: ChunkMatch): { start: number; end: number } | null {
+export function charSpanOf(source: Pick<DocumentSource, 'metadata'>): { start: number; end: number } | null {
   const start = source.metadata?.char_start;
   const end = source.metadata?.char_end;
   if (typeof start === 'number' && typeof end === 'number' && end >= start) return { start, end };

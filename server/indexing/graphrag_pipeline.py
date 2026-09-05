@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import uuid
 from collections.abc import Callable, Coroutine
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypeVar
@@ -34,6 +36,8 @@ from neo4j_graphrag.llm import OpenAILLM
 from server.gateway_reasoning import reasoning_model_params
 from server.indexing.code_graph import CODE_GRAPH_LANGUAGES, extract_code_graph
 from server.indexing.graph_policy import GraphPolicy
+from server.indexing.graphrag_schema import closed_graph_schema
+from server.model_policy import ensure_model_allowed
 from server.models.index import Chunk, GraphResolutionTelemetry
 from server.models.tribrid_config_model import TriBridConfig
 
@@ -41,7 +45,8 @@ ResultT = TypeVar("ResultT")
 
 logger = logging.getLogger(__name__)
 
-RESERVED_SCOPE_KEYS = frozenset({"repo_id", "run_id", "graphJoinId"})
+RESERVED_SCOPE_KEYS = frozenset({"repo_id", "run_id", "graphJoinId", "__tmp_internal_id"})
+_WRITER_TEMP_PREFIX: ContextVar[str | None] = ContextVar("graphrag_writer_temp_prefix", default=None)
 _RUN_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 _STAGING_GRAPH_RE = re.compile(
     r"^__staging__[A-Za-z0-9][A-Za-z0-9._-]*__[0-9a-f]{32}$"
@@ -259,19 +264,14 @@ def fold_duplicate_node_ids(graph: Neo4jGraph) -> tuple[Neo4jGraph, dict[str, in
     """Make extracted node ids unique before the official writer sees them.
 
     The 1.19 writer ``CREATE``s one node per row, so a model response that repeats a
-    node id inside one chunk yields two rows with the same chunk-prefixed ``entity_id``
-    and the store's uniqueness constraint aborts the run (Task 8 drive defect D12: a
-    two-hour rebuild died after 3,113 of 3,123 chunks). Duplicates with the same label
-    fold into the first occurrence (properties merged, first value wins); a duplicate
-    with a different label keeps a deterministic ordinal suffix so nothing is dropped.
-    Relationships keep the ids the model wrote, i.e. they attach to the first
-    occurrence.
+    node id inside one chunk yields duplicate writer rows. Rows identifying the same
+    named entity fold into the first occurrence. Conflicting names or labels are
+    ambiguous: relationships cannot identify which entity they meant, and renaming
+    one node would silently remove its provenance. Refuse the graph before writing.
     """
     kept: list[Neo4jNode] = []
     position: dict[str, int] = {}
-    ordinal: dict[str, int] = {}
     folded = 0
-    rekeyed = 0
     for node in graph.nodes:
         index = position.get(node.id)
         if index is None:
@@ -279,29 +279,56 @@ def fold_duplicate_node_ids(graph: Neo4jGraph) -> tuple[Neo4jGraph, dict[str, in
             kept.append(node)
             continue
         first = kept[index]
-        if first.label == node.label:
+        if first.label == node.label and (first.properties or {}).get("name") == (
+            node.properties or {}
+        ).get("name"):
             merged = dict(node.properties or {})
             merged.update(first.properties or {})
             kept[index] = first.model_copy(update={"properties": merged})
             folded += 1
             continue
-        ordinal[node.id] = ordinal.get(node.id, 1) + 1
-        kept.append(node.model_copy(update={"id": f"{node.id}#{ordinal[node.id]}"}))
-        rekeyed += 1
-    if not folded and not rekeyed:
-        return graph, {"folded_same_label": 0, "rekeyed_other_label": 0}
+        raise ValueError(
+            f"GraphRAG node id {node.id!r} has conflicting identity; "
+            "the extraction must use a distinct id for each named entity."
+        )
+    if not folded:
+        return graph, {"folded_same_label": 0}
     return (
         Neo4jGraph(nodes=kept, relationships=list(graph.relationships)),
-        {"folded_same_label": folded, "rekeyed_other_label": rekeyed},
+        {"folded_same_label": folded},
     )
 
 
 
 class ScopedNeo4jWriter(Neo4jWriter):
     def __init__(self, *args: Any, repo_id: str, run_id: str, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
         self.repo_id = require_staging_graph_id(repo_id)
         self.run_id = require_run_id(run_id)
+        if self.repo_id.rsplit("__", 1)[-1] != self.run_id:
+            raise ValueError("graph writer run_id must match the staging graph generation")
+        super().__init__(*args, **kwargs)
+
+    def _db_cleaning(self) -> None:
+        """Clean only this writer's temporary endpoint IDs, in its configured database.
+
+        The pinned writer's default cleanup is database-wide. Complete semantic writes
+        need invocation scope because another file write may still be using its IDs;
+        deferred code writes keep their generation namespace until finalize().
+        """
+        if self._clean_db:
+            prefix = _WRITER_TEMP_PREFIX.get()
+            if prefix is None or not prefix.startswith(f"{self.repo_id}:write:"):
+                raise RuntimeError("GraphRAG writer cleanup requires its invocation scope")
+        else:
+            prefix = f"{self.repo_id}:deferred:"
+        query = f"""
+            MATCH (n:__KGBuilder__ {{repo_id: $repo_id}})
+            WHERE n.__tmp_internal_id STARTS WITH $writer_prefix
+            CALL (n) {{ REMOVE n.__tmp_internal_id }}
+            IN TRANSACTIONS OF {int(self.batch_size)} ROWS
+        """
+        with self.driver.session(database=self.neo4j_database) as session:
+            session.run(query, repo_id=self.repo_id, writer_prefix=prefix).consume()
 
     async def run(
         self,
@@ -312,14 +339,13 @@ class ScopedNeo4jWriter(Neo4jWriter):
         # therefore hand downstream components plain dictionaries. The parent
         # method's validate_call normally restores the model; this override owns
         # the boundary and must do so before inspecting or stamping properties.
-        graph = Neo4jGraph.model_validate(graph)
+        graph = Neo4jGraph.model_validate(graph).model_copy(deep=True)
         graph, duplicate_ids = fold_duplicate_node_ids(graph)
-        if duplicate_ids["folded_same_label"] or duplicate_ids["rekeyed_other_label"]:
+        if duplicate_ids["folded_same_label"]:
             logger.warning(
-                "GraphRAG extraction repeated node ids for %s: folded=%d rekeyed=%d",
+                "GraphRAG extraction repeated identical entity ids for %s: folded=%d",
                 self.repo_id,
                 duplicate_ids["folded_same_label"],
-                duplicate_ids["rekeyed_other_label"],
             )
         lexical_graph_config = lexical_graph_config or LexicalGraphConfig()
         validate_no_reserved_scope_keys(graph, RESERVED_SCOPE_KEYS)
@@ -329,13 +355,28 @@ class ScopedNeo4jWriter(Neo4jWriter):
             run_id=self.run_id,
             lexical=lexical_graph_config,
         )
-        base_run = super().run
-        result = await asyncio.to_thread(
-            run_writer_coroutine_in_worker,
-            base_run,
-            graph,
-            lexical_graph_config,
+        # The official writer resolves endpoints using a database-wide temporary id.
+        # Qualify that id without changing the canonical IDs stamped into properties.
+        writer_prefix = (
+            f"{self.repo_id}:write:{uuid.uuid4().hex}:"
+            if self._clean_db else f"{self.repo_id}:deferred:"
         )
+        for node in graph.nodes:
+            node.id = f"{writer_prefix}{node.id}"
+        for relationship in graph.relationships:
+            relationship.start_node_id = f"{writer_prefix}{relationship.start_node_id}"
+            relationship.end_node_id = f"{writer_prefix}{relationship.end_node_id}"
+        base_run = super().run
+        token = _WRITER_TEMP_PREFIX.set(writer_prefix)
+        try:
+            result = await asyncio.to_thread(
+                run_writer_coroutine_in_worker,
+                base_run,
+                graph,
+                lexical_graph_config,
+            )
+        finally:
+            _WRITER_TEMP_PREFIX.reset(token)
         if result.status != "SUCCESS":
             raise RuntimeError(f"Neo4j GraphRAG writer failed: {result.metadata}")
         return result
@@ -433,6 +474,8 @@ def semantic_extraction_llm(
     request in the upstream's own protocol (:func:`reasoning_model_params`); the Indexing
     page showed both, but neither reached the pipeline before (Task 8 drive defect D9).
     """
+    ensure_model_allowed(route_model)
+    ensure_model_allowed(route_upstream)
     if not str(route_model or "").strip():
         raise RuntimeError("GraphRAG semantic extraction requires a resolved model id")
     if not str(route_base_url or "").strip():
@@ -573,6 +616,7 @@ async def write_semantic_file_graph(
     schema: GraphSchema,
 ) -> GraphFileTelemetry:
     lexical = lexical_graph_config()
+    schema = closed_graph_schema(schema)
     result = await pipeline.run(
         data={
             "extractor": {

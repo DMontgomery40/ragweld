@@ -8,6 +8,7 @@ from typing import Literal
 
 from server.chat.gateway_runtime import resolve_litellm_api_key, resolve_litellm_base_url
 from server.gateway_catalog import gateway_rows_snapshot
+from server.model_policy import ensure_model_allowed
 from server.models.tribrid_config_model import TriBridConfig
 
 _GATEWAY_ALIAS = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -33,6 +34,10 @@ def _resolve_gateway_alias(raw_override: str, default_alias: str) -> str:
         raise RuntimeError("Generation model_override must be a LiteLLM gateway alias")
 
     alias = override or default_alias.strip()
+    try:
+        ensure_model_allowed(alias)
+    except ValueError as exc:
+        raise RuntimeError(str(exc)) from exc
     if not _GATEWAY_ALIAS.fullmatch(alias):
         raise RuntimeError("Generation model_override must be a LiteLLM gateway alias")
     return alias

@@ -9,6 +9,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.exceptions import RequestValidationError
 
 from server.api.dependency_errors import (
     DEPENDENCY_UNAVAILABLE_RESPONSES,
@@ -72,6 +73,43 @@ router = APIRouter(tags=["config"], responses=DEPENDENCY_UNAVAILABLE_RESPONSES)
 
 # Ruff B008: avoid function calls in argument defaults (FastAPI Depends()).
 _CORPUS_SCOPE_DEP = Depends()
+
+
+def _config_scope(request: Request, scope: CorpusScope = _CORPUS_SCOPE_DEP) -> CorpusScope:
+    """Reject an invalid scope before any config read, migration, write or reset.
+
+    FastAPI's model dependency ignores unknown query keys, so a UI-style ``corpus``
+    or a misspelled ``corpus_id`` otherwise silently selects the global config.
+    Keep the documented scope names and the usual field-addressable 422 response.
+    """
+    errors: list[dict[str, Any]] = []
+    selected: set[str] = set()
+    for key in request.query_params:
+        values = request.query_params.getlist(key)
+        if key not in CorpusScope.model_fields:
+            message = "Unknown config query parameter; use corpus_id to select a corpus"
+            error_type = "extra_forbidden"
+        elif len(values) != 1:
+            message = "Specify each config scope parameter only once"
+            error_type = "value_error"
+        elif not values[0].strip():
+            message = "Corpus scope must not be blank; omit it to select global config"
+            error_type = "value_error"
+        else:
+            selected.add(values[0].strip())
+            continue
+        errors.append({"type": error_type, "loc": ("query", key), "msg": message, "input": values})
+    if len(selected) > 1:
+        errors.append({
+            "type": "value_error", "loc": ("query", "corpus_id"),
+            "msg": "Config scope parameters must identify the same corpus",
+        })
+    if errors:
+        raise RequestValidationError(errors)
+    return scope
+
+
+_CONFIG_SCOPE_DEP = Depends(_config_scope)
 
 _CONFIG_WRITE_LOCKS: dict[str | None, asyncio.Lock] = {}
 
@@ -529,7 +567,7 @@ def _collect_model_warnings(config: TriBridConfig) -> list[ModelValidationWarnin
 
 
 @router.get("/config/validate", response_model=ModelValidationResult)
-async def validate_config(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> ModelValidationResult:
+async def validate_config(scope: CorpusScope = _CONFIG_SCOPE_DEP) -> ModelValidationResult:
     """Validate current config model assignments against the catalog.
 
     Returns soft warnings (unknown models, capability mismatches) without
@@ -548,7 +586,7 @@ async def get_config_registry() -> ConfigRegistryResponse:
 
 
 @router.get("/config/readiness", response_model=ConfigReadinessResponse)
-async def get_config_readiness(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> ConfigReadinessResponse:
+async def get_config_readiness(scope: CorpusScope = _CONFIG_SCOPE_DEP) -> ConfigReadinessResponse:
     repo_id = scope.resolved_repo_id
     config = await _load_config_for_api(repo_id, boundary="Config readiness API")
     try:
@@ -559,7 +597,7 @@ async def get_config_readiness(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> Config
 
 
 @router.get("/config", response_model=TriBridConfig)
-async def get_config(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> TriBridConfig:
+async def get_config(scope: CorpusScope = _CONFIG_SCOPE_DEP) -> TriBridConfig:
     repo_id = scope.resolved_repo_id
     config = await _load_config_for_api(repo_id, boundary="Config API")
     return redact_config_secrets(config)
@@ -568,7 +606,7 @@ async def get_config(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> TriBridConfig:
 @router.put("/config", response_model=TriBridConfig)
 async def update_config(
     config: TriBridConfig,
-    scope: CorpusScope = _CORPUS_SCOPE_DEP,
+    scope: CorpusScope = _CONFIG_SCOPE_DEP,
 ) -> TriBridConfig:
     repo_id = scope.resolved_repo_id
     try:
@@ -603,7 +641,7 @@ async def update_config(
 async def update_config_section(
     section: str,
     updates: dict[str, Any],
-    scope: CorpusScope = _CORPUS_SCOPE_DEP,
+    scope: CorpusScope = _CONFIG_SCOPE_DEP,
 ) -> TriBridConfig:
     repo_id = scope.resolved_repo_id
     async with _get_config_write_lock(repo_id):
@@ -655,7 +693,7 @@ async def update_config_section(
 
 
 @router.post("/config/reset", response_model=TriBridConfig)
-async def reset_config(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> TriBridConfig:
+async def reset_config(scope: CorpusScope = _CONFIG_SCOPE_DEP) -> TriBridConfig:
     repo_id = scope.resolved_repo_id
     try:
         async with _get_config_write_lock(repo_id):

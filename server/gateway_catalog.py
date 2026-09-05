@@ -34,6 +34,7 @@ from typing import Any
 
 import yaml
 
+from server.model_policy import ensure_model_allowed
 from server.models.runtime_gateway import validate_litellm_alias
 from server.models.tribrid_config_model import ModelCatalogEntry
 
@@ -143,6 +144,11 @@ def gateway_rows(catalog: dict[str, Any]) -> list[GatewayRow]:
     local_rows = 0
     for raw in _catalog_rows(catalog):
         entry = _validate_row(raw)
+        try:
+            for identifier in (entry.model, entry.gateway_alias, entry.gateway_upstream):
+                ensure_model_allowed(identifier or "")
+        except ValueError as error:
+            raise GatewayCatalogError(str(error)) from error
         identity = f"{entry.provider}/{entry.model}"
         has_gateway = entry.gateway_alias is not None or entry.gateway_upstream is not None
         if not has_gateway:
@@ -246,6 +252,7 @@ def build_litellm_config(catalog: dict[str, Any]) -> dict[str, Any]:
             "context_window_fallbacks": [],
             "callbacks": ["prometheus"],
             "require_auth_for_metrics_endpoint": False,
+            "include_cost_in_streaming_usage": True,
         },
         "router_settings": {"num_retries": 0},
         "general_settings": {
