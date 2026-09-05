@@ -30,6 +30,8 @@ except ImportError:
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from server.model_policy import ensure_model_allowed
+from server.models.corpus import CorpusAlreadyIndexedDetail as CorpusAlreadyIndexedDetail
+from server.models.corpus import CorpusAlreadyIndexedResponse as CorpusAlreadyIndexedResponse
 from server.models.graph_sources import GraphEntitySource as GraphEntitySource
 from server.models.graph_sources import GraphEntitySourcesResponse as GraphEntitySourcesResponse
 from server.models.graph_sources import (

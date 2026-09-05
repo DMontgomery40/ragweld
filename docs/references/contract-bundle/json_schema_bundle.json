@@ -2,7 +2,7 @@
   "domain_modules": [
     "server.models.index"
   ],
-  "model_count": 317,
+  "model_count": 320,
   "module": "server.models.tribrid_config_model",
   "root_models": {
     "ActiveSources": {
@@ -10272,6 +10272,101 @@
       "title": "Corpus",
       "type": "object"
     },
+    "CorpusAlreadyIndexedDetail": {
+      "description": "Conditional cleanup refused a corpus whose index completed (HTTP 409).",
+      "properties": {
+        "code": {
+          "const": "corpus_already_indexed",
+          "default": "corpus_already_indexed",
+          "title": "Code",
+          "type": "string"
+        },
+        "corpus_id": {
+          "description": "Corpus preserved by conditional cleanup",
+          "title": "Corpus Id",
+          "type": "string"
+        },
+        "last_indexed": {
+          "description": "Index timestamp read under the corpus write lock",
+          "format": "date-time",
+          "title": "Last Indexed",
+          "type": "string"
+        },
+        "message": {
+          "description": "Stable, non-sensitive conflict summary",
+          "title": "Message",
+          "type": "string"
+        },
+        "operator_hint": {
+          "description": "What the operator can do next",
+          "title": "Operator Hint",
+          "type": "string"
+        }
+      },
+      "required": [
+        "corpus_id",
+        "last_indexed",
+        "message",
+        "operator_hint"
+      ],
+      "title": "CorpusAlreadyIndexedDetail",
+      "type": "object"
+    },
+    "CorpusAlreadyIndexedResponse": {
+      "$defs": {
+        "CorpusAlreadyIndexedDetail": {
+          "description": "Conditional cleanup refused a corpus whose index completed (HTTP 409).",
+          "properties": {
+            "code": {
+              "const": "corpus_already_indexed",
+              "default": "corpus_already_indexed",
+              "title": "Code",
+              "type": "string"
+            },
+            "corpus_id": {
+              "description": "Corpus preserved by conditional cleanup",
+              "title": "Corpus Id",
+              "type": "string"
+            },
+            "last_indexed": {
+              "description": "Index timestamp read under the corpus write lock",
+              "format": "date-time",
+              "title": "Last Indexed",
+              "type": "string"
+            },
+            "message": {
+              "description": "Stable, non-sensitive conflict summary",
+              "title": "Message",
+              "type": "string"
+            },
+            "operator_hint": {
+              "description": "What the operator can do next",
+              "title": "Operator Hint",
+              "type": "string"
+            }
+          },
+          "required": [
+            "corpus_id",
+            "last_indexed",
+            "message",
+            "operator_hint"
+          ],
+          "title": "CorpusAlreadyIndexedDetail",
+          "type": "object"
+        }
+      },
+      "description": "FastAPI response envelope for an indexed corpus skipped by cleanup.",
+      "properties": {
+        "detail": {
+          "$ref": "#/$defs/CorpusAlreadyIndexedDetail"
+        }
+      },
+      "required": [
+        "detail"
+      ],
+      "title": "CorpusAlreadyIndexedResponse",
+      "type": "object"
+    },
     "CorpusCreateRequest": {
       "description": "Request to create a new corpus.",
       "properties": {
@@ -18393,9 +18488,23 @@
     "GraphExtractionTelemetry": {
       "properties": {
         "attempted_chunks": {
+          "description": "In checkpoint_v1, chunks admitted inside the extraction semaphore, including reuse.",
           "minimum": 0,
           "title": "Attempted Chunks",
           "type": "integer"
+        },
+        "cancelled_chunks": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cancelled Chunks"
         },
         "extracted_entities": {
           "minimum": 0,
@@ -18417,6 +18526,48 @@
           "title": "Llm Model Alias",
           "type": "string"
         },
+        "outcome_version": {
+          "default": "whole_file_v0",
+          "description": "Historical file aggregates or measured durable per-chunk outcomes; HTTP attempts belong to native census.",
+          "enum": [
+            "whole_file_v0",
+            "checkpoint_v1"
+          ],
+          "title": "Outcome Version",
+          "type": "string"
+        },
+        "progress_owner_run_id": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{32}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Progress Owner Run Id"
+        },
+        "progress_sequence": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Progress Sequence",
+          "type": "integer"
+        },
+        "reused_chunks": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reused Chunks"
+        },
         "selected_chunks": {
           "minimum": 0,
           "title": "Selected Chunks",
@@ -18428,6 +18579,7 @@
           "type": "integer"
         },
         "succeeded_chunks": {
+          "description": "In checkpoint_v1, durable reusable successes, including reused checkpoints.",
           "minimum": 0,
           "title": "Succeeded Chunks",
           "type": "integer"
@@ -18436,6 +18588,19 @@
           "minimum": 0,
           "title": "Truncated Chunks",
           "type": "integer"
+        },
+        "unfinished_chunks": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unfinished Chunks"
         },
         "worker_seconds": {
           "default": 0.0,
@@ -18510,9 +18675,23 @@
         "GraphExtractionTelemetry": {
           "properties": {
             "attempted_chunks": {
+              "description": "In checkpoint_v1, chunks admitted inside the extraction semaphore, including reuse.",
               "minimum": 0,
               "title": "Attempted Chunks",
               "type": "integer"
+            },
+            "cancelled_chunks": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Cancelled Chunks"
             },
             "extracted_entities": {
               "minimum": 0,
@@ -18534,6 +18713,48 @@
               "title": "Llm Model Alias",
               "type": "string"
             },
+            "outcome_version": {
+              "default": "whole_file_v0",
+              "description": "Historical file aggregates or measured durable per-chunk outcomes; HTTP attempts belong to native census.",
+              "enum": [
+                "whole_file_v0",
+                "checkpoint_v1"
+              ],
+              "title": "Outcome Version",
+              "type": "string"
+            },
+            "progress_owner_run_id": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{32}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Progress Owner Run Id"
+            },
+            "progress_sequence": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Progress Sequence",
+              "type": "integer"
+            },
+            "reused_chunks": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Reused Chunks"
+            },
             "selected_chunks": {
               "minimum": 0,
               "title": "Selected Chunks",
@@ -18545,6 +18766,7 @@
               "type": "integer"
             },
             "succeeded_chunks": {
+              "description": "In checkpoint_v1, durable reusable successes, including reused checkpoints.",
               "minimum": 0,
               "title": "Succeeded Chunks",
               "type": "integer"
@@ -18553,6 +18775,19 @@
               "minimum": 0,
               "title": "Truncated Chunks",
               "type": "integer"
+            },
+            "unfinished_chunks": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Unfinished Chunks"
             },
             "worker_seconds": {
               "default": 0.0,
@@ -19429,6 +19664,167 @@
         }
       },
       "title": "GraphSchemaProposalRequest",
+      "type": "object"
+    },
+    "GraphSchemaProposalState": {
+      "$defs": {
+        "GraphSchemaProposal": {
+          "properties": {
+            "accounting_run_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Persisted schema-proposal attempt; separate from a later index run.",
+              "title": "Accounting Run Id"
+            },
+            "accounting_started_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Server-recorded start of the persisted schema-proposal attempt; absent on legacy proposals.",
+              "title": "Accounting Started At"
+            },
+            "corpus_id": {
+              "title": "Corpus Id",
+              "type": "string"
+            },
+            "created_at": {
+              "format": "date-time",
+              "title": "Created At",
+              "type": "string"
+            },
+            "graphrag_version": {
+              "const": "1.19.0",
+              "default": "1.19.0",
+              "title": "Graphrag Version",
+              "type": "string"
+            },
+            "input_fingerprint": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Input Fingerprint",
+              "type": "string"
+            },
+            "model_alias": {
+              "title": "Model Alias",
+              "type": "string"
+            },
+            "policy": {
+              "const": "semantic",
+              "title": "Policy",
+              "type": "string"
+            },
+            "sample": {
+              "$ref": "#/$defs/GraphSchemaSample"
+            },
+            "schema": {
+              "additionalProperties": true,
+              "title": "Schema",
+              "type": "object"
+            },
+            "schema_hash": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Schema Hash",
+              "type": "string"
+            }
+          },
+          "required": [
+            "corpus_id",
+            "policy",
+            "input_fingerprint",
+            "schema_hash",
+            "schema",
+            "sample",
+            "model_alias",
+            "created_at"
+          ],
+          "title": "GraphSchemaProposal",
+          "type": "object"
+        },
+        "GraphSchemaSample": {
+          "properties": {
+            "chunk_hashes": {
+              "items": {
+                "type": "string"
+              },
+              "title": "Chunk Hashes",
+              "type": "array"
+            },
+            "chunk_ids": {
+              "items": {
+                "type": "string"
+              },
+              "title": "Chunk Ids",
+              "type": "array"
+            },
+            "recipe": {
+              "default": "documents-and-positions-v2",
+              "enum": [
+                "documents-and-positions-v1",
+                "documents-and-positions-v2"
+              ],
+              "title": "Recipe",
+              "type": "string"
+            },
+            "seed": {
+              "default": 0,
+              "title": "Seed",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "chunk_ids",
+            "chunk_hashes"
+          ],
+          "title": "GraphSchemaSample",
+          "type": "object"
+        }
+      },
+      "description": "Read-only restoration; unavailable saved proposals never trigger generation.",
+      "properties": {
+        "corpus_id": {
+          "title": "Corpus Id",
+          "type": "string"
+        },
+        "proposal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GraphSchemaProposal"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "status": {
+          "enum": [
+            "current",
+            "missing",
+            "stale",
+            "ineligible"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "corpus_id",
+        "status"
+      ],
+      "title": "GraphSchemaProposalState",
       "type": "object"
     },
     "GraphSchemaSample": {
@@ -21612,9 +22008,23 @@
         "GraphExtractionTelemetry": {
           "properties": {
             "attempted_chunks": {
+              "description": "In checkpoint_v1, chunks admitted inside the extraction semaphore, including reuse.",
               "minimum": 0,
               "title": "Attempted Chunks",
               "type": "integer"
+            },
+            "cancelled_chunks": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Cancelled Chunks"
             },
             "extracted_entities": {
               "minimum": 0,
@@ -21636,6 +22046,48 @@
               "title": "Llm Model Alias",
               "type": "string"
             },
+            "outcome_version": {
+              "default": "whole_file_v0",
+              "description": "Historical file aggregates or measured durable per-chunk outcomes; HTTP attempts belong to native census.",
+              "enum": [
+                "whole_file_v0",
+                "checkpoint_v1"
+              ],
+              "title": "Outcome Version",
+              "type": "string"
+            },
+            "progress_owner_run_id": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{32}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Progress Owner Run Id"
+            },
+            "progress_sequence": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Progress Sequence",
+              "type": "integer"
+            },
+            "reused_chunks": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Reused Chunks"
+            },
             "selected_chunks": {
               "minimum": 0,
               "title": "Selected Chunks",
@@ -21647,6 +22099,7 @@
               "type": "integer"
             },
             "succeeded_chunks": {
+              "description": "In checkpoint_v1, durable reusable successes, including reused checkpoints.",
               "minimum": 0,
               "title": "Succeeded Chunks",
               "type": "integer"
@@ -21655,6 +22108,19 @@
               "minimum": 0,
               "title": "Truncated Chunks",
               "type": "integer"
+            },
+            "unfinished_chunks": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Unfinished Chunks"
             },
             "worker_seconds": {
               "default": 0.0,

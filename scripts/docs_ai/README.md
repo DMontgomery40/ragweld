@@ -126,18 +126,33 @@ Nothing is capped silently.
   - Generates the docs plan artifact
   - Runs the LLM patch flow in a disposable git worktree
   - Regenerates deterministic config reference docs
+  - Checks every Markdown page before build/publication and repairs recognizable generated page wrappers
   - Runs `mkdocs build --strict`
   - Commits and pushes only when the transactional worktree succeeds
   - Writes `pushed=true|false` (+ `commit_sha`) to `$GITHUB_OUTPUT`; exits non-zero when
     the LLM lane did not process the range (see "The one workflow that matters")
   - `--publish-state` mode: writes `publish_needed=true|false` + `docs_commit` for the
     branch tip so the workflow can dispatch `deploy-docs.yml`
+  - `--repair-page-wrappers-only` mode: checks existing pages in the disposable bot
+    worktree, runs the strict build, and publishes only mechanical delimiter repairs.
+    It needs no provider key and runs no content generators. Use this operation in
+    the bot publication environment to repair existing output without paid regeneration;
+    then use the existing publish-state/deploy-docs dispatch to publish the repair.
 
 - `generate_docs_from_diff.py` (**authoritative**)  
   Diff-driven doc updates. It builds a context bundle from `git diff` + current docs tree and asks the LLM to output a **unified diff patch** that only edits:
   - `mkdocs/docs/**`
   - `mkdocs.yml`
   - Includes guardrails against destructive page rewrites in normal incremental runs.
+  - `--repair-page-wrappers` validates all Markdown pages and stages safe wrapper
+    repairs without a provider call (`--docs-root` selects the repository).
+    The shared publication gate handles valid patches, Cursor patches, FILE-page
+    replacements, and older untouched pages. It recognizes the generated H1/Material
+    grid layout, walks inner code fences, and removes only a leading Markdown
+    presentation fence and its outer closer when present. Body bytes, inner examples,
+    and trailing prose are preserved. Unfamiliar layouts or ambiguous/unclosed fences
+    fail with the page name; a refused batch writes no repairs and cannot be published.
+    Prompt quotations use fences longer than the quoted content's backtick runs.
   - Includes screenshot asset inventory context (`mkdocs/docs/assets/images/**`, `web/public/screenshots/**`) so screenshot sections can be kept current.
   - Acts as the docs-autopilot engine; CI orchestration lives in `run_ci_autopilot.py`.
 

@@ -91,7 +91,6 @@ export function CorpusRegistry({ isOpen, onClose }: CorpusRegistryProps) {
     addRepo,
     deleteCorpus,
     error,
-    initialized,
   } = useRepoStore();
   const [newName, setNewName] = useState('');
   const [newPath, setNewPath] = useState('');
@@ -100,10 +99,10 @@ export function CorpusRegistry({ isOpen, onClose }: CorpusRegistryProps) {
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (isOpen && !initialized && !loading) {
-      loadRepos();
+    if (isOpen) {
+      void loadRepos({ force: true });
     }
-  }, [isOpen, initialized, loading, loadRepos]);
+  }, [isOpen, loadRepos]);
 
   useEffect(() => {
     if (!isOpen) return;

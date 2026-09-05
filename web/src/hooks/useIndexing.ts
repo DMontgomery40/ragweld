@@ -7,6 +7,7 @@ import type {
 } from '@/types/generated';
 import { TerminalService } from '@/services/TerminalService';
 import { describeIndexRunConflict } from '@/utils/indexRunConflict';
+import { useRepoStore } from '@/stores/useRepoStore';
 
 type UseIndexingState = {
   status: IndexStatus | null;
@@ -150,6 +151,9 @@ export function useIndexing() {
             const [nextStatus, nextStats] = await Promise.all([
               fetchStatus(corpusId, { quiet: true }).catch(() => null),
               fetchStats(corpusId, { quiet: true }).catch(() => null),
+              // The terminal event follows the committed index. Supersede any
+              // registry read that began before it before notifying consumers.
+              useRepoStore.getState().loadRepos({ force: true }),
             ]);
             callbacks.onComplete?.(nextStatus, nextStats);
           })();
@@ -198,6 +202,9 @@ export function useIndexing() {
         const data: IndexStatus = await r.json();
         if (options.terminalId) {
           TerminalService.disconnect(options.terminalId);
+        }
+        if (data.status === 'complete') {
+          await useRepoStore.getState().loadRepos({ force: true });
         }
         setState((s) => ({ ...s, status: data, loading: false }));
         return data;

@@ -580,6 +580,19 @@ export interface ConfigIntegrationContract {
   blocked_surfaces?: string[];
 }
 
+/** Conditional cleanup refused a corpus whose index completed (HTTP 409). */
+export interface CorpusAlreadyIndexedDetail {
+  code?: "corpus_already_indexed"; // default: "corpus_already_indexed"
+  /** Corpus preserved by conditional cleanup */
+  corpus_id: string;
+  /** Index timestamp read under the corpus write lock */
+  last_indexed: string;
+  /** Stable, non-sensitive conflict summary */
+  message: string;
+  /** What the operator can do next */
+  operator_hint: string;
+}
+
 export interface CorpusEvalProfile {
   /** Corpus identifier */
   corpus_id: string;
@@ -1187,8 +1200,17 @@ export interface GraphEntitySource {
 }
 
 export interface GraphExtractionTelemetry {
+  /** Historical file aggregates or measured durable per-chunk outcomes; HTTP attempts belong to native census. */
+  outcome_version?: "whole_file_v0" | "checkpoint_v1"; // default: "whole_file_v0"
+  progress_owner_run_id?: string | null; // default: None
+  progress_sequence?: number; // default: 0
+  reused_chunks?: number | null; // default: None
+  cancelled_chunks?: number | null; // default: None
+  unfinished_chunks?: number | null; // default: None
   selected_chunks: number;
+  /** In checkpoint_v1, chunks admitted inside the extraction semaphore, including reuse. */
   attempted_chunks: number;
+  /** In checkpoint_v1, durable reusable successes, including reused checkpoints. */
   succeeded_chunks: number;
   failed_chunks: number;
   truncated_chunks: number;
@@ -1263,6 +1285,22 @@ export interface GraphSchemaPolicyConflictDetail {
   policy: "semantic" | "code" | "off" | "excluded";
   message: string;
   operator_hint: string;
+}
+
+export interface GraphSchemaProposal {
+  corpus_id: string;
+  policy: "semantic";
+  input_fingerprint: string;
+  schema_hash: string;
+  schema: Record<string, unknown>;
+  sample: GraphSchemaSample;
+  model_alias: string;
+  graphrag_version?: "1.19.0"; // default: "1.19.0"
+  created_at: string;
+  /** Persisted schema-proposal attempt; separate from a later index run. */
+  accounting_run_id?: string | null; // default: None
+  /** Server-recorded start of the persisted schema-proposal attempt; absent on legacy proposals. */
+  accounting_started_at?: string | null; // default: None
 }
 
 export interface GraphSchemaProposalFailureDetail {
@@ -3806,6 +3844,11 @@ export interface Corpus {
   last_indexed?: string | null;
 }
 
+/** FastAPI response envelope for an indexed corpus skipped by cleanup. */
+export interface CorpusAlreadyIndexedResponse {
+  detail: CorpusAlreadyIndexedDetail;
+}
+
 /** Request to create a new corpus. */
 export interface CorpusCreateRequest {
   /** Optional corpus ID; generated from name if omitted */
@@ -4223,28 +4266,19 @@ export interface GraphSchemaPolicyConflictResponse {
   detail: GraphSchemaPolicyConflictDetail;
 }
 
-export interface GraphSchemaProposal {
-  corpus_id: string;
-  policy: "semantic";
-  input_fingerprint: string;
-  schema_hash: string;
-  schema: Record<string, unknown>;
-  sample: GraphSchemaSample;
-  model_alias: string;
-  graphrag_version?: "1.19.0";
-  created_at: string;
-  /** Persisted schema-proposal attempt; separate from a later index run. */
-  accounting_run_id?: string | null;
-  /** Server-recorded start of the persisted schema-proposal attempt; absent on legacy proposals. */
-  accounting_started_at?: string | null;
-}
-
 export interface GraphSchemaProposalFailureResponse {
   detail: GraphSchemaProposalFailureDetail;
 }
 
 export interface GraphSchemaProposalRequest {
   force_refresh?: boolean;
+}
+
+/** Read-only restoration; unavailable saved proposals never trigger generation. */
+export interface GraphSchemaProposalState {
+  corpus_id: string;
+  status: "current" | "missing" | "stale" | "ineligible";
+  proposal?: GraphSchemaProposal | null;
 }
 
 export interface GraphSourceGenerationChangedResponse {

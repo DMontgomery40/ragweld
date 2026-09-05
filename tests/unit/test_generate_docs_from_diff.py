@@ -12,6 +12,117 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 MODULE_PATH = REPO_ROOT / "scripts" / "docs_ai" / "generate_docs_from_diff.py"
 
 
+WRAPPER_PAGE_BODY = (
+    '# Deployment\n\n<div class="grid chunk_summaries" markdown>\n\n'
+    '- **Gateway** — [API reference](api.md)\n\n</div>\n\n'
+    '!!! warning "Private provider keys"\n'
+    '    Keep gateway keys separate from private provider credentials.\n\n'
+    '## Start the stack\n\n```bash\n./start.sh\n```\n\n'
+    '```mermaid\nflowchart LR\n  UI --> Gateway\n```\n\n'
+    '```json\n{"gateway": "enabled"}\n```\n\n'
+    '`````markdown\n# Example heading\n```bash\n./start.sh --help\n```\n`````\n\n'
+    'Trailing prose retains the private-provider-key guidance.\n'
+)
+
+
+@pytest.mark.parametrize("fence", ["```", "``````", "~~~"])
+@pytest.mark.parametrize("complete", [False, True])
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_page_wrapper_repair_preserves_body_bytes_and_is_idempotent(
+    tmp_path: Path, fence: str, complete: bool, newline: str
+) -> None:
+    module = _load_module()
+    repo = _init_repo(tmp_path)
+    path = repo / "mkdocs/docs/deployment.md"
+    body = WRAPPER_PAGE_BODY.replace("\n", newline).encode()
+    path.write_bytes((fence + "markdown" + newline).encode() + body + ((fence + newline).encode() if complete else b""))
+
+    result = module.repair_docs_page_wrappers(repo)
+
+    assert result.refused == {}
+    assert result.written == ["mkdocs/docs/deployment.md"]
+    assert path.read_bytes() == body
+    assert module.repair_docs_page_wrappers(repo).written == []
+
+
+def test_page_wrapper_repair_keeps_a_real_final_example_closer(tmp_path: Path) -> None:
+    module = _load_module()
+    repo = _init_repo(tmp_path)
+    body = WRAPPER_PAGE_BODY + '\n```bash\n./start.sh --check\n```\n'
+    path = repo / "mkdocs/docs/deployment.md"
+    path.write_text("```markdown\n" + body, encoding="utf-8")
+    assert module.repair_docs_page_wrappers(repo).refused == {}
+    assert path.read_bytes() == body.encode()
+
+
+@pytest.mark.parametrize("body", [
+    "```markdown\n# Example\n\nMarkdown syntax demonstration.\n```\n",
+    "```markdown\nThis might be a literal Markdown example.\n```\n",
+    "```markdown\n" + WRAPPER_PAGE_BODY + "\n```python\nprint('unfinished')\n",
+    "```markdown\n" + WRAPPER_PAGE_BODY + "\n````\n",
+])
+def test_page_wrapper_repair_refuses_ambiguous_batches_without_partial_writes(tmp_path: Path, body: str) -> None:
+    module = _load_module()
+    repo = _init_repo(tmp_path)
+    good = repo / "mkdocs/docs/a-deployment.md"
+    bad = repo / "mkdocs/docs/z-example.md"
+    good.write_text("```markdown\n" + WRAPPER_PAGE_BODY, encoding="utf-8")
+    bad.write_text(body, encoding="utf-8")
+    before = {path: path.read_bytes() for path in (good, bad)}
+    result = module.repair_docs_page_wrappers(repo)
+    assert result.written == []
+    assert "mkdocs/docs/z-example.md" in result.refused
+    assert {path: path.read_bytes() for path in (good, bad)} == before
+
+
+@pytest.mark.parametrize("route", ["unified", "cursor", "pages"])
+def test_page_wrapper_gate_covers_each_output_admission_path(tmp_path: Path, route: str) -> None:
+    module = _load_module()
+    repo = _init_repo(tmp_path)
+    module.ROOT = repo
+    path = "mkdocs/docs/deployment.md"
+    wrapped = "```markdown\n" + WRAPPER_PAGE_BODY
+    if route == "pages":
+        pages = module.parse_page_blocks(f"### FILE: {path}\n{wrapped}### END FILE\n")
+        assert module.apply_page_replacements(pages, allowed={path}, allow_large_deletes=False).written == [path]
+    else:
+        added = "".join("+" + line for line in wrapped.splitlines(keepends=True))
+        patch = tmp_path / "wrapper.patch"
+        if route == "cursor":
+            patch.write_text(f"*** Begin Patch\n*** Add File: {path}\n{added}*** End Patch\n", encoding="utf-8")
+        else:
+            patch.write_text(
+                f"diff --git a/{path} b/{path}\nnew file mode 100644\n--- /dev/null\n+++ b/{path}\n"
+                f"@@ -0,0 +1,{len(wrapped.splitlines())} @@\n{added}", encoding="utf-8"
+            )
+        assert module.apply_patch_per_file(patch).applied == [path]
+
+    # The same provider-free operation used before publication must inspect the
+    # materialized page, regardless of which output path admitted it.
+    child = subprocess.run(
+        [sys.executable, str(MODULE_PATH), "--repair-page-wrappers", "--docs-root", str(repo)],
+        capture_output=True, text=True, check=False,
+    )
+    assert child.returncode == 0, child.stderr
+    assert (repo / path).read_bytes() == WRAPPER_PAGE_BODY.encode()
+    assert _git(repo, "show", f":{path}").stdout == WRAPPER_PAGE_BODY
+
+
+@pytest.mark.parametrize("kind", ["all", "patch-repair", "page-repair"])
+def test_prompt_page_quoting_cannot_collide_with_embedded_fences(tmp_path: Path, kind: str) -> None:
+    module = _load_module()
+    repo = _init_repo(tmp_path)
+    module.ROOT = repo
+    (repo / "mkdocs/docs/api.md").write_text(WRAPPER_PAGE_BODY, encoding="utf-8")
+    if kind == "all":
+        blocks, _ = module._all_docs_context(budget_chars=100000)
+        prompt = "\n".join(blocks)
+    else:
+        builder = module.build_page_repair_prompt if kind == "page-repair" else module.build_repair_prompt
+        prompt = builder(rejected={"mkdocs/docs/api.md": "bad context"}, rejected_patch_text="")
+    assert "``````markdown\n" + WRAPPER_PAGE_BODY + "\n``````" in prompt
+
+
 @pytest.mark.parametrize("model", ["gpt-4", "openai/gpt-4.1-nano", "openai/gpt-4o-mini", "openai/chatgpt-4o-latest"])
 def test_docs_model_policy_refuses_retired_models_before_credentials(model: str) -> None:
     # A real child process isolates environment changes. No provider key or usable

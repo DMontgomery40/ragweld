@@ -3,11 +3,15 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
 import uuid
 from collections.abc import Callable, Coroutine
 from contextvars import ContextVar
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from importlib.metadata import version
 from pathlib import Path
+from string import Formatter
 from typing import Any, TypeVar
 
 import httpx
@@ -30,6 +34,7 @@ from neo4j_graphrag.components.types import (
     TextChunk,
     TextChunks,
 )
+from neo4j_graphrag.exceptions import PromptMissingPlaceholderError
 from neo4j_graphrag.experimental.pipeline import Pipeline
 from neo4j_graphrag.generation.prompts import ERExtractionTemplate
 from neo4j_graphrag.llm import OpenAILLM
@@ -37,9 +42,25 @@ from neo4j_graphrag.utils.rate_limit import NoOpRateLimitHandler
 
 from server.gateway_reasoning import reasoning_model_params
 from server.indexing.code_graph import CODE_GRAPH_LANGUAGES, extract_code_graph
+from server.indexing.extraction_checkpoint import (
+    ExtractionCheckpointContext,
+    ExtractionFileCheckpoint,
+    await_checkpoint_task,
+    extraction_digest,
+    extraction_json,
+)
 from server.indexing.graph_policy import GraphPolicy
 from server.indexing.graphrag_schema import closed_graph_schema
 from server.model_policy import ensure_model_allowed
+from server.models.graph_extraction_checkpoint import (
+    GraphExtractionCheckpoint,
+    GraphExtractionCheckpointCorruptError,
+    GraphExtractionCheckpointError,
+    GraphExtractionCheckpointIdentity,
+    GraphExtractionCheckpointRecipe,
+    graph_extraction_cache_key,
+    graph_extraction_recipe_hash,
+)
 from server.models.index import Chunk, GraphResolutionTelemetry
 from server.models.tribrid_config_model import TriBridConfig
 from server.observability.run_census import CensusAsyncTransport, CensusTransport, RunCensusScope
@@ -540,23 +561,94 @@ def extraction_prompt_template(text: str) -> ERExtractionTemplate:
         raise ValueError(
             "GraphRAG extraction prompt is empty; it must carry the {schema} and {text} placeholders"
         )
+    # Each required input needs one complete top-level occurrence. Escaping,
+    # projections, nested fields and precision/width specs cannot satisfy that
+    # guarantee. Extra occurrences may format/truncate once a complete one exists.
+    complete_fields = {
+        field_name for _literal, field_name, format_spec, conversion in Formatter().parse(template)
+        if field_name is not None and not format_spec and conversion in {None, "s", "r", "a"}
+    }
     missing = [
         placeholder
         for placeholder in EXTRACTION_TEMPLATE_REQUIRED_PLACEHOLDERS
-        if placeholder not in template
+        if placeholder[1:-1] not in complete_fields
     ]
     if missing:
         raise ValueError(
-            "GraphRAG extraction prompt is missing the placeholder(s) the official extractor "
-            f"formats: {', '.join(missing)}"
+            f"GraphRAG extraction prompt must include complete input values for {', '.join(missing)}; "
+            "use each at least once as a direct field without a format specification. "
+            "The s/r/a conversions are supported."
         )
-    return ERExtractionTemplate(template=template)
+    try:
+        return ERExtractionTemplate(template=template)
+    except PromptMissingPlaceholderError as exc:
+        # The official public constructor additionally requires literal {text}.
+        # Keep its supported contract and unchanged rendering; never rewrite the
+        # template or bypass the constructor to accept conversion-only forms.
+        raise ValueError(
+            "The official GraphRAG template requires a literal {text} placeholder "
+            "in addition to any converted or formatted occurrences."
+        ) from exc
 
+
+
+_EXTRACTION_CHECKPOINT_VERSION = "official-structured-extraction-v1"
+_PRUNING_CHECKPOINT_VERSION = "official-domain-pruning-and-identity-v1"
+
+
+def extraction_checkpoint_recipe(
+    *, schema: GraphSchema, prompt_template: str, route_model: str,
+    route_upstream: str, route_base_url: str, reasoning_effort: str, examples: str = "",
+) -> GraphExtractionCheckpointRecipe:
+    """The exact approved semantic inputs; transport controls and credentials stay out."""
+    template = extraction_prompt_template(prompt_template)
+    return GraphExtractionCheckpointRecipe(
+        approved_schema=closed_graph_schema(schema),
+        prompt_template_sha256=extraction_digest(template.template),
+        examples_sha256=extraction_digest(examples),
+        model_alias=route_model.strip(), model_upstream=route_upstream.strip(),
+        model_endpoint=route_base_url.strip(),
+        model_parameters=reasoning_model_params(
+            reasoning_effort=reasoning_effort, route_upstream=route_upstream,
+        ),
+        neo4j_graphrag_version=version("neo4j-graphrag"),
+        extractor_version=_EXTRACTION_CHECKPOINT_VERSION,
+        pruner_version=_PRUNING_CHECKPOINT_VERSION,
+    )
+
+
+async def _pruned_extraction_checkpoint(
+    *, identity: GraphExtractionCheckpointIdentity, owner_run_id: str,
+    graph: Neo4jGraph, schema: GraphSchema,
+) -> GraphExtractionCheckpoint:
+    # Validate scope/official shape before pruning can remove evidence of a
+    # collision. Lexical entities/links are exclusively produced by the official
+    # lexical postprocessor after this durable domain-only boundary.
+    raw = GraphExtractionCheckpoint(
+        identity=identity, cache_key=graph_extraction_cache_key(identity),
+        originating_run_id=owner_run_id, created_at=datetime.now(UTC),
+        graph=graph, pruned_nodes=0, pruned_relationships=0,
+    )
+    lexical = lexical_graph_config()
+    if (any(node.label in lexical.lexical_graph_node_labels for node in raw.graph.nodes)
+            or any(rel.type in lexical.lexical_graph_relationship_types for rel in raw.graph.relationships)):
+        raise GraphScopeCollisionError("Raw extraction contains server-owned lexical nodes or relationships")
+    folded, _ = fold_duplicate_node_ids(raw.graph.model_copy(deep=True))
+    pruned = await GraphPruning().run(graph=folded, schema=schema, lexical_graph_config=lexical)
+    return GraphExtractionCheckpoint(
+        identity=identity, cache_key=raw.cache_key, originating_run_id=owner_run_id,
+        created_at=raw.created_at, graph=pruned.graph,
+        pruned_nodes=max(0, len(raw.graph.nodes) - len(pruned.graph.nodes)),
+        pruned_relationships=max(0, len(raw.graph.relationships) - len(pruned.graph.relationships)),
+    )
 
 
 @dataclass
 class _ExtractionBatch:
     tasks: set[asyncio.Task[Any]] = field(default_factory=set)
+    commits: set[asyncio.Task[None]] = field(default_factory=set)
+    commit_error: BaseException | None = None
+    checkpoint_context: ExtractionFileCheckpoint | None = None
     closing: bool = False
 
 
@@ -568,9 +660,13 @@ _EXTRACTION_BATCH: ContextVar[_ExtractionBatch | None] = ContextVar(
 class _DrainingExtractor(LLMEntityRelationExtractor):
     """Keep official extraction, but drain gather siblings before releasing its producer."""
 
-    def __init__(self, *, census_scope: RunCensusScope | None, **kwargs: Any) -> None:
+    def __init__(
+        self, *, census_scope: RunCensusScope | None,
+        checkpoint_context: ExtractionCheckpointContext | None = None, **kwargs: Any,
+    ) -> None:
         super().__init__(**kwargs)
         self.census_scope = census_scope
+        self.checkpoint_context = checkpoint_context
         self.active_runs: set[asyncio.Task[Any]] = set()
         self.drains: set[asyncio.Task[None]] = set()
         self.closed = False
@@ -578,15 +674,25 @@ class _DrainingExtractor(LLMEntityRelationExtractor):
     async def run(
         self, chunks: TextChunks, document_info: DocumentInfo | None = None,
         lexical_graph_config: LexicalGraphConfig | None = None,
-        schema: GraphSchema | None = None, examples: str = "", **kwargs: Any,
+        schema: GraphSchema | None = None, examples: str = "",
+        checkpoint_context: ExtractionFileCheckpoint | None = None, **kwargs: Any,
     ) -> Neo4jGraph:
         if self.closed:
             raise RuntimeError("semantic pipeline is closed")
+        if self.checkpoint_context is not None:
+            if checkpoint_context is None or checkpoint_context.execution is not self.checkpoint_context:
+                raise GraphExtractionCheckpointError("Extractor requires its explicitly prepared checkpoint file")
+            if schema is None:
+                raise GraphExtractionCheckpointError("Checkpoint extraction requires its approved schema")
+            schema = closed_graph_schema(schema)
+            checkpoint_context.validate_inputs(chunks, schema, examples, self.prompt_template)
+        elif checkpoint_context is not None:
+            raise GraphExtractionCheckpointError("Checkpoint file does not belong to this extractor")
         lease = self.census_scope.producer_started() if self.census_scope else None
         owner = asyncio.current_task()
         assert owner is not None
         self.active_runs.add(owner)
-        batch = _ExtractionBatch()
+        batch = _ExtractionBatch(checkpoint_context=checkpoint_context)
         token = _EXTRACTION_BATCH.set(batch)
         try:
             return await super().run(
@@ -599,21 +705,40 @@ class _DrainingExtractor(LLMEntityRelationExtractor):
             _EXTRACTION_BATCH.reset(token)
 
             async def drain() -> None:
+                cleanup_error: BaseException | None = None
                 try:
                     for task in batch.tasks:
                         if not task.done():
                             task.cancel()
                     await asyncio.gather(*batch.tasks, return_exceptions=True)
+                    # Once a validated graph starts its database commit, cancellation
+                    # can stop extraction but cannot orphan that writer or its fence.
+                    await asyncio.gather(*batch.commits, return_exceptions=True)
+                    if checkpoint_context is not None:
+                        for identity in checkpoint_context.identities:
+                            key = graph_extraction_cache_key(identity)
+                            if checkpoint_context.outcomes.get(key) == "selected":
+                                checkpoint_context.emit(identity, "cancelled")
+                except BaseException as exc:
+                    cleanup_error = exc
                 finally:
                     if lease is not None:
-                        lease.close()
+                        try:
+                            lease.close()
+                        except BaseException as exc:
+                            if cleanup_error is None:
+                                cleanup_error = exc
+                if batch.commit_error is not None:
+                    raise batch.commit_error
+                if cleanup_error is not None:
+                    raise cleanup_error
 
             cleanup = asyncio.create_task(drain())
             self.drains.add(cleanup)
             try:
                 # A second cancellation must not release the producer while siblings
                 # still own HTTP requests. Pipeline close also waits for this task.
-                await asyncio.shield(cleanup)
+                await await_checkpoint_task(cleanup)
             finally:
                 self.active_runs.discard(owner)
                 if cleanup.done():
@@ -639,22 +764,117 @@ class _DrainingExtractor(LLMEntityRelationExtractor):
         owners = tuple(self.active_runs)
         for task in owners:
             task.cancel()
-        await asyncio.gather(*owners, return_exceptions=True)
-        await asyncio.gather(*self.drains)
-        self.drains.clear()
+
+        async def drain_all() -> None:
+            # All owners and producer drains settle before an error escapes.
+            # The context retains the first storage failure even if the file
+            # owner was cancelled or has already observed and removed its drain.
+            owner_results = await asyncio.gather(*owners, return_exceptions=True)
+            drain_results = await asyncio.gather(*self.drains, return_exceptions=True)
+            self.drains.clear()
+            if self.checkpoint_context is not None:
+                await self.checkpoint_context.drain_writes()
+            for result in (*owner_results, *drain_results):
+                if isinstance(result, BaseException) and not isinstance(result, asyncio.CancelledError):
+                    raise result
+
+        await await_checkpoint_task(asyncio.create_task(drain_all()))
+
+    async def extract_for_chunk(
+        self, schema: GraphSchema, examples: str, chunk: TextChunk,
+    ) -> Neo4jGraph:
+        """Reuse only at the official pre-lexical, semaphore-admitted boundary."""
+        batch = _EXTRACTION_BATCH.get()
+        if self.checkpoint_context is None:
+            return await super().extract_for_chunk(schema, examples, chunk)
+        if batch is None or batch.checkpoint_context is None:
+            raise GraphExtractionCheckpointError("Extraction checkpoint is missing its producer ownership")
+        file = batch.checkpoint_context
+        identity = file.identity_for(chunk)
+        if batch.closing:
+            file.emit(identity, "cancelled")
+            raise asyncio.CancelledError()
+        file.emit(identity, "admitted")
+        dispatch_started: float | None = None
+        commit: asyncio.Task[None] | None = None
+        try:
+            stored = await self.checkpoint_context.load(identity)
+            if stored is not None:
+                # A valid envelope also has to remain a valid domain graph under
+                # its recipe. Do not repair a poisoned cache and call it a hit.
+                try:
+                    checked = await _pruned_extraction_checkpoint(
+                        identity=identity, owner_run_id=self.checkpoint_context.owner_run_id,
+                        graph=stored.graph.model_copy(deep=True), schema=schema,
+                    )
+                except ValueError as exc:
+                    raise GraphExtractionCheckpointCorruptError("Stored extraction graph violates its domain contract") from exc
+                if extraction_json(checked.graph.model_dump(mode="json")) != extraction_json(stored.graph.model_dump(mode="json")):
+                    raise GraphExtractionCheckpointCorruptError("Stored extraction graph was not pruned with its exact recipe")
+                file.emit(identity, "reused", checkpoint=stored)
+                return stored.graph.model_copy(deep=True)
+            file.emit(identity, "dispatching")
+            dispatch_started = time.perf_counter()
+            graph = await super().extract_for_chunk(schema, examples, chunk)
+            duration_s = max(0.0, time.perf_counter() - dispatch_started)
+            checkpoint = await _pruned_extraction_checkpoint(
+                identity=identity, owner_run_id=self.checkpoint_context.owner_run_id,
+                graph=graph, schema=schema,
+            )
+
+            async def persist() -> None:
+                try:
+                    await file.execution.postgres.put_graph_extraction_checkpoint(
+                        file.execution.repo_id, file.execution.owner_run_id, checkpoint,
+                    )
+                except BaseException as exc:
+                    batch.closing = True
+                    if not isinstance(exc, asyncio.CancelledError) and batch.commit_error is None:
+                        batch.commit_error = exc
+                    file.emit(identity, "failed", duration_s=duration_s)
+                    raise
+                file.emit(identity, "succeeded", duration_s=duration_s, checkpoint=checkpoint)
+
+            commit = self.checkpoint_context.start_write(persist())
+            batch.commits.add(commit)
+            await asyncio.shield(commit)
+            return checkpoint.graph.model_copy(deep=True)
+        except BaseException as exc:
+            batch.closing = True
+            if commit is None:
+                file.emit(identity, "cancelled" if isinstance(exc, asyncio.CancelledError) else "failed",
+                          duration_s=max(0.0, time.perf_counter() - dispatch_started) if dispatch_started is not None else 0.0)
+            raise
 
 
 class SemanticPipeline(Pipeline):
     """Official pipeline with explicit ownership of extractor work and SDK clients."""
 
-    def __init__(self, llm: OpenAILLM, extractor: _DrainingExtractor) -> None:
+    def __init__(self, llm: OpenAILLM, extractor: _DrainingExtractor, *, examples: str = "") -> None:
         super().__init__()
         self._owned_llm = llm
         self._owned_extractor = extractor
+        self.checkpoint_context = extractor.checkpoint_context
+        self.extraction_examples = examples
+        self._close_task: asyncio.Task[None] | None = None
 
     async def aclose(self) -> None:
-        await self._owned_extractor.cancel_and_drain()
-        await self._owned_llm.aclose()
+        if self._close_task is None:
+            async def close() -> None:
+                error: BaseException | None = None
+                try:
+                    await self._owned_extractor.cancel_and_drain()
+                except BaseException as exc:
+                    error = exc
+                try:
+                    await self._owned_llm.aclose()
+                except BaseException as exc:
+                    if error is None or isinstance(error, asyncio.CancelledError):
+                        error = exc
+                if error is not None:
+                    raise error
+            self._close_task = asyncio.create_task(close())
+        await await_checkpoint_task(self._close_task)
 
 
 async def close_semantic_pipeline(pipeline: Pipeline) -> None:
@@ -668,12 +888,27 @@ def semantic_entity_relation_extractor(
     prompt_template: str,
     max_concurrency: int,
     census_scope: RunCensusScope | None = None,
+    checkpoint_context: ExtractionCheckpointContext | None = None,
 ) -> _DrainingExtractor:
     """The official extractor over the operator's template, strict structured output, fail closed."""
+    template = extraction_prompt_template(prompt_template)
+    if checkpoint_context is not None:
+        recipe = checkpoint_context.recipe
+        if (
+            extraction_digest(template.template) != recipe.prompt_template_sha256
+            or llm.model_name != recipe.model_alias
+            or extraction_json(llm.model_params) != extraction_json(recipe.model_parameters)
+            or str(llm.async_client.base_url) != str(httpx.URL(recipe.model_endpoint)).rstrip("/") + "/"
+            or recipe.neo4j_graphrag_version != version("neo4j-graphrag")
+            or recipe.extractor_version != _EXTRACTION_CHECKPOINT_VERSION
+            or recipe.pruner_version != _PRUNING_CHECKPOINT_VERSION
+        ):
+            raise GraphExtractionCheckpointError("Official extractor does not match the approved checkpoint recipe")
     return _DrainingExtractor(
         census_scope=census_scope,
+        checkpoint_context=checkpoint_context,
         llm=llm,
-        prompt_template=extraction_prompt_template(prompt_template),
+        prompt_template=template,
         create_lexical_graph=True,
         on_error=OnError.RAISE,
         max_concurrency=max(1, int(max_concurrency)),
@@ -696,7 +931,21 @@ def build_semantic_pipeline(
     reasoning_effort: str,
     prompt_template: str,
     census_scope: RunCensusScope | None = None,
+    checkpoint_context: ExtractionCheckpointContext | None = None,
+    examples: str = "",
 ) -> SemanticPipeline:
+    if checkpoint_context is not None:
+        staging_id = require_staging_graph_id(repo_id)
+        corpus_id = staging_id[len("__staging__"):].rsplit("__", 1)[0]
+        if checkpoint_context.repo_id != corpus_id or checkpoint_context.owner_run_id != run_id:
+            raise GraphExtractionCheckpointError("Checkpoint owner does not match the staging generation")
+        expected_recipe = extraction_checkpoint_recipe(
+            schema=checkpoint_context.recipe.approved_schema, prompt_template=prompt_template,
+            examples=examples, route_model=route_model, route_base_url=route_base_url,
+            route_upstream=route_upstream, reasoning_effort=reasoning_effort,
+        )
+        if graph_extraction_recipe_hash(expected_recipe) != graph_extraction_recipe_hash(checkpoint_context.recipe):
+            raise GraphExtractionCheckpointError("Pipeline inputs do not match the approved checkpoint recipe")
     if census_scope is not None:
         staging_id = require_staging_graph_id(repo_id)
         corpus_id = staging_id[len("__staging__"):].rsplit("__", 1)[0]
@@ -715,6 +964,7 @@ def build_semantic_pipeline(
     extractor = semantic_entity_relation_extractor(
         llm=llm, prompt_template=prompt_template, max_concurrency=max_concurrency,
         census_scope=census_scope,
+        checkpoint_context=checkpoint_context,
     )
     writer = ScopedNeo4jWriter(
         driver=driver,
@@ -722,7 +972,7 @@ def build_semantic_pipeline(
         repo_id=repo_id,
         run_id=run_id,
     )
-    pipeline = SemanticPipeline(llm, extractor)
+    pipeline = SemanticPipeline(llm, extractor, examples=examples)
     pipeline.add_component(extractor, "extractor")
     pipeline.add_component(GraphPruning(), "pruner")
     pipeline.add_component(writer, "writer")
@@ -759,16 +1009,29 @@ async def write_semantic_file_graph(
     file_path: str,
     chunks: list[Chunk],
     schema: GraphSchema,
+    file_sha256: str | None = None,
 ) -> GraphFileTelemetry:
     lexical = lexical_graph_config()
     schema = closed_graph_schema(schema)
+    text_chunks = chunks_to_text_chunks(chunks)
+    checkpoint_file: ExtractionFileCheckpoint | None = None
+    examples = pipeline.extraction_examples if isinstance(pipeline, SemanticPipeline) else ""
+    if isinstance(pipeline, SemanticPipeline) and pipeline.checkpoint_context is not None:
+        if file_sha256 is None:
+            raise GraphExtractionCheckpointError("Checkpoint extraction requires the source byte digest")
+        checkpoint_file = await pipeline.checkpoint_context.prepare_file(
+            file_path=file_path, file_sha256=file_sha256, chunks=chunks, text_chunks=text_chunks,
+            schema=schema, prompt_template=pipeline._owned_extractor.prompt_template, examples=examples,
+        )
     result = await pipeline.run(
         data={
             "extractor": {
-                "chunks": chunks_to_text_chunks(chunks),
+                "chunks": text_chunks,
                 "document_info": document_info(file_path),
                 "lexical_graph_config": lexical,
                 "schema": schema,
+                "examples": examples,
+                "checkpoint_context": checkpoint_file,
             },
             "pruner": {"schema": schema, "lexical_graph_config": lexical},
             "writer": {"lexical_graph_config": lexical},
@@ -783,6 +1046,8 @@ async def write_semantic_file_graph(
     )
     pipeline.store.empty()
     pipeline.final_results.empty()
+    if checkpoint_file is not None:
+        checkpoint_file.mark_written()
     return GraphFileTelemetry(
         selected_chunks=len(chunks),
         attempted_chunks=len(chunks),
@@ -791,10 +1056,11 @@ async def write_semantic_file_graph(
         extracted_entities=entity_count,
         semantic_relationships=semantic_relationships,
         from_chunk_relationships=from_chunk_relationships,
-        pruned_nodes=max(0, len(extracted.nodes) - len(pruned.nodes)),
+        pruned_nodes=max(0, len(extracted.nodes) - len(pruned.nodes))
+        + (checkpoint_file.pruned_nodes if checkpoint_file is not None else 0),
         pruned_relationships=max(
             0, len(extracted.relationships) - len(pruned.relationships)
-        ),
+        ) + (checkpoint_file.pruned_relationships if checkpoint_file is not None else 0),
     )
 
 
@@ -874,6 +1140,7 @@ __all__ = [
     "chunks_to_text_chunks",
     "cypher_literal",
     "document_info",
+    "extraction_checkpoint_recipe",
     "lexical_graph_config",
     "require_run_id",
     "require_staging_graph_id",

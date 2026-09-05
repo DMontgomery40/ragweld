@@ -38,11 +38,12 @@ import re
 import threading
 import time
 import zipfile
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
 
+from server.chat.prompt_budget import count_tokens, warm_prompt_budget
 from server.indexing.chunker import Chunker
 from server.indexing.text_extractors import extract_text_for_path
 
@@ -108,6 +109,11 @@ class CorpusSample:
     tokens_high: int
     chunks_low: int
     chunks_high: int
+    # Generation counts use cl100k_base over the actual chunk content, including overlap.
+    # Indexing tokens above retain the operator's independent tokenizer units.
+    total_generation_tokens: int
+    generation_tokens_low: int
+    generation_tokens_high: int
     sampled_files: int
     sampled_bytes: int
     relative_error: float
@@ -118,6 +124,12 @@ class CorpusSample:
     # estimate -- the numbers above are meaningless, not merely uncertain.
     sufficient: bool = True
     insufficient_reason: str = ""
+    generation_sufficient: bool = True
+    generation_insufficient_reason: str = ""
+    # None when the caller does not provide a current semantic request recipe.
+    semantic_input_tokens: int | None = None
+    semantic_input_tokens_low: int | None = None
+    semantic_input_tokens_high: int | None = None
 
     @classmethod
     def empty(cls) -> CorpusSample:
@@ -128,6 +140,9 @@ class CorpusSample:
             tokens_high=0,
             chunks_low=0,
             chunks_high=0,
+            total_generation_tokens=0,
+            generation_tokens_low=0,
+            generation_tokens_high=0,
             sampled_files=0,
             sampled_bytes=0,
             relative_error=_MODEL_RELATIVE_ERROR,
@@ -258,18 +273,31 @@ def _extracted_text(path: Path, ext: str, parquet: ParquetBounds) -> tuple[str, 
         return "", 1.0, 1.0, 1.0
 
 
-def _measure(path: Path, ext: str, chunker: Chunker, parquet: ParquetBounds) -> tuple[float, float]:
-    """Chunks and chunk tokens this one file contributes, or ``(0.0, 0.0)`` if the indexer skips it."""
+def _measure(
+    path: Path, ext: str, chunker: Chunker, parquet: ParquetBounds,
+    semantic_input_counter: Callable[[Sequence[str]], int] | None = None,
+) -> tuple[float, float, float, float]:
+    """Chunks, indexing tokens, raw generation tokens and complete semantic input tokens."""
     text, page_scale, token_factor, chunk_factor = _extracted_text(path, ext, parquet)
     # The indexer drops any document whose text contains a NUL byte; so does the estimate,
     # or a directory of binaries would be sized as if it were prose.
     if not text or "\x00" in text:
-        return 0.0, 0.0
+        return 0.0, 0.0, 0.0, 0.0
     chunks = chunker.chunk_file(path.name, text)
     if not chunks:
-        return 0.0, 0.0
+        return 0.0, 0.0, 0.0, 0.0
     tokens = float(sum(int(chunk.token_count or 0) for chunk in chunks))
-    return len(chunks) * page_scale * chunk_factor, tokens * page_scale * token_factor
+    generation_tokens = sum(count_tokens(chunk.content) for chunk in chunks)
+    semantic_tokens = semantic_input_counter([chunk.content for chunk in chunks]) if semantic_input_counter else 0
+    return (
+        len(chunks) * page_scale * chunk_factor,
+        tokens * page_scale * token_factor,
+        generation_tokens * page_scale * token_factor,
+        # A full rendered request includes fixed overhead on each predicted chunk.
+        # Scale its measured total with the chunk count; never separate template
+        # text using placeholder arithmetic, which breaks conversions/repetitions.
+        semantic_tokens * page_scale * chunk_factor,
+    )
 
 
 def _systematic_picks(
@@ -366,6 +394,7 @@ def warm_sampler(chunker: Chunker) -> None:
     if _warmup_started_at is None:
         _warmup_started_at = time.monotonic()
     with _warmup_lock:
+        warm_prompt_budget()
         if sampler_is_warm():
             return
         chunker.chunk_file("warmup.md", "warm the tokenizer with one short line of text.\n")
@@ -380,6 +409,7 @@ def sample_corpus(
     parquet: ParquetBounds | None = None,
     min_files_per_format: int = 1,
     max_relative_error: float = _MAX_RELATIVE_ERROR,
+    semantic_input_counter: Callable[[Sequence[str]], int] | None = None,
 ) -> CorpusSample:
     """Estimate a corpus's chunk and token totals by measuring a sample of its files.
 
@@ -404,6 +434,8 @@ def sample_corpus(
 
     started = time.monotonic()
     total_tokens = 0.0
+    total_generation_tokens = 0.0
+    total_semantic_input_tokens = 0.0
     total_chunks = 0.0
     sampled_files = 0
     sampled_bytes = 0
@@ -411,6 +443,8 @@ def sample_corpus(
     # Tokens per byte for each file opened in a partially-sampled format: the observed spread of
     # this is what the sampling half of the band is computed from.
     partial_densities: list[float] = []
+    partial_generation_densities: list[float] = []
+    partial_semantic_densities: list[float] = []
     budget_exhausted = False
     saw_pdf = False
     saw_converted = False
@@ -424,11 +458,15 @@ def sample_corpus(
 
         measured_chunks = 0.0
         measured_tokens = 0.0
+        measured_generation_tokens = 0.0
+        measured_semantic_tokens = 0.0
         measured_bytes = 0
         measured_files = 0
         indexable_files = 0
         sampled_files_total = sampled_files
         file_densities: list[float] = []
+        generation_densities: list[float] = []
+        semantic_densities: list[float] = []
         for path, size in picks:
             # The budget is checked before every pick except the very first of the whole run.
             # Exempting the first pick of EVERY format made the ceiling meaningless on a corpus
@@ -437,13 +475,19 @@ def sample_corpus(
             if sampled_files_total + measured_files > 0 and (time.monotonic() - started) >= budget_seconds:
                 budget_exhausted = True
                 break
-            chunks, tokens = _measure(path, ext, chunker, bounds)
+            chunks, tokens, generation_tokens, semantic_tokens = _measure(
+                path, ext, chunker, bounds, semantic_input_counter,
+            )
             measured_chunks += chunks
             measured_tokens += tokens
+            measured_generation_tokens += generation_tokens
+            measured_semantic_tokens += semantic_tokens
             measured_bytes += size
             measured_files += 1
             if size > 0:
                 file_densities.append(tokens / float(size))
+                generation_densities.append(generation_tokens / float(size))
+                semantic_densities.append(semantic_tokens / float(size))
             if chunks > 0:
                 indexable_files += 1
 
@@ -452,6 +496,8 @@ def sample_corpus(
         if measured_files < group_files:
             partial_sampled += measured_files
             partial_densities.extend(file_densities)
+            partial_generation_densities.extend(generation_densities)
+            partial_semantic_densities.extend(semantic_densities)
         if ext == _PDF_SUFFIX:
             saw_pdf = True
         elif ext in _HTML_SUFFIXES or ext in _OFFICE_PARTS:
@@ -470,11 +516,26 @@ def sample_corpus(
         # chunk cannot have fewer chunks than it has readable files however few bytes it holds.
         floor = float(group_files) * (float(indexable_files) / float(measured_files))
         total_tokens += group_tokens
+        total_generation_tokens += measured_generation_tokens * scale
+        # The per-file chunk floor also adds complete requests. Carry the
+        # measured mean request size through that same correction.
+        request_scale = max(group_chunks, floor) / group_chunks if group_chunks > 0 else 1.0
+        total_semantic_input_tokens += measured_semantic_tokens * scale * request_scale
         total_chunks += max(group_chunks, floor)
 
     relative_error = min(
         _MAX_RELATIVE_ERROR, _MODEL_RELATIVE_ERROR + _sampling_error(partial_densities)
     )
+    generation_relative_error = min(
+        _MAX_RELATIVE_ERROR,
+        _MODEL_RELATIVE_ERROR + _sampling_error(partial_generation_densities),
+    )
+    semantic_relative_error = max(relative_error, generation_relative_error)
+    if semantic_input_counter is not None:
+        semantic_relative_error = max(semantic_relative_error, min(
+            _MAX_RELATIVE_ERROR,
+            _MODEL_RELATIVE_ERROR + _sampling_error(partial_semantic_densities),
+        ))
 
     # Floors. Extrapolating a sample that says nothing produces a number with a confident-looking
     # band and no relationship to the corpus, which on this surface is worse than no number at
@@ -497,12 +558,21 @@ def sample_corpus(
             f"past the ±{max_relative_error * 100:.0f}% ceiling"
         )
 
+    generation_reason = reason
+    if not generation_reason and semantic_relative_error >= max_relative_error:
+        generation_reason = (
+            f"generation-token sample leaves an error band of ±{semantic_relative_error * 100:.0f}%, "
+            f"at or past the ±{max_relative_error * 100:.0f}% ceiling"
+        )
+
     tokens = int(round(total_tokens))
     chunks = int(round(total_chunks))
     assumptions: list[str] = [
         f"tokens and chunks measured by chunking {sampled_files:,} sampled files "
         f"({sampled_bytes:,} bytes) with the configured chunker, then scaled by byte share",
         f"estimate error band ±{relative_error * 100:.0f}%",
+        "generation tokens measured separately from sampled chunk text with cl100k_base, "
+        f"including overlap; generation-token error band ±{generation_relative_error * 100:.0f}%",
     ]
     if saw_pdf:
         assumptions.append(
@@ -510,6 +580,15 @@ def sample_corpus(
             f"(tokens ×{_PDF_TOKEN_FACTOR:g}, chunks ×{_PDF_CHUNK_FACTOR:g}, measured on the "
             "Apollo 11 mission report)"
         )
+        assumptions.append(
+            "Generation-token totals also use the PDF extraction factor; that factor has not "
+            "been independently calibrated for the generation tokenizer."
+        )
+        if semantic_input_counter is not None:
+            assumptions.append(
+                f"Full rendered semantic requests use the PDF chunk factor ×{_PDF_CHUNK_FACTOR:g}; "
+                "this assumes the predicted chunks resemble the sampled requests."
+            )
     if saw_converted:
         assumptions.append(
             "HTML and office documents measured from their own text, without Docling's "
@@ -530,6 +609,9 @@ def sample_corpus(
         tokens_high=int(round(total_tokens * (1.0 + relative_error))),
         chunks_low=max(0, int(round(total_chunks * (1.0 - relative_error)))),
         chunks_high=int(round(total_chunks * (1.0 + relative_error))),
+        total_generation_tokens=int(round(total_generation_tokens)),
+        generation_tokens_low=max(0, int(round(total_generation_tokens * (1.0 - generation_relative_error)))),
+        generation_tokens_high=int(round(total_generation_tokens * (1.0 + generation_relative_error))),
         sampled_files=sampled_files,
         sampled_bytes=sampled_bytes,
         relative_error=relative_error,
@@ -538,4 +620,15 @@ def sample_corpus(
         assumptions=tuple(assumptions),
         sufficient=not reason,
         insufficient_reason=reason,
+        generation_sufficient=not generation_reason,
+        generation_insufficient_reason=generation_reason,
+        semantic_input_tokens=int(round(total_semantic_input_tokens)) if semantic_input_counter else None,
+        semantic_input_tokens_low=(
+            max(0, int(round(total_semantic_input_tokens * (1.0 - semantic_relative_error))))
+            if semantic_input_counter else None
+        ),
+        semantic_input_tokens_high=(
+            int(round(total_semantic_input_tokens * (1.0 + semantic_relative_error)))
+            if semantic_input_counter else None
+        ),
     )

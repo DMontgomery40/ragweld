@@ -1,11 +1,12 @@
 /** Real saved run records, API reconciliation, and HTTP native ledger; no model calls. */
 import fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import http from 'node:http';
 import path from 'node:path';
-import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test';
-import type { IndexRunSummary } from '../../../src/types/generated';
+import { expect, test, type APIRequestContext, type Locator, type Page, type Request } from '@playwright/test';
+import type { GraphSchemaProposal, GraphSchemaProposalFailureResponse, GraphSchemaProposalState, IndexRunSummary } from '../../../src/types/generated';
 import { API_BASE, patchCorpusConfigSection, provisionExhaustiveCorpus, type ExhaustiveCorpus } from './corpus_fixture';
-import { assertPrivateNativeConfig, assertPrivateNativeTargets, type NativeFixtureConfig } from './native_cost_fixture';
+import { assertPrivateNativeConfig, assertPrivateNativeTargets, privateNativeChildEnv, type NativeFixtureConfig } from './native_cost_fixture';
 
 // Private suites use different API/store instances. Normal exhaustive collection
 // can list this suite without running it against the operator's runtime.
@@ -25,6 +26,65 @@ let corpus: ExhaustiveCorpus;
 let neighbor: ExhaustiveCorpus;
 let ordinal = 0;
 const runDirs: string[] = [];
+
+function saveGraphOutcomeRun(historical: boolean): IndexRunSummary {
+  expect(process.cwd().startsWith('/var/tmp/')).toBeTruthy();
+  const runId = `${Date.now().toString(16)}${(++ordinal).toString(16)}`.padStart(32, '0');
+  const started = new Date(Date.now() - 60_000 + ordinal).toISOString();
+  const run: IndexRunSummary = {
+    run_id: runId, corpus_id: corpus.corpusId, status: 'error', started_at: started,
+    completed_at: started, graph_promotable: false,
+    error: 'Replacement extraction failed; the previous generation remains active.',
+    graph_metadata: {
+      policy: 'semantic',
+      extraction: {
+        outcome_version: historical ? 'whole_file_v0' : 'checkpoint_v1',
+        progress_owner_run_id: historical ? null : runId, progress_sequence: historical ? 0 : 14,
+        selected_chunks: historical ? 1002 : 5, attempted_chunks: historical ? 1002 : 3,
+        succeeded_chunks: historical ? 0 : 2, failed_chunks: historical ? 1002 : 1,
+        reused_chunks: historical ? null : 1, cancelled_chunks: historical ? null : 1,
+        unfinished_chunks: historical ? null : 1, truncated_chunks: 0,
+        extracted_entities: 4, semantic_relationships: 2, from_chunk_relationships: 4,
+        worker_seconds: historical ? 0 : 12,
+      },
+      resolution: { candidate_nodes: 0, resolved_nodes: 0, merged_nodes: 0, unresolved_duplicate_groups: 0 },
+    },
+  };
+  const dir = path.resolve('data/index_runs', corpus.corpusId, run.run_id);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'summary.json'), JSON.stringify(run));
+  runDirs.push(dir);
+  return run;
+}
+
+for (const historical of [false, true]) {
+  test(`graph outcomes retain ${historical ? 'historical uncertainty' : 'durable reuse and unfinished work'} after reload with details closed`, async ({ page }) => {
+    const run = saveGraphOutcomeRun(historical);
+    for (let visit = 0; visit < 2; visit += 1) {
+      if (visit === 0) await openRun(page, run);
+      else await page.reload();
+      const details = page.getByTestId('graph-generation-details');
+      await expect(details).toBeAttached();
+      await expect(details).toHaveJSProperty('open', false);
+      await expect(page.getByText('Not published', { exact: true })).toBeVisible();
+      await expect(page.getByTestId('graph-selected-chunks')).not.toBeVisible();
+      await details.locator('> summary').click();
+      if (historical) {
+        await expect(page.getByTestId('graph-selected-chunks')).toContainText('1,002');
+        await expect(page.getByTestId('graph-historical-outcomes')).toContainText('Detailed chunk outcomes unavailable');
+        await expect(page.getByTestId('graph-historical-outcomes')).toContainText('not measured dispatches');
+        await expect(page.getByTestId('graph-reused-chunks')).toHaveCount(0);
+      } else {
+        for (const [id, text] of [
+          ['graph-selected-chunks', 'Selected chunks: 5'], ['graph-attempted-chunks', 'Attempted (admitted): 3'],
+          ['graph-reusable-chunks', 'Reusable successes: 2'], ['graph-reused-chunks', 'Reused: 1'],
+          ['graph-failed-chunks', 'Failed: 1'], ['graph-cancelled-chunks', 'Cancelled: 1'],
+          ['graph-unfinished-chunks', 'Unfinished: 1'],
+        ]) await expect(page.getByTestId(id)).toHaveText(text);
+      }
+    }
+  });
+}
 
 function saveRun(
   corpusId: string,
@@ -396,89 +456,176 @@ for (const reverse of [false, true]) {
 
 }
 
-test('schema accounting follows successful regeneration when latest history fails and preserves a newer failed attempt', async ({ page }) => {
-  type HeldLatestLookup = {
-    seen: Promise<void>;
-    markSeen: () => void;
-    released: Promise<void>;
-    release: () => void;
-    delivered: Promise<void>;
-    markDelivered: () => void;
-  };
-  let latestSchemaLookupMode: number | 'hold' | null = null;
-  let heldLatestLookup: HeldLatestLookup | null = null;
-  let proposalCreatedAtOverride: string | null = null;
-  let proposalAccountingStartedAtOverride: string | null | undefined;
-  await page.route('**/api/index/**/graph-schema/proposal', async (route) => {
-    if (proposalCreatedAtOverride === null && proposalAccountingStartedAtOverride === undefined) {
-      await route.continue();
-      return;
-    }
-    const response = await route.fetch();
-    if (response.status() !== 200) {
-      await route.fulfill({ response });
-      return;
-    }
-    const payload = await response.json() as Record<string, unknown>;
-    if (proposalCreatedAtOverride !== null) payload.created_at = proposalCreatedAtOverride;
-    if (proposalAccountingStartedAtOverride !== undefined) {
-      payload.accounting_started_at = proposalAccountingStartedAtOverride;
-    }
-    await route.fulfill({ response, json: payload });
+test('schema accounting survives actual missing history, read-only restore, and delayed older attempts', async ({ page }) => {
+  const proposalPath = `/api/index/${corpus.corpusId}/graph-schema/proposal`;
+  const historyPath = `/api/index/${corpus.corpusId}/runs/latest`;
+  const runRoot = path.resolve('data/index_runs', corpus.corpusId);
+  expect(runRoot.startsWith('/var/tmp/')).toBeTruthy();
+  let schemaPosts = 0;
+  const activeCostReads = new Set<Request>();
+  page.on('request', (request) => {
+    if (new URL(request.url()).pathname === proposalPath && request.method() === 'POST') schemaPosts += 1;
+    if (new URL(request.url()).pathname.startsWith(`/api/index/${corpus.corpusId}/runs/`)
+      && new URL(request.url()).pathname !== historyPath) activeCostReads.add(request);
   });
-  await page.route('**/api/index/**/runs/latest**', async (route) => {
+  page.on('requestfinished', (request) => { activeCostReads.delete(request); });
+  page.on('requestfailed', (request) => { activeCostReads.delete(request); });
+
+  // Mutate only this private corpus's persisted, typed proposal. API responses
+  // continue to come from the actual backend, including optional old timestamps.
+  function updateSavedProposalTiming(fields: { created_at?: string; accounting_started_at?: null }): void {
+    expect(process.env.RAGWELD_TEST_CONFIG_PATH, 'set this to the private API configuration file').toBeTruthy();
+    execFileSync(process.env.RAGWELD_TEST_PYTHON || '.venv/bin/python', ['-c', `
+import asyncio, json, os, sys
+from pathlib import Path
+from urllib.parse import urlparse
+from server.db.postgres import PostgresClient
+from server.models.index import GraphSchemaProposal
+
+async def main():
+    assert Path.cwd().resolve().is_relative_to(Path('/var/tmp'))
+    raw = json.loads(Path(os.environ['RAGWELD_TEST_CONFIG_PATH']).read_text())
+    dsn = raw['indexing']['postgres_url']
+    target = urlparse(dsn)
+    assert target.hostname == '127.0.0.1' and target.port == 55439
+    assert target.path == '/tribrid_test'
+    fields = json.loads(sys.argv[2])
+    assert set(fields) <= {'created_at', 'accounting_started_at'}
+    pg = PostgresClient(dsn, schema_mode='control')
+    assert pg._resolve_dsn(dsn) == dsn, 'Private fixture database overrides are forbidden'
+    await pg.connect()
+    try:
+        saved = await pg.get_graph_schema_proposal(sys.argv[1])
+        assert saved is not None and saved.corpus_id == sys.argv[1]
+        payload = saved.model_dump(mode='json', by_alias=True)
+        payload.update(fields)
+        await pg.set_graph_schema_proposal(sys.argv[1], GraphSchemaProposal.model_validate(payload))
+    finally:
+        await pg.disconnect()
+
+asyncio.run(main())
+`, corpus.corpusId, JSON.stringify(fields)], {
+      cwd: process.cwd(), env: privateNativeChildEnv(process.env, process.cwd()), stdio: 'pipe',
+    });
+  }
+
+  let historyBarrier: Promise<void> | null = null;
+  let holdNextHistory = false;
+  let releaseHistory!: () => void;
+  const historyRelease = new Promise<void>((resolve) => { releaseHistory = resolve; });
+  let captureHistory!: (run: IndexRunSummary) => void;
+  const historicalRun = new Promise<IndexRunSummary>((resolve) => { captureHistory = resolve; });
+  let historyFinished!: () => void;
+  const historyCompletion = new Promise<void>((resolve) => { historyFinished = resolve; });
+  let heldHistoryClaimed = false;
+  await page.route('**/api/index/**/runs/**', async (route) => {
     const url = new URL(route.request().url());
-    if (url.searchParams.get('run_kind') !== 'schema_proposal') {
+    const isSchemaHistory = url.pathname === historyPath && url.searchParams.get('run_kind') === 'schema_proposal';
+    if (!isSchemaHistory) {
+      // Keep browser cost reads from starting writers while this fixture moves
+      // settled summaries. Restore every file before letting those reads proceed.
+      if (historyBarrier) await historyBarrier;
       await route.continue();
       return;
     }
-    if (latestSchemaLookupMode === 'hold') {
-      const hold = heldLatestLookup;
-      if (!hold) throw new Error('Held latest-schema lookup was not initialized');
-      // Fetch now so the response is the historical attempt that existed before the next
-      // operator action, then deliver it only after that action has returned a newer attempt.
-      const historicalResponse = await route.fetch();
-      hold.markSeen();
-      await hold.released;
-      await route.fulfill({ response: historicalResponse });
-      hold.markDelivered();
+    if (historyBarrier) {
+      const moved: Array<{ original: string; held: string }> = [];
+      try {
+        for (const entry of fs.readdirSync(runRoot, { withFileTypes: true })) {
+          if (!entry.isDirectory()) continue;
+          const original = path.join(runRoot, entry.name, 'summary.json');
+          if (!fs.existsSync(original)) continue;
+          const summary = JSON.parse(fs.readFileSync(original, 'utf8')) as IndexRunSummary;
+          if (summary.run_kind !== 'schema_proposal') continue;
+          expect(summary.corpus_id).toBe(corpus.corpusId);
+          expect(summary.run_id).toBe(entry.name);
+          expect(['complete', 'error', 'cancelled']).toContain(summary.status);
+          for (const census of Object.values(summary.accounting?.census ?? {})) {
+            expect(census.inflight).toBe(0);
+            expect(census.active_producers).toBe(0);
+            expect(census.owner_finished).toBe(true);
+          }
+          const held = path.join(runRoot, entry.name, 'summary.held-by-browser-fixture');
+          expect(fs.existsSync(held)).toBe(false);
+          fs.renameSync(original, held);
+          moved.push({ original, held });
+        }
+        expect(moved.length).toBeGreaterThan(0);
+        const absent = await route.fetch();
+        expect(absent.status()).toBe(404);
+        // Forward this authentic absence only after every saved run is back.
+        while (moved.length) {
+          const { original, held } = moved[0];
+          expect(fs.existsSync(original), 'no writer may replace a held settled summary').toBe(false);
+          fs.renameSync(held, original);
+          moved.shift();
+        }
+        await route.fulfill({ response: absent });
+      } finally {
+        for (const { original, held } of moved) {
+          if (fs.existsSync(original)) throw new Error(`Unexpected writer; preserved held fixture summary at ${held}`);
+          fs.renameSync(held, original);
+        }
+      }
       return;
     }
-    if (latestSchemaLookupMode !== null) {
-      await route.fulfill({
-        status: latestSchemaLookupMode,
-        contentType: 'application/json',
-        body: JSON.stringify({ detail: 'Fixture latest-schema history unavailable' }),
-      });
+    if (holdNextHistory) {
+      holdNextHistory = false;
+      heldHistoryClaimed = true;
+      try {
+        const original = await route.fetch();
+        expect(original.status()).toBe(200);
+        captureHistory(await original.json() as IndexRunSummary);
+        await historyRelease;
+        await route.fulfill({ response: original });
+      } finally {
+        historyFinished();
+      }
       return;
     }
     await route.continue();
   });
+
+  async function withMissingHistory(action: () => Promise<GraphSchemaProposal>): Promise<GraphSchemaProposal> {
+    await expect.poll(() => activeCostReads.size, { message: 'prior native reconciliation must drain before holding summaries' }).toBe(0);
+    let unblock!: () => void;
+    historyBarrier = new Promise<void>((resolve) => { unblock = resolve; });
+    const absent = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return url.pathname === historyPath && url.searchParams.get('run_kind') === 'schema_proposal'
+        && response.status() === 404;
+    });
+    try {
+      const [result] = await Promise.all([action(), absent]);
+      return result;
+    } finally {
+      historyBarrier = null;
+      unblock();
+    }
+  }
+
+  async function generateProposal(force: boolean): Promise<GraphSchemaProposal> {
+    const response = page.waitForResponse((response) => new URL(response.url()).pathname === proposalPath
+      && response.request().method() === 'POST' && response.status() === 200);
+    await page.getByTestId('generate-graph-schema').click();
+    const actual = await response;
+    expect(actual.request().postDataJSON()).toEqual({ force_refresh: force });
+    return await actual.json() as GraphSchemaProposal;
+  }
+
   await patchCorpusConfigSection(page.request, corpus.corpusId, 'graph_indexing', {
-    enabled: true,
-    build_code_graph: false,
-    semantic_kg_llm_model: 'openai.gpt-5.6-sol',
+    enabled: true, build_code_graph: false, semantic_kg_llm_model: 'openai.gpt-5.6-sol',
   });
   proposalScenario = 'valid';
   await page.goto(`rag?subtab=indexing&corpus=${encodeURIComponent(corpus.corpusId)}`);
   await page.getByTestId('indexing-component-card-enrichment').click();
-  const initialResponse = page.waitForResponse((response) =>
-    new URL(response.url()).pathname === `/api/index/${corpus.corpusId}/graph-schema/proposal`
-      && response.request().method() === 'POST'
-      && response.status() === 200);
-  await page.getByTestId('generate-graph-schema').click();
-  const initialProposal = await (await initialResponse).json() as {
-    accounting_run_id: string;
-    accounting_started_at: string;
-  };
+  const initialProposal = await generateProposal(false);
   expect(initialProposal.accounting_started_at).toBeTruthy();
   const proposal = page.getByTestId('graph-schema-proposal');
   await expect(proposal).toBeVisible();
-  const schemaHash = await page.getByTestId('graph-schema-hash').textContent();
-  expect(schemaHash).toBeTruthy();
-  let successfulRunId = initialProposal.accounting_run_id;
+  const schemaHash = initialProposal.schema_hash;
   const attempt = page.getByTestId('index-run-costs').filter({ has: page.getByText('Schema proposal cost', { exact: true }) });
-  await expect(attempt).toHaveAttribute('data-run-id', successfulRunId);
+  await expect(attempt).toHaveAttribute('data-run-id', initialProposal.accounting_run_id!);
   await expectCostsCollapsed(attempt);
   const review = proposal.getByTestId('graph-schema-review');
   await expect(review).toHaveJSProperty('open', false);
@@ -497,226 +644,150 @@ test('schema accounting follows successful regeneration when latest history fail
   await review.locator('> summary').click();
   await expect(review).toHaveJSProperty('open', false);
 
-  // A forced regeneration always creates a new attempt. Its returned ID must become visible
-  // even when the best-effort historical lookup fails or reports its own timeout.
-  for (const status of [503, 504]) {
-    latestSchemaLookupMode = status;
-    const regeneratedResponse = page.waitForResponse((response) =>
-      new URL(response.url()).pathname === `/api/index/${corpus.corpusId}/graph-schema/proposal`
-        && response.request().method() === 'POST'
-        && response.status() === 200);
-    const failedLatestLookup = page.waitForResponse((response) => {
-      const url = new URL(response.url());
-      return url.pathname === `/api/index/${corpus.corpusId}/runs/latest`
-        && url.searchParams.get('run_kind') === 'schema_proposal'
-        && response.status() === status;
-    });
+  // A real missing-history 404 cannot erase the successful action's returned owner.
+  // Actual provider 502/504 coverage belongs to graph_schema_reliability.spec.ts.
+  const forced = await withMissingHistory(() => generateProposal(true));
+  expect(forced.accounting_run_id).not.toBe(initialProposal.accounting_run_id);
+  expect(forced.accounting_started_at).toBeTruthy();
+  await expect(attempt).toHaveAttribute('data-run-id', forced.accounting_run_id!);
+
+  try {
+    holdNextHistory = true;
+    const successful = await generateProposal(true);
+    const captured = await historicalRun;
+    expect(captured.run_id).toBe(successful.accounting_run_id);
+    await expect(attempt).toHaveAttribute('data-run-id', successful.accounting_run_id!);
+
+    // The gateway really returns an invalid schema; the API creates a failed
+    // accounting attempt while retaining the previous successful proposal.
+    proposalScenario = 'wrong_shape';
+    const failedResponse = page.waitForResponse((response) => new URL(response.url()).pathname === proposalPath
+      && response.request().method() === 'POST' && response.status() === 502);
     await page.getByRole('button', { name: 'Regenerate proposed schema', exact: true }).click();
-    const regenerated = await (await regeneratedResponse).json() as {
-      accounting_run_id: string;
-      accounting_started_at: string;
-    };
-    expect(regenerated.accounting_run_id).not.toBe(successfulRunId);
-    expect(regenerated.accounting_started_at).toBeTruthy();
-    await failedLatestLookup;
-    await expect(attempt).toHaveAttribute('data-run-id', regenerated.accounting_run_id);
-    successfulRunId = regenerated.accounting_run_id;
-    latestSchemaLookupMode = null;
+    const failure = await (await failedResponse).json() as GraphSchemaProposalFailureResponse;
+    const failedId = failure.detail.accounting_run_id!;
+    expect(failedId).toMatch(/^[0-9a-f]{32}$/);
+    const failedRunResponse = await page.request.get(`${API_BASE}/index/${corpus.corpusId}/runs/${failedId}`);
+    expect(failedRunResponse.ok()).toBeTruthy();
+    const failedRun = await failedRunResponse.json() as IndexRunSummary;
+    expect(failure.detail.accounting_started_at).toBe(failedRun.started_at);
+    expect(failedRun.accounting?.gateway_base_url).toBe(gatewayUrl);
+    await expect(page.getByTestId('graph-schema-error')).toContainText(failure.detail.message);
+    await expect(proposal).toBeVisible();
+    await expect(page.getByTestId('graph-schema-hash')).toHaveText(schemaHash);
+    await expect(attempt).toHaveAttribute('data-run-id', failedId);
+    await expectCostsCollapsed(attempt);
+    await expandCosts(attempt);
+    await expect(attempt.getByTestId('index-cost-provider')).toHaveText('$0.0123');
+    releaseHistory();
+    await historyCompletion;
+    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    await expect(attempt).toHaveAttribute('data-run-id', failedId);
+
+    // Persist overlapping completion order (A-start, B-start, A-complete).
+    // Returning a draft to its saved values now restores through GET, with no
+    // Generate click, and must leave B's newer failed accounting owner intact.
+    updateSavedProposalTiming({ created_at: new Date(Date.parse(failedRun.started_at) + 60_000).toISOString() });
+    const reasoning = page.getByTestId('schema-proposal-reasoning-effort');
+    const originalReasoning = await reasoning.inputValue();
+    const alternateReasoning = originalReasoning === 'high' ? 'low' : 'high';
+    await reasoning.selectOption(alternateReasoning);
+    await expect(proposal).toHaveCount(0);
+    const postsBeforeRestore = schemaPosts;
+    const providersBeforeRestore = ledgers.size;
+    const restoredResponse = page.waitForResponse((response) => new URL(response.url()).pathname === proposalPath
+      && response.request().method() === 'GET' && response.status() === 200);
+    await reasoning.selectOption(originalReasoning);
+    const restored = await (await restoredResponse).json() as GraphSchemaProposalState;
+    expect(restored.status).toBe('current');
+    expect(restored.proposal?.accounting_run_id).toBe(successful.accounting_run_id);
+    expect(Date.parse(restored.proposal!.accounting_started_at!)).toBeLessThan(Date.parse(failedRun.started_at));
+    expect(Date.parse(restored.proposal!.created_at)).toBeGreaterThan(Date.parse(failedRun.started_at));
+    await expect(proposal).toBeVisible();
+    await expect(page.getByTestId('graph-schema-error')).toHaveCount(0);
+    await expect(attempt).toHaveAttribute('data-run-id', failedId);
+    expect(schemaPosts).toBe(postsBeforeRestore);
+    expect(ledgers.size).toBe(providersBeforeRestore);
+
+    await page.reload();
+    await page.getByTestId('indexing-component-card-enrichment').click();
+    await expect(proposal).toBeVisible();
+    await expect(attempt).toHaveAttribute('data-run-id', failedId);
+    await expectCostsCollapsed(attempt);
+    await expect(review).toHaveJSProperty('open', false);
+    expect(schemaPosts).toBe(postsBeforeRestore);
+    expect(ledgers.size).toBe(providersBeforeRestore);
+
+    proposalScenario = 'valid';
+    await reasoning.selectOption(alternateReasoning);
+    const fresh = await withMissingHistory(() => generateProposal(false));
+    expect(fresh.accounting_run_id).not.toBe(successful.accounting_run_id);
+    expect(fresh.accounting_run_id).not.toBe(failedId);
+    expect(Date.parse(fresh.accounting_started_at!)).toBeGreaterThan(Date.parse(failedRun.started_at));
+    await expect(attempt).toHaveAttribute('data-run-id', fresh.accounting_run_id!);
+
+    // An existing persisted proposal may omit its optional attempt timestamp.
+    // Hold authentic GET responses so an unforced manual cache lookup remains
+    // possible; its null must not erase the same owner's already-known start.
+    updateSavedProposalTiming({ accounting_started_at: null });
+    await reasoning.selectOption(originalReasoning);
+    await expect(proposal).toHaveCount(0);
+    let releaseRestore!: () => void;
+    const restoreRelease = new Promise<void>((resolve) => { releaseRestore = resolve; });
+    let captureRestore!: (state: GraphSchemaProposalState) => void;
+    const restoredLegacy = new Promise<GraphSchemaProposalState>((resolve) => { captureRestore = resolve; });
+    const pendingRestores: Promise<void>[] = [];
+    let holdRestore = true;
+    await page.route('**/graph-schema/proposal', async (route) => {
+      if (route.request().method() !== 'GET' || !holdRestore) {
+        await route.continue();
+        return;
+      }
+      let finished!: () => void;
+      pendingRestores.push(new Promise<void>((resolve) => { finished = resolve; }));
+      try {
+        const original = await route.fetch();
+        expect(original.status()).toBe(200);
+        captureRestore(await original.json() as GraphSchemaProposalState);
+        await restoreRelease;
+        if (!/ERR_ABORTED|NS_BINDING_ABORTED|cancell?ed/i.test(route.request().failure()?.errorText ?? '')) {
+          await route.fulfill({ response: original });
+        }
+      } catch (error) {
+        if (!/ERR_ABORTED|NS_BINDING_ABORTED|cancell?ed/i.test(route.request().failure()?.errorText ?? '')) throw error;
+      } finally {
+        finished();
+      }
+    });
+    try {
+      await reasoning.selectOption(alternateReasoning);
+      const legacyState = await restoredLegacy;
+      expect(legacyState.status).toBe('current');
+      expect(legacyState.proposal?.accounting_run_id).toBe(fresh.accounting_run_id);
+      expect(legacyState.proposal?.accounting_started_at).toBeNull();
+      const providersBeforeCache = ledgers.size;
+      const cached = await withMissingHistory(() => generateProposal(false));
+      expect(cached.accounting_run_id).toBe(fresh.accounting_run_id);
+      expect(cached.accounting_started_at).toBeNull();
+      expect(ledgers.size).toBe(providersBeforeCache);
+      await expect(attempt).toHaveAttribute('data-run-id', fresh.accounting_run_id!);
+    } finally {
+      holdRestore = false;
+      releaseRestore();
+      await Promise.all(pendingRestores);
+      await page.unroute('**/graph-schema/proposal');
+    }
+
+    await reasoning.selectOption(originalReasoning);
+    const postLegacyFresh = await withMissingHistory(() => generateProposal(false));
+    expect(postLegacyFresh.accounting_run_id).not.toBe(fresh.accounting_run_id);
+    expect(Date.parse(postLegacyFresh.accounting_started_at!)).toBeGreaterThan(Date.parse(fresh.accounting_started_at!));
+    await expect(attempt).toHaveAttribute('data-run-id', postLegacyFresh.accounting_run_id!);
+  } finally {
+    releaseHistory();
+    if (heldHistoryClaimed) await historyCompletion;
+    await page.unroute('**/api/index/**/runs/**');
   }
-
-  let markHeldLatestSeen!: () => void;
-  let releaseHeldLatest!: () => void;
-  let markHeldLatestDelivered!: () => void;
-  const heldLookup: HeldLatestLookup = {
-    seen: new Promise<void>((resolve) => { markHeldLatestSeen = resolve; }),
-    markSeen: () => markHeldLatestSeen(),
-    released: new Promise<void>((resolve) => { releaseHeldLatest = resolve; }),
-    release: () => releaseHeldLatest(),
-    delivered: new Promise<void>((resolve) => { markHeldLatestDelivered = resolve; }),
-    markDelivered: () => markHeldLatestDelivered(),
-  };
-  heldLatestLookup = heldLookup;
-  latestSchemaLookupMode = 'hold';
-  const regeneratedResponse = page.waitForResponse((response) =>
-    new URL(response.url()).pathname === `/api/index/${corpus.corpusId}/graph-schema/proposal`
-      && response.request().method() === 'POST'
-      && response.status() === 200);
-  await page.getByRole('button', { name: 'Regenerate proposed schema', exact: true }).click();
-  const regenerated = await (await regeneratedResponse).json() as {
-    accounting_run_id: string;
-    accounting_started_at: string;
-  };
-  expect(regenerated.accounting_run_id).not.toBe(successfulRunId);
-  expect(regenerated.accounting_started_at).toBeTruthy();
-  await heldLookup.seen;
-  await expect(attempt).toHaveAttribute('data-run-id', regenerated.accounting_run_id);
-  successfulRunId = regenerated.accounting_run_id;
-
-  // A response captured before this failed action must not overwrite the failure when it is
-  // finally delivered. This covers the same state family as corpus switches and unmounts:
-  // async history can populate the panel only while its request generation is still current.
-  proposalScenario = 'wrong_shape';
-  const failedResponse = page.waitForResponse((response) =>
-    new URL(response.url()).pathname === `/api/index/${corpus.corpusId}/graph-schema/proposal`
-      && response.request().method() === 'POST'
-      && response.status() === 502);
-  await page.getByRole('button', { name: 'Regenerate proposed schema', exact: true }).click();
-  const response = await failedResponse;
-  const failure = await response.json() as {
-    detail: { accounting_run_id: string; accounting_started_at: string; message: string };
-  };
-  expect(failure.detail.accounting_run_id).toMatch(/^[0-9a-f]{32}$/);
-  expect(failure.detail.accounting_started_at).toBeTruthy();
-  const failedRunResponse = await page.request.get(
-    `${API_BASE}/index/${corpus.corpusId}/runs/${failure.detail.accounting_run_id}`
-  );
-  expect(failedRunResponse.ok()).toBeTruthy();
-  const failedRun = await failedRunResponse.json() as IndexRunSummary;
-  expect(failure.detail.accounting_started_at).toBe(failedRun.started_at);
-  expect(failedRun.accounting?.gateway_base_url).toBe(gatewayUrl);
-  await expect(page.getByTestId('graph-schema-error')).toContainText(failure.detail.message);
-  await expect(page.getByTestId('graph-schema-proposal')).toBeVisible();
-  await expect(page.getByTestId('graph-schema-hash')).toHaveText(schemaHash!);
-  await expect(attempt).toHaveAttribute('data-run-id', failure.detail.accounting_run_id);
-  await expectCostsCollapsed(attempt);
-  await expandCosts(attempt);
-  await expect(attempt.getByTestId('index-cost-provider')).toHaveText('$0.0123');
-  latestSchemaLookupMode = null;
-  heldLookup.release();
-  await heldLookup.delivered;
-  await page.evaluate(() => new Promise<void>((resolve) => {
-    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-  }));
-  await expect(attempt).toHaveAttribute('data-run-id', failure.detail.accounting_run_id);
-
-  // Clear the proposal from local UI state, then restore the original configuration so the
-  // unforced request returns the cached successful proposal. Its proposal completion time is
-  // placed after the failed attempt's start to model overlapping A-start/B-start/A-complete;
-  // accounting order must still use A/B attempt starts and keep the newer failure.
-  const reasoning = page.getByTestId('schema-proposal-reasoning-effort');
-  const originalReasoning = await reasoning.inputValue();
-  const alternateReasoning = originalReasoning === 'high' ? 'low' : 'high';
-  await reasoning.selectOption(alternateReasoning);
-  await expect(proposal).toHaveCount(0);
-  await reasoning.selectOption(originalReasoning);
-  proposalCreatedAtOverride = new Date(
-    Date.parse(failure.detail.accounting_started_at) + 60_000,
-  ).toISOString();
-  latestSchemaLookupMode = 504;
-  const cachedResponse = page.waitForResponse((cachedResponse) =>
-    new URL(cachedResponse.url()).pathname === `/api/index/${corpus.corpusId}/graph-schema/proposal`
-      && cachedResponse.request().method() === 'POST'
-      && cachedResponse.status() === 200);
-  const timedOutCachedLookup = page.waitForResponse((historyResponse) => {
-    const url = new URL(historyResponse.url());
-    return url.pathname === `/api/index/${corpus.corpusId}/runs/latest`
-      && url.searchParams.get('run_kind') === 'schema_proposal'
-      && historyResponse.status() === 504;
-  });
-  await page.getByTestId('generate-graph-schema').click();
-  const cachedHttpResponse = await cachedResponse;
-  expect(cachedHttpResponse.request().postDataJSON()).toEqual({ force_refresh: false });
-  const cached = await cachedHttpResponse.json() as {
-    accounting_run_id: string;
-    accounting_started_at: string;
-  };
-  expect(cached.accounting_run_id).toBe(successfulRunId);
-  expect(Date.parse(cached.accounting_started_at)).toBeLessThan(
-    Date.parse(failure.detail.accounting_started_at),
-  );
-  await timedOutCachedLookup;
-  await expect(page.getByTestId('graph-schema-hash')).toHaveText(schemaHash!);
-  await expect(page.getByTestId('graph-schema-error')).toHaveCount(0);
-  await expect(attempt).toHaveAttribute('data-run-id', failure.detail.accounting_run_id);
-
-  latestSchemaLookupMode = null;
-  proposalCreatedAtOverride = null;
-  await page.reload();
-  await page.getByTestId('indexing-component-card-enrichment').click();
-  const restoredAttempt = page.getByTestId('index-run-costs').filter({ has: page.getByText('Schema proposal cost', { exact: true }) });
-  await expect(restoredAttempt).toHaveAttribute('data-run-id', failure.detail.accounting_run_id);
-  proposalScenario = 'valid';
-  const reloadedReasoning = page.getByTestId('schema-proposal-reasoning-effort');
-  await reloadedReasoning.selectOption(alternateReasoning);
-  latestSchemaLookupMode = 504;
-  const freshResponse = page.waitForResponse((freshResponse) =>
-    new URL(freshResponse.url()).pathname === `/api/index/${corpus.corpusId}/graph-schema/proposal`
-      && freshResponse.request().method() === 'POST'
-      && freshResponse.status() === 200);
-  const timedOutLatestLookup = page.waitForResponse((response) => {
-    const url = new URL(response.url());
-    return url.pathname === `/api/index/${corpus.corpusId}/runs/latest`
-      && url.searchParams.get('run_kind') === 'schema_proposal'
-      && response.status() === 504;
-  });
-  await page.getByTestId('generate-graph-schema').click();
-  const freshHttpResponse = await freshResponse;
-  expect(freshHttpResponse.request().postDataJSON()).toEqual({ force_refresh: false });
-  const fresh = await freshHttpResponse.json() as {
-    accounting_run_id: string;
-    accounting_started_at: string;
-  };
-  expect(fresh.accounting_run_id).not.toBe(successfulRunId);
-  expect(fresh.accounting_run_id).not.toBe(failure.detail.accounting_run_id);
-  expect(Date.parse(fresh.accounting_started_at)).toBeGreaterThan(
-    Date.parse(failure.detail.accounting_started_at),
-  );
-  await timedOutLatestLookup;
-  await expect(page.getByTestId('graph-schema-error')).toHaveCount(0);
-  await expect(restoredAttempt).toHaveAttribute('data-run-id', fresh.accounting_run_id);
-
-  // A rolling-upgrade cache may return the same run without the new timestamp. Keep the
-  // already known timestamp, or the next fresh unforced proposal becomes incomparable and
-  // remains hidden whenever its latest-history follow-up is unavailable.
-  await reloadedReasoning.selectOption(originalReasoning);
-  await expect(page.getByTestId('graph-schema-proposal')).toHaveCount(0);
-  await reloadedReasoning.selectOption(alternateReasoning);
-  proposalAccountingStartedAtOverride = null;
-  latestSchemaLookupMode = 504;
-  const legacyCachedResponse = page.waitForResponse((legacyResponse) =>
-    new URL(legacyResponse.url()).pathname === `/api/index/${corpus.corpusId}/graph-schema/proposal`
-      && legacyResponse.request().method() === 'POST'
-      && legacyResponse.status() === 200);
-  const legacyCachedLatestFailure = page.waitForResponse((historyResponse) => {
-    const url = new URL(historyResponse.url());
-    return url.pathname === `/api/index/${corpus.corpusId}/runs/latest`
-      && url.searchParams.get('run_kind') === 'schema_proposal'
-      && historyResponse.status() === 504;
-  });
-  await page.getByTestId('generate-graph-schema').click();
-  const legacyCachedHttpResponse = await legacyCachedResponse;
-  expect(legacyCachedHttpResponse.request().postDataJSON()).toEqual({ force_refresh: false });
-  const legacyCached = await legacyCachedHttpResponse.json() as { accounting_run_id: string };
-  expect(legacyCached.accounting_run_id).toBe(fresh.accounting_run_id);
-  await legacyCachedLatestFailure;
-  await expect(restoredAttempt).toHaveAttribute('data-run-id', fresh.accounting_run_id);
-
-  proposalAccountingStartedAtOverride = undefined;
-  await reloadedReasoning.selectOption(originalReasoning);
-  latestSchemaLookupMode = 504;
-  const postLegacyFreshResponse = page.waitForResponse((freshResponse) =>
-    new URL(freshResponse.url()).pathname === `/api/index/${corpus.corpusId}/graph-schema/proposal`
-      && freshResponse.request().method() === 'POST'
-      && freshResponse.status() === 200);
-  const postLegacyLatestFailure = page.waitForResponse((historyResponse) => {
-    const url = new URL(historyResponse.url());
-    return url.pathname === `/api/index/${corpus.corpusId}/runs/latest`
-      && url.searchParams.get('run_kind') === 'schema_proposal'
-      && historyResponse.status() === 504;
-  });
-  await page.getByTestId('generate-graph-schema').click();
-  const postLegacyFreshHttpResponse = await postLegacyFreshResponse;
-  expect(postLegacyFreshHttpResponse.request().postDataJSON()).toEqual({ force_refresh: false });
-  const postLegacyFresh = await postLegacyFreshHttpResponse.json() as {
-    accounting_run_id: string;
-    accounting_started_at: string;
-  };
-  expect(postLegacyFresh.accounting_run_id).not.toBe(fresh.accounting_run_id);
-  expect(Date.parse(postLegacyFresh.accounting_started_at)).toBeGreaterThan(
-    Date.parse(fresh.accounting_started_at),
-  );
-  await postLegacyLatestFailure;
-  await expect(restoredAttempt).toHaveAttribute('data-run-id', postLegacyFresh.accounting_run_id);
 });
 
 test('main and default-width dock share a single in-flight native read for the same run', async ({ page }) => {

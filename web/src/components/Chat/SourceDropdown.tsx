@@ -1,6 +1,7 @@
 import type { ActiveSources, Corpus, RecallIntensity } from '@/types/generated';
 import { useEffect, useRef, useState } from 'react';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
+import { useRepoStore } from '@/stores/useRepoStore';
 
 type SourceDropdownProps = {
   value: ActiveSources;
@@ -39,6 +40,8 @@ function toggleInOrderedSet(items: string[], id: string): string[] {
 }
 
 export function SourceDropdown(props: SourceDropdownProps) {
+  const loadRepos = useRepoStore((state) => state.loadRepos);
+  const registryError = useRepoStore((state) => state.error);
   const corpusIds = props.value.corpus_ids ?? [];
   const [confirmCleanup, setConfirmCleanup] = useState(false);
   const detailsRef = useRef<HTMLDetailsElement | null>(null);
@@ -130,6 +133,9 @@ export function SourceDropdown(props: SourceDropdownProps) {
     <details
       ref={detailsRef}
       data-testid="source-dropdown"
+      onToggle={(event) => {
+        if (event.currentTarget.open) void loadRepos({ force: true });
+      }}
       style={{
         position: 'relative',
         display: 'inline-block',
@@ -238,6 +244,11 @@ export function SourceDropdown(props: SourceDropdownProps) {
 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', marginBottom: '8px' }}>
           <div style={{ fontSize: '12px', color: 'var(--fg-muted)' }}>Corpora</div>
+          {registryError && (
+            <div role="alert" style={{ fontSize: '12px', color: 'var(--err)' }}>
+              Corpus list refresh failed: {registryError}
+            </div>
+          )}
 
           {props.onCleanupUnindexed && unindexedCount > 0 && (
             <button

@@ -242,20 +242,31 @@ def classify_cost(row: NativeSpendRow) -> CostClassification:
     return CostClassification("gateway_calculated", row.spend)
 
 
-def reconcile_costs(
-    rows: list[NativeSpendRow], *, session_id: str, corpus_id: str,
-    lanes: frozenset[str], census: RequestCensus, pages_read: int = 0,
-) -> RunCostAggregate:
-    """Pure reconciliation. Missing closed-run rows are incomplete and may heal.
+@dataclass(frozen=True)
+class NativeRunSelection:
+    """Attributed native rows and conflicts, without accepting ambiguous measurements."""
 
-    Open work is pending. No elapsed-time heuristic promotes an incomplete run.
-    The caller can poll again when native queued writes are expected to arrive.
+    rows: dict[str, NativeSpendRow]
+    conflicted_request_ids: frozenset[str]
+    matched_requests: int
+    excluded_rows: int
+    reasons: tuple[str, ...]
+
+
+def select_native_run_rows(
+    rows: list[NativeSpendRow], *, session_id: str, corpus_id: str, lanes: frozenset[str],
+) -> NativeRunSelection:
+    """Resolve identities from every qualified raw row before discarding any variant.
+
+    Identical paging overlap is harmless. A conflicting request variant can carry
+    another call ID, so that ID must still participate in collision detection.
     """
     if not session_id or not corpus_id or not lanes or not all(lanes):
         raise ValueError("Run, corpus and lane selection must be explicit")
     reasons: set[str] = set()
     selected: dict[str, NativeSpendRow] = {}
     conflicted: set[str] = set()
+    call_groups: dict[str, set[str]] = defaultdict(set)
     excluded = 0
     for row in rows:
         attribution = row.metadata.spend_logs_metadata if row.metadata else None
@@ -275,16 +286,31 @@ def reconcile_costs(
             conflicted.add(row.request_id)
             reasons.add("conflicting_native_request_id")
         selected.setdefault(row.request_id, row)
-    call_groups: dict[str, list[str]] = defaultdict(list)
-    for request_id, row in selected.items():
         call_id = row.metadata.litellm_call_id if row.metadata else None
-        # Namespaced fallback avoids colliding a response ID with a call ID.
-        identity = f"call:{call_id}" if call_id else f"request:{request_id}"
-        call_groups[identity].append(request_id)
+        identity = f"call:{call_id}" if call_id else f"request:{row.request_id}"
+        call_groups[identity].add(row.request_id)
     for group in call_groups.values():
         if len(group) > 1:
             conflicted.update(group)
             reasons.add("duplicate_native_call_id")
+    return NativeRunSelection(
+        selected, frozenset(conflicted), len(call_groups), excluded, tuple(sorted(reasons)),
+    )
+
+
+def reconcile_costs(
+    rows: list[NativeSpendRow], *, session_id: str, corpus_id: str,
+    lanes: frozenset[str], census: RequestCensus, pages_read: int = 0,
+) -> RunCostAggregate:
+    """Pure reconciliation. Missing closed-run rows are incomplete and may heal.
+
+    Open work is pending. No elapsed-time heuristic promotes an incomplete run.
+    The caller can poll again when native queued writes are expected to arrive.
+    """
+    selection = select_native_run_rows(rows, session_id=session_id, corpus_id=corpus_id, lanes=lanes)
+    selected = selection.rows
+    conflicted = set(selection.conflicted_request_ids)
+    reasons = set(selection.reasons)
     provider_total = calculated_total = logged_total = ZERO
     provider_count = calculated_count = cached_count = unknown_count = 0
     for request_id, row in selected.items():
@@ -308,7 +334,7 @@ def reconcile_costs(
         else:
             unknown_count += 1
             reasons.add(classification.reason or "unmeasured_cost")
-    matched = len(call_groups)
+    matched = selection.matched_requests
     missing = max(0, census.started_requests - matched)
     if matched > census.started_requests:
         reasons.add("native_requests_exceed_census")
@@ -342,7 +368,7 @@ def reconcile_costs(
         state, coverage_state, pricing_state, provider_total, calculated_total,
         None if reasons & {"conflicting_native_request_id", "duplicate_native_call_id"} else logged_total, provider_count,
         calculated_count, cached_count, unknown_count, matched, missing,
-        len(selected), excluded, pages_read, tuple(sorted(reasons)),
+        len(selected), selection.excluded_rows, pages_read, tuple(sorted(reasons)),
     )
 
 
@@ -370,10 +396,16 @@ class NativeSpendReader:
         self._request_timeout_s = request_timeout_s
         self._total_timeout_s = total_timeout_s
 
-    async def read_run(
+    async def read_rows_for_run(
         self, *, session_id: str, corpus_id: str, lanes: frozenset[str],
-        started_at: datetime, ended_at: datetime, census: RequestCensus,
-    ) -> RunCostAggregate:
+        started_at: datetime, ended_at: datetime,
+    ) -> tuple[list[NativeSpendRow], int]:
+        """Read validated native evidence without persisting it or claiming coverage.
+
+        Consumers must enforce exact attribution: the gateway can return foreign
+        rows, duplicate pages, or delayed records. Reconciliation and forecasting
+        share this bounded authenticated transport and its privacy boundary.
+        """
         if not session_id or not corpus_id or not lanes or not all(lanes):
             raise ValueError("Run, corpus and lane selection must be explicit")
         start_date, end_date = native_date_bounds(started_at, ended_at)
@@ -414,4 +446,14 @@ class NativeSpendReader:
             raise NativeLedgerReadError("native_connection_error") from exc
         except ValidationError:
             raise NativeLedgerReadError("invalid_native_payload") from None
+        return rows, page_number
+
+    async def read_run(
+        self, *, session_id: str, corpus_id: str, lanes: frozenset[str],
+        started_at: datetime, ended_at: datetime, census: RequestCensus,
+    ) -> RunCostAggregate:
+        rows, page_number = await self.read_rows_for_run(
+            session_id=session_id, corpus_id=corpus_id, lanes=lanes,
+            started_at=started_at, ended_at=ended_at,
+        )
         return reconcile_costs(rows, session_id=session_id, corpus_id=corpus_id, lanes=lanes, census=census, pages_read=page_number)

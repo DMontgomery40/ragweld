@@ -114,9 +114,9 @@ def test_the_semantic_kg_cost_prices_the_gateway_alias_the_run_would_actually_us
     The expected price is derived here from the catalog row itself, found by the alias, so
     this pins the resolution rather than restating whatever the helper resolved.
     """
-    chunks, enrich_chars = 200, 1000
+    input_tokens, output_tokens = 1_600_000, 120_000
     cost = _estimate_semantic_kg_cost_usd(
-        alias=SEMANTIC_ALIAS, chunks_in_scope=chunks, enrich_max_chars=enrich_chars
+        alias=SEMANTIC_ALIAS, input_tokens=input_tokens, output_tokens=output_tokens,
     )
     row = next(
         model
@@ -124,8 +124,6 @@ def test_the_semantic_kg_cost_prices_the_gateway_alias_the_run_would_actually_us
         if str(model.get("gateway_alias") or "") == SEMANTIC_ALIAS
     )
     assert "/" in str(row["model"]), row["model"]  # the id the old lookup demanded
-    input_tokens = chunks * (500 + enrich_chars // 4)
-    output_tokens = chunks * 100
     expected = (input_tokens / 1000.0) * float(row["input_per_1k"]) + (
         output_tokens / 1000.0
     ) * float(row["output_per_1k"])
@@ -140,7 +138,7 @@ def test_the_default_local_alias_is_priced_at_zero_rather_than_unknown() -> None
     """
     assert (
         _estimate_semantic_kg_cost_usd(
-            alias=LOCAL_ALIAS, chunks_in_scope=200, enrich_max_chars=1000
+            alias=LOCAL_ALIAS, input_tokens=1_600_000, output_tokens=None,
         )
         == 0.0
     )
@@ -152,6 +150,21 @@ def test_an_alias_the_catalog_does_not_serve_has_no_price(alias: str) -> None:
     row the gateway would never route to.
     """
     assert (
-        _estimate_semantic_kg_cost_usd(alias=alias, chunks_in_scope=200, enrich_max_chars=1000)
+        _estimate_semantic_kg_cost_usd(alias=alias, input_tokens=1_600_000, output_tokens=120_000)
         is None
     )
+
+
+@pytest.mark.parametrize("input_tokens", [1, 100_000, 1_600_000])
+def test_unknown_output_usage_keeps_paid_total_unknown(input_tokens: int) -> None:
+    assert _estimate_semantic_kg_cost_usd(
+        alias=SEMANTIC_ALIAS, input_tokens=input_tokens, output_tokens=None,
+    ) is None
+
+
+@pytest.mark.parametrize("input_tokens,output_tokens", [(-1, 20), (10, -1), (10, float("nan")), (10, float("inf"))])
+def test_invalid_token_forecasts_are_rejected(input_tokens, output_tokens) -> None:
+    with pytest.raises(ValueError):
+        _estimate_semantic_kg_cost_usd(
+            alias=SEMANTIC_ALIAS, input_tokens=input_tokens, output_tokens=output_tokens,
+        )

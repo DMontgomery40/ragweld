@@ -281,6 +281,8 @@ function App() {
           </ErrorBoundary>
         </aside>
 
+        {/* The mobile pane stack scrolls separately from the navigation drawer. */}
+        <div className="layout-panes">
         {/* Main content area */}
         <div className="main-content">
           <Breadcrumbs />
@@ -397,6 +399,7 @@ function App() {
           >
             <DockPanel />
           </ErrorBoundary>
+        </div>
         </div>
       </div>
     </>

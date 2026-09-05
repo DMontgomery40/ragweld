@@ -14,6 +14,15 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 import asyncpg
 from pgvector.asyncpg import register_vector
 
+from server.models.graph_extraction_checkpoint import (
+    GraphExtractionCheckpoint,
+    GraphExtractionCheckpointConflictError,
+    GraphExtractionCheckpointCorruptError,
+    GraphExtractionCheckpointError,
+    GraphExtractionCheckpointFenceError,
+    GraphExtractionCheckpointPartition,
+    graph_extraction_recipe_hash,
+)
 from server.models.index import (
     Chunk,
     ChunkProvenance,
@@ -52,10 +61,21 @@ _VECTOR_AVAILABLE_BY_DSN: dict[tuple[str, str], bool] = {}
 
 _STAGING_REPO_PREFIX = "__staging__"
 
-# Every table an index run writes under its staging id, child tables first (all of
-# them cascade from ``corpora``; the explicit order keeps the sweep readable and
-# identical between de-index and corpus deletion).
+
+class CorpusAlreadyIndexedError(RuntimeError):
+    """Conditional cleanup refused an indexed corpus under its write lock."""
+
+    def __init__(self, corpus_id: str, last_indexed: datetime) -> None:
+        super().__init__(f"Corpus is already indexed: {corpus_id}")
+        self.corpus_id = corpus_id
+        self.last_indexed = last_indexed
+
+
+# Corpus-owned tables, child first. Extraction checkpoints belong to the base
+# corpus, so staging reclamation cannot erase reusable work. Explicit de-index
+# and corpus deletion use this same inventory and do remove them.
 _STAGING_ROW_TABLES: tuple[str, ...] = (
+    "graph_extraction_checkpoints",
     "chunk_summaries_last_build",
     "chunk_summaries",
     "documents",
@@ -105,9 +125,106 @@ async def _delete_corpus_staging_rows(conn: asyncpg.Connection, repo_id: str) ->
 
 async def _delete_corpus_data_rows(conn: asyncpg.Connection, repo_id: str) -> None:
     """Clear one corpus and its staging inventory within the caller's transaction."""
+    # Serialize before touching child rows. A checkpoint writer holds the base
+    # row before its child write; child-first deletion would invert that order.
+    await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1));", repo_id)
+    await conn.fetchrow("SELECT repo_id FROM corpora WHERE repo_id = $1 FOR UPDATE;", repo_id)
     await _delete_corpus_staging_rows(conn, repo_id)
     for table in (await _existing_corpus_data_tables(conn)).values():
         await conn.execute(f"DELETE FROM {table} WHERE repo_id = $1;", repo_id)
+
+
+def _require_checkpoint_scope(repo_id: str, cache_key: str | None = None) -> None:
+    if (
+        not isinstance(repo_id, str) or not repo_id.strip()
+        or repo_id.startswith(_STAGING_REPO_PREFIX)
+        or any(ord(char) < 32 for char in repo_id)
+    ):
+        raise GraphExtractionCheckpointError("Checkpoints require a valid base corpus id")
+    if cache_key is not None and (
+        not isinstance(cache_key, str) or len(cache_key) != 64
+        or any(char not in "0123456789abcdef" for char in cache_key)
+    ):
+        raise GraphExtractionCheckpointError("Checkpoint keys must be lowercase SHA-256 digests")
+
+
+def _checkpoint_from_row(row: Any, repo_id: str, cache_key: str) -> GraphExtractionCheckpoint:
+    """Read exact JSONB, never the generic forgiving JSON coercion used by older stores."""
+    try:
+        raw = row["envelope"]
+        payload = json.loads(raw) if isinstance(raw, str) else raw
+        checkpoint = GraphExtractionCheckpoint.from_persisted_payload(payload)
+        if (
+            row["repo_id"] != repo_id or checkpoint.identity.repo_id != repo_id
+            or row["cache_key"] != cache_key or checkpoint.cache_key != cache_key
+            or row["file_path"] != checkpoint.identity.file_path
+            or row["recipe_hash"] != graph_extraction_recipe_hash(checkpoint.identity.recipe)
+            or row["created_at"] != checkpoint.created_at
+        ):
+            raise ValueError("Checkpoint envelope disagrees with its persistence identity")
+        return checkpoint
+    except Exception as exc:
+        # Provider output and corpus content are intentionally absent from error text.
+        raise GraphExtractionCheckpointCorruptError(
+            f"Invalid extraction checkpoint for corpus {repo_id}; explicit de-index is required"
+        ) from exc
+
+
+async def _lock_checkpoint_owner(
+    conn: asyncpg.Connection, repo_id: str, owner_run_id: str,
+) -> GraphExtractionCheckpointPartition | None:
+    """Lock advisory then corpus row; the caller retains both through mutation/commit."""
+    from server.indexing.generations import IndexRunFence
+
+    _require_checkpoint_scope(repo_id)
+    await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1));", repo_id)
+    row = await conn.fetchrow("SELECT meta FROM corpora WHERE repo_id = $1 FOR UPDATE;", repo_id)
+    if row is None:
+        raise GraphExtractionCheckpointFenceError("Checkpoint base corpus no longer exists")
+    try:
+        raw = row["meta"]
+        meta = json.loads(raw) if isinstance(raw, str) else raw
+        if not isinstance(meta, dict):
+            raise ValueError("Corpus metadata must be an object")
+        fence = IndexRunFence.model_validate(meta.get("index_run"))
+    except Exception as exc:
+        raise GraphExtractionCheckpointFenceError(
+            "Checkpoint writes require a readable current index fence"
+        ) from exc
+    if (
+        fence.run_id != owner_run_id or fence.phase != "building"
+        or meta.get("index_tombstone") is not None
+    ):
+        raise GraphExtractionCheckpointFenceError(
+            "Checkpoint writes require the current building owner with no deletion tombstone"
+        )
+    raw_partition = meta.get("graph_extraction_checkpoint_partition")
+    if raw_partition is None:
+        if "graph_extraction_checkpoint_partition" in meta or await conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM graph_extraction_checkpoints WHERE repo_id = $1);", repo_id,
+        ):
+            raise GraphExtractionCheckpointCorruptError(
+                "Checkpoint rows require a complete recipe partition; explicit de-index is required"
+            )
+        return None
+    try:
+        return GraphExtractionCheckpointPartition.from_persisted_payload(raw_partition)
+    except Exception as exc:
+        raise GraphExtractionCheckpointCorruptError(
+            "Invalid checkpoint recipe partition; explicit de-index is required"
+        ) from exc
+
+
+def _require_checkpoint_partition(
+    partition: GraphExtractionCheckpointPartition | None, owner_run_id: str, recipe_hash: str,
+) -> None:
+    if (
+        partition is None or partition.owner_run_id != owner_run_id
+        or partition.recipe_hash != recipe_hash or partition.complete
+    ):
+        raise GraphExtractionCheckpointError(
+            "Checkpoint recipe must be prepared by this run and remain unfinished"
+        )
 
 
 def _coerce_jsonb_dict(value: Any) -> dict[str, Any]:
@@ -374,6 +491,22 @@ class PostgresClient:
 
         if not include_vector:
             return vector_available
+
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS graph_extraction_checkpoints (
+              repo_id TEXT NOT NULL REFERENCES corpora(repo_id) ON DELETE CASCADE,
+              cache_key TEXT NOT NULL,
+              recipe_hash TEXT NOT NULL,
+              file_path TEXT NOT NULL,
+              created_at TIMESTAMPTZ NOT NULL,
+              envelope JSONB NOT NULL,
+              PRIMARY KEY (repo_id, cache_key)
+            );
+            CREATE INDEX IF NOT EXISTS graph_extraction_checkpoints_recipe_file_idx
+              ON graph_extraction_checkpoints (repo_id, recipe_hash, file_path);
+            """
+        )
 
         # Semantic cache store (search/answer/chat payload cache).
         # Keep parity with chunks.embedding compatibility: prefer undimensioned vector,
@@ -1928,6 +2061,150 @@ class PostgresClient:
                 )
         return int(result.split()[-1])
 
+    async def get_graph_extraction_checkpoint(
+        self, repo_id: str, cache_key: str,
+    ) -> GraphExtractionCheckpoint | None:
+        """Return a newly validated graph or a proven miss; corruption raises."""
+        _require_checkpoint_scope(repo_id, cache_key)
+        await self._require_pool()
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT repo_id, cache_key, recipe_hash, file_path, created_at, envelope "
+                "FROM graph_extraction_checkpoints WHERE repo_id = $1 AND cache_key = $2;",
+                repo_id, cache_key,
+            )
+        return None if row is None else _checkpoint_from_row(row, repo_id, cache_key)
+
+    async def put_graph_extraction_checkpoint(
+        self, repo_id: str, owner_run_id: str, checkpoint: GraphExtractionCheckpoint,
+    ) -> None:
+        """Persist official extraction before downstream processing, fenced through commit.
+
+        Identical duplicate content preserves the first origin and timestamp.
+        Neither a conflicting graph nor corrupt existing data can be overwritten.
+        """
+        _require_checkpoint_scope(repo_id)
+        # Pydantic model_copy and mutable nested official models can bypass validation.
+        validated = GraphExtractionCheckpoint.model_validate(checkpoint.model_dump(mode="python"))
+        if validated.identity.repo_id != repo_id or validated.originating_run_id != owner_run_id:
+            raise GraphExtractionCheckpointError("Checkpoint corpus or originating run does not match writer")
+        recipe_hash = graph_extraction_recipe_hash(validated.identity.recipe)
+        await self._require_pool()
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                partition = await _lock_checkpoint_owner(conn, repo_id, owner_run_id)
+                _require_checkpoint_partition(partition, owner_run_id, recipe_hash)
+                row = await conn.fetchrow(
+                    "SELECT repo_id, cache_key, recipe_hash, file_path, created_at, envelope "
+                    "FROM graph_extraction_checkpoints WHERE repo_id = $1 AND cache_key = $2;",
+                    repo_id, validated.cache_key,
+                )
+                if row is not None:
+                    existing = _checkpoint_from_row(row, repo_id, validated.cache_key)
+                    if existing.semantic_payload() != validated.semantic_payload():
+                        raise GraphExtractionCheckpointConflictError(
+                            "Conflicting validated graphs share one exact extraction identity"
+                        )
+                    return
+                await conn.execute(
+                    "INSERT INTO graph_extraction_checkpoints "
+                    "(repo_id, cache_key, recipe_hash, file_path, created_at, envelope) "
+                    "VALUES ($1, $2, $3, $4, $5, $6::jsonb);",
+                    repo_id, validated.cache_key, recipe_hash, validated.identity.file_path,
+                    validated.created_at, validated.model_dump_json(),
+                )
+
+    async def prepare_graph_extraction_checkpoint_file(
+        self, repo_id: str, owner_run_id: str, recipe_hash: str,
+        file_path: str, current_keys: list[str],
+    ) -> None:
+        """Register this run's recipe, then prune a file only from its complete key set.
+
+        A successor run may rotate the recipe. One owner cannot change it while
+        earlier extraction tasks remain in flight. Validate rows before pruning
+        so malformed stored work can never turn into an automatic paid miss.
+        """
+        _require_checkpoint_scope(repo_id, recipe_hash)
+        if not file_path.strip() or any(ord(char) < 32 for char in file_path):
+            raise GraphExtractionCheckpointError("Checkpoint file path must be nonempty text")
+        for key in current_keys:
+            _require_checkpoint_scope(repo_id, key)
+        candidate = GraphExtractionCheckpointPartition(owner_run_id=owner_run_id, recipe_hash=recipe_hash)
+        await self._require_pool()
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                partition = await _lock_checkpoint_owner(conn, repo_id, owner_run_id)
+                if partition is not None and partition.owner_run_id == owner_run_id:
+                    _require_checkpoint_partition(partition, owner_run_id, recipe_hash)
+                rows = await conn.fetch(
+                    "SELECT repo_id, cache_key, recipe_hash, file_path, created_at, envelope "
+                    "FROM graph_extraction_checkpoints WHERE repo_id = $1 AND "
+                    "(recipe_hash <> $2 OR file_path = $3 OR cache_key = ANY($4::text[]));",
+                    repo_id, recipe_hash, file_path, current_keys,
+                )
+                current_key_set = set(current_keys)
+                for row in rows:
+                    existing = _checkpoint_from_row(row, repo_id, row["cache_key"])
+                    if existing.cache_key in current_key_set and (
+                        existing.identity.file_path != file_path or row["recipe_hash"] != recipe_hash
+                    ):
+                        raise GraphExtractionCheckpointError("Current file keys belong to a different extraction input")
+                await conn.execute(
+                    "UPDATE corpora SET meta = jsonb_set(meta, '{graph_extraction_checkpoint_partition}', $2::jsonb) "
+                    "WHERE repo_id = $1;",
+                    repo_id, candidate.model_dump_json(),
+                )
+                await conn.execute(
+                    "DELETE FROM graph_extraction_checkpoints WHERE repo_id = $1 "
+                    "AND (recipe_hash <> $2 OR (file_path = $3 AND NOT (cache_key = ANY($4::text[]))));",
+                    repo_id, recipe_hash, file_path, current_keys,
+                )
+
+    async def finish_graph_extraction_checkpoint_run(
+        self, repo_id: str, owner_run_id: str, recipe_hash: str, current_files: list[str],
+    ) -> None:
+        """After a successful full build, remove deleted files and close checkpoint writes.
+
+        Call while the owner still holds its building fence, after all chunk
+        commits drain and before generation promotion. Failure/staging cleanup
+        must never call this operation.
+        """
+        _require_checkpoint_scope(repo_id, recipe_hash)
+        for file_path in current_files:
+            if not file_path.strip() or any(ord(char) < 32 for char in file_path):
+                raise GraphExtractionCheckpointError("Checkpoint file paths must be nonempty text")
+        await self._require_pool()
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                partition = await _lock_checkpoint_owner(conn, repo_id, owner_run_id)
+                # Empty corpora may have no file preparation call at all.
+                if partition is None or partition.owner_run_id != owner_run_id:
+                    if current_files:
+                        raise GraphExtractionCheckpointError("Nonempty checkpoint inventory must be prepared before finishing")
+                    partition = GraphExtractionCheckpointPartition(owner_run_id=owner_run_id, recipe_hash=recipe_hash)
+                else:
+                    _require_checkpoint_partition(partition, owner_run_id, recipe_hash)
+                rows = await conn.fetch(
+                    "SELECT repo_id, cache_key, recipe_hash, file_path, created_at, envelope "
+                    "FROM graph_extraction_checkpoints WHERE repo_id = $1;", repo_id,
+                )
+                for row in rows:
+                    _checkpoint_from_row(row, repo_id, row["cache_key"])
+                await conn.execute(
+                    "DELETE FROM graph_extraction_checkpoints WHERE repo_id = $1 "
+                    "AND (recipe_hash <> $2 OR NOT (file_path = ANY($3::text[])));",
+                    repo_id, recipe_hash, current_files,
+                )
+                await conn.execute(
+                    "UPDATE corpora SET meta = jsonb_set(meta, '{graph_extraction_checkpoint_partition}', $2::jsonb) "
+                    "WHERE repo_id = $1;", repo_id,
+                    partition.model_copy(update={"complete": True}).model_dump_json(),
+                )
+
     async def get_generation(self, repo_id: str) -> GenerationManifest | None:
         """The active-generation manifest of a corpus (None when nothing is promoted)."""
         from server.indexing.generations import generation_from_corpus_row
@@ -2364,6 +2641,7 @@ class PostgresClient:
         allow_fence_run_id: str | None = None,
         lease_seconds: int,
         intent: Literal["deindex", "delete_corpus"] = "deindex",
+        only_unindexed: bool = False,
     ) -> tuple[int, DeletionTombstone]:
         """De-index a corpus in Postgres in ONE transaction: chunk rows gone, manifest and contracts cleared.
 
@@ -2375,6 +2653,8 @@ class PostgresClient:
         tombstone on the row so the external cleanup can be retried until it
         succeeds. A corpus fenced by a live run that is not ``allow_fence_run_id``
         is refused (``IndexFenceHeldError``); a stale fence is cleared.
+        Conditional corpus cleanup also refuses a non-null ``last_indexed``
+        under these same locks, before recording a tombstone or deleting rows.
         """
         from server.indexing.generations import (
             DeletionTombstone,
@@ -2392,9 +2672,11 @@ class PostgresClient:
             async with conn.transaction():
                 await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1));", repo_id)
                 row = await conn.fetchrow(
-                    "SELECT meta, now() AS db_now FROM corpora WHERE repo_id = $1 FOR UPDATE;",
+                    "SELECT meta, last_indexed, now() AS db_now FROM corpora WHERE repo_id = $1 FOR UPDATE;",
                     repo_id,
                 )
+                if only_unindexed and row is not None and row["last_indexed"] is not None:
+                    raise CorpusAlreadyIndexedError(repo_id, row["last_indexed"])
                 now: datetime = row["db_now"] if row is not None else datetime.now(UTC)
                 meta = _coerce_jsonb_dict(row["meta"]) if row is not None else {}
                 # De-indexing is the explicit repair path for malformed persisted
@@ -2517,7 +2799,7 @@ class PostgresClient:
                             embedding_model = NULL,
                             embedding_dimensions = NULL,
                             sparse_contract = NULL,
-                            meta = (COALESCE(meta, '{}'::jsonb) - 'generation' - 'index_run' - 'reclaim_backlog') || $2::jsonb
+                            meta = (COALESCE(meta, '{}'::jsonb) - 'generation' - 'index_run' - 'reclaim_backlog' - 'graph_extraction_checkpoint_partition') || $2::jsonb
                         WHERE repo_id = $1;
                         """,
                         repo_id,

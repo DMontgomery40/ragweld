@@ -372,6 +372,86 @@ def test_extraction_prompt_template_refuses_a_template_the_extractor_cannot_form
         extraction_prompt_template(template)
 
 
+@pytest.mark.parametrize(("template", "missing"), [
+    pytest.param("{{schema}}\n{text}", "{schema}", id="escaped_schema"),
+    pytest.param("{schema}\n{{text}}", "{text}", id="escaped_text"),
+    pytest.param("{{schema}}\n{{text}}", "{schema}", id="both_escaped"),
+    pytest.param("{{{{schema}}}}\n{text}", "{schema}", id="multiply_escaped_schema"),
+    pytest.param("{{{schema}}}\n{{text}}", "{text}", id="real_schema_escaped_text"),
+    pytest.param("{{schema!r}}\n{text!s}", "{schema}", id="escaped_conversion"),
+    pytest.param("{schema[node_types]}\n{text}", "{schema}", id="schema_projection"),
+    pytest.param("{schema}\n{text[0]}", "{text}", id="text_projection"),
+    pytest.param("{examples:{schema}}\n{text}", "{schema}", id="schema_only_in_format_spec"),
+    pytest.param("{schema}\n{examples:{text}}", "{text}", id="text_only_in_format_spec"),
+    pytest.param("{schema}\n{examples!r:>{text}}", "{text}", id="nested_conversion_spec"),
+])
+def test_required_extraction_inputs_must_be_actual_output_fields(template: str, missing: str) -> None:
+    with pytest.raises(ValueError, match=missing.replace("{", "\\{").replace("}", "\\}")):
+        extraction_prompt_template(template)
+
+
+@pytest.mark.parametrize("template", [
+    pytest.param("{schema}\n{text}", id="direct"),
+    pytest.param("{schema!r}\n{text}\n{text!s}", id="conversion_with_direct_text"),
+    pytest.param("{schema!a}\n{text}\n{text!a}", id="ascii_conversion"),
+    pytest.param("{{schema}}\n{schema!s}\n{{text}}\n{text}\n{text!r}", id="literals_and_real_fields"),
+    pytest.param("{{{schema}}}\n{{{text}}}", id="fields_inside_literal_braces"),
+    pytest.param("{schema}{schema!s}\n{text}{text!r}", id="repeated_fields"),
+    pytest.param("{schema!s}\n{schema!s:{examples}}\n{text}\n{text:{examples}}", id="nested_optional_format"),
+    pytest.param("{schema!s}\n{text}\n{text:>{examples}}", id="nested_alignment"),
+    pytest.param("{schema!r}\n{text}\n{text!r:{examples}}", id="nested_conversion"),
+    pytest.param("{schema}\n{text}\n{schema!s:.0}\n{text:.0}", id="full_and_empty_duplicates"),
+    pytest.param("{schema!r}\n{text}\n{text!r:.1}", id="full_and_short_duplicate"),
+    pytest.param("{schema}\n{text}\n{text:{examples}.0}", id="full_and_dynamic_duplicate"),
+])
+def test_actual_extraction_inputs_keep_valid_formatting_semantics(template: str) -> None:
+    schema = {"node_types": [{"label": "DomainSchema"}]}
+    text = "ChunkText 'quoted'\n月面"
+    rendered = extraction_prompt_template(template).format(schema=schema, text=text, examples="")
+    assert rendered == template.format(schema=schema, text=text, examples="")
+    assert "DomainSchema" in rendered and "ChunkText" in rendered
+
+
+@pytest.mark.parametrize("template", [
+    "{schema!r}\n{text!s}",
+    "{schema!a}\n{text!a}",
+    "{schema}\n{text:}",
+], ids=["conversion_only", "ascii_only", "empty_spec"])
+def test_official_template_constructor_refusal_is_a_validation_error(template: str) -> None:
+    # These are legal str.format expressions, but ERExtractionTemplate's public
+    # constructor requires literal {text}. Keep that contract without rewriting
+    # the operator's prompt or bypassing the official template implementation.
+    with pytest.raises(ValueError, match=r"official.*\{text\}"):
+        extraction_prompt_template(template)
+
+
+@pytest.mark.parametrize(("template", "missing"), [
+    pytest.param("{schema!s:.0}\n{text}", "{schema}", id="schema_empty"),
+    pytest.param("{schema!s:.1}\n{text}", "{schema}", id="schema_truncated"),
+    pytest.param("{schema!s:{examples}.0}\n{text}", "{schema}", id="schema_dynamic_precision"),
+    pytest.param("{schema!s:{examples}}\n{text}", "{schema}", id="schema_nested_spec"),
+    pytest.param("{{text}}\n{schema}\n{text!s:.0}", "{text}", id="text_empty"),
+    pytest.param("{{text}}\n{schema}\n{text!s:.1}", "{text}", id="text_truncated"),
+    pytest.param("{{text}}\n{schema}\n{text:{examples}.0}", "{text}", id="text_dynamic_precision"),
+    pytest.param("{{text}}\n{schema}\n{text:{examples}}", "{text}", id="text_nested_spec"),
+    pytest.param("{{text}}\n{schema}\n{text:>10}", "{text}", id="text_alignment_spec"),
+    pytest.param("{schema}\n{text!x}", "{text}", id="unsupported_conversion"),
+])
+def test_required_extraction_inputs_need_one_complete_unformatted_occurrence(template: str, missing: str) -> None:
+    with pytest.raises(ValueError, match=missing.replace("{", "\\{").replace("}", "\\}")):
+        extraction_prompt_template(template)
+
+
+@pytest.mark.parametrize("template", [
+    "{schema}\n{text:\n",
+    "{schema}\n{text:{examples}",
+    "{schema}\n{text}\n}",
+], ids=["unclosed_format", "unclosed_nested_format", "unmatched_closing_brace"])
+def test_malformed_replacement_field_syntax_is_rejected_by_the_shared_helper(template: str) -> None:
+    with pytest.raises(ValueError):
+        extraction_prompt_template(template)
+
+
 def test_semantic_extractor_carries_the_operator_template_and_structured_output() -> None:
     llm = semantic_extraction_llm(
         route_model="openai.gpt-5.6-luna",

@@ -12,6 +12,66 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 MODULE_PATH = REPO_ROOT / "scripts" / "docs_ai" / "run_ci_autopilot.py"
 
 
+@pytest.mark.parametrize("repair_only", [False, True])
+@pytest.mark.parametrize("ambiguous", [False, True])
+def test_wrapper_gate_controls_real_remote_publication(
+    tmp_path: Path, repair_only: bool, ambiguous: bool
+) -> None:
+    """A successful build executable must never authorize an unsafe page body."""
+    module = _load_module()
+    repo, remote, fake_bin = _init_fake_repo(tmp_path)
+    _configure_module(module, repo)
+    body = (
+        '# Deployment\n\n<div class="grid chunk_summaries" markdown>\n\n'
+        '- **Gateway keys** stay separate from private provider credentials.\n\n</div>\n\n'
+        '## Configure the gateway\n\n```bash\n./start.sh\n```\n\nTrailing guidance.\n'
+    )
+    wrapped = "```markdown\n" + body
+    _write_file(repo / "mkdocs/docs/deployment.md", wrapped)
+    if ambiguous:
+        _write_file(repo / "mkdocs/docs/unsafe.md", "```markdown\n# A literal example\n```\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "existing generated wrapper fixture")
+    _git(repo, "push", "origin", "main")
+    before = _remote_head(remote)
+
+    previous_env = os.environ.copy()
+    try:
+        os.environ["OPENROUTER_API_KEY"] = "" if repair_only else "test-key"
+        os.environ["FAKE_DOCS_AI_MODE"] = "empty"
+        os.environ["FAKE_CONFIG_MODE"] = "success"
+        os.environ["FAKE_ARCH_MODE"] = "success"
+        os.environ["FAKE_MKDOCS_MODE"] = "success"
+        os.environ["DOCS_AUTOPILOT_MKDOCS_BIN"] = str(fake_bin / "mkdocs")
+        os.environ["GITHUB_OUTPUT"] = str(tmp_path / "github-output")
+        for name in ("GITHUB_HEAD_REF", "GITHUB_REF", "GITHUB_REF_NAME"):
+            os.environ.pop(name, None)
+        rc = module.main(["--repair-page-wrappers-only"] if repair_only else ["--base", "origin/main"])
+    finally:
+        os.environ.clear()
+        os.environ.update(previous_env)
+
+    assert rc == (1 if ambiguous else 0)
+    assert _git(repo, "status", "--short").stdout == ""
+    assert (repo / "mkdocs/docs/deployment.md").read_bytes() == wrapped.encode()
+    if ambiguous:
+        assert _remote_head(remote) == before
+        assert "mkdocs/docs/unsafe.md" in module.LOG_FILE.read_text(encoding="utf-8")
+        assert "pushed=false" in (tmp_path / "github-output").read_text(encoding="utf-8")
+    else:
+        assert _remote_head(remote) != before
+        assert _remote_file(remote, "mkdocs/docs/deployment.md") == body
+        assert "pushed=true" in (tmp_path / "github-output").read_text(encoding="utf-8")
+        if repair_only:
+            # Repair-only publication must be exactly the mechanical wrapper
+            # deletion, without paying for or running any content generator.
+            changed = _git(repo, "diff", "--name-only", before, _remote_head(remote)).stdout.splitlines()
+            assert changed == ["mkdocs/docs/deployment.md"]
+            diff = _git(repo, "diff", "--unified=0", before, _remote_head(remote)).stdout
+            assert "-```markdown\n" in diff
+            assert "+#" not in diff
+
+
 def _load_module():
     spec = importlib.util.spec_from_file_location("run_ci_autopilot_test", MODULE_PATH)
     assert spec is not None

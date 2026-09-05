@@ -28,6 +28,216 @@ from tests.fixtures.pdf_builder import build_pdf
 
 
 @pytest.mark.asyncio
+@pytest.mark.requires_postgres
+async def test_read_only_proposal_restore_returns_current_missing_stale_and_ineligible_without_attempts(
+    client: AsyncClient, tmp_path: Path,
+) -> None:
+    corpus_id = f"pytest_schema_restore_{uuid4().hex[:8]}"
+    (tmp_path / "mission.txt").write_text("Apollo 11 used the Eagle lunar module.")
+    created = await client.post("/api/corpora", json={
+        "corpus_id": corpus_id, "name": corpus_id, "path": str(tmp_path),
+    })
+    assert created.status_code in (200, 201), created.text
+    pg = PostgresClient(load_config().indexing.postgres_url)
+    await pg.connect()
+    url = f"/api/index/{corpus_id}/graph-schema/proposal"
+    try:
+        configured = await client.patch(f"/api/config/graph_indexing?corpus_id={corpus_id}", json={
+            "enabled": True, "build_code_graph": False,
+        })
+        assert configured.status_code == 200, configured.text
+        missing = await client.get(url)
+        assert missing.status_code == 200, missing.text
+        assert missing.json()["status"] == "missing" and missing.json()["proposal"] is None
+        corpus, cfg = await index_api.load_corpus_and_scoped_config(corpus_id)
+        schema = canonical_schema_dict(normalize_domain_schema(GraphSchema(
+            node_types=(NodeType(label="Mission"), NodeType(label="Spacecraft")),
+            relationship_types=(RelationshipType(label="USED"),),
+            patterns=(Pattern(source="Mission", relationship="USED", target="Spacecraft"),),
+        )))
+        proposal = GraphSchemaProposal(
+            corpus_id=corpus_id, policy="semantic",
+            input_fingerprint=await index_api.graph_schema_input_fingerprint(corpus, cfg),
+            schema_hash=graph_schema_hash(schema), schema=schema,
+            sample=GraphSchemaSample(chunk_ids=[], chunk_hashes=[]),
+            model_alias=index_api._semantic_kg_model_override(cfg), created_at=datetime.now(UTC),
+        )
+        await pg.set_graph_schema_proposal(corpus_id, proposal)
+        current = await client.get(url)
+        assert current.status_code == 200, current.text
+        assert current.json()["status"] == "current"
+        assert GraphSchemaProposal.model_validate(current.json()["proposal"]) == proposal
+        changed = await client.patch(f"/api/config/graph_indexing?corpus_id={corpus_id}", json={
+            "schema_proposal_reasoning_effort": "high",
+        })
+        assert changed.status_code == 200
+        stale = await client.get(url)
+        assert stale.status_code == 200 and stale.json()["status"] == "stale"
+        assert stale.json()["proposal"] is None
+        disabled = await client.patch(f"/api/config/graph_indexing?corpus_id={corpus_id}", json={"enabled": False})
+        assert disabled.status_code == 200
+        ineligible = await client.get(url)
+        assert ineligible.status_code == 200 and ineligible.json()["status"] == "ineligible"
+        assert ineligible.json()["proposal"] is None
+        latest = await client.get(f"/api/index/{corpus_id}/runs/latest?run_kind=schema_proposal")
+        assert latest.status_code == 404, latest.text
+        assert await pg.get_graph_schema_proposal(corpus_id) == proposal
+    finally:
+        await client.delete(f"/api/corpora/{corpus_id}")
+        await pg.disconnect()
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_postgres
+@pytest.mark.parametrize("deletion", ["before_request", "during_first_config_read"])
+async def test_read_only_restore_reports_missing_corpus_before_or_during_initial_context(
+    client: AsyncClient, tmp_path: Path, deletion: str,
+) -> None:
+    corpus_id = f"pytest_schema_gone_{uuid4().hex[:8]}"
+    store = config_store.get_config_store()
+    pg = PostgresClient(load_config().indexing.postgres_url)
+    await pg.connect()
+    reading: asyncio.Task | None = None
+    held = False
+    lock = await store._get_lock(corpus_id)
+    try:
+        if deletion == "during_first_config_read":
+            await pg.upsert_corpus(corpus_id, corpus_id, str(tmp_path))
+            await config_store.save_config(load_config().model_copy(deep=True), repo_id=corpus_id)
+            await lock.acquire()
+            held = True
+        reading = asyncio.create_task(client.get(f"/api/index/{corpus_id}/graph-schema/proposal"))
+        if held:
+            async with asyncio.timeout(10):
+                while not lock._waiters:
+                    await asyncio.sleep(0)
+            await pg.delete_corpus(corpus_id)
+            store.clear_cache(corpus_id)
+            lock.release()
+            held = False
+        response = await reading
+        assert response.status_code == 404, response.text
+        assert corpus_id in response.json()["detail"]
+        assert not index_api._repo_runs_dir(corpus_id).exists()
+    finally:
+        if held:
+            lock.release()
+        if reading is not None:
+            if not reading.done():
+                reading.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await reading
+        await pg.delete_corpus(corpus_id)
+        await pg.disconnect()
+        store.clear_cache(corpus_id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_postgres
+@pytest.mark.parametrize("initial,final", [
+    ("missing", "current"), ("stale", "current"), ("ineligible", "current"),
+    ("current", "current"), ("current", "missing"), ("current", "stale"),
+    ("current", "ineligible"), ("current", "deleted"),
+])
+async def test_read_only_restore_rechecks_every_state_after_a_real_config_read_barrier(
+    client: AsyncClient, tmp_path: Path, initial: str, final: str,
+) -> None:
+    corpus_id = f"pytest_schema_state_race_{uuid4().hex[:8]}"
+    (tmp_path / "mission.txt").write_text("Apollo 11 used the Eagle lunar module.")
+    cfg = load_config().model_copy(deep=True)
+    cfg.graph_indexing.enabled = initial != "ineligible"
+    cfg.graph_indexing.build_code_graph = False
+    pg = PostgresClient(cfg.indexing.postgres_url)
+    await pg.connect()
+    await pg.upsert_corpus(corpus_id, corpus_id, str(tmp_path))
+    await config_store.save_config(cfg, repo_id=corpus_id)
+    corpus, cfg = await index_api.load_corpus_and_scoped_config(corpus_id)
+    schema = canonical_schema_dict(normalize_domain_schema(GraphSchema(
+        node_types=(NodeType(label="Mission"), NodeType(label="Spacecraft")),
+        relationship_types=(RelationshipType(label="USED"),),
+        patterns=(Pattern(source="Mission", relationship="USED", target="Spacecraft"),),
+    )))
+    original = GraphSchemaProposal(
+        corpus_id=corpus_id, policy="semantic",
+        input_fingerprint=("0" * 64 if initial == "stale" else
+                           await index_api.graph_schema_input_fingerprint(corpus, cfg)),
+        schema_hash=graph_schema_hash(schema), schema=schema,
+        sample=GraphSchemaSample(chunk_ids=[], chunk_hashes=[]),
+        model_alias=index_api._semantic_kg_model_override(cfg), created_at=datetime.now(UTC),
+        accounting_run_id=uuid4().hex,
+    )
+    if initial != "missing":
+        await pg.set_graph_schema_proposal(corpus_id, original)
+    store = config_store.get_config_store()
+    lock = await store._get_lock(corpus_id)
+    reading: asyncio.Task | None = None
+    barrier: asyncio.Task | None = None
+    held = False
+    try:
+        # The production per-corpus config lock supplies a real FIFO barrier.
+        # Let the first config read through, then hold the next read while real
+        # Postgres state changes. No method, API response or payload is replaced.
+        await lock.acquire()
+        held = True
+        reading = asyncio.create_task(client.get(f"/api/index/{corpus_id}/graph-schema/proposal"))
+        async with asyncio.timeout(10):
+            while not lock._waiters:
+                await asyncio.sleep(0)
+            barrier = asyncio.create_task(lock.acquire())
+            await asyncio.sleep(0)
+            lock.release()
+            held = False
+            await barrier
+            held = True
+            while not reading.done() and not lock._waiters:
+                await asyncio.sleep(0)
+        assert not reading.done(), f"Initial {initial} returned before the authoritative recheck"
+        updated = cfg.model_copy(deep=True)
+        updated.graph_indexing.enabled = final != "ineligible"
+        if final == "stale":
+            updated.graph_indexing.schema_proposal_reasoning_effort = "high"
+        if final == "deleted":
+            await pg.delete_corpus(corpus_id)
+        else:
+            # This is the same durable config write used by ConfigStore.save;
+            # clear its cache while preserving the held production lock.
+            await pg.upsert_corpus_config_json(corpus_id, updated.model_dump())
+            if final == "current":
+                latest = original.model_copy(update={
+                    "input_fingerprint": await index_api.graph_schema_input_fingerprint(corpus, updated),
+                    "accounting_run_id": uuid4().hex,
+                })
+                await pg.set_graph_schema_proposal(corpus_id, latest)
+            elif final == "missing":
+                await pg.patch_corpus_meta_locked(corpus_id, {"graph_schema_proposal": None})
+        store.clear_cache(corpus_id)
+        lock.release()
+        held = False
+        response = await reading
+        assert response.status_code == (404 if final == "deleted" else 200), response.text
+        if final != "deleted":
+            state = response.json()
+            assert state["status"] == final
+            if final == "current":
+                assert state["proposal"]["accounting_run_id"] == latest.accounting_run_id
+            else:
+                assert state["proposal"] is None
+        assert not index_api._repo_runs_dir(corpus_id).exists(), "A read-only restore must not create an attempt"
+    finally:
+        if held:
+            lock.release()
+        for task in (reading, barrier):
+            if task is not None and not task.done():
+                task.cancel()
+            if task is not None:
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await task
+        await pg.delete_corpus(corpus_id)
+        await pg.disconnect()
+        store.clear_cache(corpus_id)
+
+
+@pytest.mark.asyncio
 async def test_schema_fingerprint_invalidates_pre_coverage_prompt_proposals(tmp_path: Path) -> None:
     document = tmp_path / "incident.md"
     document.write_text("A failed valve caused a pressure alarm.")

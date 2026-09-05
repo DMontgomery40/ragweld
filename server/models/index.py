@@ -174,6 +174,22 @@ class GraphSchemaProposalRequest(BaseModel):
     force_refresh: bool = False
 
 
+class GraphSchemaProposalState(BaseModel):
+    """Read-only restoration; unavailable saved proposals never trigger generation."""
+
+    corpus_id: str
+    status: Literal["current", "missing", "stale", "ineligible"]
+    proposal: GraphSchemaProposal | None = None
+
+    @model_validator(mode="after")
+    def _current_proposal_matches(self) -> GraphSchemaProposalState:
+        if (self.status == "current") != (self.proposal is not None):
+            raise ValueError("Only a current saved schema carries a proposal")
+        if self.proposal is not None and self.proposal.corpus_id != self.corpus_id:
+            raise ValueError("Saved schema must belong to the requested corpus")
+        return self
+
+
 class GraphSchemaProposalFailureDetail(BaseModel):
     code: Literal[
         "graph_schema_generation_failed", "graph_schema_deadline_exceeded", "graph_schema_context_changed",
@@ -195,9 +211,18 @@ class GraphSchemaProposalFailureResponse(BaseModel):
 
 
 class GraphExtractionTelemetry(BaseModel):
+    outcome_version: Literal["whole_file_v0", "checkpoint_v1"] = Field(
+        default="whole_file_v0",
+        description="Historical file aggregates or measured durable per-chunk outcomes; HTTP attempts belong to native census.",
+    )
+    progress_owner_run_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{32}$")
+    progress_sequence: int = Field(default=0, ge=0)
+    reused_chunks: int | None = Field(default=None, ge=0)
+    cancelled_chunks: int | None = Field(default=None, ge=0)
+    unfinished_chunks: int | None = Field(default=None, ge=0)
     selected_chunks: int = Field(ge=0)
-    attempted_chunks: int = Field(ge=0)
-    succeeded_chunks: int = Field(ge=0)
+    attempted_chunks: int = Field(ge=0, description="In checkpoint_v1, chunks admitted inside the extraction semaphore, including reuse.")
+    succeeded_chunks: int = Field(ge=0, description="In checkpoint_v1, durable reusable successes, including reused checkpoints.")
     failed_chunks: int = Field(ge=0)
     truncated_chunks: int = Field(ge=0)
     extracted_entities: int = Field(ge=0)
@@ -206,12 +231,25 @@ class GraphExtractionTelemetry(BaseModel):
     # The measurement the next estimate for this corpus reuses (Task 8 drive finding D13):
     # which gateway alias ran the extraction, how many workers ran it in parallel, and the
     # wall time spent inside the extraction calls summed over those workers. Divided by
-    # succeeded_chunks that is the seconds one chunk costs one worker, independent of the
+    # fresh successes (succeeded_chunks minus reused_chunks in checkpoint_v1), that
+    # is the seconds one chunk costs one worker, independent of the
     # concurrency the run happened to use. Empty/zero on code-policy runs and on records
     # written before the measurement existed.
     llm_model_alias: str = ""
     workers: int = Field(default=0, ge=0)
     worker_seconds: float = Field(default=0.0, ge=0.0)
+
+    @model_validator(mode="after")
+    def _checkpoint_outcomes_are_complete(self) -> GraphExtractionTelemetry:
+        if self.outcome_version == "checkpoint_v1":
+            if (self.progress_owner_run_id is None or self.reused_chunks is None
+                    or self.cancelled_chunks is None or self.unfinished_chunks is None):
+                raise ValueError("checkpoint_v1 requires owned measured outcome counters")
+            if not self.reused_chunks <= self.succeeded_chunks <= self.attempted_chunks <= self.selected_chunks:
+                raise ValueError("Checkpoint success, reuse and admission must fit selected work")
+            if self.succeeded_chunks + self.failed_chunks + self.cancelled_chunks + self.unfinished_chunks != self.selected_chunks:
+                raise ValueError("Every selected checkpoint chunk requires one terminal or unfinished outcome")
+        return self
 
 
 class GraphResolutionTelemetry(BaseModel):
@@ -384,6 +422,10 @@ class IndexRunSummary(BaseModel):
             self.accounting.session_id != self.run_id or self.accounting.corpus_id != self.repo_id
         ):
             raise ValueError("Accounting must name the owning index run and corpus")
+        if (self.graph_metadata is not None
+                and self.graph_metadata.extraction.outcome_version == "checkpoint_v1"
+                and self.graph_metadata.extraction.progress_owner_run_id != self.run_id):
+            raise ValueError("Graph progress must name the owning index run")
         return self
 
 

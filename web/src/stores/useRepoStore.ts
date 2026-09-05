@@ -10,7 +10,7 @@
  */
 
 import { create } from 'zustand';
-import type { Corpus, CorpusCreateRequest, CorpusUpdateRequest } from '@/types/generated';
+import type { Corpus, CorpusAlreadyIndexedResponse, CorpusCreateRequest, CorpusUpdateRequest } from '@/types/generated';
 import { resolveAPIBase } from '@/api/client';
 import { describeIndexRunConflict } from '@/utils/indexRunConflict';
 
@@ -343,6 +343,12 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
   },
 
   deleteUnindexedCorpora: async () => {
+    // A corpus can finish indexing while Sources remains open. Never turn the
+    // previously displayed metadata into a destructive cleanup candidate list.
+    const refreshed = await get().loadRepos({ force: true });
+    if (!refreshed.ok) {
+      throw new Error(`No corpora were deleted. The corpus list could not be refreshed. ${refreshed.error}`);
+    }
     const apiBase = getApiBase();
     const { repos, activeRepo } = get();
     const beforeActive = String(activeRepo || '').trim();
@@ -369,11 +375,23 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
       const id = String(c.corpus_id || '').trim();
       if (!id) continue;
       try {
-        const response = await fetch(`${apiBase}/corpora/${encodeURIComponent(id)}`, {
+        const response = await fetch(`${apiBase}/corpora/${encodeURIComponent(id)}?only_unindexed=true`, {
           method: 'DELETE',
         });
         if (!response.ok) {
           const detail = await response.text().catch(() => '');
+          if (response.status === 409) {
+            try {
+              const refusal = JSON.parse(detail) as CorpusAlreadyIndexedResponse;
+              if (refusal?.detail?.code === 'corpus_already_indexed' && refusal.detail.corpus_id === id) {
+                // Indexing committed after our snapshot. Leave this corpus in
+                // place and reconcile it in the same final registry refresh.
+                continue;
+              }
+            } catch {
+              // A different failure retains the existing cleanup error behavior.
+            }
+          }
           failed.push({ id, status: response.status, detail });
           continue;
         }

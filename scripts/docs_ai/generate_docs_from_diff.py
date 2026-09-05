@@ -388,6 +388,12 @@ def _select_context_files(changed: list[str], *, limit: int) -> list[str]:
     return selected[:limit]
 
 
+def _quote_prompt_content(content: str, language: str) -> str:
+    """Keep a quoted page's own fences inside its presentation delimiter."""
+    fence = "`" * max(3, 1 + max((len(run) for run in re.findall(r"`+", content)), default=0))
+    return f"{fence}{language}\n{content}\n{fence}"
+
+
 def _all_docs_context(*, budget_chars: int) -> tuple[list[str], int]:
     """Quote the current text of every docs page, newest-shallowest first.
 
@@ -410,7 +416,7 @@ def _all_docs_context(*, budget_chars: int) -> tuple[list[str], int]:
         if not content.strip():
             continue
         rel = page.relative_to(docs_dir).as_posix()
-        block = f"### mkdocs/docs/{rel}\n```markdown\n{content}\n```"
+        block = f"### mkdocs/docs/{rel}\n" + _quote_prompt_content(content, "markdown")
         if spent + len(block) > budget_chars:
             omitted += 1
             continue
@@ -820,13 +826,18 @@ def response_output_text(data: object) -> str:
     raise RuntimeError("Model returned no output text.")
 
 
+PAGE_BODY_RULE = (
+    "Page bodies must be raw Markdown documents, never enclosed in a Markdown presentation fence. "
+    "Keep legitimate code-example fences inside the document; quoted input delimiters are not page content.\n"
+)
+
 PAGE_REPAIR_SYSTEM_PROMPT = (
     "You are repairing documentation pages for ragweld whose unified-diff hunks git could not apply.\n"
     "For EACH page listed in the request, return its COMPLETE new content - the whole page, not a diff.\n"
     "Start every page with a line `### FILE: <path>` and end it with a line `### END FILE`.\n"
     "Keep everything on the page that the request did not ask you to change; apply only the intended edits.\n"
     "Markdown code fences inside the page are fine. Output nothing outside the FILE blocks.\n"
-)
+) + PAGE_BODY_RULE
 
 PAGE_BLOCK_RE = re.compile(r"^### FILE: (?P<path>[^\n]+)\n(?P<body>.*?)^### END FILE[ \t]*$", re.MULTILINE | re.DOTALL)
 
@@ -846,6 +857,7 @@ def call_llm_unified_diff(prompt: str) -> str:
         "You may create, move, or delete pages and restructure folders, and you may update mkdocs.yml nav accordingly.\n"
         "Only modify MkDocs sources: mkdocs/docs/** and mkdocs.yml.\n"
         "The plan quotes the full current text of every page, so copy context lines verbatim from it.\n"
+        + PAGE_BODY_RULE +
         "Output ONLY a standard git unified diff patch suitable for `git apply`.\n"
         "Your output MUST use git patch headers: `diff --git a/path b/path`.\n"
         "Hunk line counts are recomputed on apply, but every context line must match the quoted page exactly.\n"
@@ -1323,16 +1335,14 @@ def build_page_repair_prompt(*, rejected: dict[str, str], rejected_patch_text: s
         *[f"- {path}: {err.splitlines()[0] if err else 'rejected'}" for path, err in rejected.items()],
         "",
         "## Your rejected hunks (the edits you intended)",
-        "```diff",
-        (rejected_patch_text or "").rstrip(),
-        "```",
+        _quote_prompt_content((rejected_patch_text or "").rstrip(), "diff"),
         "",
         "## Current page text (verbatim)",
     ]
     for path in rejected:
         current = _read_text(ROOT / path)
         if current:
-            lines += [f"### {path}", "```markdown", current, "```", ""]
+            lines += [f"### {path}", _quote_prompt_content(current, "markdown"), ""]
         else:
             lines += [f"### {path}", "(does not exist yet - return the complete new page)", ""]
     return "\n".join(lines).rstrip() + "\n"
@@ -1354,6 +1364,102 @@ def parse_page_blocks(text: str) -> dict[str, str]:
 class PageRepairResult:
     written: list[str]
     refused: dict[str, str]
+
+
+_PAGE_FENCE_RE = re.compile(r"^(?P<indent>[ \t]*)(?P<fence>`{3,}|~{3,})(?P<info>[^\r\n]*)$")
+_GENERATED_PAGE_START_RE = re.compile(
+    r'\A(?:[ \t]*\r?\n)*# [^\r\n]+\r?\n(?:[ \t]*\r?\n)+'
+    r'<div class="grid [^"]+" markdown>\r?\n'
+)
+
+
+def _repair_page_wrapper(content: str) -> str:
+    """Remove only a recognizable generated page wrapper, preserving all other bytes.
+
+    A leading Markdown fence can also be a legitimate syntax example. Require
+    the generated title/grid layout before interpreting it as a leaked prompt
+    delimiter. Parse the inner examples independently: their closing fences
+    must never be mistaken for a missing or present outer closing delimiter.
+    """
+    lines = content.splitlines(keepends=True)
+    start = next((i for i, line in enumerate(lines) if line.strip()), None)
+    if start is None:
+        return content
+    opening = _PAGE_FENCE_RE.fullmatch(lines[start].rstrip("\r\n"))
+    if not opening or opening["info"].strip().lower() not in {"markdown", "md"}:
+        return content
+    if len(opening["indent"]) > 3 or "\t" in opening["indent"]:
+        raise ValueError("ambiguous indented Markdown example")
+    body = "".join(lines[start + 1:])
+    layout = _GENERATED_PAGE_START_RE.match(body)
+    if not layout:
+        raise ValueError("ambiguous leading Markdown fence: no generated title/grid layout")
+
+    inner: tuple[str, str] | None = None
+    outer_end: int | None = None
+    grid_closed = False
+    for index in range(start + 1, len(lines)):
+        line = lines[index].rstrip("\r\n")
+        fence = _PAGE_FENCE_RE.fullmatch(line)
+        if inner is not None:
+            indent, delimiter = inner
+            if (fence and not fence["info"].strip() and fence["indent"] == indent
+                    and fence["fence"][0] == delimiter[0] and len(fence["fence"]) >= len(delimiter)):
+                inner = None
+            continue
+        if line == "</div>":
+            grid_closed = True
+        if not fence:
+            continue
+        if not grid_closed:
+            raise ValueError(f"ambiguous generated grid before fence at line {index + 1}")
+        if not fence["info"].strip() and not any(line.strip() for line in lines[index + 1:]):
+            if fence["fence"] != opening["fence"] or fence["indent"] != opening["indent"]:
+                raise ValueError(f"ambiguous outer closing fence at line {index + 1}")
+            outer_end = index
+            break
+        inner = (fence["indent"], fence["fence"])
+    if not grid_closed:
+        raise ValueError("ambiguous generated page: grid is not closed")
+    if inner is not None:
+        raise ValueError("ambiguous page wrapper: an inner code example is unclosed")
+    return "".join(line for index, line in enumerate(lines) if index not in {start, outer_end})
+
+
+def repair_docs_page_wrappers(root: Path) -> PageRepairResult:
+    """Validate the entire publication batch before writing delimiter-only repairs."""
+    replacements: dict[Path, bytes] = {}
+    refused: dict[str, str] = {}
+    docs_dir = root / "mkdocs" / "docs"
+    for page in sorted(docs_dir.rglob("*.md")):
+        relative = page.relative_to(root).as_posix()
+        try:
+            if page.is_symlink() or not page.resolve().is_relative_to(docs_dir.resolve()):
+                raise ValueError("page must be a regular file inside mkdocs/docs")
+            raw = page.read_bytes()
+            repaired = _repair_page_wrapper(raw.decode("utf-8")).encode("utf-8")
+            if repaired != raw:
+                replacements[page] = repaired
+        except (ValueError, OSError) as exc:
+            refused[relative] = str(exc)
+    if refused:
+        return PageRepairResult(written=[], refused=refused)
+    for page, repaired in replacements.items():
+        page.write_bytes(repaired)
+    return PageRepairResult(written=[page.relative_to(root).as_posix() for page in replacements], refused={})
+
+
+def _run_page_wrapper_repair(root: Path) -> None:
+    result = repair_docs_page_wrappers(root)
+    if result.refused:
+        for page, reason in result.refused.items():
+            _gh_error(f"Page-wrapper gate refused {page}: {reason}")
+        raise SystemExit(1)
+    if result.written:
+        subprocess.run(["git", "add", "--", *result.written], cwd=root, check=True)
+    for page in result.written:
+        print(f"Page wrapper repaired: {page}")
+    print(f"AUTOPILOT_PAGE_WRAPPERS: repaired={len(result.written)}")
 
 
 def apply_page_replacements(pages: dict[str, str], *, allowed: set[str], allow_large_deletes: bool) -> PageRepairResult:
@@ -1412,16 +1518,14 @@ def build_repair_prompt(*, rejected: dict[str, str], rejected_patch_text: str) -
         *[f"- {path}: {err.splitlines()[0] if err else 'rejected'}" for path, err in rejected.items()],
         "",
         "## Rejected hunks (what you sent)",
-        "```diff",
-        (rejected_patch_text or "").rstrip(),
-        "```",
+        _quote_prompt_content((rejected_patch_text or "").rstrip(), "diff"),
         "",
         "## Current page text (verbatim - copy context lines from here)",
     ]
     for path in rejected:
         current = _read_text(ROOT / path)
         if current:
-            lines += [f"### {path}", "```markdown", current, "```", ""]
+            lines += [f"### {path}", _quote_prompt_content(current, "markdown"), ""]
         else:
             lines += [f"### {path}", "(does not exist yet - emit it as a new-file diff against /dev/null)", ""]
     return "\n".join(lines).rstrip() + "\n"
@@ -1433,8 +1537,14 @@ def main() -> None:
     ap.add_argument("--llm", choices=["openrouter"], default=None, help="LLM provider (currently: openrouter)")
     ap.add_argument("--apply", action="store_true", help="Apply the returned patch with `git apply --index`")
     ap.add_argument("--apply-patch", default="", help="Apply an existing patch file and exit (no LLM call)")
+    ap.add_argument("--repair-page-wrappers", action="store_true", help="Validate all docs pages and stage safe wrapper repairs (no LLM call)")
+    ap.add_argument("--docs-root", type=Path, default=ROOT, help="Repository root for --repair-page-wrappers")
     ap.add_argument("--output", default=str(PLAN_FILE.name), help="Plan output file (plan mode)")
     args = ap.parse_args()
+
+    if args.repair_page_wrappers:
+        _run_page_wrapper_repair(args.docs_root)
+        return
 
     if args.apply_patch:
         patch_path = Path(args.apply_patch)

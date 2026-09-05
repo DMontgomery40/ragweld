@@ -249,11 +249,15 @@ class ConfigStore:
                 self._locks[repo_id] = lock
             return lock
 
-    async def get(self, repo_id: str | None = None) -> TriBridConfig:
-        """Get config for a corpus (repo_id) or global when repo_id is None."""
+    async def get(self, repo_id: str | None = None, *, persist: bool = True) -> TriBridConfig:
+        """Resolve config, optionally without seeding, saving migrations or using caches.
+
+        Nonpersisting reads use the same upgrade/reconciliation rules but leave
+        storage and cached snapshots unchanged, including the global template.
+        """
         lock = await self._get_lock(repo_id)
         async with lock:
-            if repo_id is None and repo_id in self._cache:
+            if persist and repo_id is None and repo_id in self._cache:
                 return self._cache[repo_id].model_copy(deep=True)
 
             if repo_id is None:
@@ -272,15 +276,16 @@ class ConfigStore:
                 else:
                     cfg = load_global_config()
 
-                if changed:
+                if changed and persist:
                     save_global_config(cfg)
                     if migrated:
                         logger.info("Auto-migrated global config keys: %s", ", ".join(migrated))
-                self._cache[None] = cfg.model_copy(deep=True)
-                return self._cache[None].model_copy(deep=True)
+                if persist:
+                    self._cache[None] = cfg.model_copy(deep=True)
+                return cfg.model_copy(deep=True)
 
             # Per-corpus config lives in Postgres
-            base = (await self.get(repo_id=None)).model_copy(deep=True)
+            base = (await self.get(repo_id=None, persist=persist)).model_copy(deep=True)
             await self._postgres.connect()
 
             # Ensure corpus row exists (do NOT auto-create on read)
@@ -288,25 +293,27 @@ class ConfigStore:
             if corpus is None:
                 raise CorpusNotFoundError(f"Corpus not found: {repo_id}")
 
-            if repo_id in self._cache:
+            if persist and repo_id in self._cache:
                 return self._cache[repo_id].model_copy(deep=True)
 
             raw = await self._postgres.get_corpus_config_json(repo_id)
             if raw is None:
                 # Seed new corpus config from the global template
-                await self._postgres.upsert_corpus_config_json(repo_id, base.model_dump())
+                if persist:
+                    await self._postgres.upsert_corpus_config_json(repo_id, base.model_dump())
                 cfg = base
             else:
                 cfg, changed, migrated = _upgrade_raw_config(raw)
                 cfg, reconciled, reconciled_paths = _reconcile_production_scope(cfg, base)
                 changed = changed or reconciled
                 migrated.extend(reconciled_paths)
-                if changed:
+                if changed and persist:
                     await self._postgres.upsert_corpus_config_json(repo_id, cfg.model_dump())
                     if migrated:
                         logger.info("Auto-migrated corpus config keys repo_id=%s: %s", repo_id, ", ".join(migrated))
-            self._cache[repo_id] = cfg.model_copy(deep=True)
-            return self._cache[repo_id].model_copy(deep=True)
+            if persist:
+                self._cache[repo_id] = cfg.model_copy(deep=True)
+            return cfg.model_copy(deep=True)
 
     async def save(self, config: TriBridConfig, repo_id: str | None = None) -> TriBridConfig:
         """Persist config for a corpus (repo_id) or global when repo_id is None."""
@@ -366,10 +373,10 @@ def get_config_store(postgres_dsn: str | None = None) -> ConfigStore:
     return _store
 
 
-async def get_config(repo_id: str | None = None) -> TriBridConfig:
-    """Convenience wrapper to load config for a scope."""
+async def get_config(repo_id: str | None = None, *, persist: bool = True) -> TriBridConfig:
+    """Resolve a scope; nonpersisting reads leave stored config and caches untouched."""
     store = get_config_store()
-    return await store.get(repo_id=repo_id)
+    return await store.get(repo_id=repo_id, persist=persist)
 
 
 async def save_config(config: TriBridConfig, repo_id: str | None = None) -> TriBridConfig:

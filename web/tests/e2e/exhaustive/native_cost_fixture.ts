@@ -18,6 +18,13 @@ export function assertPrivateNativeTargets(env: NodeJS.ProcessEnv, cwd: string):
   }
 }
 
+/** A fixture subprocess must not inherit application or driver database overrides. */
+export function privateNativeChildEnv(env: NodeJS.ProcessEnv, cwd: string): NodeJS.ProcessEnv {
+  assertPrivateNativeTargets(env, cwd);
+  const child = Object.fromEntries(Object.entries(env).filter(([key]) => !/^(POSTGRES_|PG)/.test(key)));
+  return { ...child, PYTHONPATH: path.resolve(cwd) };
+}
+
 export type NativeFixtureConfig = {
   indexing: { postgres_url: string };
   qdrant: { url: string };

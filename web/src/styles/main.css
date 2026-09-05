@@ -215,6 +215,12 @@
             position: relative;
         }
 
+        /* Preserve the desktop grid while giving mobile panes their own scroll
+           owner, independent of the drawer anchored to the layout boundary. */
+        .layout-panes {
+            display: contents;
+        }
+
         /* Left sidebar (wraps TabBar) */
         .sidebar {
             grid-column: 1;
@@ -828,6 +834,22 @@
             margin-bottom: 16px;
         }
 
+        .dock-panel {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            min-height: 0;
+        }
+
+        .dock-body {
+            flex: 1 1 auto;
+            min-height: 0;
+            overflow: hidden;
+            /* Native pages, source documents and settings inherit wrapping;
+               content that cannot wrap scrolls in its mode's own viewport. */
+            overflow-wrap: anywhere;
+        }
+
         /* Dock panel header - sticky with proper button wrapping */
         .dock-header {
             position: sticky;
@@ -1342,10 +1364,13 @@
                 --topbar-h: 52px;
             }
 
-            /* More compact topbar (height flows from --topbar-h so the fixed
-               resize handle and off-canvas sidebar stay aligned to it). */
+            /* Compact chrome still needs its natural height when a corpus
+               name or the action controls require another row. */
             .topbar {
                 padding: 12px 16px;
+                height: auto;
+                min-height: var(--topbar-h);
+                flex-wrap: wrap;
             }
 
             .topbar .brand {
@@ -1360,6 +1385,18 @@
             /* Adjust top actions */
             .top-actions {
                 gap: 8px;
+                flex-wrap: wrap;
+                min-width: 0;
+                max-width: 100%;
+            }
+
+            #btn-corpus {
+                max-width: 100%;
+            }
+
+            #btn-corpus span {
+                min-width: 0;
+                overflow-wrap: anywhere;
             }
 
             #global-search {
@@ -1423,15 +1460,19 @@
            SMALL TABLET (<900px) - Hide sidebar, show hamburger
            =================================== */
         @media (max-width: 900px) {
+            .mobile-nav-toggle {
+                display: flex !important;
+            }
+
             .layout {
                 display: grid !important;
                 grid-template-columns: 1fr var(--sidepanel-width) !important;
             }
 
             .sidebar {
-                position: fixed;
+                position: absolute;
                 left: -200px;
-                top: 56px;
+                top: 0;
                 bottom: 0;
                 width: 200px;
                 z-index: 1000;
@@ -1463,36 +1504,82 @@
                 display: flex !important;
                 flex-direction: column !important;
                 grid-template-columns: none !important;
+                overflow: hidden;
             }
 
-            .sidebar {
-                position: fixed;
-                left: -200px;
-                top: 56px;
-                bottom: 0;
-                width: 200px;
-                z-index: 1000;
-                transition: left 0.2s ease;
-            }
-
-            .sidebar.mobile-open {
-                left: 0;
+            .layout-panes {
+                display: flex;
+                flex-direction: column;
+                flex: 1;
+                min-height: 0;
+                /* Scroll the usable pane stack without moving the drawer's
+                   origin above the actual bottom of the wrapped topbar. */
+                overflow-y: auto;
+                overflow-x: hidden;
             }
 
             .main-content {
-                flex: 1 1 auto;
+                flex: 1 0 50%;
+                height: auto;
+                min-height: min-content;
                 order: 1;
             }
 
             .content {
-                min-height: 50vh;
+                height: auto;
+                flex: 1 0 auto;
+                min-height: 0;
+            }
+
+            .content-scroll {
+                /* Footer errors and recovery actions add their own height;
+                   they must never borrow the body's usable scroll viewport. */
+                flex: 1 0 24rem;
+                min-height: 24rem;
+                /* The Apply footer is a sibling in normal flow; reserving its
+                   height again needlessly consumes the mobile body viewport. */
+                padding-bottom: 0;
             }
 
             .sidepanel {
                 order: 2;
-                max-height: 50vh;
+                flex: 1 0 50%;
+                height: auto;
+                /* The header can wrap independently of the body. Let its
+                   intrinsic height add to the usable body minimum below. */
+                min-height: min-content;
+                max-height: none;
                 border-top: 1px solid var(--line);
+            }
+
+            .dock-panel {
+                height: auto;
+                flex: 1 0 auto;
+            }
+
+            .dock-header {
                 flex-shrink: 0;
+            }
+
+            .dock-body {
+                /* A definite flex basis preserves percentage-height source
+                   viewers and their virtualizers, even in a scrolling stack. */
+                flex: 1 0 24rem;
+                min-height: 24rem;
+            }
+
+            .subtab-bar {
+                /* Wrapped RAG navigation can consume the entire pane. Keep
+                   all tabs in one row that pointer and keyboard users scroll. */
+                flex-wrap: nowrap;
+                flex-shrink: 0;
+                overflow-x: auto;
+                padding: 8px 12px;
+            }
+
+            .subtab-bar button {
+                flex-shrink: 0;
+                white-space: nowrap;
             }
 
             /* Hamburger menu button */

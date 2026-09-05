@@ -11,13 +11,19 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TextIO
 
-from server.models.index import IndexRunSummary
+from server.models.index import GraphExtractionTelemetry, IndexRunSummary
 from server.models.run_accounting import (
     CostLane,
     IndexRunAccounting,
     RunCostIdentity,
     RunRequestCensus,
 )
+
+_GRAPH_PROGRESS_FIELDS = frozenset({
+    "outcome_version", "progress_owner_run_id", "progress_sequence", "selected_chunks",
+    "attempted_chunks", "succeeded_chunks", "failed_chunks", "reused_chunks",
+    "cancelled_chunks", "unfinished_chunks", "worker_seconds",
+})
 
 
 @contextmanager
@@ -55,7 +61,7 @@ def _read_locked(path: Path) -> IndexRunSummary:
 
 
 def write_run_summary(path: Path, summary: IndexRunSummary) -> None:
-    """Persist run status without overwriting a newer accounting checkpoint."""
+    """Persist run status without overwriting newer accounting or graph progress."""
     with _locked_summary(path):
         if path.exists():
             previous = _read_locked(path)
@@ -63,7 +69,42 @@ def write_run_summary(path: Path, summary: IndexRunSummary) -> None:
                 raise ValueError("Cannot replace another run's summary")
             if previous.accounting is not None:
                 summary = summary.model_copy(update={"accounting": previous.accounting})
+            prior_graph = previous.graph_metadata
+            if prior_graph is not None and prior_graph.extraction.outcome_version == "checkpoint_v1":
+                graph = summary.graph_metadata
+                if graph is None:
+                    summary = summary.model_copy(update={"graph_metadata": prior_graph})
+                elif (graph.extraction.outcome_version != "checkpoint_v1"
+                      or graph.extraction.progress_sequence < prior_graph.extraction.progress_sequence):
+                    extraction = graph.extraction.model_copy(update=prior_graph.extraction.model_dump(
+                        include=set(_GRAPH_PROGRESS_FIELDS),
+                    ))
+                    summary = summary.model_copy(update={
+                        "graph_metadata": graph.model_copy(update={"extraction": extraction}),
+                    })
         _write_locked(path, summary)
+
+
+def persist_graph_progress(
+    path: Path, *, repo_id: str, run_id: str, extraction: GraphExtractionTelemetry,
+) -> None:
+    """Update only outcome fields under the shared accounting/status record lock."""
+    extraction = GraphExtractionTelemetry.model_validate(extraction.model_dump())
+    if extraction.outcome_version != "checkpoint_v1" or extraction.progress_owner_run_id != run_id:
+        raise ValueError("Graph progress must name its checkpoint run owner")
+    with _locked_summary(path):
+        summary = _read_locked(path)
+        if (summary.repo_id, summary.run_id) != (repo_id, run_id):
+            raise ValueError("Graph progress belongs to another run")
+        graph = summary.graph_metadata
+        if graph is None or graph.extraction.progress_owner_run_id != run_id:
+            raise ValueError("Graph progress owner was not initialized in the run summary")
+        if extraction.progress_sequence <= graph.extraction.progress_sequence:
+            return
+        updated = graph.extraction.model_copy(update=extraction.model_dump(include=set(_GRAPH_PROGRESS_FIELDS)))
+        _write_locked(path, summary.model_copy(update={
+            "graph_metadata": graph.model_copy(update={"extraction": updated}),
+        }))
 
 
 def initialize_run_accounting(path: Path, accounting: IndexRunAccounting) -> None:

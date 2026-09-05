@@ -5,6 +5,7 @@ import socket
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal
+from itertools import permutations
 from pathlib import Path
 
 import pytest
@@ -42,6 +43,22 @@ def changed(row: NativeSpendRow, **updates: object) -> NativeSpendRow:
 
 
 MEASURED = [row for row in ROWS if classify_cost(row).kind != "unmeasured"]
+
+
+@pytest.mark.parametrize("order", list(permutations(range(3))))
+def test_compound_request_and_call_conflicts_exclude_every_ambiguous_identity(order) -> None:
+    first = changed(ROWS[0], request_id="r1")
+    conflicting_metadata = first.metadata.model_dump(mode="json")
+    conflicting_metadata["litellm_call_id"] = "c2"
+    variant = changed(first, metadata=conflicting_metadata)
+    neighbor = changed(variant, request_id="r2")
+    raw = [first, variant, neighbor]
+    result = aggregate([raw[index] for index in order], census(2))
+    assert result.provider_reported_usd == result.gateway_calculated_usd == 0
+    assert result.native_logged_usd is None
+    assert result.unmeasured_requests == 2
+    assert result.matched_gateway_requests == 2
+    assert {"conflicting_native_request_id", "duplicate_native_call_id"} <= set(result.reasons)
 
 
 @pytest.mark.parametrize(("index", "kind", "amount"), [
@@ -283,3 +300,22 @@ async def test_real_unbound_connection_returns_typed_error_without_credentials()
             await reader.read_run(session_id=SESSION, corpus_id=CORPUS, lanes=LANES, started_at=now, ended_at=now, census=census(0))
     assert error.value.code == "native_connection_error"
     assert "never-print-fixture-key" not in str(error.value)
+
+
+@pytest.mark.asyncio
+async def test_usage_rows_share_the_bounded_authenticated_native_reader() -> None:
+    with socket.socket() as reservation:
+        reservation.bind(("127.0.0.1", 0))
+        reader = NativeSpendReader(
+            base_url=f"http://127.0.0.1:{reservation.getsockname()[1]}",
+            api_key=SecretStr("never-print-usage-fixture-key"),
+            request_timeout_s=2, total_timeout_s=3,
+        )
+        now = datetime.now(UTC)
+        with pytest.raises(NativeLedgerReadError) as error:
+            await reader.read_rows_for_run(
+                session_id=SESSION, corpus_id=CORPUS, lanes=LANES,
+                started_at=now, ended_at=now,
+            )
+    assert error.value.code == "native_connection_error"
+    assert "never-print-usage-fixture-key" not in str(error.value)

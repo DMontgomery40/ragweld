@@ -11,6 +11,7 @@ import pytest
 from httpx import AsyncClient
 
 from server.db.postgres import PostgresClient
+from server.services.config_store import get_config_store
 from tests.service_requirements import require_env
 from tests.unit.test_graphrag_schema_transport import proposal_gateway
 
@@ -40,6 +41,116 @@ async def _create_corpus(client: AsyncClient, path: Path, gateway_url: str) -> s
     })
     assert graph.status_code == 200, graph.text
     return corpus_id
+
+
+@pytest.mark.parametrize("observation", [0, 1])
+@pytest.mark.parametrize("stage", ["corpus", "config_corpus", "config_json", "proposal"])
+async def test_saved_proposal_postgres_disconnect_is_typed_at_each_observation(
+    client: AsyncClient, tmp_path: Path, observation: int, stage: str,
+) -> None:
+    """Queue real SQL locks to advance one read, then kill only its owned backend.
+
+    Each observation reads corpus context, checks the scoped config's corpus,
+    and retrieves the proposal. Config JSON is uncached at both observations.
+    No application callable or database result is replaced by this fixture.
+    """
+    corpus_id = await _create_corpus(client, tmp_path, "http://127.0.0.1:1/v1")
+    store = get_config_store()
+    store.clear_cache(corpus_id)
+    postgres = PostgresClient(require_env("POSTGRES_DSN"))
+    await postgres.connect()  # Schema bootstrap precedes the selective SELECT locks.
+    controls = [await asyncpg.connect(require_env("POSTGRES_DSN")) for _ in range(2)]
+    control_pids = [connection.get_server_pid() for connection in controls]
+    transactions = [None, None]
+    pending = None
+    queued = None
+
+    async def blocked_reader(table: str) -> int:
+        async with asyncio.timeout(5):
+            while True:
+                await controls[holder].execute("SELECT pg_stat_clear_snapshot()")
+                rows = await controls[holder].fetch(
+                    "SELECT pid FROM pg_stat_activity WHERE datname=current_database() "
+                    "AND wait_event_type='Lock' AND NOT (pid=ANY($1::int[])) "
+                    "AND query LIKE $2",
+                    control_pids,
+                    "%SELECT config FROM corpus_configs%" if table == "corpus_configs"
+                    else "%SELECT repo_id, name, root_path%",
+                )
+                if rows:
+                    assert len(rows) == 1, "the fixture must identify exactly one owned reader"
+                    return rows[0]["pid"]
+                assert pending is not None and not pending.done()
+                await asyncio.sleep(0.01)
+
+    try:
+        holder = 0
+        transactions[holder] = controls[holder].transaction()
+        await transactions[holder].start()
+        await controls[holder].execute("LOCK TABLE corpora IN ACCESS EXCLUSIVE MODE")
+        pending = asyncio.create_task(client.get(f"/api/index/{corpus_id}/graph-schema/proposal"))
+        target = observation * 3 + {"corpus": 1, "config_corpus": 2, "config_json": 2, "proposal": 3}[stage]
+        for ordinal in range(1, target + 1):
+            victim = await blocked_reader("corpora")
+            if ordinal == 3:
+                # The first config has already been consumed. Force an actual
+                # config JSON read in the second observation as well.
+                store.clear_cache(corpus_id)
+            if ordinal == target:
+                break
+            next_holder = 1 - holder
+            transactions[next_holder] = controls[next_holder].transaction()
+            await transactions[next_holder].start()
+            queued = asyncio.create_task(controls[next_holder].execute("LOCK TABLE corpora IN ACCESS EXCLUSIVE MODE"))
+            async with asyncio.timeout(5):
+                while True:
+                    await controls[holder].execute("SELECT pg_stat_clear_snapshot()")
+                    if await controls[holder].fetchval(
+                        "SELECT wait_event_type='Lock' FROM pg_stat_activity WHERE pid=$1", control_pids[next_holder],
+                    ):
+                        break
+                    await asyncio.sleep(0.01)
+            # The exclusive waiter queues behind the current SELECT, so the
+            # following SELECT cannot race past the next controlled barrier.
+            await transactions[holder].rollback()
+            transactions[holder] = None
+            await queued
+            queued = None
+            holder = next_holder
+        if stage == "config_json":
+            next_holder = 1 - holder
+            transactions[next_holder] = controls[next_holder].transaction()
+            await transactions[next_holder].start()
+            await controls[next_holder].execute("LOCK TABLE corpus_configs IN ACCESS EXCLUSIVE MODE")
+            await transactions[holder].rollback()
+            transactions[holder] = None
+            holder = next_holder
+            victim = await blocked_reader("corpus_configs")
+        assert victim not in control_pids
+        assert await controls[holder].fetchval("SELECT pg_terminate_backend($1)", victim)
+        response = await asyncio.wait_for(pending, 5)
+        assert response.status_code == 503, response.text
+        detail = response.json()["detail"]
+        assert detail["code"] == "dependency_unavailable"
+        assert detail["dependency"] == "postgres"
+        assert detail["retryable"] is True
+        assert detail["operation"] == "get_graph_schema_proposal"
+        assert "operator_hint" in detail
+        assert require_env("POSTGRES_DSN") not in response.text
+    finally:
+        if queued is not None:
+            queued.cancel()
+            await asyncio.gather(queued, return_exceptions=True)
+        if pending is not None and not pending.done():
+            pending.cancel()
+            await asyncio.gather(pending, return_exceptions=True)
+        for connection, transaction in zip(controls, transactions, strict=True):
+            if transaction is not None:
+                await transaction.rollback()
+            await connection.close()
+        await postgres.disconnect()
+        store.clear_cache(corpus_id)
+        await client.delete(f"/api/corpora/{corpus_id}")
 
 
 async def test_proposal_deadline_includes_locked_postgres_persistence(

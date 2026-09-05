@@ -466,6 +466,44 @@ def _run_build(worktree: Path) -> tuple[bool, str]:
     return True, "mkdocs build --strict passed."
 
 
+def _run_page_wrapper_check(worktree: Path) -> tuple[bool, str]:
+    # Run the same revision of the validator as this orchestrator. It inspects
+    # the final materialized pages, including pages untouched by the AI patch.
+    result = _run(
+        (_cli_python(), str(Path(__file__).with_name("generate_docs_from_diff.py")),
+         "--repair-page-wrappers", "--docs-root", str(worktree)),
+        cwd=worktree,
+        check=False,
+    )
+    if result.returncode != 0:
+        return False, _error_detail(result)
+    return True, result.stdout.strip()
+
+
+def _repair_page_wrappers_only() -> int:
+    """Publish a bot-owned mechanical repair without invoking a content generator."""
+    _reset_artifacts()
+    branch = resolve_branch_name()
+    summary = ["## Docs Autopilot Page Wrapper Repair", "", f"- Branch: `{branch}`"]
+    with temporary_worktree() as worktree:
+        wrappers_ok, wrappers_message = _run_page_wrapper_check(worktree)
+        summary.append(f"- Page wrappers: {wrappers_message}")
+        build_ok, build_message = _run_build(worktree) if wrappers_ok else (False, "Not run: page-wrapper gate failed.")
+        summary.append(f"- Strict build: {build_message}")
+        _capture_worktree_state(worktree)
+        if not wrappers_ok or not build_ok:
+            _annotation("error", wrappers_message if not wrappers_ok else build_message)
+            summary.append("- Result: branch unchanged.")
+            _write_summary(summary)
+            _write_github_output(pushed=False)
+            return 1
+        commit = _commit_and_push(worktree, branch) if _has_staged_changes(worktree) else None
+        summary.append(f"- Commit: `{commit}`" if commit else "- Commit: no page wrappers to repair.")
+        _write_summary(summary)
+        _write_github_output(pushed=commit is not None, commit_sha=commit)
+        return 0
+
+
 def _latest_docs_commit(branch: str) -> str:
     # The checkout predates the autopilot's push from its temporary worktree,
     # so the branch tip must come from a live fetch; a stale tracking ref would
@@ -517,10 +555,16 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Only report publish_needed/docs_commit for the branch tip (no generation).",
     )
+    parser.add_argument(
+        "--repair-page-wrappers-only", action="store_true",
+        help="Repair existing page wrappers, strict-build, and publish a bot commit without any provider calls.",
+    )
     args = parser.parse_args(argv)
 
     if args.publish_state:
         return publish_state()
+    if args.repair_page_wrappers_only:
+        return _repair_page_wrappers_only()
 
     _reset_artifacts()
     base_ref = resolve_base_ref(args.base)
@@ -575,6 +619,21 @@ def main(argv: list[str] | None = None) -> int:
             summary_lines.extend(
                 [
                     "- Result: branch unchanged; run marked failed so the next run re-covers this range.",
+                    f"- Debug artifacts: `{ARTIFACT_DIR.relative_to(ROOT)}`",
+                ]
+            )
+            _write_summary(summary_lines)
+            _write_github_output(pushed=False)
+            return 1
+
+        wrappers_ok, wrappers_message = _run_page_wrapper_check(worktree)
+        summary_lines.append(f"- Page wrappers: {wrappers_message}")
+        if not wrappers_ok:
+            _annotation("error", f"Page-wrapper gate failed: {wrappers_message}")
+            _capture_worktree_state(worktree)
+            summary_lines.extend(
+                [
+                    "- Result: branch unchanged; page output is ambiguous and requires review.",
                     f"- Debug artifacts: `{ARTIFACT_DIR.relative_to(ROOT)}`",
                 ]
             )

@@ -6,9 +6,9 @@ import re
 from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from server.api.dependency_errors import (
     DEPENDENCY_UNAVAILABLE_RESPONSES,
@@ -19,7 +19,7 @@ from server.api.dependency_errors import (
 from server.api.index import index_run_conflict
 from server.config import load_config
 from server.db.neo4j import Neo4jClient
-from server.db.postgres import PostgresClient
+from server.db.postgres import CorpusAlreadyIndexedError, PostgresClient
 from server.dependency_errors import DependencyUnavailableError
 from server.indexing.generations import (
     DeletionIncompleteError,
@@ -30,6 +30,7 @@ from server.indexing.generations import (
 )
 from server.indexing.loader import FileLoader
 from server.lineage.registry import delete_repo_lineage
+from server.models.corpus import CorpusAlreadyIndexedDetail, CorpusAlreadyIndexedResponse
 from server.models.index import (
     IndexDeletionIncompleteResponse,
     IndexRunConflictResponse,
@@ -331,8 +332,8 @@ async def get_corpus_stats(corpus_id: str) -> CorpusStats:
     "/repos/{corpus_id}",
     responses={
         409: {
-            "model": IndexRunConflictResponse,
-            "description": "A live index run holds this corpus; stop it first.",
+            "model": IndexRunConflictResponse | CorpusAlreadyIndexedResponse,
+            "description": "A live index run holds this corpus, or conditional cleanup found a completed index.",
         },
         503: {
             "model": DependencyUnavailableResponse | IndexDeletionIncompleteResponse,
@@ -340,7 +341,12 @@ async def get_corpus_stats(corpus_id: str) -> CorpusStats:
         },
     },
 )
-async def delete_repo(corpus_id: str) -> dict[str, Any]:
+async def delete_repo(
+    corpus_id: str,
+    only_unindexed: Annotated[
+        bool, Query(description="Delete only if the corpus is still unindexed under its write lock.")
+    ] = False,
+) -> dict[str, Any]:
     repo_id = corpus_id
     pg = await _get_postgres()
     row = await pg.get_corpus(repo_id)
@@ -354,13 +360,24 @@ async def delete_repo(corpus_id: str) -> dict[str, Any]:
     # run is refused (409): stop that run first.
     # The corpus-scoped config decides the fence lease (a scoped tunable), never
     # the global one.
-    cfg = await load_scoped_config(repo_id=repo_id)
+    cfg = await load_scoped_config(repo_id=repo_id, persist=not only_unindexed)
     try:
         _, tombstone = await pg.delete_index_state(
             repo_id,
             lease_seconds=cfg.indexing.index_run_lease_seconds,
             intent="delete_corpus",  # only the registry row's removal ends this tombstone
+            only_unindexed=only_unindexed,
         )
+    except CorpusAlreadyIndexedError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=CorpusAlreadyIndexedDetail(
+                corpus_id=exc.corpus_id,
+                last_indexed=exc.last_indexed,
+                message="The corpus has been indexed and was preserved by cleanup.",
+                operator_hint="Refresh the corpus list. Use explicit corpus deletion if you intend to remove indexed data.",
+            ).model_dump(mode="json"),
+        ) from exc
     except IndexFenceHeldError as exc:
         # One builder for this conflict (it also reports what the holding run is doing), so
         # the delete refusal and the index-start refusal cannot drift apart.
@@ -416,8 +433,8 @@ async def delete_repo(corpus_id: str) -> dict[str, Any]:
     # handler it delegates to rather than publishing an untyped 409 the client cannot read.
     responses={
         409: {
-            "model": IndexRunConflictResponse,
-            "description": "A live index run holds this corpus; stop it first.",
+            "model": IndexRunConflictResponse | CorpusAlreadyIndexedResponse,
+            "description": "A live index run holds this corpus, or conditional cleanup found a completed index.",
         },
         503: {
             "model": DependencyUnavailableResponse | IndexDeletionIncompleteResponse,
@@ -425,5 +442,10 @@ async def delete_repo(corpus_id: str) -> dict[str, Any]:
         },
     },
 )
-async def delete_corpus(corpus_id: str) -> dict[str, Any]:
-    return await delete_repo(corpus_id)
+async def delete_corpus(
+    corpus_id: str,
+    only_unindexed: Annotated[
+        bool, Query(description="Delete only if the corpus is still unindexed under its write lock.")
+    ] = False,
+) -> dict[str, Any]:
+    return await delete_repo(corpus_id, only_unindexed=only_unindexed)

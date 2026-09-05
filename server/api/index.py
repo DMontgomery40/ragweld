@@ -6,6 +6,7 @@ import hashlib
 import importlib.util
 import json
 import logging
+import math
 import multiprocessing
 import os
 import platform
@@ -16,10 +17,10 @@ import threading
 import time
 import uuid
 from collections import defaultdict
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator, Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
-from functools import lru_cache
+from functools import lru_cache, partial
 from pathlib import Path
 from typing import Any, Literal, TypeVar
 
@@ -27,7 +28,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from httpx import InvalidURL
 from neo4j import Driver, GraphDatabase
 from neo4j_graphrag.components.schema import GraphSchema
-from neo4j_graphrag.components.types import Neo4jRelationship
+from neo4j_graphrag.components.types import Neo4jGraph, Neo4jRelationship
 from neo4j_graphrag.experimental.pipeline import Pipeline
 from pydantic import SecretStr
 from starlette.responses import StreamingResponse
@@ -37,6 +38,12 @@ from server.api.dependency_errors import (
     raise_postgres_unavailable_if_applicable,
 )
 from server.chat.gateway_runtime import resolve_litellm_api_key, resolve_litellm_base_url
+from server.chat.prompt_budget import (
+    TEMPLATE_MARGIN_TOKENS,
+    TEXT_FACTOR_BY_PROVIDER,
+    TEXT_FACTOR_DEFAULT,
+    count_tokens,
+)
 from server.chat.provider_router import ProviderRoute, select_provider_route
 from server.db.neo4j import Neo4jClient
 from server.db.postgres import PostgresClient
@@ -53,6 +60,7 @@ from server.indexing.estimate import (
     warm_sampler,
     warmup_seconds_remaining,
 )
+from server.indexing.extraction_checkpoint import ExtractionCheckpointContext, await_checkpoint_task
 from server.indexing.figure_chunking import chunk_document_with_figures
 from server.indexing.generations import (
     DeletionIncompleteError,
@@ -85,10 +93,12 @@ from server.indexing.graph_policy import (
     require_graph_chunk_ceiling,
     resolve_graph_policy,
 )
+from server.indexing.graph_progress import GraphProgressOwner
 from server.indexing.graphrag_pipeline import (
     ScopedNeo4jWriter,
     build_semantic_pipeline,
     close_semantic_pipeline,
+    extraction_checkpoint_recipe,
     extraction_prompt_template,
     resolve_staged_entities,
     write_code_file_graph,
@@ -97,6 +107,7 @@ from server.indexing.graphrag_pipeline import (
 )
 from server.indexing.graphrag_schema import (
     GraphSchemaProposalError,
+    closed_graph_schema,
     derive_graph_schema_proposal,
     schema_proposal_prompt,
     select_schema_chunks,
@@ -104,6 +115,7 @@ from server.indexing.graphrag_schema import (
 from server.indexing.loader import FileLoader
 from server.indexing.provenance import stamp_provenance
 from server.indexing.run_records import update_run_accounting, write_run_summary
+from server.indexing.source_snapshot import SourceSnapshot
 from server.indexing.text_extractors import (
     ExtractedDocument,
     FigureGateway,
@@ -125,6 +137,7 @@ from server.models.index import (
     GraphSchemaProposalFailureDetail,
     GraphSchemaProposalFailureResponse,
     GraphSchemaProposalRequest,
+    GraphSchemaProposalState,
     IndexDeletionIncompleteResponse,
     IndexedDocumentRecord,
     IndexEstimate,
@@ -152,7 +165,12 @@ from server.models.tribrid_config_model import (
     GraphIndexingConfig,
     TriBridConfig,
 )
-from server.observability.gateway_costs import NativeSpendReader
+from server.observability.gateway_costs import (
+    NativeLedgerReadError,
+    NativeSpendReader,
+    NativeSpendRow,
+    select_native_run_rows,
+)
 from server.observability.metrics import (
     CHUNKS_INDEXED_CURRENT,
     GRAPH_ENTITIES_CURRENT,
@@ -1366,29 +1384,19 @@ def _estimate_local_tokens_per_second(*, cfg: TriBridConfig, provider: str) -> i
 def _estimate_semantic_kg_cost_usd(
     *,
     alias: str,
-    chunks_in_scope: int,
-    enrich_max_chars: int,
+    input_tokens: int,
+    output_tokens: float | None,
 ) -> float | None:
-    """Estimate semantic KG LLM extraction cost from the catalog GEN pricing of one alias.
-
-    `alias` is the LiteLLM alias the run would call (`graph_indexing.semantic_kg_llm_model`,
-    else the gateway default), so it is resolved through the alias lookup the figure price
-    uses. Resolving it as a provider/model id instead priced nothing at all: no priced GEN
-    row's model id is ever slash-free, and an alias never contains a slash.
-    """
-    count = max(0, int(chunks_in_scope or 0))
-    if count <= 0:
+    """Price explicit token assumptions using the selected alias's catalog rates."""
+    if input_tokens < 0 or (output_tokens is not None and (
+        not math.isfinite(output_tokens) or output_tokens < 0
+    )):
+        raise ValueError("Semantic token estimates must be finite and nonnegative")
+    if input_tokens == 0 and output_tokens == 0:
         return 0.0
     name = str(alias or "").strip()
     if not name:
         return None
-
-    # Per chunk heuristic: fixed prompt overhead + bounded chunk text + concise JSON output.
-    input_tokens_per_chunk = max(0, 500 + int(max(0, enrich_max_chars) / 4))
-    output_tokens_per_chunk = 100
-    total_input_tokens = count * input_tokens_per_chunk
-    total_output_tokens = count * output_tokens_per_chunk
-
     spec = _gateway_model_spec(name)
     if not spec or not _model_has_component(spec, "GEN"):
         return None
@@ -1397,11 +1405,253 @@ def _estimate_semantic_kg_cost_usd(
 
     in_rate = _to_float(spec.get("input_per_1k"))
     out_rate = _to_float(spec.get("output_per_1k"))
-    if in_rate is None and out_rate is None:
+    if in_rate is None or out_rate is None:
         return None
-    return ((float(total_input_tokens) / 1000.0) * float(in_rate or 0.0)) + (
-        (float(total_output_tokens) / 1000.0) * float(out_rate or 0.0)
+    if in_rate == out_rate == 0:
+        return 0.0
+    if output_tokens is None:
+        return None
+    return (float(input_tokens) / 1000.0) * in_rate + (
+        (float(output_tokens) / 1000.0) * out_rate
     )
+
+
+def _require_semantic_extraction_prompt(cfg: TriBridConfig, corpus_id: str) -> None:
+    """One prompt refusal contract for estimation and actual indexing consent."""
+    try:
+        template = extraction_prompt_template(str(cfg.system_prompts.semantic_kg_extraction))
+        template.format(text="", schema={}, examples="")
+    except (ValueError, KeyError, IndexError, AttributeError, TypeError) as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "graph_extraction_prompt_invalid",
+                "corpus_id": corpus_id,
+                "message": str(exc),
+                "operator_hint": (
+                    "System Prompts > Semantic KG Extraction must keep the {schema} and "
+                    "{text} placeholders the official extractor fills; edit it or reset "
+                    "it to the default, then start the run again."
+                ),
+            },
+        ) from exc
+
+
+def _semantic_kg_input_tokens(
+    chunk_texts: Sequence[str], *, alias: str, schema: GraphSchema, prompt_template: str,
+) -> int:
+    """Measure complete rendered requests over actual sampled chunks.
+
+    Formatting uses the official template, including repetitions, conversions,
+    examples and escaped braces. OpenAILLM also sends Neo4jGraph's structured
+    output schema for every request. The provider margin remains a forecast.
+    """
+    template = extraction_prompt_template(prompt_template)
+    schema_payload = closed_graph_schema(schema).model_dump(exclude_none=True)
+    response_format = {"type": "json_schema", "json_schema": {
+        "name": Neo4jGraph.__name__, "strict": True, "schema": Neo4jGraph.model_json_schema(),
+    }}
+    overhead = count_tokens(json.dumps(response_format)) + TEMPLATE_MARGIN_TOKENS
+    spec = _gateway_model_spec(alias) or {}
+    factor = TEXT_FACTOR_BY_PROVIDER.get(str(spec.get("provider") or "").lower(), TEXT_FACTOR_DEFAULT)
+    return sum(math.ceil((count_tokens(template.format(text=text, schema=schema_payload, examples=""))
+                          + overhead) * factor) for text in chunk_texts)
+
+
+@dataclass(frozen=True)
+class _SemanticKGOutputSample:
+    run_id: str
+    run_status: str
+    config_fingerprint: str
+    requests: int
+    input_tokens: int
+    output_tokens: int
+    min_output_tokens: int
+    max_output_tokens: int
+    processed_chunks: int
+    dispatched_requests: int
+
+    @property
+    def mean_output_tokens(self) -> float:
+        return self.output_tokens / self.requests
+
+
+def _semantic_kg_usage_run_matches(
+    run: IndexRunSummary, *, corpus_id: str, alias: str, schema_hash: str,
+) -> bool:
+    record = run.accounting
+    graph = run.graph_metadata
+    if (run.repo_id != corpus_id or run.run_kind != "index"
+            or run.status not in {"complete", "error", "cancelled"}
+            or record is None or record.session_id != run.run_id
+            or record.corpus_id != corpus_id or record.models.get("semantic_kg") != alias
+            or record.ended_at is None or graph is None or graph.policy != "semantic"
+            or graph.schema_hash != schema_hash or graph.extraction.llm_model_alias != alias):
+        return False
+    lane = record.census.get("semantic_kg")
+    return bool(lane and lane.started_requests > 0 and lane.state == "closed"
+                and lane.owner_finished and not lane.inflight and not lane.active_producers)
+
+
+def _semantic_kg_usage_sample(
+    rows: list[NativeSpendRow], *, run: IndexRunSummary, corpus_id: str,
+    alias: str, upstream: str, schema_hash: str,
+) -> _SemanticKGOutputSample | None:
+    """Successful native outputs may inform a forecast even when their run failed.
+
+    Request samples are not unique chunks or a successful corpus benchmark.
+    Conflicts and ambiguous native call identities never reweight the sample.
+    """
+    if not _semantic_kg_usage_run_matches(run, corpus_id=corpus_id, alias=alias, schema_hash=schema_hash):
+        return None
+    record = run.accounting
+    assert record is not None and record.ended_at is not None
+    selection = select_native_run_rows(
+        rows, session_id=run.run_id, corpus_id=corpus_id, lanes=frozenset({"semantic_kg"}),
+    )
+    if selection.matched_requests > record.census["semantic_kg"].started_requests:
+        return None
+    inputs: list[int] = []
+    outputs: list[int] = []
+    for request_id, row in selection.rows.items():
+        usage = row.metadata.usage_object if row.metadata else None
+        if (request_id in selection.conflicted_request_ids or row.status != "success" or row.model != upstream
+                or row.call_type not in {"completion", "acompletion"}
+                or row.cache_hit not in {False, "False", "None", None}
+                or not record.started_at <= row.startTime <= record.ended_at
+                or row.endTime < row.startTime or usage is None
+                or usage.prompt_tokens is None or usage.completion_tokens is None):
+            continue
+        if usage.total_tokens is not None and usage.total_tokens != usage.prompt_tokens + usage.completion_tokens:
+            continue
+        reasoning = (usage.completion_tokens_details or {}).get("reasoning_tokens")
+        if reasoning is not None and reasoning > usage.completion_tokens:
+            continue
+        inputs.append(usage.prompt_tokens)
+        # Native completion_tokens already includes reasoning tokens.
+        outputs.append(usage.completion_tokens)
+    if not outputs:
+        return None
+    return _SemanticKGOutputSample(
+        run_id=run.run_id, run_status=str(run.status), config_fingerprint=record.config_fingerprint,
+        requests=len(outputs), input_tokens=sum(inputs), output_tokens=sum(outputs),
+        min_output_tokens=min(outputs), max_output_tokens=max(outputs),
+        processed_chunks=record.processed_chunks,
+        dispatched_requests=record.census["semantic_kg"].started_requests,
+    )
+
+
+def _load_semantic_kg_usage_run(
+    corpus_id: str, alias: str, schema_hash: str,
+) -> list[IndexRunSummary]:
+    """Load qualified run candidates; native evidence decides which one is usable."""
+    candidates: list[IndexRunSummary] = []
+    for path in _repo_runs_dir(corpus_id).glob("*/summary.json"):
+        try:
+            run = IndexRunSummary.model_validate_json(path.read_text())
+        except (OSError, ValueError):
+            continue
+        if _semantic_kg_usage_run_matches(run, corpus_id=corpus_id, alias=alias, schema_hash=schema_hash):
+            candidates.append(run)
+    return sorted(candidates, key=lambda run: (run.started_at, run.run_id), reverse=True)
+
+
+async def _read_semantic_kg_usage(
+    cfg: TriBridConfig, corpus_id: str, schema_hash: str,
+) -> _SemanticKGOutputSample | None:
+    alias = _semantic_kg_model_override(cfg)
+    candidates = await asyncio.to_thread(_load_semantic_kg_usage_run, corpus_id, alias, schema_hash)
+    if not candidates:
+        return None
+    try:
+        current_gateway = resolve_litellm_base_url(configured_url=cfg.chat.litellm.base_url).removesuffix("/v1").rstrip("/")
+        upstream = gateway_upstream_for_alias(alias)
+        reader = NativeSpendReader(
+            base_url=current_gateway, api_key=SecretStr(resolve_litellm_api_key()),
+            request_timeout_s=3.0, total_timeout_s=6.0,
+        )
+        # Searching history shares the original total transport budget. Empty,
+        # rejected, or not-yet-ingested evidence does not hide an older usable
+        # sample, nor give every historical run another six seconds to wait.
+        async with asyncio.timeout(6.0):
+            for run in candidates:
+                record = run.accounting
+                assert record is not None and record.ended_at is not None
+                if not record.gateway_base_url or record.gateway_base_url.rstrip("/") != current_gateway:
+                    continue
+                try:
+                    rows, _ = await reader.read_rows_for_run(
+                        session_id=run.run_id, corpus_id=corpus_id, lanes=frozenset({"semantic_kg"}),
+                        started_at=record.started_at, ended_at=record.ended_at,
+                    )
+                except NativeLedgerReadError:
+                    continue
+                sample = _semantic_kg_usage_sample(
+                    rows, run=run, corpus_id=corpus_id, alias=alias,
+                    upstream=upstream, schema_hash=schema_hash,
+                )
+                if sample is not None:
+                    return sample
+    except (TimeoutError, ValueError, RuntimeError):
+        # Forecast evidence is ancillary; no failed read can claim measured zero.
+        return None
+    return None
+
+
+@dataclass(frozen=True)
+class _SemanticKGForecast:
+    cost_usd: float | None
+    assumptions: tuple[str, ...]
+
+
+def _semantic_kg_forecast(
+    *, cfg: TriBridConfig, chunks: int, input_tokens: int | None,
+    chunks_low: int, chunks_high: int, tokens_low: int | None, tokens_high: int | None,
+    usage: _SemanticKGOutputSample | None,
+    generation_insufficient_reason: str = "",
+) -> _SemanticKGForecast:
+    """Price the measured complete-request input subtotal only when its sample is usable."""
+    if chunks == 0:
+        return _SemanticKGForecast(0.0, ())
+    if generation_insufficient_reason:
+        return _SemanticKGForecast(None, (f"Semantic KG cost unavailable: {generation_insufficient_reason}.",))
+    if input_tokens is None or tokens_low is None or tokens_high is None:
+        return _SemanticKGForecast(None, ("Semantic KG cost unavailable: generate the current schema before estimating its repeated prompt cost.",))
+    alias = _semantic_kg_model_override(cfg)
+    assumptions = [
+        f"Semantic KG≈{chunks:,} sampled chunks; {input_tokens:,} input tokens include the full extraction prompt, approved schema and structured-output schema on every request, with actual rendered chunk text and a tokenizer margin.",
+    ]
+    output = usage.mean_output_tokens * chunks if usage else None
+    cost = _estimate_semantic_kg_cost_usd(alias=alias, input_tokens=input_tokens, output_tokens=output)
+    if usage is None:
+        assumptions.append("Semantic KG output-token evidence unavailable: no matching settled native request sample; no arbitrary output allowance or paid total is assumed.")
+        return _SemanticKGForecast(cost, tuple(assumptions))
+    assumptions.append(
+        f"Output baseline: {usage.requests:,} successful native requests from run {usage.run_id[:8]} (status={usage.run_status}), "
+        f"with {usage.processed_chunks:,} processed chunks and {usage.dispatched_requests:,} HTTP attempts; "
+        f"{usage.mean_output_tokens:.1f} output tokens/request including reasoning. Requests can include retries and are not unique-chunk coverage or a completed-corpus benchmark."
+    )
+    if usage.requests < usage.dispatched_requests:
+        assumptions.append(
+            f"{usage.dispatched_requests - usage.requests:,} dispatched attempts have no usable output sample; delayed native ingestion can change this forecast."
+        )
+    if hashlib.sha256(cfg.model_dump_json().encode()).hexdigest() != usage.config_fingerprint:
+        assumptions.append("Historical configuration differs; the sampled output baseline may not reflect the current prompt or reasoning settings.")
+    low = _estimate_semantic_kg_cost_usd(
+        alias=alias, input_tokens=tokens_low,
+        output_tokens=usage.min_output_tokens * chunks_low,
+    )
+    high = _estimate_semantic_kg_cost_usd(
+        alias=alias, input_tokens=tokens_high,
+        output_tokens=usage.max_output_tokens * chunks_high,
+    )
+    if low is not None and high is not None:
+        assumptions.append(
+            f"Semantic KG scenario ${low:.2f}–${high:.2f}: sampled chunk-count band and observed output minimum/maximum "
+            f"({usage.min_output_tokens:,}–{usage.max_output_tokens:,} tokens/request). This is not a confidence interval or spending limit; future outputs can exceed the sample."
+        )
+    assumptions.append("Forecast assumes one request per chunk at catalog input/output rates; retries, cache discounts and provider price changes can alter charges. This is not a spending limit.")
+    return _SemanticKGForecast(cost, tuple(assumptions))
 
 
 _FIGURE_INPUT_TOKENS = 1200  # image at images_scale 2 (~800) + prompt (~400)
@@ -1603,7 +1853,15 @@ def _measured_semantic_kg_seconds_per_chunk(
         return None
     if extraction.worker_seconds <= 0.0 or extraction.succeeded_chunks <= 0:
         return None
-    return float(extraction.worker_seconds) / float(extraction.succeeded_chunks)
+    fresh = extraction.succeeded_chunks
+    if extraction.outcome_version == "checkpoint_v1":
+        reused = extraction.reused_chunks
+        if (reused is None or reused < 0 or reused > fresh
+                or extraction.unfinished_chunks != 0 or extraction.cancelled_chunks != 0
+                or extraction.failed_chunks != 0 or extraction.succeeded_chunks != extraction.selected_chunks):
+            return None
+        fresh -= reused
+    return float(extraction.worker_seconds) / float(fresh) if fresh > 0 else None
 
 
 def _semantic_kg_seconds_assumption(
@@ -1837,6 +2095,7 @@ async def _run_index(
     graph_schema: GraphSchema | None = None,
     graph_extraction: GraphExtractionTelemetry | None = None,
     accounting: IndexAccountingOwner | None = None,
+    checkpoint_context: ExtractionCheckpointContext | None = None,
 ) -> tuple[IndexStats, FigureRunTotals]:
     # ONE config snapshot per run (the caller's): what the fence recorded, what is
     # built here and what the commit names must come from the same decision.
@@ -2014,6 +2273,7 @@ async def _run_index(
                     reasoning_effort=str(cfg.graph_indexing.semantic_kg_reasoning_effort),
                     prompt_template=str(cfg.system_prompts.semantic_kg_extraction),
                     census_scope=accounting.scopes.get("semantic_kg") if accounting is not None else None,
+                    checkpoint_context=checkpoint_context,
                 )
             else:
                 code_writer = await asyncio.to_thread(
@@ -2034,6 +2294,7 @@ async def _run_index(
                 await neo4j.disconnect()
         raise
 
+    source_snapshots = contextlib.ExitStack()
     try:
         return await _run_index_body(
             repo_id=repo_id,
@@ -2045,6 +2306,7 @@ async def _run_index(
             graph_schema=graph_schema,
             graph_extraction=graph_extraction,
             accounting=accounting,
+            source_snapshots=source_snapshots,
             semantic_pipeline=semantic_pipeline,
             code_writer=code_writer,
             chunker=chunker,
@@ -2060,14 +2322,19 @@ async def _run_index(
             qdrant_generation=qdrant_generation,
         )
     finally:
-        if semantic_pipeline is not None:
-            await close_semantic_pipeline(semantic_pipeline)
-        if sync_graph_driver is not None:
-            with contextlib.suppress(Exception):
-                await asyncio.to_thread(sync_graph_driver.close)
-        if neo4j is not None:
-            with contextlib.suppress(Exception):
-                await neo4j.disconnect()
+        async def close_owned_graph() -> None:
+            try:
+                if semantic_pipeline is not None:
+                    await close_semantic_pipeline(semantic_pipeline)
+            finally:
+                await asyncio.to_thread(source_snapshots.close)
+                if sync_graph_driver is not None:
+                    with contextlib.suppress(Exception):
+                        await asyncio.to_thread(sync_graph_driver.close)
+                if neo4j is not None:
+                    with contextlib.suppress(Exception):
+                        await neo4j.disconnect()
+        await await_checkpoint_task(asyncio.create_task(close_owned_graph()))
 
 
 def _extract_text_for_index_sync(
@@ -2122,9 +2389,13 @@ async def _record_document(
     rel_path: str,
     abs_path: Path,
     extracted: ExtractedDocument | None,
+    *, source_snapshot: SourceSnapshot | None = None,
 ) -> None:
     """Write the file's provenance record under the staging id (promoted with its chunks)."""
-    sha256, byte_size = await asyncio.to_thread(_hash_and_size, abs_path)
+    sha256, byte_size = (
+        (source_snapshot.sha256, source_snapshot.byte_size)
+        if source_snapshot is not None else await asyncio.to_thread(_hash_and_size, abs_path)
+    )
     kind = extracted.kind if extracted is not None else document_kind_for_path(abs_path)
     extraction = extracted.extraction if extracted is not None else "direct"
     markdown = extracted.text if (extracted is not None and kind == "rich") else None
@@ -2372,6 +2643,7 @@ async def _run_index_body(
     qdrant_generation: str,
     graph_extraction: GraphExtractionTelemetry | None = None,
     accounting: IndexAccountingOwner | None = None,
+    source_snapshots: contextlib.ExitStack | None = None,
 ) -> tuple[IndexStats, FigureRunTotals]:
     """Core indexing loop -- extracted to allow _run_index() to guarantee Neo4j cleanup via finally.
 
@@ -2469,7 +2741,7 @@ async def _run_index_body(
                 eligible_chunks=semantic_eligible_chunks + len(chunks),
                 ceiling=semantic_ceiling,
             )
-        if graph_extraction is not None:
+        if graph_extraction is not None and graph_policy != "semantic":
             graph_extraction.selected_chunks += len(chunks)
         target.extend(chunks)
 
@@ -2567,7 +2839,9 @@ async def _run_index_body(
                 merged.extend(r)
         return merged
 
-    async def _write_complete_file_graph(file_path: str, chunks: list[Chunk]) -> None:
+    async def _write_complete_file_graph(
+        file_path: str, chunks: list[Chunk], source_snapshot: SourceSnapshot | None,
+    ) -> None:
         nonlocal semantic_processed
         nonlocal semantic_entities_total
         nonlocal semantic_relations_total
@@ -2578,7 +2852,6 @@ async def _run_index_body(
             if graph_policy == "semantic":
                 if semantic_pipeline is None or graph_schema is None:
                     raise RuntimeError("Semantic graph writer was not initialized")
-                extraction_started = time.perf_counter()
                 with INDEX_STAGE_LATENCY_SECONDS.labels(
                     stage="neo4j_write_semantic_file"
                 ).time():
@@ -2587,14 +2860,15 @@ async def _run_index_body(
                         file_path=file_path,
                         chunks=chunks,
                         schema=graph_schema,
+                        file_sha256=source_snapshot.sha256 if source_snapshot is not None else None,
                     )
-                if graph_extraction is not None:
-                    # Worker-seconds: every file's extraction time is summed even though
-                    # up to indexing_workers files run at once, so the next estimate can
-                    # divide by succeeded_chunks and get the per-worker rate (D13).
-                    graph_extraction.worker_seconds += max(
-                        0.0, time.perf_counter() - extraction_started
-                    )
+                # The complete file writer has drained extraction/checkpoint
+                # work. Release this file's source before admitting the next
+                # file; the outer owner still drains before cleanup on failure.
+                assert source_snapshots is not None
+                await await_checkpoint_task(asyncio.create_task(
+                    asyncio.to_thread(source_snapshots.close),
+                ))
             else:
                 if code_writer is None:
                     raise RuntimeError("Code graph writer was not initialized")
@@ -2619,14 +2893,15 @@ async def _run_index_body(
                         deferred_relationships=code_graph_deferred,
                     )
         except Exception:
-            if graph_extraction is not None:
+            if graph_extraction is not None and graph_policy != "semantic":
                 graph_extraction.attempted_chunks += len(chunks)
                 graph_extraction.failed_chunks += len(chunks)
             raise
         if graph_extraction is not None:
-            graph_extraction.attempted_chunks += telemetry.attempted_chunks
-            graph_extraction.succeeded_chunks += telemetry.succeeded_chunks
-            graph_extraction.failed_chunks += telemetry.failed_chunks
+            if graph_policy != "semantic":
+                graph_extraction.attempted_chunks += telemetry.attempted_chunks
+                graph_extraction.succeeded_chunks += telemetry.succeeded_chunks
+                graph_extraction.failed_chunks += telemetry.failed_chunks
             graph_extraction.extracted_entities += telemetry.extracted_entities
             graph_extraction.semantic_relationships += telemetry.semantic_relationships
             graph_extraction.from_chunk_relationships += telemetry.from_chunk_relationships
@@ -2690,11 +2965,29 @@ async def _run_index_body(
                 drop_oldest=True,
             )
 
+        source_snapshot: SourceSnapshot | None = None
+        if graph_policy == "semantic":
+            if source_snapshots is None:
+                raise RuntimeError("Semantic extraction requires owned source snapshots")
+
+            async def capture_source(path: Path) -> SourceSnapshot:
+                snapshot = await asyncio.to_thread(SourceSnapshot.capture, path, max_bytes=max_indexable_bytes)
+                assert source_snapshots is not None
+                source_snapshots.enter_context(snapshot)
+                return snapshot
+
+            try:
+                source_snapshot = await await_checkpoint_task(asyncio.create_task(capture_source(abs_path)))
+            except OSError as exc:
+                raise RuntimeError(f"Semantic graph source is unreadable: {rel_path}; replacement not published") from exc
+            abs_path = source_snapshot.path
         try:
             size_bytes = int((await asyncio.to_thread(abs_path.stat)).st_size)
         except Exception:
             size_bytes = None
         if size_bytes is not None and size_bytes > max_indexable_bytes:
+            if graph_policy == "semantic":
+                raise RuntimeError(f"Selected semantic source exceeds the file size limit: {rel_path}")
             if event_queue is not None:
                 _emit_event(
                     event_queue,
@@ -2739,7 +3032,8 @@ async def _run_index_body(
                 INDEX_FILES_PROCESSED_TOTAL.inc()
                 if accounting is not None:
                     accounting.progress(files=1)
-                await _record_document(postgres, write_repo_id, rel_path, abs_path, None)
+                await _record_document(postgres, write_repo_id, rel_path, abs_path, None,
+                                       source_snapshot=source_snapshot)
                 with INDEX_STAGE_LATENCY_SECONDS.labels(stage="file_read_stream").time():
                     stream = await asyncio.to_thread(
                         abs_path.open, "r", encoding="utf-8", errors="ignore"
@@ -2750,6 +3044,8 @@ async def _run_index_body(
                             if not block:
                                 break
                             if "\x00" in block:
+                                if graph_policy == "semantic":
+                                    raise RuntimeError(f"Selected semantic source contains binary text: {rel_path}")
                                 break
                             with INDEX_STAGE_LATENCY_SECONDS.labels(stage="chunk").time():
                                 chunks = await asyncio.to_thread(
@@ -2774,6 +3070,8 @@ async def _run_index_body(
                 raise
             except Exception as exc:
                 INDEX_STAGE_ERRORS_TOTAL.labels(stage="file_read_stream").inc()
+                if graph_policy == "semantic":
+                    raise RuntimeError(f"Semantic source read/chunk failed: {rel_path}") from exc
                 _emit_event(
                     event_queue,
                     {
@@ -2815,6 +3113,8 @@ async def _run_index_body(
                     )
             except Exception as exc:
                 INDEX_STAGE_ERRORS_TOTAL.labels(stage="file_read").inc()
+                if graph_policy == "semantic":
+                    raise RuntimeError(f"Semantic source extraction failed: {rel_path}") from exc
                 _emit_event(
                     event_queue,
                     {
@@ -2826,6 +3126,8 @@ async def _run_index_body(
                 )
                 continue
             if extracted is None:
+                if graph_policy == "semantic":
+                    raise RuntimeError(f"Semantic source produced no extracted document: {rel_path}")
                 continue
             # Counted per successfully extracted document: the vision calls were made
             # (and billed) even if the document is skipped further down.
@@ -2873,8 +3175,11 @@ async def _run_index_body(
                 )
             content = extracted.text
             if "\x00" in content:
+                if graph_policy == "semantic":
+                    raise RuntimeError(f"Selected semantic source contains binary text: {rel_path}")
                 continue
-            await _record_document(postgres, write_repo_id, rel_path, abs_path, extracted)
+            await _record_document(postgres, write_repo_id, rel_path, abs_path, extracted,
+                                   source_snapshot=source_snapshot)
 
             # Local-only "late chunking": embed the full doc segment once, then pool per chunk span.
             # This is experimental and only applies when explicitly enabled via config.
@@ -2912,11 +3217,13 @@ async def _run_index_body(
                 if accounting is not None:
                     accounting.progress(files=1)
                 if not chunks:
+                    if graph_policy == "semantic":
+                        raise RuntimeError(f"Semantic source produced no chunks: {rel_path}")
                     continue
                 stamp_provenance(chunks, extraction=extracted.extraction, spans=extracted.spans)
                 embedded_batches = await _upsert_chunk_batches(chunks)
                 _queue_graph_chunks(file_graph_chunks, embedded_batches)
-                await _write_complete_file_graph(rel_path, file_graph_chunks)
+                await _write_complete_file_graph(rel_path, file_graph_chunks, source_snapshot)
                 continue
 
             with INDEX_STAGE_LATENCY_SECONDS.labels(stage="chunk").time():
@@ -2934,6 +3241,8 @@ async def _run_index_body(
             if accounting is not None:
                 accounting.progress(files=1)
             if not chunks:
+                if graph_policy == "semantic":
+                    raise RuntimeError(f"Semantic source produced no chunks: {rel_path}")
                 continue
             stamp_provenance(chunks, extraction=extracted.extraction, spans=extracted.spans)
             if cross_file_chunk_batching:
@@ -2943,9 +3252,11 @@ async def _run_index_body(
             embedded_batches = await _upsert_chunk_batches(chunks)
             _queue_graph_chunks(file_graph_chunks, embedded_batches)
 
+        if graph_policy == "semantic" and not file_graph_chunks:
+            raise RuntimeError(f"Semantic source produced no chunks: {rel_path}")
         if file_graph_chunks:
             try:
-                await _write_complete_file_graph(rel_path, file_graph_chunks)
+                await _write_complete_file_graph(rel_path, file_graph_chunks, source_snapshot)
             except Exception as exc:
                 INDEX_STAGE_ERRORS_TOTAL.labels(stage="semantic_kg").inc()
                 if event_queue is not None:
@@ -3373,6 +3684,9 @@ async def _background_index_job(
     staged_graph_recorded: str | None = None  # the graph id recorded on the fence
     cleanup_recorded = True  # False only when an uncommitted run could not record its handoff
     accounting: IndexAccountingOwner | None = None
+    checkpoint_context: ExtractionCheckpointContext | None = None
+    checkpoint_postgres: PostgresClient | None = None
+    graph_progress: GraphProgressOwner | None = None
 
     def _current_graph_metadata(
         *, override: Any | None = None, partial: bool = False
@@ -3435,6 +3749,11 @@ async def _background_index_job(
         )
         if graph_policy in {"semantic", "code"}:
             graph_extraction = GraphExtractionTelemetry(
+                outcome_version="checkpoint_v1" if graph_policy == "semantic" else "whole_file_v0",
+                progress_owner_run_id=run_id if graph_policy == "semantic" else None,
+                reused_chunks=0 if graph_policy == "semantic" else None,
+                cancelled_chunks=0 if graph_policy == "semantic" else None,
+                unfinished_chunks=0 if graph_policy == "semantic" else None,
                 selected_chunks=0,
                 attempted_chunks=0,
                 succeeded_chunks=0,
@@ -3485,12 +3804,30 @@ async def _background_index_job(
                 coverage_notes.append("This embedding provider is outside native gateway accounting.")
         if cfg.indexing.figures.enabled and cfg.indexing.figures.describe:
             models["figure_description"] = cfg.indexing.figures.vision_model
+        summary = summary.model_copy(update={"graph_metadata": _current_graph_metadata()})
         accounting = IndexAccountingOwner(
             _run_summary_path(repo_id, run_id), summary,
             config_json=cfg.model_dump_json(), config=cfg, models=models,
             coverage_complete=not coverage_notes, coverage_notes=coverage_notes, estimate=estimate,
             gateway_base_url=resolve_litellm_base_url(configured_url=cfg.chat.litellm.base_url).removesuffix("/v1"),
         )
+        if graph_policy == "semantic":
+            assert graph_schema is not None and graph_extraction is not None
+            graph_progress = GraphProgressOwner(_run_summary_path(repo_id, run_id), repo_id, run_id, graph_extraction)
+            checkpoint_postgres = PostgresClient(cfg.indexing.postgres_url)
+            await checkpoint_postgres.connect()
+            route = _resolve_semantic_kg_route(cfg)
+            checkpoint_context = ExtractionCheckpointContext(
+                postgres=checkpoint_postgres, repo_id=repo_id, owner_run_id=run_id,
+                recipe=extraction_checkpoint_recipe(
+                    schema=graph_schema, prompt_template=str(cfg.system_prompts.semantic_kg_extraction),
+                    route_model=str(route.model or "").strip(),
+                    route_upstream=gateway_upstream_for_alias(str(route.model or "").strip()),
+                    route_base_url=str(route.base_url or "").strip(),
+                    reasoning_effort=str(cfg.graph_indexing.semantic_kg_reasoning_effort),
+                ),
+                progress=graph_progress,
+            )
         # Every claim drains the durable reclaim backlog (a failed reclaim from an
         # earlier takeover is retried by the next normal run, never forgotten).
         await _drain_reclaim_backlog(cfg, repo_id)
@@ -3531,21 +3868,25 @@ async def _background_index_job(
             },
             drop_oldest=True,
         )
-        with INDEX_DURATION_SECONDS.time():
-            stats, figure_totals = await _run_index(
-                repo_id,
-                request.repo_path,
-                request.force_reindex,
-                event_queue=queue,
-                run_id=run_id,
-                write_repo_id=staging_repo_id,
-                qdrant=qdrant,
-                qdrant_generation=qdrant_generation,
-                cfg=cfg,
-                graph_schema=graph_schema,
-                graph_extraction=graph_extraction,
-                accounting=accounting,
-            )
+        # The owned context drains after extraction while retaining any primary
+        # indexing error/cancellation alongside an independent persistence error.
+        async with (graph_progress if graph_progress is not None else contextlib.nullcontext()):
+            with INDEX_DURATION_SECONDS.time():
+                stats, figure_totals = await _run_index(
+                    repo_id,
+                    request.repo_path,
+                    request.force_reindex,
+                    event_queue=queue,
+                    run_id=run_id,
+                    write_repo_id=staging_repo_id,
+                    qdrant=qdrant,
+                    qdrant_generation=qdrant_generation,
+                    cfg=cfg,
+                    graph_schema=graph_schema,
+                    graph_extraction=graph_extraction,
+                    accounting=accounting,
+                    checkpoint_context=checkpoint_context,
+                )
         accounting.finish()
         # Verify every staged resource BEFORE the commit: a partial vector index
         # or an empty staged graph must never become the active generation.
@@ -3739,6 +4080,11 @@ async def _background_index_job(
             finally:
                 await neo4j_verify.disconnect()
 
+        if checkpoint_context is not None:
+            # Success-only pruning is inside the building fence, after complete
+            # official graph writes, persistence drain and generation invariants.
+            await checkpoint_context.finish_success()
+
         # THE commit: one Postgres transaction swaps the chunk rows and writes
         # the generation manifest (Qdrant collection + Neo4j graph id) after
         # re-checking, under the row lock, that this run still holds the fence.
@@ -3884,7 +4230,7 @@ async def _background_index_job(
         except Exception:
             # Never fail indexing due to gauge update issues.
             pass
-    except asyncio.CancelledError:
+    except asyncio.CancelledError as exc:
         if committed:
             # The manifest already names this run's generation: the index is live
             # and the cancellation only interrupted best-effort retirement. The
@@ -3919,8 +4265,12 @@ async def _background_index_job(
         except Exception:
             pass
         prev = _STATUS.get(repo_id)
+        if graph_progress is not None:
+            graph_failure_codes = list(dict.fromkeys([*graph_failure_codes, *graph_progress.failure_codes(exc)]))
         if graph_run_metadata is None:
             graph_run_metadata = _current_graph_metadata()
+        if graph_extraction is not None:
+            graph_promotable = False
         _STATUS[repo_id] = IndexStatus(
             repo_id=repo_id,
             status="cancelled",
@@ -3990,7 +4340,8 @@ async def _background_index_job(
                 )
             if (
                 graph_extraction.truncated_chunks > 0
-                or graph_extraction.attempted_chunks != graph_extraction.selected_chunks
+                or (graph_extraction.outcome_version == "whole_file_v0"
+                    and graph_extraction.attempted_chunks != graph_extraction.selected_chunks)
                 or isinstance(e, GraphChunkCeilingExceeded)
             ):
                 graph_failure_codes = list(
@@ -3998,6 +4349,12 @@ async def _background_index_job(
                 )
         if graph_extraction is not None and graph_promotable is None:
             graph_promotable = False
+        if graph_extraction is not None:
+            graph_promotable = False
+            if graph_progress is not None:
+                graph_failure_codes = list(dict.fromkeys([*graph_failure_codes, *graph_progress.failure_codes(e)]))
+            elif graph_extraction.failed_chunks == 0 and graph_extraction.succeeded_chunks > 0:
+                graph_failure_codes = list(dict.fromkeys([*graph_failure_codes, "graph_build_or_promotion_failure"]))
         if graph_run_metadata is None:
             graph_run_metadata = _current_graph_metadata()
         prev = _STATUS.get(repo_id)
@@ -4032,6 +4389,16 @@ async def _background_index_job(
             _persist_run_summary(summary)
         _emit_event(queue, {"type": "error", "message": str(e)}, guarantee=True)
     finally:
+        # Covers failures before the extraction body as well. The close owns its
+        # retained writer, so cancellation cannot release the fence over progress.
+        if graph_progress is not None:
+            try:
+                await graph_progress.close()
+            except BaseException:
+                logger.exception("Graph progress closure failed for run %s", run_id)
+        if checkpoint_postgres is not None:
+            with contextlib.suppress(Exception):
+                await checkpoint_postgres.disconnect()
         if accounting is not None:
             try:
                 accounting.finish(interrupted=True)
@@ -4350,6 +4717,56 @@ def _extract_schema_sample_text_for_path(path: Path, cfg: TriBridConfig) -> str:
     return str(extracted.text or "") if extracted is not None else ""
 
 
+@router.get(
+    "/index/{corpus_id}/graph-schema/proposal",
+    response_model=GraphSchemaProposalState,
+    responses={503: {"model": DependencyUnavailableResponse}},
+)
+async def get_graph_schema_proposal(corpus_id: str) -> GraphSchemaProposalState:
+    """Read a current saved proposal; never initialize accounting or generate one."""
+    # Every initial outcome gets the same bounded recheck. In particular a
+    # missing/stale proposal may have been regenerated, and policy may have
+    # changed in either direction while the first observation waited. This is
+    # exactly two observations, never a retry-until-stable loop.
+    state: GraphSchemaProposalState
+    for _observation in range(2):
+        try:
+            corpus, cfg = await load_corpus_and_scoped_config(corpus_id)
+        except CorpusNotFoundError as exc:
+            # Deletion can land between the corpus row and scoped-config reads
+            # in either observation. It remains an absent resource at this API.
+            raise HTTPException(status_code=404, detail=f"Corpus not found: {corpus_id}") from exc
+        except Exception as exc:
+            raise_postgres_unavailable_if_applicable(exc, boundary="get_graph_schema_proposal")
+            raise
+        meta = corpus.get("meta") if isinstance(corpus.get("meta"), dict) else {}
+        policy = resolve_graph_policy(
+            internal=bool((meta or {}).get("system_kind")), enabled=bool(cfg.graph_indexing.enabled),
+            build_code_graph=bool(cfg.graph_indexing.build_code_graph),
+        )
+        if policy != "semantic":
+            state = GraphSchemaProposalState(corpus_id=corpus_id, status="ineligible")
+            continue
+        fingerprint = await graph_schema_input_fingerprint(corpus, cfg)
+        postgres = PostgresClient(cfg.indexing.postgres_url)
+        try:
+            await postgres.connect()
+            try:
+                proposal = await postgres.get_graph_schema_proposal(corpus_id)
+            finally:
+                await postgres.disconnect()
+        except Exception as exc:
+            raise_postgres_unavailable_if_applicable(exc, boundary="get_graph_schema_proposal")
+            raise
+        if proposal is None:
+            state = GraphSchemaProposalState(corpus_id=corpus_id, status="missing")
+        elif proposal_matches(proposal, fingerprint, cfg):
+            state = GraphSchemaProposalState(corpus_id=corpus_id, status="current", proposal=proposal)
+        else:
+            state = GraphSchemaProposalState(corpus_id=corpus_id, status="stale")
+    return state
+
+
 @router.post(
     "/index/{corpus_id}/graph-schema/proposal",
     response_model=GraphSchemaProposal,
@@ -4600,6 +5017,7 @@ async def _estimate_index_with_config(request: IndexRequest, cfg: TriBridConfig)
     repo_id = str(request.repo_id or "").strip()
     repo_path = str(request.repo_path or "").strip()
     corpus: dict[str, Any] | None = None
+    graph_proposal: GraphSchemaProposal | None = None
     if not repo_id:
         raise HTTPException(status_code=422, detail="repo_id is required")
 
@@ -4648,10 +5066,17 @@ async def _estimate_index_with_config(request: IndexRequest, cfg: TriBridConfig)
             raw = meta.get("exclude_paths") if isinstance(meta, dict) else None
             if isinstance(raw, list):
                 extra_gitignore_patterns = [str(x).strip() for x in raw if str(x).strip()]
+            if corpus is not None and cfg.graph_indexing.enabled:
+                try:
+                    graph_proposal = await pg2.get_graph_schema_proposal(repo_id)
+                except Exception:
+                    # A missing/unreadable forecast schema cannot expand the corpus scope.
+                    graph_proposal = None
         finally:
             await pg2.disconnect()
     except Exception:
-        extra_gitignore_patterns = []
+        # Preserve any exclusions already read even if connection cleanup fails.
+        pass
 
     corpus_meta = (corpus or {}).get("meta") or {}
     graph_policy = resolve_graph_policy(
@@ -4659,6 +5084,9 @@ async def _estimate_index_with_config(request: IndexRequest, cfg: TriBridConfig)
         enabled=bool(cfg.graph_indexing.enabled),
         build_code_graph=bool(cfg.graph_indexing.build_code_graph),
     )
+    semantic_graph_active = graph_policy == "semantic"
+    if semantic_graph_active:
+        _require_semantic_extraction_prompt(cfg, repo_id)
 
     loader = FileLoader(
         ignore_patterns=ignore_patterns, extra_gitignore_patterns=extra_gitignore_patterns
@@ -4678,6 +5106,28 @@ async def _estimate_index_with_config(request: IndexRequest, cfg: TriBridConfig)
         if str(root) != repo_path:
             detail += f" (registered as {repo_path})"
         raise HTTPException(status_code=422, detail=detail)
+
+    # Bind a fresh request recipe before sampling actual chunk text. The sampler
+    # does not cache results or retain texts after this estimate.
+    estimate_schema: GraphSchema | None = None
+    semantic_input_counter: Callable[[Sequence[str]], int] | None = None
+    if semantic_graph_active and corpus is not None and graph_proposal is not None:
+        try:
+            if _resolve_corpus_root(str(corpus.get("path") or "")) == root:
+                fingerprint = await graph_schema_input_fingerprint(corpus, cfg)
+                if (proposal_matches(graph_proposal, fingerprint, cfg)
+                        and (request.approved_graph_schema_hash is None
+                             or request.approved_graph_schema_hash == graph_proposal.schema_hash)):
+                    estimate_schema = closed_graph_schema(graph_proposal.schema_payload)
+        except (OSError, ValueError):
+            # Source files may disappear during inventory; an ancillary quote is
+            # unavailable until the current schema can be verified again.
+            estimate_schema = None
+        if estimate_schema is not None:
+            semantic_input_counter = partial(
+                _semantic_kg_input_tokens, alias=_semantic_kg_model_override(cfg),
+                schema=estimate_schema, prompt_template=cfg.system_prompts.semantic_kg_extraction,
+            )
 
     for _rel, p in loader.iter_repo_files(str(root)):
         try:
@@ -4731,6 +5181,7 @@ async def _estimate_index_with_config(request: IndexRequest, cfg: TriBridConfig)
         ),
         min_files_per_format=int(cfg.indexing.estimate.min_files_per_format),
         max_relative_error=float(cfg.indexing.estimate.max_relative_error),
+        semantic_input_counter=semantic_input_counter,
     )
     elapsed_seconds = time.monotonic() - sampling_started
     if not sample.sufficient:
@@ -4761,7 +5212,6 @@ async def _estimate_index_with_config(request: IndexRequest, cfg: TriBridConfig)
     embedding_provider = str(getattr(cfg.embedding, "embedding_type", "") or "").strip()
     embedding_model = str(getattr(cfg.embedding, "effective_model", "") or "").strip()
 
-    semantic_graph_active = graph_policy == "semantic"
     try:
         semantic_kg_chunks = require_graph_chunk_ceiling(
             policy=graph_policy,
@@ -4784,12 +5234,20 @@ async def _estimate_index_with_config(request: IndexRequest, cfg: TriBridConfig)
         )
 
     semantic_kg_cost: float | None = None
+    semantic_assumptions: tuple[str, ...] = ()
     if semantic_graph_active:
-        semantic_kg_cost = _estimate_semantic_kg_cost_usd(
-            alias=semantic_alias,
-            chunks_in_scope=semantic_kg_chunks,
-            enrich_max_chars=int(cfg.enrichment.enrich_max_chars or 1000),
+        usage_sample: _SemanticKGOutputSample | None = None
+        if estimate_schema is not None and graph_proposal is not None and sample.generation_sufficient:
+            usage_sample = await _read_semantic_kg_usage(cfg, repo_id, graph_proposal.schema_hash)
+        semantic_forecast = await asyncio.to_thread(
+            _semantic_kg_forecast,
+            cfg=cfg, chunks=semantic_kg_chunks, input_tokens=sample.semantic_input_tokens,
+            chunks_low=sample.chunks_low, chunks_high=sample.chunks_high,
+            tokens_low=sample.semantic_input_tokens_low, tokens_high=sample.semantic_input_tokens_high,
+            usage=usage_sample, generation_insufficient_reason=sample.generation_insufficient_reason,
         )
+        semantic_kg_cost = semantic_forecast.cost_usd
+        semantic_assumptions = semantic_forecast.assumptions
 
     estimated_figures, figure_cost = _estimate_figures(cfg, pdf_paths)
 
@@ -4809,7 +5267,7 @@ async def _estimate_index_with_config(request: IndexRequest, cfg: TriBridConfig)
     time_model: _IndexTimeModel | None = None
     estimated_seconds_semantic_kg: float | None = None
     estimated_seconds_figures: float | None = None
-    assumptions: list[str] = [*sample.assumptions, "time range is a heuristic (very rough)"]
+    assumptions: list[str] = [*sample.assumptions, *semantic_assumptions, "time range is a heuristic (very rough)"]
     if skipped_large_files > 0:
         assumptions.append(f"skips files > {max_indexable_bytes} bytes")
     if estimated_figures is not None:
@@ -5012,25 +5470,7 @@ async def start_index(request: IndexRequest, http_request: Request) -> IndexStat
                 ),
             )
     if requested_policy == "semantic":
-        # The operator's extraction prompt is the official extractor's template (D24). One
-        # the extractor cannot format is a config error to read on the System Prompts page,
-        # refused before the schema gate, the fence, and any staged generation.
-        try:
-            extraction_prompt_template(str(cfg.system_prompts.semantic_kg_extraction))
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=422,
-                detail={
-                    "code": "graph_extraction_prompt_invalid",
-                    "corpus_id": request.repo_id,
-                    "message": str(exc),
-                    "operator_hint": (
-                        "System Prompts > Semantic KG Extraction must keep the {schema} and "
-                        "{text} placeholders the official extractor fills; edit it or reset "
-                        "it to the default, then start the run again."
-                    ),
-                },
-            ) from exc
+        _require_semantic_extraction_prompt(cfg, request.repo_id)
     await require_approved_graph_schema(
         corpus,
         cfg,

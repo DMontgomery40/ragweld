@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert';
 import test from 'node:test';
-import { assertPrivateNativeConfig, assertPrivateNativeTargets, type NativeFixtureConfig } from '../e2e/exhaustive/native_cost_fixture.ts';
+import { assertPrivateNativeConfig, assertPrivateNativeTargets, privateNativeChildEnv, type NativeFixtureConfig } from '../e2e/exhaustive/native_cost_fixture.ts';
 
 const env = { EXHAUSTIVE_API_BASE_URL: 'http://127.0.0.1:58123/api', PLAYWRIGHT_WEB_BASE_URL: 'http://127.0.0.1:5196/web' };
 const cwd = '/var/tmp/native-fixture';
@@ -23,6 +23,33 @@ test('native fixtures require explicit private API and browser targets before se
   for (const dir of ['/opt/ragweld', '/Users/davidmontgomery/ragweld', '/var/tmp/../../opt/ragweld']) {
     assert.throws(() => assertPrivateNativeTargets(env, dir));
   }
+});
+
+test('private child environments exclude PostgreSQL overrides without changing the parent', () => {
+  const overrides = {
+    POSTGRES_DSN: 'postgresql://foreign.invalid:5432/operator',
+    POSTGRES_HOST: 'foreign.invalid', POSTGRES_PORT: '5432', POSTGRES_DB: 'operator',
+    POSTGRES_USER: 'operator', POSTGRES_PASSWORD: 'fixture-only-foreign-value',
+    POSTGRES_FUTURE_OVERRIDE: 'future application override',
+    PGHOST: 'foreign.invalid', PGHOSTADDR: '192.0.2.1', PGPORT: '5432', PGDATABASE: 'operator',
+    PGUSER: 'operator', PGPASSWORD: 'fixture-only-foreign-value',
+    PGPASSFILE: '/nonexistent/foreign-pgpass', PGSERVICE: 'operator', PGSERVICEFILE: '/nonexistent/pg-service',
+    PGOPTIONS: '-c search_path=operator', PG_FUTURE_OVERRIDE: 'future driver override',
+  };
+  for (const additions of [{}, ...Object.entries(overrides).map(([key, value]) => ({ [key]: value })), overrides]) {
+    const parent = {
+      ...env, ...additions, PYTHONPATH: '/foreign/imports',
+      RAGWELD_TEST_CONFIG_PATH: `${cwd}/fixture.json`, NATIVE_FIXTURE_MARKER: 'preserved',
+    };
+    const before = structuredClone(parent);
+    const child = privateNativeChildEnv(parent, cwd);
+    assert.deepEqual(child, {
+      ...env, PYTHONPATH: cwd, RAGWELD_TEST_CONFIG_PATH: `${cwd}/fixture.json`, NATIVE_FIXTURE_MARKER: 'preserved',
+    });
+    assert.deepEqual(parent, before, 'the parent process environment remains unchanged');
+  }
+  assert.throws(() => privateNativeChildEnv({ ...env, EXHAUSTIVE_API_BASE_URL: 'http://127.0.0.1:58012/api' }, cwd));
+  assert.throws(() => privateNativeChildEnv(env, '/opt/ragweld'));
 });
 
 test('resolved config rejects live dependencies, gateways, and telemetry before fixture creation', () => {

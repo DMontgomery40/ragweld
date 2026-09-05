@@ -268,6 +268,7 @@ def main(output_path: Path | None = None) -> None:
             GraphSchemaProposalFailureDetail,
             GraphSchemaProposalFailureResponse,
             GraphSchemaProposalRequest,
+            GraphSchemaProposalState,
             GraphSchemaSample,
             IndexDeletionIncompleteDetail,
             IndexDeletionIncompleteResponse,
@@ -337,6 +338,8 @@ def main(output_path: Path | None = None) -> None:
             ConfigRegistryResponse,
             # Domain models - Corpora
             Corpus,
+            CorpusAlreadyIndexedDetail,
+            CorpusAlreadyIndexedResponse,
             CorpusCreateRequest,
             # Domain models - Reranker training eval
             CorpusEvalProfile,
@@ -572,6 +575,7 @@ def main(output_path: Path | None = None) -> None:
         GraphSchemaProposalFailureDetail,
         GraphSchemaProposalFailureResponse,
         GraphSchemaProposalRequest,
+        GraphSchemaProposalState,
         GraphExtractionTelemetry,
         GraphResolutionTelemetry,
         GraphCommunityTelemetry,
@@ -601,6 +605,8 @@ def main(output_path: Path | None = None) -> None:
         MCPStatusResponse,
         MCPToolInfo,
         Corpus,
+        CorpusAlreadyIndexedDetail,
+        CorpusAlreadyIndexedResponse,
         CorpusCreateRequest,
         CorpusUpdateRequest,
         CorpusStats,

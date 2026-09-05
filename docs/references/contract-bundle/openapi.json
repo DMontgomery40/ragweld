@@ -4422,6 +4422,59 @@
         "title": "Corpus",
         "type": "object"
       },
+      "CorpusAlreadyIndexedDetail": {
+        "description": "Conditional cleanup refused a corpus whose index completed (HTTP 409).",
+        "properties": {
+          "code": {
+            "const": "corpus_already_indexed",
+            "default": "corpus_already_indexed",
+            "title": "Code",
+            "type": "string"
+          },
+          "corpus_id": {
+            "description": "Corpus preserved by conditional cleanup",
+            "title": "Corpus Id",
+            "type": "string"
+          },
+          "last_indexed": {
+            "description": "Index timestamp read under the corpus write lock",
+            "format": "date-time",
+            "title": "Last Indexed",
+            "type": "string"
+          },
+          "message": {
+            "description": "Stable, non-sensitive conflict summary",
+            "title": "Message",
+            "type": "string"
+          },
+          "operator_hint": {
+            "description": "What the operator can do next",
+            "title": "Operator Hint",
+            "type": "string"
+          }
+        },
+        "required": [
+          "corpus_id",
+          "last_indexed",
+          "message",
+          "operator_hint"
+        ],
+        "title": "CorpusAlreadyIndexedDetail",
+        "type": "object"
+      },
+      "CorpusAlreadyIndexedResponse": {
+        "description": "FastAPI response envelope for an indexed corpus skipped by cleanup.",
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/CorpusAlreadyIndexedDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "CorpusAlreadyIndexedResponse",
+        "type": "object"
+      },
       "CorpusCreateRequest": {
         "description": "Request to create a new corpus.",
         "properties": {
@@ -8220,9 +8273,22 @@
       "GraphExtractionTelemetry": {
         "properties": {
           "attempted_chunks": {
+            "description": "In checkpoint_v1, chunks admitted inside the extraction semaphore, including reuse.",
             "minimum": 0.0,
             "title": "Attempted Chunks",
             "type": "integer"
+          },
+          "cancelled_chunks": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancelled Chunks"
           },
           "extracted_entities": {
             "minimum": 0.0,
@@ -8244,6 +8310,46 @@
             "title": "Llm Model Alias",
             "type": "string"
           },
+          "outcome_version": {
+            "default": "whole_file_v0",
+            "description": "Historical file aggregates or measured durable per-chunk outcomes; HTTP attempts belong to native census.",
+            "enum": [
+              "whole_file_v0",
+              "checkpoint_v1"
+            ],
+            "title": "Outcome Version",
+            "type": "string"
+          },
+          "progress_owner_run_id": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{32}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Progress Owner Run Id"
+          },
+          "progress_sequence": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Progress Sequence",
+            "type": "integer"
+          },
+          "reused_chunks": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reused Chunks"
+          },
           "selected_chunks": {
             "minimum": 0.0,
             "title": "Selected Chunks",
@@ -8255,6 +8361,7 @@
             "type": "integer"
           },
           "succeeded_chunks": {
+            "description": "In checkpoint_v1, durable reusable successes, including reused checkpoints.",
             "minimum": 0.0,
             "title": "Succeeded Chunks",
             "type": "integer"
@@ -8263,6 +8370,18 @@
             "minimum": 0.0,
             "title": "Truncated Chunks",
             "type": "integer"
+          },
+          "unfinished_chunks": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unfinished Chunks"
           },
           "worker_seconds": {
             "default": 0.0,
@@ -8811,6 +8930,41 @@
           }
         },
         "title": "GraphSchemaProposalRequest",
+        "type": "object"
+      },
+      "GraphSchemaProposalState": {
+        "description": "Read-only restoration; unavailable saved proposals never trigger generation.",
+        "properties": {
+          "corpus_id": {
+            "title": "Corpus Id",
+            "type": "string"
+          },
+          "proposal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GraphSchemaProposal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "enum": [
+              "current",
+              "missing",
+              "stale",
+              "ineligible"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "corpus_id",
+          "status"
+        ],
+        "title": "GraphSchemaProposalState",
         "type": "object"
       },
       "GraphSchemaSample": {
@@ -23654,6 +23808,18 @@
               "title": "Corpus Id",
               "type": "string"
             }
+          },
+          {
+            "description": "Delete only if the corpus is still unindexed under its write lock.",
+            "in": "query",
+            "name": "only_unindexed",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Delete only if the corpus is still unindexed under its write lock.",
+              "title": "Only Unindexed",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -23673,11 +23839,19 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/IndexRunConflictResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/IndexRunConflictResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CorpusAlreadyIndexedResponse"
+                    }
+                  ],
+                  "title": "Response 409 Delete Corpus Api Corpora  Corpus Id  Delete"
                 }
               }
             },
-            "description": "A live index run holds this corpus; stop it first."
+            "description": "A live index run holds this corpus, or conditional cleanup found a completed index."
           },
           "422": {
             "content": {
@@ -27410,6 +27584,57 @@
       }
     },
     "/api/index/{corpus_id}/graph-schema/proposal": {
+      "get": {
+        "description": "Read a current saved proposal; never initialize accounting or generate one.",
+        "operationId": "get_graph_schema_proposal_api_index__corpus_id__graph_schema_proposal_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "corpus_id",
+            "required": true,
+            "schema": {
+              "title": "Corpus Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GraphSchemaProposalState"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyUnavailableResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Get Graph Schema Proposal",
+        "tags": [
+          "index"
+        ]
+      },
       "post": {
         "operationId": "propose_graph_schema_api_index__corpus_id__graph_schema_proposal_post",
         "parameters": [
@@ -30133,6 +30358,18 @@
               "title": "Corpus Id",
               "type": "string"
             }
+          },
+          {
+            "description": "Delete only if the corpus is still unindexed under its write lock.",
+            "in": "query",
+            "name": "only_unindexed",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Delete only if the corpus is still unindexed under its write lock.",
+              "title": "Only Unindexed",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -30152,11 +30389,19 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/IndexRunConflictResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/IndexRunConflictResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CorpusAlreadyIndexedResponse"
+                    }
+                  ],
+                  "title": "Response 409 Delete Repo Api Repos  Corpus Id  Delete"
                 }
               }
             },
-            "description": "A live index run holds this corpus; stop it first."
+            "description": "A live index run holds this corpus, or conditional cleanup found a completed index."
           },
           "422": {
             "content": {

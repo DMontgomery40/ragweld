@@ -21,6 +21,7 @@ import {
   useRuntimeCapabilities,
 } from '@/hooks';
 import { useRepoStore } from '@/stores/useRepoStore';
+import { useConfigStore } from '@/stores/useConfigStore';
 import { LiveTerminal, type LiveTerminalHandle } from '@/components/LiveTerminal/LiveTerminal';
 import { RepositoryConfig } from '@/components/RAG/RepositoryConfig';
 import { SyntheticCallout } from '@/components/RAG/SyntheticCallout';
@@ -232,6 +233,7 @@ export function IndexingSubtab() {
   const schemaProposalReasoningId = useId();
   const { api } = useAPI();
   const { config, flushPendingPatches } = useConfig();
+  const persistedConfig = useConfigStore((state) => state.persisted);
   const { capabilities: runtimeCapabilities } = useRuntimeCapabilities();
   const { activeRepo, repos, loadRepos, setActiveRepo } = useRepoStore();
   const {
@@ -580,10 +582,21 @@ export function IndexingSubtab() {
 
   // Invalidate displayed and in-flight proposals when their sampling/configuration
   // context changes. The API independently validates the authoritative fingerprint.
-  const graphSchemaContextKey = JSON.stringify([
-    activeRepo, effectivePath, graphCorpusIsInternal,
-    config?.graph_indexing, config?.chunking, config?.tokenization, config?.indexing,
+  const graphSchemaConfigKey = JSON.stringify([
+    config?.graph_indexing, config?.chunking, config?.tokenization, config?.indexing, config?.chat?.litellm,
   ]);
+  const graphSchemaPersistedConfigKey = JSON.stringify([
+    persistedConfig?.graph_indexing, persistedConfig?.chunking, persistedConfig?.tokenization,
+    persistedConfig?.indexing, persistedConfig?.chat?.litellm,
+  ]);
+  const graphSchemaHasUnappliedChanges = graphSchemaConfigKey !== graphSchemaPersistedConfigKey;
+  const graphSchemaContextKey = JSON.stringify([
+    activeRepo, effectivePath, graphCorpusIsInternal, graphSchemaConfigKey,
+  ]);
+  const graphSchemaContextRef = useRef(graphSchemaContextKey);
+  graphSchemaContextRef.current = graphSchemaContextKey;
+  const [graphSchemaRestoreState, setGraphSchemaRestoreState] = useState<string | null>(null);
+  const graphSchemaCanRestore = Boolean(config && activeCorpus && semanticGraphActive && effectivePath === resolvedPath);
   useEffect(() => {
     graphSchemaRequestRef.current?.abort();
     graphSchemaRequestRef.current = null;
@@ -591,11 +604,47 @@ export function IndexingSubtab() {
     setGraphSchemaProposal(null);
     setGraphSchemaError(null);
     setGraphSchemaLoading(false);
+    setGraphSchemaRestoreState(null);
     return () => {
       graphSchemaRequestRef.current?.abort();
       graphSchemaRequestRef.current = null;
     };
   }, [graphSchemaContextKey]);
+
+  useEffect(() => {
+    const rid = String(activeRepo || '').trim();
+    if (!rid || !graphSchemaCanRestore) return;
+    // The GET validates persisted server settings. A local edit invalidates
+    // review immediately, but cannot be restored until Apply or Discard makes
+    // the draft agree with the acknowledged configuration again.
+    if (graphSchemaHasUnappliedChanges) {
+      setGraphSchemaRestoreState('Saved schema review is paused while these settings have unapplied changes.');
+      return;
+    }
+    // An explicit Generate can be flushing its own staged settings. That save
+    // acknowledgment must not let a read-only restore replace its controller.
+    if (graphSchemaRequestRef.current) return;
+    setGraphSchemaRestoreState(null);
+    const controller = new AbortController();
+    graphSchemaRequestRef.current = controller;
+    void indexingApi.getGraphSchemaProposal(rid, controller.signal).then((saved) => {
+      if (controller.signal.aborted || graphSchemaRequestRef.current !== controller
+        || graphSchemaContextRef.current !== graphSchemaContextKey || saved.corpus_id !== rid) return;
+      setGraphSchemaProposal(saved.status === 'current' ? saved.proposal ?? null : null);
+      setGraphSchemaRestoreState(saved.status === 'missing' ? 'No saved schema. Generate one to review.'
+        : saved.status === 'stale' ? 'The saved schema is out of date. Generate one to review.' : null);
+    }).catch((error: unknown) => {
+      if (controller.signal.aborted || graphSchemaRequestRef.current !== controller
+        || graphSchemaContextRef.current !== graphSchemaContextKey) return;
+      setGraphSchemaError({ message: errorDetail(error), operatorHint: 'The saved schema could not be read. Try again before indexing.' });
+    }).finally(() => {
+      if (graphSchemaRequestRef.current === controller) graphSchemaRequestRef.current = null;
+    });
+    return () => {
+      controller.abort();
+      if (graphSchemaRequestRef.current === controller) graphSchemaRequestRef.current = null;
+    };
+  }, [activeRepo, graphSchemaCanRestore, graphSchemaContextKey, graphSchemaHasUnappliedChanges]);
 
   useEffect(() => {
     activeRepoRef.current = String(activeRepo || '').trim();
@@ -1163,6 +1212,7 @@ export function IndexingSubtab() {
     graphSchemaRequestRef.current = controller;
     setGraphSchemaLoading(true);
     setGraphSchemaError(null);
+    setGraphSchemaRestoreState(null);
     const forceRefresh = Boolean(graphSchemaProposal);
     try {
       await flushPendingPatches();
@@ -1664,15 +1714,24 @@ export function IndexingSubtab() {
                   gap: '4px 14px',
                 }}
               >
-                <span>
-                  Chunks: {formatNumber(graphRunMetadata.extraction.selected_chunks)} selected /{' '}
-                  {formatNumber(graphRunMetadata.extraction.attempted_chunks)} attempted /{' '}
-                  {formatNumber(graphRunMetadata.extraction.succeeded_chunks)} succeeded
-                </span>
-                <span>
-                  Extraction failures: {formatNumber(graphRunMetadata.extraction.failed_chunks)} failed /{' '}
-                  {formatNumber(graphRunMetadata.extraction.truncated_chunks)} truncated
-                </span>
+                <span data-testid="graph-selected-chunks">Selected chunks: {formatNumber(graphRunMetadata.extraction.selected_chunks)}</span>
+                {graphRunMetadata.extraction.outcome_version === 'checkpoint_v1' ? <>
+                  <span data-testid="graph-attempted-chunks">Attempted (admitted): {formatNumber(graphRunMetadata.extraction.attempted_chunks)}</span>
+                  <span data-testid="graph-reusable-chunks">Reusable successes: {formatNumber(graphRunMetadata.extraction.succeeded_chunks)}</span>
+                  <span data-testid="graph-reused-chunks">Reused: {formatNumber(graphRunMetadata.extraction.reused_chunks ?? 0)}</span>
+                  <span data-testid="graph-failed-chunks">Failed: {formatNumber(graphRunMetadata.extraction.failed_chunks)}</span>
+                  <span data-testid="graph-cancelled-chunks">Cancelled: {formatNumber(graphRunMetadata.extraction.cancelled_chunks ?? 0)}</span>
+                  <span data-testid="graph-unfinished-chunks">Unfinished: {formatNumber(graphRunMetadata.extraction.unfinished_chunks ?? 0)}</span>
+                  <span>Reuse adds no native request or spend. Successful checkpoints do not publish a failed run.</span>
+                </> : graphRunMetadata.policy === 'semantic' ? <span data-testid="graph-historical-outcomes">
+                  Detailed chunk outcomes unavailable for this historical run. File aggregates recorded{' '}
+                  {formatNumber(graphRunMetadata.extraction.attempted_chunks)} attempted and{' '}
+                  {formatNumber(graphRunMetadata.extraction.failed_chunks)} failed; these are not measured dispatches.
+                </span> : <span>
+                  Code graph: {formatNumber(graphRunMetadata.extraction.succeeded_chunks)} succeeded /{' '}
+                  {formatNumber(graphRunMetadata.extraction.failed_chunks)} failed
+                </span>}
+                <span>Truncated: {formatNumber(graphRunMetadata.extraction.truncated_chunks)}</span>
                 <span>Entities extracted: {formatNumber(graphRunMetadata.extraction.extracted_entities)}</span>
                 <span>Entities resolved: {formatNumber(graphRunMetadata.resolution.resolved_nodes)}</span>
                 <span>Entities merged: {formatNumber(graphRunMetadata.resolution.merged_nodes)}</span>
@@ -3735,6 +3794,9 @@ export function IndexingSubtab() {
                       </span>
                     </div>
 
+                    {graphSchemaRestoreState ? <div data-testid="graph-schema-restore-state" style={{ color: 'var(--fg-muted)', fontSize: 12 }}>
+                      {graphSchemaRestoreState}
+                    </div> : null}
                     {graphSchemaError ? (
                       <div data-testid="graph-schema-error" role="alert" style={{ color: 'var(--err)', fontSize: 12 }}>
                         <div>{graphSchemaError.message}</div>

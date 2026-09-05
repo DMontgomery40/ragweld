@@ -11,6 +11,9 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
+import pytest
+
+from server.chat.prompt_budget import count_tokens
 from server.indexing.chunker import Chunker
 from server.indexing.estimate import (
     _MODEL_RELATIVE_ERROR,
@@ -294,3 +297,147 @@ def test_the_model_load_is_not_charged_to_the_sampling_budget(tmp_path: Path) ->
     # single file IS ~3.3% here, so assert the mechanism rather than a magic number.
     assert sample.budget_exhausted is True
     assert sample.sampled_files == 1
+
+
+@pytest.mark.parametrize("strategy", ["whitespace", "tiktoken", "huggingface", "estimate_only"])
+@pytest.mark.parametrize("body", [
+    "orbittrajectorytelemetry" * 200,
+    "月面探査通信記録" * 300,
+    "mission\t   telemetry\n\n" * 200,
+], ids=["unspaced_latin", "unspaced_cjk", "mixed_whitespace"])
+def test_generation_tokens_measure_chunk_text_independently_of_indexing_units(
+    tmp_path: Path, strategy: str, body: str,
+) -> None:
+    cfg = TriBridConfig()
+    cfg.chunking.chunking_strategy = "fixed_chars"
+    cfg.chunking.chunk_overlap = 100
+    cfg.tokenization.strategy = "whitespace" if strategy == "estimate_only" else strategy
+    cfg.tokenization.estimate_only = strategy == "estimate_only"
+    if strategy == "huggingface":
+        from tokenizers import Tokenizer, models, pre_tokenizers
+        from transformers import PreTrainedTokenizerFast
+
+        tokenizer = Tokenizer(models.WordLevel({"[UNK]": 0, "mission": 1}, unk_token="[UNK]"))
+        tokenizer.pre_tokenizer = pre_tokenizers.WhitespaceSplit()
+        location = tmp_path / "tokenizer"
+        PreTrainedTokenizerFast(tokenizer_object=tokenizer, unk_token="[UNK]").save_pretrained(location)
+        cfg.tokenization.hf_tokenizer_name = str(location)
+    document = tmp_path / "mission.txt"
+    document.write_text(body)
+    chunker = _chunker(cfg)
+    chunks = chunker.chunk_file(document.name, body)
+
+    sample = sample_corpus(files=_sized([document]), chunker=chunker)
+
+    assert sample.total_generation_tokens == sum(count_tokens(chunk.content) for chunk in chunks)
+    assert sample.total_tokens == sum(chunk.token_count for chunk in chunks)
+    assert sample.generation_tokens_low <= sample.total_generation_tokens <= sample.generation_tokens_high
+    if strategy == "whitespace" and not any(char.isspace() for char in body):
+        assert sample.total_generation_tokens > sample.total_tokens * 100
+
+
+def test_generation_token_sample_scales_uniform_files_without_changing_units(tmp_path: Path) -> None:
+    cfg = TriBridConfig()
+    cfg.tokenization.strategy = "whitespace"
+    body = "轨道通信数据" * 300
+    files = _write_many(tmp_path, 40, body)
+    one = sample_corpus(files=_sized(files[:1]), chunker=_chunker(cfg))
+    all_files = sample_corpus(files=_sized(files), chunker=_chunker(cfg))
+    assert all_files.sampled_files < len(files)
+    assert all_files.total_generation_tokens == one.total_generation_tokens * len(files)
+    assert all_files.total_generation_tokens > all_files.total_tokens * 100
+
+
+@pytest.mark.parametrize("body", [b"", b"\x00binary"])
+def test_non_indexable_text_has_zero_generation_tokens(tmp_path: Path, body: bytes) -> None:
+    document = tmp_path / "empty.txt"
+    document.write_bytes(body)
+    sample = sample_corpus(files=_sized([document]), chunker=_chunker())
+    assert sample.total_generation_tokens == sample.generation_tokens_low == sample.generation_tokens_high == 0
+    assert CorpusSample.empty().total_generation_tokens == 0
+
+
+def test_generation_precision_is_separate_from_uniform_indexing_units(tmp_path: Path) -> None:
+    cfg = TriBridConfig()
+    cfg.tokenization.strategy = "whitespace"
+    cfg.chunking.chunking_strategy = "fixed_chars"
+    files = []
+    for index in range(48):
+        path = tmp_path / f"doc_{index:02d}.txt"
+        path.write_text(("a" * 800) if index % 2 else ("qz9!x7#v2@" * 80))
+        files.append(path)
+    sample = sample_corpus(files=_sized(files), chunker=_chunker(cfg), max_relative_error=0.4)
+    assert sample.sufficient is True
+    assert sample.relative_error == _MODEL_RELATIVE_ERROR
+    assert sample.generation_sufficient is False
+    assert "generation-token" in sample.generation_insufficient_reason
+
+
+@pytest.mark.parametrize("suffix", ["txt", "pdf"])
+def test_full_semantic_request_sample_recounts_changed_prompt_without_a_result_cache(
+    tmp_path: Path, suffix: str,
+) -> None:
+    from server.api.index import _semantic_kg_input_tokens
+    from tests.unit.test_index_estimate_semantic_kg import LUNA, _cost_schema
+
+    path = tmp_path / f"mission.{suffix}"
+    body = "Mission telemetry reports the lunar orbit.\n" * 80
+    if suffix == "pdf":
+        path.write_bytes(build_pdf([["Mission telemetry reports the lunar orbit."] for _ in range(4)]))
+    else:
+        path.write_text(body)
+    templates = ["{schema}\n{text}", "{schema}\n{text}\nRepeated: {text!r}\n{text}\n{examples!r}"]
+    samples = []
+    for template in templates:
+        sample = sample_corpus(
+            files=_sized([path]), chunker=_chunker(),
+            semantic_input_counter=lambda texts, template=template: _semantic_kg_input_tokens(
+                texts, alias=LUNA, schema=_cost_schema(), prompt_template=template,
+            ),
+        )
+        samples.append(sample)
+        assert sample.semantic_input_tokens_low <= sample.semantic_input_tokens <= sample.semantic_input_tokens_high
+    assert samples[0].total_tokens == samples[1].total_tokens
+    assert samples[0].total_generation_tokens == samples[1].total_generation_tokens
+    assert samples[0].semantic_input_tokens < samples[1].semantic_input_tokens
+    assert sample_corpus(files=_sized([path]), chunker=_chunker()).semantic_input_tokens is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_postgres
+@pytest.mark.parametrize("semantic_enabled", [False, True], ids=["graph_off", "semantic_graph"])
+async def test_generation_precision_only_refuses_the_relevant_semantic_forecast(
+    tmp_path: Path, semantic_enabled: bool,
+) -> None:
+    import asyncio
+
+    from server.api.index import _estimate_index_with_config
+    from server.config import load_config
+    from server.indexing.estimate import warm_sampler
+    from server.models.index import IndexRequest
+
+    cfg = load_config().model_copy(deep=True)
+    warm_cfg = TriBridConfig()
+    await asyncio.to_thread(warm_sampler, _chunker(warm_cfg))
+    cfg.graph_indexing.enabled = semantic_enabled
+    cfg.graph_indexing.build_code_graph = False
+    cfg.graph_indexing.semantic_kg_llm_model = "openai.gpt-5.6-luna"
+    cfg.indexing.skip_dense = True
+    cfg.indexing.figures.enabled = False
+    cfg.indexing.estimate.max_relative_error = 0.4
+    cfg.chunking.chunking_strategy = "fixed_chars"
+    cfg.tokenization.strategy = "whitespace"
+    for index in range(48):
+        (tmp_path / f"doc_{index:02d}.txt").write_text(
+            ("a" * 800) if index % 2 else ("qz9!x7#v2@" * 80)
+        )
+    estimate = await _estimate_index_with_config(
+        IndexRequest(repo_id="pytest_generation_precision", repo_path=str(tmp_path)), cfg,
+    )
+    assert estimate.estimated_total_chunks == 48
+    assert estimate.embedding_cost_usd == 0
+    if semantic_enabled:
+        assert estimate.semantic_kg_cost_usd is None and estimate.total_cost_usd is None
+        assert any("cost unavailable" in detail and "generation-token" in detail for detail in estimate.assumptions)
+    else:
+        assert estimate.total_cost_usd == 0

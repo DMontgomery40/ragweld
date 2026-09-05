@@ -3,7 +3,7 @@
 import { createHash } from 'node:crypto';
 import { strict as assert } from 'node:assert';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
-import { activateCorpusInBrowser } from './corpus_fixture';
+import { acceptanceCorpusPath, activateCorpusInBrowser, indexCorpus, patchCorpusConfigSection } from './corpus_fixture';
 
 type RepoStoreModule = typeof import('../../../src/stores/useRepoStore');
 type ConfigStoreModule = typeof import('../../../src/stores/useConfigStore');
@@ -432,6 +432,202 @@ async function expectOwnedRegistry(request: APIRequestContext, corpusIds: string
   expect(rows.map((row) => row.corpus_id).sort()).toEqual([...corpusIds].sort());
 }
 
+async function prepareRegistryIndex(request: APIRequestContext, corpus: string): Promise<void> {
+  expect((await request.patch(`${CONTROL}/api/corpora/${corpus}`, {
+    data: { path: acceptanceCorpusPath() },
+  })).ok()).toBe(true);
+  await patchCorpusConfigSection(request, corpus, 'embedding', { embedding_backend: 'deterministic' });
+  await patchCorpusConfigSection(request, corpus, 'generation', { enrich_disabled: true });
+  await patchCorpusConfigSection(request, corpus, 'graph_indexing', { enabled: false, build_code_graph: false });
+  await patchCorpusConfigSection(request, corpus, 'reranking', { reranker_mode: 'none' });
+}
+
+async function registryIndexTime(page: Page, moduleUrl: string, corpus: string): Promise<string | null> {
+  return page.evaluate(({ url, id }) => {
+    const { useRepoStore } = window.__graphOrderingModules![url].module as RepoStoreModule;
+    return useRepoStore.getState().getRepoByName(id)?.last_indexed ?? null;
+  }, { url: moduleUrl, id: corpus });
+}
+
+async function cleanupRegistryIndex(request: APIRequestContext, corpora: string[]): Promise<void> {
+  // Indexed fixtures own Qdrant generations as well as graph rows; the real delete
+  // endpoint must retire those before the scheduler's registry-only cleanup.
+  for (const corpus of corpora) {
+    const response = await request.delete(`${CONTROL}/api/corpora/${corpus}`);
+    expect([200, 204, 404]).toContain(response.status());
+  }
+  expect((await request.post(`${CONTROL}/__graph_fixture__/cleanup`)).ok()).toBe(true);
+}
+
+for (const surface of ['registry', 'sources'] as const) {
+  test(`${surface} opening refreshes a corpus indexed outside this browser session`, async ({ page, request, baseURL }) => {
+    test.setTimeout(6 * 60 * 1000);
+    const seeded = await request.post(`${CONTROL}/__graph_fixture__/seed`);
+    const corpora = (await seeded.json()).corpora as string[];
+    const corpus = corpora[0];
+    try {
+      await prepareRegistryIndex(request, corpus);
+      await activateCorpusInBrowser(page, corpus);
+      await page.goto(new URL(`chat?subtab=ui&corpus=${corpus}`, baseURL).toString());
+      await expect(page.getByTestId('source-dropdown-trigger')).toBeVisible();
+      const moduleUrl = await loadedModuleUrl(page, 'src/stores/useRepoStore.ts');
+      await expect.poll(() => currentRepoState(page, moduleUrl)).toMatchObject({ loading: false, initialized: true });
+      expect(await registryIndexTime(page, moduleUrl, corpus)).toBeNull();
+
+      await indexCorpus(request, corpus, acceptanceCorpusPath());
+      const current = await request.get(`${CONTROL}/api/corpora/${corpus}`);
+      const indexedAt = (await current.json()).last_indexed as string;
+      expect(indexedAt).toBeTruthy();
+      // Opening a control must reconcile the mounted app; a document navigation
+      // would hide the stale-cache bug by reinitializing the store.
+      expect(await registryIndexTime(page, moduleUrl, corpus)).toBeNull();
+      if (surface === 'registry') {
+        await page.getByTestId('topbar-corpus').click();
+        await expect(page.getByTestId(`corpus-row-${corpus}`)).not.toContainText('Never indexed');
+      } else {
+        await page.getByTestId('source-dropdown-trigger').click();
+        const row = page.locator('label').filter({ has: page.getByTestId(`source-corpus-${corpus}`) });
+        await expect(row).not.toContainText('not indexed');
+        await expect(row).toContainText('indexed');
+        await expect(page.getByTestId('cleanup-unindexed-corpora')).toContainText('(1)');
+      }
+      await expect.poll(() => registryIndexTime(page, moduleUrl, corpus)).toBe(indexedAt);
+      expect(new URL(page.url()).searchParams.get('corpus')).toBe(corpus);
+      await expect(page.locator('vite-error-overlay')).toHaveCount(0);
+    } finally {
+      await cleanupRegistryIndex(request, corpora);
+    }
+  });
+}
+
+test('streamed index completion refreshes the shared registry before any corpus control opens', async ({ page, request, baseURL }) => {
+  test.setTimeout(6 * 60 * 1000);
+  const seeded = await request.post(`${CONTROL}/__graph_fixture__/seed`);
+  const corpora = (await seeded.json()).corpora as string[];
+  const corpus = corpora[0];
+  try {
+    await prepareRegistryIndex(request, corpus);
+    await activateCorpusInBrowser(page, corpus);
+    await page.goto(new URL(`rag?subtab=indexing&corpus=${corpus}`, baseURL).toString());
+    await expect(page.getByTestId('index-now-button')).toBeEnabled();
+    const moduleUrl = await loadedModuleUrl(page, 'src/stores/useRepoStore.ts');
+    expect(await registryIndexTime(page, moduleUrl, corpus)).toBeNull();
+    await page.getByTestId('index-now-button').click();
+    await expect(page.getByTestId('confirm-dialog')).toBeVisible();
+    await page.getByTestId('confirm-dialog-accept').click();
+    await expect.poll(async () => {
+      const response = await request.get(`${CONTROL}/api/index/${corpus}/status`);
+      return (await response.json()).status;
+    }, { timeout: 5 * 60 * 1000 }).toBe('complete');
+    await expect.poll(() => registryIndexTime(page, moduleUrl, corpus), { timeout: 30_000 }).not.toBeNull();
+    await page.getByTestId('topbar-corpus').click();
+    await expect(page.getByTestId(`corpus-row-${corpus}`)).not.toContainText('Never indexed');
+  } finally {
+    await cleanupRegistryIndex(request, corpora);
+  }
+});
+
+for (const preflight of ['failed', 'indexed-after-opening'] as const) {
+  test(`unindexed cleanup uses a fresh registry snapshot: ${preflight}`, async ({ page, request, baseURL }) => {
+    test.setTimeout(6 * 60 * 1000);
+    const seeded = await request.post(`${CONTROL}/__graph_fixture__/seed`);
+    const corpora = (await seeded.json()).corpora as string[];
+    const corpus = corpora[0];
+    const deletes: string[] = [];
+    try {
+      await prepareRegistryIndex(request, corpus);
+      await activateCorpusInBrowser(page, corpus);
+      await page.goto(new URL(`chat?subtab=ui&corpus=${corpus}`, baseURL).toString());
+      await page.getByTestId('source-dropdown-trigger').click();
+      await expect(page.getByTestId('cleanup-unindexed-corpora')).toContainText('(2)');
+      const moduleUrl = await loadedModuleUrl(page, 'src/stores/useRepoStore.ts');
+      await expect.poll(() => currentRepoState(page, moduleUrl)).toMatchObject({ loading: false, initialized: true });
+      if (preflight === 'indexed-after-opening') {
+        await indexCorpus(request, corpus, acceptanceCorpusPath());
+        expect(await registryIndexTime(page, moduleUrl, corpus)).toBeNull();
+      } else {
+        await failAfterCapture(request, '/api/corpora');
+      }
+      page.on('request', (req) => {
+        if (req.method() === 'DELETE' && new URL(req.url()).pathname.startsWith('/api/corpora/')) deletes.push(req.url());
+      });
+      await page.getByTestId('cleanup-unindexed-corpora').click();
+      await expect(page.getByTestId('cleanup-unindexed-corpora')).toContainText('CONFIRM DELETE');
+      await page.getByTestId('cleanup-unindexed-corpora').click();
+      if (preflight === 'failed') {
+        await expect.poll(() => currentRepoState(page, moduleUrl)).toMatchObject({
+          loading: false, error: 'Failed to load corpora',
+        });
+        expect(deletes).toEqual([]);
+        await expectOwnedRegistry(request, corpora);
+      } else {
+        await expect.poll(() => currentRepoState(page, moduleUrl)).toMatchObject({ repos: [corpus], loading: false });
+        expect(deletes.map((url) => new URL(url).pathname)).toEqual([`/api/corpora/${corpora[1]}`]);
+        await expectOwnedRegistry(request, [corpus]);
+        expect(await registryIndexTime(page, moduleUrl, corpus)).toBeTruthy();
+      }
+    } finally {
+      await cleanupRegistryIndex(request, corpora);
+    }
+  });
+}
+
+test('cleanup preserves a corpus indexed after its preflight response was captured', async ({ page, request, baseURL }) => {
+  test.setTimeout(6 * 60 * 1000);
+  const seeded = await request.post(`${CONTROL}/__graph_fixture__/seed`);
+  const corpora = (await seeded.json()).corpora as string[];
+  const corpus = corpora[0];
+  try {
+    await prepareRegistryIndex(request, corpus);
+    await activateCorpusInBrowser(page, corpus);
+    await page.goto(new URL(`chat?subtab=ui&corpus=${corpus}`, baseURL).toString());
+    await expect(page.getByTestId('source-dropdown-trigger')).toBeVisible();
+    const moduleUrl = await loadedModuleUrl(page, 'src/stores/useRepoStore.ts');
+    await expect.poll(() => currentRepoState(page, moduleUrl)).toMatchObject({ loading: false, initialized: true });
+    const preflight = await hold(request, '/api/corpora');
+    await page.evaluate((url) => {
+      const { useRepoStore } = window.__graphOrderingModules![url].module as RepoStoreModule;
+      const target = window as typeof window & {
+        __registryCleanup?: { deleted: string[] | null; error: string | null };
+      };
+      target.__registryCleanup = { deleted: null, error: null };
+      void useRepoStore.getState().deleteUnindexedCorpora().then((deleted) => {
+        target.__registryCleanup = { deleted, error: null };
+      }).catch((error: unknown) => {
+        target.__registryCleanup = { deleted: null, error: error instanceof Error ? error.message : String(error) };
+      });
+    }, moduleUrl);
+    await captured(request, preflight);
+    // Deliver the original unindexed snapshot only after a real index commits.
+    // The delete transaction must reject that now-obsolete cleanup candidate.
+    await indexCorpus(request, corpus, acceptanceCorpusPath());
+    const current = await request.get(`${CONTROL}/api/corpora/${corpus}`);
+    const indexedAt = (await current.json()).last_indexed as string;
+    expect(indexedAt).toBeTruthy();
+    const refusal = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === 'DELETE' && url.pathname === `/api/corpora/${corpus}`;
+    });
+    await release(request, page, preflight);
+    const refused = await refusal;
+    expect(new URL(refused.url()).searchParams.get('only_unindexed')).toBe('true');
+    expect(refused.status()).toBe(409);
+    expect(await refused.json()).toMatchObject({
+      detail: { code: 'corpus_already_indexed', corpus_id: corpus, last_indexed: indexedAt },
+    });
+    await expect.poll(() => page.evaluate(() => (window as typeof window & {
+      __registryCleanup: { deleted: string[] | null; error: string | null };
+    }).__registryCleanup)).toEqual({ deleted: [corpora[1]], error: null });
+    await expectOwnedRegistry(request, [corpus]);
+    expect(await registryIndexTime(page, moduleUrl, corpus)).toBe(indexedAt);
+    await page.getByTestId('source-dropdown-trigger').click();
+    await expect(page.getByTestId('cleanup-unindexed-corpora')).toHaveCount(0);
+    await expect(page.locator('label').filter({ has: page.getByTestId(`source-corpus-${corpus}`) })).not.toContainText('not indexed');
+  } finally {
+    await cleanupRegistryIndex(request, corpora);
+  }
+});
+
 test('a held pre-delete registry response cannot resurrect the deleted last corpus', async ({ page, request, baseURL }, testInfo) => {
   const seeded = await request.post(`${CONTROL}/__graph_fixture__/seed`);
   const [corpus, other] = (await seeded.json()).corpora as string[];
@@ -663,6 +859,9 @@ for (const mutation of ['add', 'update', 'delete', 'cleanup'] as const) {
         const reservedResponse = await request.post(`${CONTROL}/__graph_fixture__/reserve-corpus`);
         expect(reservedResponse.ok()).toBe(true);
         const reserved = await reservedResponse.json() as { corpus: string; path: string };
+        // Cleanup now verifies its candidates before sending any DELETE. Let
+        // that read settle before exercising the post-mutation failure chain.
+        const preflight = mutation === 'cleanup' ? await hold(request, '/api/corpora') : null;
         const older = await hold(request, '/api/corpora');
         const failingResponse = await request.post(`${CONTROL}/__graph_fixture__/fail-after-release`, {
           data: { path: '/api/corpora', query: null },
@@ -694,6 +893,10 @@ for (const mutation of ['add', 'update', 'delete', 'cleanup'] as const) {
             };
           });
         }, { url: moduleUrl, operation: mutation, corpus: corpora[0], created: reserved });
+        if (preflight) {
+          await captured(request, preflight);
+          await release(request, page, preflight);
+        }
         await captured(request, older);
 
         await page.evaluate((url) => {

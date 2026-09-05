@@ -97,6 +97,9 @@ def test_stateful_api_openapi_documents_typed_dependency_503() -> None:
             "DependencyUnavailableResponse",
             "IndexDeletionIncompleteResponse",
         },
+        ("/api/index/{corpus_id}/graph-schema/proposal", "get"): {
+            "DependencyUnavailableResponse",
+        },
         ("/api/index/{corpus_id}", "delete"): {
             "DependencyUnavailableResponse",
             "IndexDeletionIncompleteResponse",
@@ -187,6 +190,7 @@ REQUESTS = [
     ("POST", "/api/mcp/probe?corpus_id=missing", {"question": "How often is the Aurora salinity sensor array calibrated?"}),
     ("GET", "/api/config?corpus_id=missing", None),
     ("GET", "/api/config/validate?corpus_id=missing", None),
+    ("GET", "/api/index/missing/graph-schema/proposal", None),
     ("GET", "/api/graph/missing/stats", None),
     ("GET", "/api/lineage/current?corpus_id=missing", None),
     ("POST", "/api/feedback?corpus_id=missing", {"event_id": "outage-test", "signal": "thumbsup"}),
@@ -226,7 +230,7 @@ asyncio.run(main())
 
     assert result.returncode == 0, result.stdout + result.stderr
     rows = json.loads(result.stdout.strip().splitlines()[-1])
-    assert len(rows) == 19
+    assert len(rows) == 20
     for row in rows:
         assert row["status"] == 503, row
         detail = row["body"].get("detail")
@@ -350,7 +354,13 @@ def test_corpus_delete_409_names_the_run_that_holds_the_corpus() -> None:
         refs = (
             [body["$ref"]] if "$ref" in body else [item["$ref"] for item in body.get("anyOf", [])]
         )
-        assert {r.rsplit("/", 1)[-1] for r in refs} == {"IndexRunConflictResponse"}, (path, body)
+        assert {r.rsplit("/", 1)[-1] for r in refs} == {
+            "IndexRunConflictResponse", "CorpusAlreadyIndexedResponse"
+        }, (path, body)
+        guard = next(p for p in schema["paths"][path]["delete"]["parameters"] if p["name"] == "only_unindexed")
+        assert guard["in"] == "query" and not guard["required"]
+        assert guard["schema"]["type"] == "boolean"
+        assert guard["schema"]["default"] is False
 
     properties = schema["components"]["schemas"]["IndexRunConflictDetail"]["properties"]
     for field in ("run_id", "started_at", "phase", "stage"):
