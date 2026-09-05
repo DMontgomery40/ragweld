@@ -693,12 +693,6 @@ model_list:
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
-- model_name: ibm-granite.granite-4.1-8b
-  litellm_params:
-    model: openrouter/ibm-granite/granite-4.1-8b
-    num_retries: 0
-    max_retries: 0
-    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: ibm-granite.granite-4.2-8b
   litellm_params:
     model: openrouter/ibm-granite/granite-4.2-8b
@@ -732,6 +726,12 @@ model_list:
 - model_name: inclusionai.ling-3.0-flash-fin.free
   litellm_params:
     model: openrouter/inclusionai/ling-3.0-flash-fin:free
+    num_retries: 0
+    max_retries: 0
+    api_key: os.environ/OPENROUTER_API_KEY
+- model_name: inclusionai.ling-3.0-flash-sante.free
+  litellm_params:
+    model: openrouter/inclusionai/ling-3.0-flash-sante:free
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
@@ -1521,6 +1521,30 @@ model_list:
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
+- model_name: openai.gpt-6-astra
+  litellm_params:
+    model: openrouter/openai/gpt-6-astra
+    num_retries: 0
+    max_retries: 0
+    api_key: os.environ/OPENROUTER_API_KEY
+- model_name: openai.gpt-6-astra-pro
+  litellm_params:
+    model: openrouter/openai/gpt-6-astra-pro
+    num_retries: 0
+    max_retries: 0
+    api_key: os.environ/OPENROUTER_API_KEY
+- model_name: openai.gpt-6-astra-pro.batch
+  litellm_params:
+    model: openrouter/openai/gpt-6-astra-pro:batch
+    num_retries: 0
+    max_retries: 0
+    api_key: os.environ/OPENROUTER_API_KEY
+- model_name: openai.gpt-6-astra.batch
+  litellm_params:
+    model: openrouter/openai/gpt-6-astra:batch
+    num_retries: 0
+    max_retries: 0
+    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-audio
   litellm_params:
     model: openrouter/openai/gpt-audio
@@ -2007,9 +2031,9 @@ model_list:
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
-- model_name: qwen.qwen3.8-max
+- model_name: qwen.qwen3.8-max-0902
   litellm_params:
-    model: openrouter/qwen/qwen3.8-max
+    model: openrouter/qwen/qwen3.8-max-0902
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
