@@ -101,6 +101,8 @@ Your selected chat model is saved per conversation. On page load, the model pick
 
 Why this matters: if you pin a specific LiteLLM gateway alias for your conversations (for example, a production chat model that differs from the vision override), a refresh no longer silently drops you back to the default before the catalog finishes loading. The picker simply stays on your saved choice until the server confirms the option list.
 
+The picker reads a generation-scoped catalog: `/api/chat/models` filters to `GEN` capability, so embedding gateway aliases (for example `openai.text-embedding-3-small`) never appear as chat models even though they are rendered into the same LiteLLM config. See [Model catalog](../models.md).
+
 !!! tip "If the picker stays disabled"
     The picker enables once `/api/chat/models` responds. If it never does, check:
 

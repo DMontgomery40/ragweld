@@ -1,3 +1,4 @@
+```markdown
 # Quickstart
 
 <div class="grid chunk_summaries" markdown>
@@ -80,13 +81,15 @@ If readiness is failing, jump to [Troubleshooting](troubleshooting.md).
 
 ## 3) Confirm provider keys (optional but recommended)
 
-ragweld can run without every provider key, but many features (embeddings, generation, cloud reranking) require at least one provider configured.
+ragweld can run without every provider key, but many features (cloud embeddings, generation, cloud reranking) require the gateway to have an upstream configured.
 
 ```bash
-curl -sS "http://127.0.0.1:8012/api/secrets/check?keys=OPENAI_API_KEY,ANTHROPIC_API_KEY" | jq .
+curl -sS "http://127.0.0.1:58012/api/secrets/check?keys=LITELLM_API_KEY" | jq .
 ```
 
-You can also see this in the UI at **Admin → Secrets**.
+This checks the **app's gateway client key** (`LITELLM_API_KEY`) — presence only, never the value, and never upstream-provider readiness. Upstream provider keys (`OPENAI_API_KEY`, `OPENROUTER_API_KEY`, …) live **only** in the gateway's private `infra/litellm.env` (copy it from `infra/litellm.env.example`; `disabled` is not a working key) and are deliberately never loaded into the app process, so they are not registered secret checks.
+
+You can also see this in the UI at **Admin → Dependencies**.
 
 ## 4) Index your first corpus
 
@@ -159,3 +162,4 @@ When status becomes `complete`, you’re ready to search.
 - Learn what a **corpus** really means: [Corpus vs repo_id](../guides/corpus.md)
 - Understand the retrieval legs and tuning knobs: [Searching & answering](search.md)
 - Use the UI effectively: [UI tour](ui.md)
+

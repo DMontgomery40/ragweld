@@ -37,21 +37,26 @@
 
 ## Secrets Check
 
+`/api/secrets/check` reports **app secret presence only** — never values, never authentication success, never upstream-provider readiness. The registered checks are the app's own credentials; the only provider key they cover today is the gateway client key.
+
+!!! warning "Upstream provider keys are not app secret checks"
+    `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY` and `GOOGLE_API_KEY` belong **only** in the LiteLLM gateway's private `infra/litellm.env` (initialized from `infra/litellm.env.example` on a new install; `disabled` is not a working key). They are never loaded into the app process — `./start.sh` unsets them, the Compose API service blanks them, and importing `server/main.py` drops any inherited values — so asking `/api/secrets/check` about one of them answers `400` instead of pretending to verify the gateway's upstream credential.
+
 === "Python"
 ```python
 import httpx
-print(httpx.get("http://127.0.0.1:8012/api/secrets/check", params={"keys": "OPENAI_API_KEY,ANTHROPIC_API_KEY"}).json())
+print(httpx.get("http://127.0.0.1:58012/api/secrets/check", params={"keys": "LITELLM_API_KEY"}).json())
 ```
 
 === "curl"
 ```bash
-curl -sS "http://127.0.0.1:8012/api/secrets/check?keys=OPENAI_API_KEY,ANTHROPIC_API_KEY" | jq .
+curl -sS "http://127.0.0.1:58012/api/secrets/check?keys=LITELLM_API_KEY" | jq .
 ```
 
 === "TypeScript"
 ```typescript
 async function secrets() {
-  console.log(await (await fetch('/api/secrets/check?keys=OPENAI_API_KEY,ANTHROPIC_API_KEY')).json());
+  console.log(await (await fetch('/api/secrets/check?keys=LITELLM_API_KEY')).json());
 }
 ```
 
@@ -84,14 +89,20 @@ The MCP bearer key is different on purpose: `MCP_API_KEY` is an environment secr
 
 ## Environment Keys (Selected)
 
-| Key | Purpose |
-|-----|---------|
-| `OPENAI_API_KEY`, `VOYAGE_API_KEY`, `COHERE_API_KEY`, `JINA_API_KEY` | Provider access for embedding/gen/rerank |
-| `POSTGRES_*` | DB connection for pgvector + FTS |
-| `MCP_API_KEY` | Bearer token enforced by the embedded MCP transport when `mcp.require_api_key=true` — environment only, never a config field |
-| `NEO4J_*` | Neo4j connection |
-| `SERVER_PORT` | API service port |
-| `CONFIG_FILE` | Path to `tribrid_config.json` |
+Gateway-owned upstream keys and app credentials are different boundaries; never mix them.
+
+| Key | Owner | Purpose |
+|-----|-------|---------|
+| `OPENAI_API_KEY` | Gateway only (`infra/litellm.env`) | Upstream key for the native OpenAI embedding routes (`openai.text-embedding-3-small` / `openai.text-embedding-3-large`) |
+| `OPENROUTER_API_KEY` | Gateway only (`infra/litellm.env`) | Upstream key for OpenRouter-routed generation aliases |
+| `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY` | Gateway only (`infra/litellm.env`) | Reserved gateway-owned upstream keys — never exported into the app process |
+| `LITELLM_BASE_URL`, `LITELLM_API_KEY` | App | How the API authenticates to the local LiteLLM gateway; Compose maps `LITELLM_API_KEY` onto the gateway's `LITELLM_MASTER_KEY` |
+| `VOYAGE_API_KEY`, `COHERE_API_KEY`, `JINA_API_KEY` | App | Provider access for embedding/rerank lanes that do not route through the gateway |
+| `POSTGRES_*` | App | DB connection for chunk rows and generation manifests |
+| `MCP_API_KEY` | App | Bearer token enforced by the embedded MCP transport when `mcp.require_api_key=true` — environment only, never a config field |
+| `NEO4J_*` | App | Neo4j connection |
+| `SERVER_PORT` | App | API service port |
+| `CONFIG_FILE` | App | Path to `tribrid_config.json` |
 
 ```mermaid
 flowchart LR

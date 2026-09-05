@@ -1,3 +1,4 @@
+```markdown
 # Deployment
 
 <div class="grid chunk_summaries" markdown>
@@ -30,7 +31,7 @@
     Data lives in named Docker volumes (`postgres_data`, `qdrant_data`, `neo4j_data`, ...) owned by the `ragweld` Compose project. Back up the volumes rather than bind mounts.
 
 !!! note "Environment Template"
-    Copy the provided environment configuration to `.env`, fill in DB credentials and API keys, and export it into your shell for local runs.
+    Copy the provided environment configuration to `.env` and fill in DB credentials. Upstream provider keys (`OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`) are **gateway-owned**: they belong only in the gateway's private `infra/litellm.env`, initialized from `infra/litellm.env.example` on a new install (`disabled` is not a working key). The app talks to the gateway with `LITELLM_BASE_URL` and `LITELLM_API_KEY` from its own environment — never with an upstream provider key. `./start.sh` unsets inherited provider keys, the Compose API service blanks them, and importing the app drops any that survive, so a leaked shell export can never impersonate the gateway's upstream credential.
 
 !!! tip "Precedence: shell environment beats `.env`"
     `./start.sh` sources `.env` with `set -a`, but it first snapshots every exported variable in your shell and restores that exact snapshot after sourcing. The practical effect: **caller-provided environment always wins over `.env`** — `.env` fills in only the keys you did not already set. This matters for ports (`BACKEND_PORT`, `FRONTEND_PORT`), provider keys you inject from a secret manager, and any CI runner that exports configuration before invoking `./start.sh`.
@@ -49,7 +50,7 @@
 | Qdrant | 56333 | Dense + sparse chunk vectors |
 | Neo4j Bolt | 7687 | Graph driver |
 | Neo4j Browser | 7474 | Admin UI |
-| LiteLLM | 54000 | Generation gateway |
+| LiteLLM | 54000 | Generation + native OpenAI embedding gateway |
 | MLflow | 55500 | Training run tracking |
 | Prometheus | 59090 | Metrics (remote-writes to Mimir) |
 | Grafana | 3301 | Dashboards |
@@ -66,7 +67,8 @@ flowchart LR
 
 ## Bring-Up Tasks
 
-- [x] Create `.env` with DB creds and API keys
+- [x] Create `.env` with DB creds (upstream provider keys belong in `infra/litellm.env`, not here)
+- [x] Initialize `infra/litellm.env` from `infra/litellm.env.example` and fill in the upstream keys you need
 - [x] `docker compose up -d`
 - [x] `uv run scripts/generate_types.py`
 - [x] Start API service
@@ -105,3 +107,4 @@ flowchart TB
 
 ??? note "Container Logs"
     Use `/docker/{container}/logs` to fetch current log lines via API for basic troubleshooting when UI access is limited.
+
