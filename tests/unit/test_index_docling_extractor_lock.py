@@ -18,6 +18,7 @@ import threading
 import time
 from collections.abc import Generator
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -29,11 +30,56 @@ from server.api.index import (
     _load_run_events,
     _run_docling_extraction_locked,
 )
+from server.indexing.accounting import (
+    IndexAccountingOwner,
+    accounting_census,
+    accounting_owner_alive,
+)
+from server.models.index import IndexRunSummary
 
 HOLDER_CORPUS = "corpus-holder"
 HOLDER_RUN = "0d3f9a71-holder"
 WAITER_CORPUS = "corpus-waiter"
 WAITER_RUN = "7be21c04-waiter"
+
+
+@pytest.mark.asyncio
+async def test_census_owner_waits_for_cancelled_awaiter_actual_docling_worker(tmp_path: Path) -> None:
+    path = tmp_path / "owned" / "summary.json"
+    owner = IndexAccountingOwner(
+        path, IndexRunSummary(run_id="docling-run", repo_id="figures", status="indexing", started_at=datetime.now(UTC)),
+        config_json="{}", models={"figure_description": "vision"}, coverage_complete=True, coverage_notes=[],
+    )
+    entered, release = threading.Event(), threading.Event()
+
+    def convert() -> str:
+        entered.set()
+        if not release.wait(10):
+            raise RuntimeError("test worker release was not delivered")
+        return "converted"
+
+    task = asyncio.create_task(_run_docling_extraction_locked(
+        convert, census_scope=owner.scopes["figure_description"], wait_notice_seconds=0,
+    ))
+    try:
+        assert await asyncio.to_thread(entered.wait, 5)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        owner.finish(interrupted=True)
+        record = IndexRunSummary.model_validate_json(path.read_text()).accounting
+        assert record is not None
+        assert record.census["figure_description"].active_producers == 1
+        assert accounting_census(record).state == "open"
+        assert accounting_owner_alive(path)
+    finally:
+        release.set()
+        async with asyncio.timeout(5):
+            while accounting_owner_alive(path):
+                await asyncio.sleep(0.01)
+    record = IndexRunSummary.model_validate_json(path.read_text()).accounting
+    assert record is not None and accounting_census(record).state == "closed"
+    assert not index_api._DOCLING_EXTRACTION_LOCK.locked()
 
 
 @pytest.fixture(autouse=True)
@@ -65,6 +111,9 @@ def isolate_index_run_storage(tmp_path) -> Generator[None, None, None]:
 def _register(queue: asyncio.Queue[dict[str, Any]], repo_id: str, run_id: str) -> None:
     """Bind a queue to its run exactly as `_run_index` does, so events reach the run log."""
     index_api._QUEUE_RUN_CONTEXT[id(queue)] = (repo_id, run_id)
+    index_api._persist_run_summary(IndexRunSummary(
+        run_id=run_id, repo_id=repo_id, status="indexing", started_at=datetime.now(UTC),
+    ))
 
 
 def _messages(repo_id: str, run_id: str) -> list[str]:

@@ -24,6 +24,7 @@ import { useRepoStore } from '@/stores/useRepoStore';
 import { LiveTerminal, type LiveTerminalHandle } from '@/components/LiveTerminal/LiveTerminal';
 import { RepositoryConfig } from '@/components/RAG/RepositoryConfig';
 import { SyntheticCallout } from '@/components/RAG/SyntheticCallout';
+import { IndexRunCosts } from '@/components/RAG/IndexRunCosts';
 import { ModelPicker } from '@/components/RAG/ModelPicker';
 import { ModelPicker as ChatModelPicker } from '@/components/Chat/ModelPicker';
 import { PromptLink } from '@/components/ui/PromptLink';
@@ -50,6 +51,33 @@ import type {
 import { describeEmbeddingProviderStrategy } from '@/utils/embeddingStrategy';
 
 type IndexingComponent = 'embedding' | 'chunking' | 'bm25' | 'enrichment' | 'figures';
+
+type SchemaAttemptRef = {
+  corpusId: string;
+  runId: string;
+  startedAt: string | null;
+};
+
+/** Keep the newest schema attempt using only the accounting attempt's server start time. */
+function newerSchemaAttempt(
+  current: SchemaAttemptRef | null,
+  incoming: SchemaAttemptRef,
+): SchemaAttemptRef {
+  if (!current || current.corpusId !== incoming.corpusId) return incoming;
+  const currentStartedAt = current.startedAt === null ? Number.NaN : Date.parse(current.startedAt);
+  const incomingStartedAt = incoming.startedAt === null ? Number.NaN : Date.parse(incoming.startedAt);
+  // A legacy cached response for the same run must not erase a timestamp learned from that
+  // run's summary or original response. Later attempts still need that known value to compare.
+  if (current.runId === incoming.runId) {
+    return Number.isFinite(currentStartedAt) && !Number.isFinite(incomingStartedAt)
+      ? current
+      : incoming;
+  }
+  // Legacy responses lack the attempt timestamp. Different runs are then incomparable, so
+  // keep the already displayed attempt until an authoritative latest-history read succeeds.
+  if (!Number.isFinite(currentStartedAt) || !Number.isFinite(incomingStartedAt)) return current;
+  return currentStartedAt > incomingStartedAt ? current : incoming;
+}
 
 /**
  * One line per conversion instead of forty.
@@ -268,6 +296,7 @@ export function IndexingSubtab() {
   const [graphSchemaProposal, setGraphSchemaProposal] = useState<GraphSchemaProposal | null>(null);
   const [graphSchemaLoading, setGraphSchemaLoading] = useState(false);
   const [graphSchemaError, setGraphSchemaError] = useState<{ message: string; operatorHint: string } | null>(null);
+  const [latestSchemaAttempt, setLatestSchemaAttempt] = useState<SchemaAttemptRef | null>(null);
   const graphSchemaRequestRef = useRef<AbortController | null>(null);
   const [graphOverrideReason, setGraphOverrideReason] = useState('');
   const [estimateLoading, setEstimateLoading] = useState(false);
@@ -511,6 +540,8 @@ export function IndexingSubtab() {
   const activeRepoRef = useRef<string>('');
   const statusRequestSeq = useRef(0);
   const statsRequestSeq = useRef(0);
+  const latestRunRequestSeq = useRef(0);
+  const latestSchemaAttemptRequestSeq = useRef(0);
   const statusAbortRef = useRef<AbortController | null>(null);
   const statsAbortRef = useRef<AbortController | null>(null);
 
@@ -590,6 +621,8 @@ export function IndexingSubtab() {
 
   useEffect(() => {
     return () => {
+      latestRunRequestSeq.current += 1;
+      latestSchemaAttemptRequestSeq.current += 1;
       statusAbortRef.current?.abort();
       statsAbortRef.current?.abort();
     };
@@ -891,27 +924,39 @@ export function IndexingSubtab() {
 
   const loadLatestRunReplay = useCallback(async () => {
     const rid = String(activeRepo || '').trim();
+    const seq = ++latestRunRequestSeq.current;
     if (!rid || isIndexingRef.current) {
       return;
     }
     try {
       const latestResp = await fetch(api(`index/${encodeURIComponent(rid)}/runs/latest`));
+      if (seq !== latestRunRequestSeq.current || activeRepoRef.current !== rid) return;
       if (!latestResp.ok) {
         setLatestRun(null);
         setLatestRunEvents([]);
+        setLatestRunEventTotal(0);
         return;
       }
       const latest: IndexRunSummary = await latestResp.json();
+      if (
+        seq !== latestRunRequestSeq.current
+        || activeRepoRef.current !== rid
+        || latest.corpus_id !== rid
+        || latest.run_kind === 'schema_proposal'
+      ) return;
       setLatestRun(latest);
 
       const eventsResp = await fetch(
         api(`index/${encodeURIComponent(rid)}/runs/${encodeURIComponent(String(latest.run_id || ''))}/events?limit=500`)
       );
+      if (seq !== latestRunRequestSeq.current || activeRepoRef.current !== rid) return;
       if (!eventsResp.ok) {
         setLatestRunEvents([]);
+        setLatestRunEventTotal(0);
         return;
       }
       const page: IndexRunEventPage = await eventsResp.json();
+      if (seq !== latestRunRequestSeq.current || activeRepoRef.current !== rid) return;
       const events: IndexRunEvent[] = Array.isArray(page.events) ? page.events : [];
       setLatestRunEvents(events);
       setLatestRunEventTotal(Number(page.total ?? events.length));
@@ -944,6 +989,42 @@ export function IndexingSubtab() {
     }
   }, [activeRepo, api, resetTerminal]);
 
+  const loadLatestSchemaAttempt = useCallback(async (preserveKnownOnMissing = false) => {
+    const rid = String(activeRepo || '').trim();
+    const seq = ++latestSchemaAttemptRequestSeq.current;
+    if (!rid) {
+      setLatestSchemaAttempt(null);
+      return;
+    }
+    try {
+      const response = await fetch(
+        api(`index/${encodeURIComponent(rid)}/runs/latest?finalize=false&run_kind=schema_proposal`)
+      );
+      if (seq !== latestSchemaAttemptRequestSeq.current || activeRepoRef.current !== rid) return;
+      if (response.status === 404) {
+        if (!preserveKnownOnMissing) setLatestSchemaAttempt(null);
+        return;
+      }
+      if (!response.ok) return;
+      const latest: IndexRunSummary = await response.json();
+      if (
+        seq !== latestSchemaAttemptRequestSeq.current
+        || activeRepoRef.current !== rid
+        || latest.corpus_id !== rid
+        || latest.run_kind !== 'schema_proposal'
+      ) return;
+      // This endpoint is the server's authoritative latest attempt. Request generations keep
+      // a response issued before an operator action or corpus change from reaching this point.
+      setLatestSchemaAttempt({
+        corpusId: rid,
+        runId: latest.run_id,
+        startedAt: latest.started_at,
+      });
+    } catch {
+      // A proposal already on screen remains usable while this historical read is unavailable.
+    }
+  }, [activeRepo, api]);
+
   useEffect(() => {
     isIndexingRef.current = isIndexing;
   }, [isIndexing]);
@@ -952,7 +1033,8 @@ export function IndexingSubtab() {
     void refreshStatus();
     void loadStats();
     void loadLatestRunReplay();
-  }, [refreshStatus, loadStats, loadLatestRunReplay]);
+    void loadLatestSchemaAttempt();
+  }, [refreshStatus, loadStats, loadLatestRunReplay, loadLatestSchemaAttempt]);
 
   // Poll the corpus status so a run started anywhere (API, another operator, a schedule)
   // shows up here exactly like one started from this tab: progress bar, current file,
@@ -997,12 +1079,13 @@ export function IndexingSubtab() {
           const latestResp = await fetch(api(`index/${encodeURIComponent(rid)}/runs/latest`));
           if (!latestResp.ok) return true;
           const latest: IndexRunSummary = await latestResp.json();
+          if (cancelled || activeRepoRef.current !== rid) return false;
           const runId = String(latest.run_id || '');
           if (!runId) return true;
+          setLatestRun(latest);
           if (runId !== foreignRunIdRef.current) {
             foreignRunIdRef.current = runId;
             foreignEventsSeenRef.current = 0;
-            setLatestRun(latest);
             setTerminalVisible(true);
             resetTerminal(`Indexing: ${rid} (run ${runId.slice(0, 12)}, started outside this tab)`);
           }
@@ -1090,30 +1173,58 @@ export function IndexingSubtab() {
   const handleGenerateGraphSchema = useCallback(async () => {
     const rid = String(activeRepo || '').trim();
     if (!rid || !semanticGraphActive) return;
+    // A history request issued before this operator action describes the old attempt even if
+    // it settles later. The success/failure response below is the new ordering boundary.
+    latestSchemaAttemptRequestSeq.current += 1;
     graphSchemaRequestRef.current?.abort();
     const controller = new AbortController();
     graphSchemaRequestRef.current = controller;
     setGraphSchemaLoading(true);
     setGraphSchemaError(null);
+    const forceRefresh = Boolean(graphSchemaProposal);
     try {
       await flushPendingPatches();
       if (controller.signal.aborted || graphSchemaRequestRef.current !== controller) return;
       const proposal = await indexingApi.proposeGraphSchema(
         rid,
-        { force_refresh: false },
+        { force_refresh: forceRefresh },
         { signal: controller.signal, timeoutMs: (schemaProposalTimeoutS + 10) * 1000 },
       );
       if (controller.signal.aborted || graphSchemaRequestRef.current !== controller) return;
       setGraphSchemaProposal(proposal);
+      if (proposal.accounting_run_id) {
+        latestSchemaAttemptRequestSeq.current += 1;
+        const returnedAttempt: SchemaAttemptRef = {
+          corpusId: rid,
+          runId: proposal.accounting_run_id,
+          startedAt: proposal.accounting_started_at ?? null,
+        };
+        // Forced responses always name the new attempt. An unforced response can be either a
+        // cached proposal or a newly generated one, so order it against known state only by the
+        // two accounting attempt timestamps. A legacy missing timestamp stays incomparable.
+        setLatestSchemaAttempt((current) => (
+          forceRefresh
+            ? returnedAttempt
+            : newerSchemaAttempt(current, returnedAttempt)
+        ));
+        void loadLatestSchemaAttempt(true);
+      }
     } catch (error) {
       if (controller.signal.aborted || graphSchemaRequestRef.current !== controller) return;
-      const hint = axios.isAxiosError<GraphSchemaProposalFailureResponse>(error)
-        ? error.response?.data?.detail?.operator_hint
+      const detail = axios.isAxiosError<GraphSchemaProposalFailureResponse>(error)
+        ? error.response?.data?.detail
         : undefined;
-      setGraphSchemaProposal(null);
+      if (detail?.accounting_run_id) {
+        latestSchemaAttemptRequestSeq.current += 1;
+        setLatestSchemaAttempt({
+          corpusId: rid,
+          runId: detail.accounting_run_id,
+          startedAt: detail.accounting_started_at ?? null,
+        });
+      }
       setGraphSchemaError({
         message: errorDetail(error),
-        operatorHint: typeof hint === 'string' ? hint : '',
+        operatorHint: typeof detail?.operator_hint === 'string' ? detail.operator_hint : '',
       });
     } finally {
       if (graphSchemaRequestRef.current === controller) {
@@ -1121,7 +1232,7 @@ export function IndexingSubtab() {
         setGraphSchemaLoading(false);
       }
     }
-  }, [activeRepo, flushPendingPatches, schemaProposalTimeoutS, semanticGraphActive]);
+  }, [activeRepo, flushPendingPatches, graphSchemaProposal, loadLatestSchemaAttempt, schemaProposalTimeoutS, semanticGraphActive]);
 
   const handleStartIndex = useCallback(async (requestedGraphOverrideReason?: string) => {
     const rid = String(activeRepo || '').trim();
@@ -1457,6 +1568,9 @@ export function IndexingSubtab() {
       graphRunMetadata.extraction.failed_chunks === 0 &&
       graphRunMetadata.extraction.truncated_chunks === 0
   );
+  const schemaAccountingRunId = latestSchemaAttempt?.corpusId === activeRepo
+    ? latestSchemaAttempt.runId
+    : graphSchemaProposal?.accounting_run_id ?? null;
 
   // Avoid rendering “blank defaults” before config arrives
   if (!config) {
@@ -1581,6 +1695,13 @@ export function IndexingSubtab() {
             ) : null}
           </div>
 
+
+          {latestRun?.corpus_id === activeRepo && <IndexRunCosts
+            key={`${latestRun.corpus_id}:${latestRun.run_id}`}
+            corpusId={latestRun.corpus_id}
+            runId={latestRun.run_id}
+            initialRun={latestRun}
+          />}
 
           {graphRunMetadata && (
             <div
@@ -3693,6 +3814,13 @@ export function IndexingSubtab() {
                         {graphSchemaError.operatorHint ? <div>{graphSchemaError.operatorHint}</div> : null}
                       </div>
                     ) : null}
+
+                    {schemaAccountingRunId ? <IndexRunCosts
+                      key={`${activeRepo}:${schemaAccountingRunId}`}
+                      corpusId={activeRepo}
+                      runId={schemaAccountingRunId}
+                      title="Schema proposal accounting"
+                    /> : null}
 
                     {graphSchemaProposal ? (
                       <div

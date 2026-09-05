@@ -106,6 +106,7 @@ jobs:
           POSTGRES_DB: tribrid_test
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
+          RAGWELD_NATIVE_LEDGER_TEST_ADMIN_DSN: postgresql://postgres:postgres@127.0.0.1:5432/tribrid_test
           QDRANT_URL: http://127.0.0.1:56333
           NEO4J_URI: bolt://127.0.0.1:7687
           NEO4J_USER: neo4j

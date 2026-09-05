@@ -254,14 +254,20 @@ def test_profiling_stays_off_for_test_processes_and_without_a_server() -> None:
     assert "RAGWELD_DISABLE_PROFILING" in profiling.profiling_state()
 
 
-def test_langfuse_cost_details_maps_the_trace_summary_to_usd_totals() -> None:
-    from server.models.tribrid_config_model import TraceCostSummary
-    from server.observability.runtime import langfuse_cost_details
+def test_langfuse_status_does_not_claim_native_delivery_from_app_configuration() -> None:
+    from server.models.tribrid_config_model import TriBridConfig
+    from server.observability.runtime import langfuse_ingestion_state
+    from server.observability.status import _langfuse_ingestion_detail
 
-    assert langfuse_cost_details(None) == {}
-    assert langfuse_cost_details(TraceCostSummary()) == {}
-    summary = TraceCostSummary(estimated_cost_usd=0.000844, cost_source="provider")
-    assert langfuse_cost_details(summary) == {"total": 0.000844}
+    state = langfuse_ingestion_state()
+    assert "native LiteLLM owns generation export" in state
+    assert "native delivery unverified" in state
+    disabled = TriBridConfig()
+    disabled.tracing.langfuse_enabled = False
+    detail = _langfuse_ingestion_detail(disabled)
+    assert "API root/stage exporter blocked" in detail
+    assert "native LiteLLM owns generation export" in detail
+    assert "native delivery unverified" in detail
 
 
 def test_langfuse_client_blockers_name_every_missing_precondition() -> None:
@@ -313,3 +319,28 @@ def test_langfuse_trace_url_is_built_from_config_without_network() -> None:
     assert langfuse_trace_url(cfg.tracing, "a659c9939466c50f4a1158c586673388") is None
     cfg.tracing.langfuse_base_url = ""
     assert langfuse_trace_url(cfg.tracing, "abc") is None
+
+
+@pytest.mark.asyncio
+async def test_langfuse_component_reports_ui_health_without_native_activation_claims() -> None:
+    from server.models.tribrid_config_model import TriBridConfig
+    from server.observability.status import _build_operator_hint, _langfuse_ui_component
+
+    with _probe_redirect_server() as base:
+        for path, expected in (("/ok", True), ("/missing", False)):
+            cfg = TriBridConfig()
+            cfg.tracing.otel_export_enabled = False
+            cfg.tracing.langfuse_enabled = True
+            cfg.tracing.langfuse_base_url = base + path
+            cfg.tracing.langfuse_public_base_url = base
+            probe = await _check_url(base + path)
+            component = _langfuse_ui_component(cfg, probe, "otel_langfuse")
+            assert component.label == "Langfuse UI"
+            assert component.configured is True
+            assert component.reachable is expected
+            assert "UI reachability only" in component.detail
+            assert "native callback activation and delivery are unverified" in component.detail
+            if expected:
+                hint = _build_operator_hint(cfg, "otel_langfuse", [component])
+                assert "does not verify native callback activation or trace delivery" in hint
+                assert "LANGFUSE_SECRET_KEY" not in hint

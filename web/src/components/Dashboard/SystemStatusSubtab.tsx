@@ -11,6 +11,7 @@ import { StatusIndicator } from '@/components/ui/StatusIndicator';
 import { useRepoStore } from '@/stores/useRepoStore';
 import { useHealthStore } from '@/stores/useHealthStore';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
+import { IndexRunCosts } from '@/components/RAG/IndexRunCosts';
 import type { IndexRunSummary } from '@/types/generated';
 
 // M-80: this row reported `frontend_running` -- a probe for a Vite dev server on
@@ -185,9 +186,8 @@ export function SystemStatusSubtab() {
   /**
    * The latest run of every corpus, one request each, in parallel.
    *
-   * Deliberately NOT on the 30s status poll: nothing here changes without an indexing run,
-   * and N corpora x every 30 seconds is real load against an endpoint that flushes the run
-   * event queue. Mount and the explicit refresh action are enough.
+   * Native accounting can settle after indexing ends. Refresh saved summaries on
+   * the existing status interval; these listing reads do not reconcile or flush.
    */
   const refreshRecentRuns = useCallback(async () => {
     // Each fan-out claims a generation; only the newest one may publish. Corpus count varies
@@ -251,6 +251,7 @@ export function SystemStatusSubtab() {
     const interval = setInterval(() => {
       refreshStatus();
       fetchDevStackStatus();
+      refreshRecentRuns();
     }, 30000);
 
     // Listen for manual refresh events
@@ -264,7 +265,7 @@ export function SystemStatusSubtab() {
       clearInterval(interval);
       window.removeEventListener('dashboard-refresh', handleRefresh);
     };
-  }, [fetchDevStackStatus, loadRepos, refreshStatus, reposInitialized, reposLoading]);
+  }, [fetchDevStackStatus, loadRepos, refreshStatus, refreshRecentRuns, reposInitialized, reposLoading]);
 
   // If the dashboard mounted while the backend was down, `loadRepos()` can fail and the store
   // intentionally marks itself initialized to avoid retry loops. When the backend comes back,
@@ -677,7 +678,7 @@ export function SystemStatusSubtab() {
                   <th style={{ textAlign: 'left', padding: '6px 0' }}>Completed</th>
                   <th style={{ textAlign: 'right', padding: '6px 0' }}>Chunks</th>
                   <th style={{ textAlign: 'right', padding: '6px 0' }}>Figures</th>
-                  <th style={{ textAlign: 'right', padding: '6px 0' }}>Cost</th>
+                  <th style={{ textAlign: 'left', padding: '6px 0' }}>Run accounting</th>
                 </tr>
               </thead>
               <tbody>
@@ -695,9 +696,14 @@ export function SystemStatusSubtab() {
                       {formatRunFigures(row.run)}
                     </td>
                     <td style={{ padding: '4px 0', textAlign: 'right', fontFamily: "'SF Mono', monospace" }}>
-                      {row.run?.figure_description_cost_usd != null
-                        ? `\u2264 $${Number(row.run.figure_description_cost_usd).toFixed(4)}`
-                        : '\u2014'}
+                      {row.run ? <IndexRunCosts
+                        key={`${row.corpusId}:${row.run.run_id}`}
+                        corpusId={row.corpusId}
+                        runId={row.run.run_id}
+                        initialRun={row.run}
+                        compact
+                        autoRefresh={false}
+                      /> : 'Accounting unavailable'}
                     </td>
                   </tr>
                 ))}

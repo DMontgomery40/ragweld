@@ -6,6 +6,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from uuid import uuid4
 
+import asyncpg
 import pytest
 from httpx import AsyncClient
 
@@ -41,6 +42,118 @@ async def _create_corpus(client: AsyncClient, path: Path, gateway_url: str) -> s
     return corpus_id
 
 
+async def test_proposal_deadline_includes_locked_postgres_persistence(
+    client: AsyncClient, tmp_path: Path,
+) -> None:
+    """The gateway answers promptly, but an actual row lock delays the final write."""
+    with proposal_gateway("valid") as (url, requests):
+        corpus_id = await _create_corpus(client, tmp_path, url)
+        connection = await asyncpg.connect(require_env("POSTGRES_DSN"))
+        pending = None
+        transaction = None
+        try:
+            endpoint = f"/api/index/{corpus_id}/graph-schema/proposal"
+            first = await client.post(endpoint, json={"force_refresh": True})
+            assert first.status_code == 200, first.text
+            first_attempt = await client.get(f"/api/index/{corpus_id}/runs/{first.json()['accounting_run_id']}")
+            assert first_attempt.status_code == 200, first_attempt.text
+            assert first.json()["accounting_started_at"] == first_attempt.json()["started_at"]
+            configured = await client.patch(f"/api/config/graph_indexing?corpus_id={corpus_id}", json={"schema_proposal_timeout_s": 5})
+            assert configured.status_code == 200, configured.text
+            before = await connection.fetchval("SELECT meta FROM corpora WHERE repo_id=$1", corpus_id)
+            async with AsyncClient() as control:
+                await control.post(f"{url}/__fixture__/scenario", json={"scenario": "held_valid"})
+                requests.clear()
+                started = asyncio.get_running_loop().time()
+                pending = asyncio.create_task(client.post(endpoint, json={"force_refresh": True}))
+                async with asyncio.timeout(3):
+                    while not requests:
+                        await asyncio.sleep(0.01)
+                transaction = connection.transaction()
+                await transaction.start()
+                await connection.fetchval("SELECT meta FROM corpora WHERE repo_id=$1 FOR UPDATE", corpus_id)
+                await control.post(f"{url}/__fixture__/release", json={})
+                # Keep the lock through the response: the deadline must cancel the
+                # blocked native SQL transaction, not merely its provider request.
+                response = await asyncio.wait_for(pending, timeout=7)
+            assert response.status_code == 504, response.text
+            assert asyncio.get_running_loop().time() - started < 7
+            detail = response.json()["detail"]
+            assert detail["code"] == "graph_schema_deadline_exceeded"
+            assert detail["accounting_run_id"] != first.json()["accounting_run_id"]
+            attempt = await client.get(f"/api/index/{corpus_id}/runs/{detail['accounting_run_id']}")
+            assert attempt.status_code == 200, attempt.text
+            assert detail["accounting_started_at"] == attempt.json()["started_at"]
+            assert attempt.json()["status"] == "error"
+            checkpoint = attempt.json()["accounting"]["census"]["schema_proposal"]
+            assert checkpoint["started_requests"] == checkpoint["completed_requests"] == 1
+            assert checkpoint["inflight"] == checkpoint["active_producers"] == 0
+            assert await connection.fetchval("SELECT meta FROM corpora WHERE repo_id=$1", corpus_id) == before
+            await transaction.rollback()
+            transaction = None
+            # Cancellation must not leave a deferred write that wins when unlocked.
+            assert await connection.fetchval("SELECT meta FROM corpora WHERE repo_id=$1", corpus_id) == before
+        finally:
+            if pending is not None and not pending.done():
+                pending.cancel()
+                await asyncio.gather(pending, return_exceptions=True)
+            if transaction is not None:
+                await transaction.rollback()
+            await connection.close()
+            await client.delete(f"/api/corpora/{corpus_id}")
+
+
+@pytest.mark.parametrize("config_delay", [2, 6])
+async def test_proposal_config_loading_consumes_the_scoped_total_budget(
+    client: AsyncClient, tmp_path: Path, config_delay: int,
+) -> None:
+    with proposal_gateway("held_valid") as (url, requests):
+        corpus_id = await _create_corpus(client, tmp_path, url)
+        configured = await client.patch(f"/api/config/graph_indexing?corpus_id={corpus_id}", json={"schema_proposal_timeout_s": 5})
+        assert configured.status_code == 200, configured.text
+        connection = await asyncpg.connect(require_env("POSTGRES_DSN"))
+        transaction = connection.transaction()
+        pending = None
+        try:
+            await transaction.start()
+            await connection.execute("LOCK TABLE corpora IN ACCESS EXCLUSIVE MODE")
+            started = asyncio.get_running_loop().time()
+            pending = asyncio.create_task(client.post(f"/api/index/{corpus_id}/graph-schema/proposal", json={"force_refresh": True}))
+            # This is an actual config/corpus SELECT blocked by our table lock.
+            async with asyncio.timeout(2):
+                while not await connection.fetchval("SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND pid<>pg_backend_pid())"):
+                    await asyncio.sleep(0.01)
+            await asyncio.sleep(config_delay)
+            assert not requests
+            await transaction.rollback()
+            transaction = None
+            response = await asyncio.wait_for(pending, timeout=6)
+            elapsed = asyncio.get_running_loop().time() - started
+            assert response.status_code == 504, response.text
+            expected_duration = max(5, config_delay)
+            assert expected_duration - 0.5 <= elapsed < expected_duration + 1.5, f"config time was not charged to the 5s total: {elapsed}"
+            assert len(requests) == (1 if config_delay < 5 else 0)
+            attempt_id = response.json()["detail"]["accounting_run_id"]
+            retained = await client.get(f"/api/index/{corpus_id}/runs/{attempt_id}")
+            assert retained.status_code == 200
+            assert response.json()["detail"]["accounting_started_at"] == retained.json()["started_at"]
+            assert retained.json()["status"] == "error"
+            if config_delay >= 5:
+                # No model dispatch occurred before we discovered the expired
+                # scoped budget, so retain the attempt without inventing a census.
+                assert retained.json()["accounting"] is None
+        finally:
+            if transaction is not None:
+                await transaction.rollback()
+            if pending is not None and not pending.done():
+                pending.cancel()
+                await asyncio.gather(pending, return_exceptions=True)
+            async with AsyncClient() as control:
+                await control.post(f"{url}/__fixture__/release", json={})
+            await connection.close()
+            await client.delete(f"/api/corpora/{corpus_id}")
+
+
 @pytest.mark.parametrize(("scenario", "status", "code"), [
     ("malformed", 502, "graph_schema_generation_failed"),
     ("truncated", 502, "graph_schema_generation_failed"),
@@ -59,6 +172,14 @@ async def test_proposal_failure_is_typed_and_preserves_the_previous_proposal(
             endpoint = f"/api/index/{corpus_id}/graph-schema/proposal"
             first = await client.post(endpoint, json={"force_refresh": True})
             assert first.status_code == 200, first.text
+            first_payload = first.json()
+            first_attempt = await client.get(f"/api/index/{corpus_id}/runs/{first_payload['accounting_run_id']}")
+            assert first_attempt.status_code == 200, first_attempt.text
+            assert first_payload["accounting_started_at"] == first_attempt.json()["started_at"]
+            cached = await client.post(endpoint, json={"force_refresh": False})
+            assert cached.status_code == 200, cached.text
+            assert cached.json()["accounting_run_id"] == first_payload["accounting_run_id"]
+            assert cached.json()["accounting_started_at"] == first_payload["accounting_started_at"]
             async with AsyncClient() as control:
                 await control.post(f"{url}/__fixture__/scenario", json={"scenario": scenario})
             configured = await client.patch(f"/api/config/graph_indexing?corpus_id={corpus_id}", json={"schema_proposal_timeout_s": 5})
@@ -69,6 +190,21 @@ async def test_proposal_failure_is_typed_and_preserves_the_previous_proposal(
             assert failed.status_code == status, failed.text
             assert failed.json()["detail"]["code"] == code
             assert "operator_hint" in failed.json()["detail"]
+            attempt_id = failed.json()["detail"]["accounting_run_id"]
+            assert attempt_id and attempt_id != first.json()["accounting_run_id"]
+            attempt = await client.get(f"/api/index/{corpus_id}/runs/{attempt_id}")
+            assert attempt.status_code == 200, attempt.text
+            saved_attempt = attempt.json()
+            assert saved_attempt["run_kind"] == "schema_proposal"
+            assert saved_attempt["status"] == "error"
+            assert failed.json()["detail"]["accounting_started_at"] == saved_attempt["started_at"]
+            assert saved_attempt["accounting"]["session_id"] == attempt_id
+            assert saved_attempt["accounting"]["gateway_base_url"] == url.removesuffix("/v1")
+            census = saved_attempt["accounting"]["census"]["schema_proposal"]
+            assert census["started_requests"] == census["completed_requests"] == 1
+            assert census["inflight"] == census["active_producers"] == 0
+            latest_attempt = await client.get(f"/api/index/{corpus_id}/runs/latest", params={"run_kind": "schema_proposal"})
+            assert latest_attempt.status_code == 200 and latest_attempt.json()["run_id"] == attempt_id
             assert "PRIVATE PROVIDER DETAIL" not in failed.text
             assert elapsed < 7
             pg = PostgresClient(require_env("POSTGRES_DSN"))
@@ -106,7 +242,11 @@ async def test_inflight_proposal_cannot_persist_after_its_context_changes(
                 await control.post(f"{url}/__fixture__/release", json={})
             response = await pending
             assert response.status_code == 409, response.text
-            assert response.json()["detail"]["code"] == "graph_schema_context_changed"
+            detail = response.json()["detail"]
+            assert detail["code"] == "graph_schema_context_changed"
+            attempt = await client.get(f"/api/index/{corpus_id}/runs/{detail['accounting_run_id']}")
+            assert attempt.status_code == 200, attempt.text
+            assert detail["accounting_started_at"] == attempt.json()["started_at"]
             pg = PostgresClient(require_env("POSTGRES_DSN"))
             await pg.connect()
             try:

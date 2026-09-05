@@ -26,6 +26,48 @@ REASONING_ONLY_KEY = "reasoning-only-key"
 REASONING_ONLY_COST_USD = 0.004212
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("streaming", [False, True])
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("fails", [False, True])
+async def test_gateway_dispatch_parents_native_generation_and_preserves_trace_link(streaming, enabled, fails):
+    config = TriBridConfig()
+    config.tracing.tracing_mode = "local"
+    config.tracing.otel_export_enabled = False
+    config.tracing.langfuse_enabled = enabled
+    config.tracing.langfuse_public_base_url = "https://traces.example.invalid"
+    config.tracing.langfuse_project = "synthetic-project"
+    with _gateway_server() as base_url:
+        route = _route(base_url, model="openai.gpt-5.4-mini", api_key=FAIL_ONCE_KEY if fails else "synthetic")
+        with start_request_observation(config=config, route_name="synthetic.telemetry", path="/fixture", method="POST", run_id="fixture-run", repo_id="fixture-corpus") as observation:
+            assert observation is not None
+            kwargs = dict(route=route, system_prompt="System", user_message="Hello", images=[], temperature=0.0, max_tokens=32, context_chunks=[])
+            async def execute():
+                if streaming:
+                    return "".join([part async for part in stream_chat_text(**kwargs)])
+                return (await generate_chat_text(**kwargs)).text
+            if fails:
+                with pytest.raises(RuntimeError, match="HTTP 503"):
+                    await execute()
+            else:
+                assert await execute()
+            headers = _GatewayHandler.requests[-1]["headers"]
+            assert headers["traceparent"].split("-")[1] == observation.trace_id
+            assert headers["traceparent"].split("-")[2] != observation.root_span_id
+            assert headers["langfuse_session_id"] == "fixture-run"
+            assert json.loads(headers["x-litellm-spend-logs-metadata"]) == {
+                "run_id": "fixture-run", "corpus_id": "fixture-corpus", "lane": "generation",
+            }
+            assert (observation.cost_summary is not None) is not fails
+            links = [link for link in observation.links if link.kind == "langfuse"]
+            assert bool(links) is enabled
+            for link in links:
+                assert link.label == "Look up trace in Langfuse"
+                assert link.url.endswith(observation.trace_id)
+                assert "Delivery is unverified" in link.detail
+                assert "may not exist" in link.detail
+
+
 @pytest.fixture(autouse=True)
 def _warm_catalog_snapshot() -> None:
     # The transport budgets every call against the alias's catalog context window.
@@ -45,6 +87,7 @@ class _GatewayHandler(BaseHTTPRequestHandler):
             {
                 "path": self.path,
                 "authorization": self.headers.get("Authorization"),
+                "headers": dict(self.headers),
                 "payload": payload,
             }
         )

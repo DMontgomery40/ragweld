@@ -157,7 +157,12 @@ async def test_schema_proposal_refuses_a_large_textless_pdf_inside_the_edge_wind
             )
 
         assert response.status_code == 422, response.text
-        assert "no embedded PDF text" in str(response.json()["detail"])
+        detail = response.json()["detail"]
+        assert detail["code"] == "graph_schema_unusable"
+        assert "no embedded PDF text" in detail["message"]
+        attempt = await client.get(f"/api/index/{corpus_id}/runs/{detail['accounting_run_id']}")
+        assert attempt.status_code == 200, attempt.text
+        assert detail["accounting_started_at"] == attempt.json()["started_at"]
     finally:
         await client.delete(f"/api/corpora/{corpus_id}")
 

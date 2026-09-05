@@ -18,6 +18,7 @@ from server.models.index import (
     FigureOutcome,
     PageRegion,
 )
+from server.observability.run_census import RunCensusScope
 
 # Rich-document formats are converted through Docling; code and plain-text
 # formats keep the direct read path by design.
@@ -94,6 +95,7 @@ class FigureGateway:
     base_url: str
     api_key: str
     model: str
+    census_scope: RunCensusScope | None = None
 
 
 def build_figure_pipeline_options(figures: Any, gateway: FigureGateway | None) -> Any:
@@ -123,7 +125,7 @@ def build_figure_pipeline_options(figures: Any, gateway: FigureGateway | None) -
     opts.enable_remote_services = describe
     if describe:
         assert gateway is not None
-        opts.picture_description_options = PictureDescriptionApiOptions(
+        api_options = PictureDescriptionApiOptions(
             url=AnyUrl(f"{gateway.base_url.rstrip('/')}/chat/completions"),
             headers={"Authorization": f"Bearer {gateway.api_key}"},
             params={
@@ -152,6 +154,18 @@ def build_figure_pipeline_options(figures: Any, gateway: FigureGateway | None) -
             scale=float(figures.images_scale),
             provenance=f"ragweld:{gateway.model}",
         )
+        if gateway.census_scope is not None:
+            from server.indexing.docling_census import (
+                CensusPictureOptions,
+                register_census_picture_model,
+            )
+
+            register_census_picture_model()
+            opts.picture_description_options = CensusPictureOptions(
+                **api_options.model_dump(), scope=gateway.census_scope
+            )
+        else:
+            opts.picture_description_options = api_options
     return opts
 
 
@@ -162,7 +176,7 @@ def build_figure_pipeline_options(figures: Any, gateway: FigureGateway | None) -
 # indexing at a time, occasionally alternating with a second) while keeping the resident
 # pipeline count flat.
 _FIGURE_CONVERTER_CACHE_SIZE = 2
-_FIGURE_CONVERTERS: OrderedDict[str, Any] = OrderedDict()
+_FIGURE_CONVERTERS: OrderedDict[tuple[str, RunCensusScope | None], Any] = OrderedDict()
 
 
 def docling_converter_for(figures: Any, gateway: FigureGateway | None) -> Any:
@@ -187,8 +201,13 @@ def docling_converter_for(figures: Any, gateway: FigureGateway | None) -> Any:
         },
         sort_keys=True,
     )
+    # Docling's own options hash serializes only the base picture fields. Keep
+    # the exact scope binding in this outer cache key so another run (even one
+    # carrying the same textual ID) cannot reuse a model holding the first scope.
+    census_scope = gateway.census_scope if gateway is not None and bool(figures.describe) else None
+    cache_key = (signature, census_scope)
     with _DOCLING_CONVERTER_LOCK:
-        converter = _FIGURE_CONVERTERS.get(signature)
+        converter = _FIGURE_CONVERTERS.get(cache_key)
         if converter is None:
             from docling.datamodel.base_models import InputFormat
             from docling.document_converter import (
@@ -207,7 +226,7 @@ def docling_converter_for(figures: Any, gateway: FigureGateway | None) -> Any:
                     InputFormat.IMAGE: ImageFormatOption(pipeline_options=options),
                 }
             )
-            _FIGURE_CONVERTERS[signature] = converter
+            _FIGURE_CONVERTERS[cache_key] = converter
             while len(_FIGURE_CONVERTERS) > _FIGURE_CONVERTER_CACHE_SIZE:
                 _FIGURE_CONVERTERS.popitem(last=False)  # oldest inserted
     return converter

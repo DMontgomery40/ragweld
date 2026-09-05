@@ -3,6 +3,14 @@
   "generated_from": "data/glossary.json",
   "terms": [
     {
+      "term": "Native Index Accounting",
+      "key": "INDEX_NATIVE_ACCOUNTING",
+      "definition": "Observed indexing costs read from the existing LiteLLM spend log for one saved run. Provider-reported amounts, gateway-calculated amounts, and the original pre-run estimate are shown separately. Pending workers, missing requests, uncertain outcomes, or unverified provider retry coverage prevent a complete total. Run history remains available after the index or corpus is deleted.",
+      "category": "indexing",
+      "related": [],
+      "links": []
+    },
+    {
       "term": "Schema Proposal Reasoning Effort",
       "key": "SCHEMA_PROPOSAL_REASONING_EFFORT",
       "definition": "Reasoning effort used to generate a GraphRAG schema proposal. The default is low to keep proposals within their time budget. This setting is separate from semantic KG extraction effort. Changing it invalidates proposal reuse so approval remains tied to the actual generation settings.",

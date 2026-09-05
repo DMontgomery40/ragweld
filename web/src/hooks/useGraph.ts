@@ -18,7 +18,7 @@
  *   } = useGraph();
  */
 import { useCallback, useEffect } from 'react';
-import { DEFAULT_ENTITY_LIMIT, useGraphStore } from '@/stores/useGraphStore';
+import { DEFAULT_ENTITY_LIMIT, useGraphStore, type GraphRequest, type GraphRequestKind } from '@/stores/useGraphStore';
 import { useRepoStore } from '@/stores';
 import type { Entity, Relationship, Community, GraphStats, GraphNeighborsResponse } from '@/types/generated';
 
@@ -65,7 +65,9 @@ export function useGraph() {
     setStats,
     setSelectedEntity,
     setSelectedCommunity,
-    setIsLoading,
+    beginRequest,
+    isCurrentRequest,
+    finishRequest,
     setError,
     setExpansion,
     setScope,
@@ -78,6 +80,16 @@ export function useGraph() {
     reset,
   } = useGraphStore();
 
+  const begin = useCallback((kind: GraphRequestKind): GraphRequest | null => {
+    // A callback from a departing corpus must not reclaim the shared graph.
+    if (!activeRepo || useRepoStore.getState().activeRepo !== activeRepo) return null;
+    return beginRequest(activeRepo, kind);
+  }, [activeRepo, beginRequest]);
+
+  const current = useCallback((request: GraphRequest): boolean => (
+    useRepoStore.getState().activeRepo === request.corpusId && isCurrentRequest(request)
+  ), [isCurrentRequest]);
+
   /**
    * Load graph statistics for the current repository
    */
@@ -87,7 +99,8 @@ export function useGraph() {
       return null;
     }
 
-    setIsLoading(true);
+    const request = begin('stats');
+    if (!request) return null;
     setError(null);
 
     try {
@@ -96,16 +109,17 @@ export function useGraph() {
         throw new Error(`Failed to load graph stats: ${response.status}`);
       }
       const data: GraphStats = await response.json();
+      if (!current(request)) return null;
       setStats(data);
       return data;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load graph stats';
-      setError(message);
+      if (current(request)) setError(message);
       return null;
     } finally {
-      setIsLoading(false);
+      finishRequest(request);
     }
-  }, [activeRepo, setStats, setIsLoading, setError]);
+  }, [activeRepo, setStats, begin, current, finishRequest, setError]);
 
   /**
    * Load all communities for the current repository
@@ -116,7 +130,8 @@ export function useGraph() {
       return [];
     }
 
-    setIsLoading(true);
+    const request = begin('communities');
+    if (!request) return [];
     setError(null);
 
     try {
@@ -125,28 +140,30 @@ export function useGraph() {
         throw new Error(`Failed to load communities: ${response.status}`);
       }
       const data: Community[] = await response.json();
+      if (!current(request)) return [];
       setCommunities(data);
       return data;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load communities';
-      setError(message);
+      if (current(request)) setError(message);
       return [];
     } finally {
-      setIsLoading(false);
+      finishRequest(request);
     }
-  }, [activeRepo, setCommunities, setIsLoading, setError]);
+  }, [activeRepo, setCommunities, begin, current, finishRequest, setError]);
 
   /**
    * Get neighbors of an entity within N hops
    */
   const getNeighbors = useCallback(
-    async (entityId: string, hops: number = maxHops): Promise<{ entities: Entity[]; relationships: Relationship[] } | null> => {
+    async (entityId: string, hops: number = maxHops, ticket?: GraphRequest): Promise<{ entities: Entity[]; relationships: Relationship[] } | null> => {
       if (!activeRepo) {
         setError('No repository selected');
         return null;
       }
 
-      setIsLoading(true);
+      const request = ticket ?? begin('view');
+      if (!request || !current(request)) return null;
       setError(null);
 
       try {
@@ -165,15 +182,18 @@ export function useGraph() {
           // destroyed the search results and told nobody why (M-01).
           // One surface per failure: the expansion banner carries this one. Mirroring it
           // into `error` too rendered the same sentence in two stacked red boxes (F-02).
+          const detail = await failureDetail(response, 'Could not expand this entity');
+          if (!current(request)) return null;
           setExpansion({
             entityId,
             status: 'failed',
-            detail: await failureDetail(response, 'Could not expand this entity'),
+            detail,
           });
           return null;
         }
 
         const data: GraphNeighborsResponse = await response.json();
+        if (!current(request)) return null;
         const ents = Array.isArray(data.entities) ? data.entities : [];
         const rels = Array.isArray(data.relationships) ? data.relationships : [];
 
@@ -184,10 +204,10 @@ export function useGraph() {
         return { entities: ents, relationships: rels };
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Could not expand this entity';
-        setExpansion({ entityId, status: 'failed', detail: message });
+        if (current(request)) setExpansion({ entityId, status: 'failed', detail: message });
         return null;
       } finally {
-        setIsLoading(false);
+        finishRequest(request);
       }
     },
     [
@@ -195,7 +215,9 @@ export function useGraph() {
       maxHops,
       setEntities,
       setRelationships,
-      setIsLoading,
+      begin,
+      current,
+      finishRequest,
       setError,
       setExpansion,
       setScope,
@@ -208,14 +230,16 @@ export function useGraph() {
   const getCommunitySubgraph = useCallback(
     async (
       communityId: string,
-      limit: number = 200
+      limit: number = 200,
+      ticket?: GraphRequest
     ): Promise<{ entities: Entity[]; relationships: Relationship[] } | null> => {
       if (!activeRepo) {
         setError('No repository selected');
         return null;
       }
 
-      setIsLoading(true);
+      const request = ticket ?? begin('view');
+      if (!request || !current(request)) return null;
       setError(null);
 
       try {
@@ -224,23 +248,25 @@ export function useGraph() {
 
         const response = await fetch(url);
         if (!response.ok) {
-          setError(await failureDetail(response, 'Could not load this community'));
+          const detail = await failureDetail(response, 'Could not load this community');
+          if (current(request)) setError(detail);
           return null;
         }
 
         const data: GraphNeighborsResponse = await response.json();
+        if (!current(request)) return null;
         const ents = Array.isArray(data.entities) ? data.entities : [];
         const rels = Array.isArray(data.relationships) ? data.relationships : [];
         return { entities: ents, relationships: rels };
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Could not load this community';
-        setError(message);
+        if (current(request)) setError(message);
         return null;
       } finally {
-        setIsLoading(false);
+        finishRequest(request);
       }
     },
-    [activeRepo, setIsLoading, setError]
+    [activeRepo, begin, current, finishRequest, setError]
   );
 
   /**
@@ -248,21 +274,24 @@ export function useGraph() {
    */
   const selectEntity = useCallback(
     async (entity: Entity | null) => {
+      const request = begin('view');
+      if (!request) return;
       setExpansion(null);
       if (!entity) {
         setSelectedEntity(null);
+        finishRequest(request);
         return;
       }
       // Nothing about the current view changes until the neighborhood is on screen.
       // Moving the selection first, or clearing the community first, would leave the
       // previous scope's rows on screen under the new entity's name and under the
       // corpus denominator (M-01 keeps the results; F-01 keeps them correctly labelled).
-      const loaded = await getNeighbors(entity.entity_id);
-      if (!loaded) return;
+      const loaded = await getNeighbors(entity.entity_id, maxHops, request);
+      if (!loaded || !current(request)) return;
       setSelectedEntity(entity);
       setSelectedCommunity(null);
     },
-    [setSelectedEntity, setSelectedCommunity, setExpansion, getNeighbors]
+    [begin, current, finishRequest, maxHops, setSelectedEntity, setSelectedCommunity, setExpansion, getNeighbors]
   );
 
   /**
@@ -270,13 +299,16 @@ export function useGraph() {
    */
   const selectCommunity = useCallback(
     async (community: Community | null) => {
+      const request = begin('view');
+      if (!request) return;
       setExpansion(null);
       if (!community) {
         setSelectedCommunity(null);
+        finishRequest(request);
         return;
       }
-      const sub = await getCommunitySubgraph(community.community_id, 250);
-      if (sub === null) return;
+      const sub = await getCommunitySubgraph(community.community_id, 250, request);
+      if (sub === null || !current(request)) return;
       setEntities(sub.entities);
       setRelationships(sub.relationships);
       setSelectedCommunity(community);
@@ -284,6 +316,9 @@ export function useGraph() {
       setScope({ kind: 'community', communityId: community.community_id });
     },
     [
+      begin,
+      current,
+      finishRequest,
       setSelectedCommunity,
       setSelectedEntity,
       setExpansion,
@@ -333,7 +368,8 @@ export function useGraph() {
         setError('No repository selected');
         return null;
       }
-      setIsLoading(true);
+      const request = begin('view');
+      if (!request) return null;
       setError(null);
       try {
         const params = new URLSearchParams({ limit: String(limit) });
@@ -342,10 +378,12 @@ export function useGraph() {
         const url = `${GRAPH_API_BASE}/${encodeURIComponent(activeRepo)}/subgraph?${params.toString()}`;
         const response = await fetch(url);
         if (!response.ok) {
-          setError(await failureDetail(response, 'Could not load the corpus graph'));
+          const detail = await failureDetail(response, 'Could not load the corpus graph');
+          if (current(request)) setError(detail);
           return null;
         }
         const data: GraphNeighborsResponse = await response.json();
+        if (!current(request)) return null;
         const ents = Array.isArray(data.entities) ? data.entities : [];
         const rels = Array.isArray(data.relationships) ? data.relationships : [];
         setEntities(ents);
@@ -353,15 +391,16 @@ export function useGraph() {
         setTotalMatched(Number(data.total_matched ?? ents.length));
         setActiveQuery(q);
         setSelectedEntity(null);
+        setSelectedCommunity(null);
         setExpansion(null);
         setScope(q ? { kind: 'search', query: q } : { kind: 'corpus' });
         return { entities: ents, relationships: rels };
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Could not load the corpus graph';
-        setError(message);
+        if (current(request)) setError(message);
         return null;
       } finally {
-        setIsLoading(false);
+        finishRequest(request);
       }
     },
     [
@@ -371,15 +410,18 @@ export function useGraph() {
       setTotalMatched,
       setActiveQuery,
       setSelectedEntity,
+      setSelectedCommunity,
       setExpansion,
       setScope,
-      setIsLoading,
+      begin,
+      current,
+      finishRequest,
       setError,
     ]
   );
 
   const loadGraph = useCallback(async () => {
-    if (!activeRepo) return;
+    if (!activeRepo || useRepoStore.getState().activeRepo !== activeRepo) return;
 
     reset();
     await Promise.all([loadStats(), loadCommunities(), loadSubgraph(DEFAULT_ENTITY_LIMIT, '')]);
@@ -389,8 +431,11 @@ export function useGraph() {
   useEffect(() => {
     if (activeRepo) {
       loadGraph();
+    } else {
+      // Deleting the last corpus must also invalidate its in-flight responses.
+      reset();
     }
-  }, [activeRepo, loadGraph]);
+  }, [activeRepo, loadGraph, reset]);
 
   return {
     // State

@@ -550,3 +550,284 @@ No deployment configuration changed for this correction.
 The corrected deployment-contract suite passes all 61 tests on LXC100 and
 received a focused independent Sol xhigh APPROVE. Publication still awaits
 fresh GitHub checks; production remains at its previous marker with corpora idle.
+
+### Merged deployment and native accounting continuation
+
+PR #89 merged as bf7b9766 after final GitHub verification (2,486 passed, 39 skipped)
+and independent Sol approvals of the final corrections. The merge's CI, including
+the Docker build, also passed. All four production corpora were idle before the
+controlled deployment. Production HEAD and deployment marker now match bf7b9766,
+the checkout is clean, and /api/ready reports every required dependency ready.
+The authenticated Graph UI loaded a six-node/five-edge fuel-tank neighborhood,
+listed five source mentions, and opened/rendered A11_MissionReport.pdf page154.
+NASA's old graph remains active; its rebuild has not started.
+
+Native accounting is a separate, uncommitted slice. The existing index summary now
+has optional aggregate accounting, immutable configuration/model/estimate identity,
+processed denominators, and durable per-lane census checkpoints. Index and proposal
+attempts have distinct IDs. Latest-index selection uses start time instead of file
+mtime; the dashboard selects the exact manifest run. Atomic summary replacement
+and stable file locks preserve newer checkpoints across queued status writes.
+An OS lifetime lock distinguishes retained workers from an abandoned process.
+The integrated census, native reader, and root owner tests passed139 cases on the
+private LXC overlay. Generated contracts were refreshed there and synced to source.
+API lifecycle, dashboard history semantics, and UI integration are still being
+validated; these changes are not deployed.
+
+Sol found an inbound/outbound role-membership gap in native ledger setup. The
+provisioner now refuses either membership direction before creating resources.
+The real disposable-Postgres setup/catalog suite passed69 tests. Docling census
+integration uses the supported picture-model factory, preserves official crops
+and annotations, and scopes its converter cache to the run; its11 direct cases
+and existing35-case family passed (one explicitly unconfigured paid test skipped).
+A further native retry investigation found inner SDK retries that router-level
+counters alone do not prove absent. Policy verification remains conservative
+until a native gateway/provider-attempt matrix validates the supported settings.
+No native production database or paid NASA rebuild has been started.
+
+### Native accounting integration and independent review follow-ups
+
+The isolated native retry matrix reproduced three provider attempts for a failed
+embedding request despite router/request retries being zero. Both the process
+`DEFAULT_MAX_RETRIES=0` and native `litellm_settings.DEFAULT_MAX_RETRIES: 0` are
+needed. The canonical generator now emits explicit zero retries for all391 aliases
+and disables retry policies, fallback families and shadow/failover routing. Exact
+native startup with networking disabled confirmed the generated configuration;
+61 catalog and38 disposable-Postgres setup tests passed. Native management APIs
+still cannot prove the effective cached SDK settings. Runtime accounting therefore
+retains an unverified-policy qualification instead of declaring a complete total.
+
+Index, figure and proposal calls carry explicit durable census scopes, with
+worker leases surviving cancellation. Frozen original gateway roots allow later
+reconciliation after configuration changes or corpus deletion. Real HTTP/API
+history cases passed3/3 across reconfiguration, deindex and corpus deletion.
+Failed proposal responses expose their attempt IDs, and latest proposal-attempt
+history is a separate query from latest indexing history. The combined schema,
+Dashboard, replay and cost API suite passed75 tests. Ancillary estimate failures
+now save an unavailable quote without replacing the actual indexing source and
+chunk-count checks; both real-file regression cases passed.
+
+Deindex no longer erases run summaries or late worker checkpoints. Fourteen real
+Dashboard/API cases passed, including complete/failed/cancelled/held-worker
+history and exact live-manifest cost selection. The first native cost browser
+suite passed five cases: delayed ingestion, bounded retry/manual refresh, legacy
+and incomplete states, Dashboard refresh, and shared main/dock requests. Sol's UI
+review then identified failed-proposal discoverability and additional corpus
+switch races; those corrections and their browser regressions are in progress.
+
+Independent Sol owner review found recovery and concurrent reconciliation races,
+non-atomic bootstrap, duplicate-owner mutation, lock path aliasing and a stale
+returned snapshot. These are being corrected with real filesystem/HTTP concurrency
+coverage before publication. A separate Sol API integration review is running.
+The native accounting slice remains uncommitted and undeployed. No native
+production ledger database, NASA rebuild, or code-corpus refresh has started.
+
+### Further review, test isolation, and native trace integration
+
+Sol's API review identified four additional defects: the proposal deadline excluded
+initial inventory and final persistence; current status returned deleted-corpus
+history; figure ceilings omitted failed attempts; missing gateway credentials or
+invalid client construction bypassed durable reconciliation errors. The correction
+uses one reschedulable deadline from the original monotonic start, retains a typed
+failed attempt even when no dispatch/census began, preserves explicit historical
+run access while returning404 for deleted current status, counts failed picture
+attempts, and saves reconciliation errors under a captured-record equality guard.
+Real PostgreSQL table/row locks reproduced both timeout families against the old
+code, then passed against the fix. Final combined verification is pending.
+
+The initial full native snapshot ran2,803 passing tests,40 skipped and36 failing.
+The launcher incorrectly disabled the OTel SDK, overrode the refusal suite's
+Postgres configuration through POSTGRES_DSN, and omitted CI's example.env copy.
+Two catalog assertions also predated explicit SDK retries, and the new glossary
+term lacked its public mirror. Correcting these yielded35/36 passing; the remaining
+failure was a third retry snapshot assertion. These are preliminary results, not
+the final combined gate.
+
+Sol's second owner review confirmed the original six fixes and found a duplicate
+constructor's transient lifetime lock could hide an abandoned owner, plus zero-lane
+completion retained stale reconciliation and changed its end time on repeated calls.
+Duplicate rejection now occurs under the summary lock before lifetime ownership;
+completion invalidates prior reconciliation and repeats without changing a closed
+record. Census progress also clears obsolete reconciliation errors. Real process,
+filesystem and HTTP regressions passed65 cases before adding the run trace lifecycle.
+
+The Sol UI review's initial private API launcher inherited production endpoints.
+Four synthetic schema requests reached the live gateway with Sol and returned200;
+their saved attempt IDs are d6cc7bdcb9b248f5ad3265520c3df1f0,
+ba27c6efacbd4260abf8176417779103,9db4fa9c32a246f09cddb8e809b9d7a0,
+and75598e9593ba4eec8b06aacc5d738b5d. All censuses are closed and quiescent.
+The payloads were fictional acceptance documents and standard schema instructions.
+Native usage/cost was unavailable; no zero-charge claim is made. Eighteen temporary
+corpus lifecycles also used production PostgreSQL, and their owned records were
+confirmed removed. The private API was stopped; production services were untouched.
+These runs are excluded from acceptance. A subsequent private startup briefly
+attached the profiler to the existing collector; profiling is now explicitly
+disabled and its URL blank. The replacement launcher uses env-i, explicit disposable
+endpoints, synthetic credentials and resolved-configuration assertions.
+
+Native billing and trace visibility are separate contracts. The running gateway
+had only the Prometheus callback and no Langfuse project configuration. Pinned1.94
+fixture verification established supported Langfuse session metadata, W3C parent
+joining, and message redaction through turn_off_message_logging. Implementation is
+adding one run observation retained through actual worker closure, explicit context
+in census transports, low-cardinality lane metrics, and native Langfuse generations
+while removing duplicate app generation emission. Native fixture, privacy, stream,
+failure, and exact-count verification gate activation; production is unchanged.
+
+### Final native backend gate and containment correction
+
+The combined backend snapshot passed 2,914 tests with 38 skips in 672.68 seconds
+on LXC100. Native gateway policy and telemetry integration were enabled. Ruff,
+strict mypy (178 source files), banned-pattern checks, generated types, both
+glossary copies, configuration reality and the contract bundle also passed.
+Focused results included 224 native telemetry/setup cases, 73 owner lifecycle
+cases and 53 history/Docling/dependency cases. Independent Sol xhigh review
+approved the canonical run trace routes and exact corpus/run history guards.
+The original owner and API findings are resolved; final native telemetry review
+and the integrated browser gate remain in progress.
+
+The history guard preserves existing filesystem paths while rejecting lossy
+corpus/run directory aliases. Latest summaries, exact records, event listings
+and stage replay now verify the stored identity. The regression matrix covers
+both run kinds, three corpus-collision families and mixed run-ID event rows.
+
+A later UI rerun passed EXHAUSTIVE_API_BASE instead of the required
+EXHAUSTIVE_API_BASE_URL. The old guard ran after setup, so two temporary corpora
+were created, patched and deleted in production at 06:29:23–24 UTC. No index,
+proposal, completion or embedding route ran; gateway logs confirmed no provider
+requests in the surrounding interval. Production registry, PostgreSQL and Qdrant
+checks found no matching records. Root moved the 16 owned lineage assets and two
+lock files to an audited private quarantine; none of those paths remain in
+production. The failed rerun is excluded from acceptance.
+
+The native-cost suite now fails during collection unless both explicit endpoints
+name its private loopback fixtures and its working directory is a private LXC
+overlay. Before any corpus mutation it checks resolved global configuration
+through both the API and browser proxy, including stores, gateway and disabled
+external integrations. Missing, misspelled and production endpoint settings were
+actually rejected before hooks. The dependency and telemetry mutation matrix
+also passes. Root owns further browser execution.
+
+Live Graph acceptance also reproduced a delayed Reset response overwriting a
+newer search. The correction uses shared request generations across the main
+view and dock; its real response-ordering regression is in progress. Epstein's
+approved two-type Person/Email schema is intentional and matches the completed
+D19 source record; absence of Organization is not a reason to rebuild it.
+
+The final native browser run reproduced a Dashboard status race missed by the
+earlier UI review: a delayed corpus A response replaced the index details after
+switching to corpus B, until the next 30-second refresh. The index-details card
+now rejects stale callback starts, results, errors and loading completion using
+a request generation plus the current corpus, and invalidates on cleanup. Both
+switch directions pass. The complete native UI gate is now nine passing cases
+in 1.4 minutes. Integrated frontend lint, 23 unit tests and build also pass.
+
+The Graph fix passed seven strict real API/browser cases in 20.6 seconds. Each
+held response retained its original status and body SHA after release. Coverage
+includes Reset, search, entity and community selection, corpus change, parallel
+loading completion and a stale real 404. The only earlier setup failure returned
+empty real graph data during overlap with the full backend fixture cleanup;
+repeating after that suite ended passed without another product-code change.
+
+Sol's native telemetry review then identified missing default-fallback validation,
+duplicate environment binding conflicts, native-readiness wording, failure-only
+metric lane loss in pinned LiteLLM, and absent exported usage/cost assertions.
+Corrections are in progress. These review findings do not invalidate the recorded
+passing snapshot, but that snapshot is not the final publication gate.
+
+### Remaining wider E scope, verified against current source
+
+The native index/schema slice does not close every paid workflow. A separate
+read-only call-chain audit confirmed these remaining items:
+
+- Cloud embeddings from indexing, retrieval, semantic cache and Recall still
+  share Embedder._embed_openai with environment-derived direct OpenAI routing
+  and combined application/SDK retries. Canonical EMB gateway aliases and
+  explicit call-site identity/census remain needed. A transport-only repair
+  must preserve dense contracts, dimensions, preprocessing and cache identity.
+- Cohere reranking still calls cohere.Client.rerank in a worker thread. The
+  existing LiteLLM option is LLM listwise reranking, not native /rerank. Move
+  the supported Cohere capability onto the native gateway substrate; the
+  reranker cost endpoint must stop reporting hard-coded zero.
+- Benchmark allocates its ID after shared retrieval; Eval POST/SSE and Promptfoo
+  allocate IDs after work. Synthetic correctly saves an ID before scheduling,
+  but generation, judging and its Eval quality gate do not propagate accounting.
+  These existing run records need explicit pre-work identity and honest native
+  reconciliation coverage. Promptfoo also needs subprocess lifecycle accounting.
+- Shared generation currently derives attribution from tracing and uses a generic
+  generation lane; billing identity must remain present when tracing is disabled.
+  The middleware also lacks inbound W3C parent extraction for nested workflows.
+
+The implementation order is cloud embedding transport, native Cohere replacement,
+Benchmark/Eval/Synthetic run scopes, then Promptfoo subprocess attribution. This
+is a continuation of the recovered D2–D4 requirements, not a new approval cycle.
+NASA rebuild and deployed operator acceptance remain ahead of these later slices.
+
+The final containment inventory found no production lineage files for the first
+18 temporary corpora. Their 18 locks and 148 assets are confined to the originating
+private API overlay and retained with the audit. The known provider history remains
+exactly the four previously recorded synthetic schema calls.
+
+Sol approved the Dashboard and native fixture guard corrections. Its Graph review
+found one further state transition: deleting the last corpus left the old shared
+graph visible when the selected corpus became empty. That empty-corpus transition
+is being corrected with a real browser regression before the Graph slice freezes.
+
+### Publication candidate verification
+
+Sol xhigh approved the five telemetry corrections and then the narrow final
+Graph, fixture-selection and observed-policy fallback corrections. The Graph
+empty-corpus regression now passes through actual last-corpus deletion and
+registry refresh, with held original responses, real 404 recovery and disabled
+exports. Nine Graph cases pass. A separately observed stale config error in the
+shared Apply bar after deleting the last corpus remains an operator follow-up;
+it is not Graph data or selection state.
+
+The final combined local backend run completed with 2,938 passed, 38 skipped and
+three test failures in 687.52 seconds. Two expected retired Langfuse key/readiness
+wording. The cancellation fixture waited for one server arrival but asserted two;
+its new explicit second-arrival barrier establishes the two-running/one-queued
+scenario before cancellation. The entire affected API and census suites then
+passed 26 cases. Production code did not change for these test corrections.
+A fresh full CI run is required before merge.
+
+The final source snapshot passed Ruff, strict mypy (178 files), types, glossary,
+configuration, contracts, frontend lint, 23 frontend unit tests and build. Native
+browser execution passed all nine cases in 1.4 minutes against the final source
+with the explicit NATIVE_COST_FIXTURE=1 selector. Without that selector ordinary exhaustive
+collection skips this private-only suite; strict mode refuses missing setup.
+The wrong-name, missing and production endpoint cases still fail before hooks.
+
+GitNexus indexed 23,615 nodes and 966 flows, with documented static-analysis
+limits. Its staged analysis reported critical scope across 69 files, 965 symbols
+and 95 traced flows, matching indexing, configuration, observability and operator
+UI ownership. The two unrelated instruction-file edits remain excluded.
+
+### PR90 review corrections
+
+The first PR90 CI run completed successfully: 2,911 passed and 68 environment-gated
+skips in 858.61 seconds, plus frontend build and all contract gates. GitHub review
+found two P2 accounting defects. Duplicate native call IDs now suppress the
+ambiguous native logged subtotal; twelve provider-priced, gateway-priced and
+cached-row variants failed before the fix and all 77 reader tests now pass.
+
+Successful forced schema regeneration now immediately selects the returned
+accounting ID even if the latest-history lookup fails. Historical requests begun
+before a newer operator action cannot overwrite its result. Proposal success and
+failure contracts carry the actual durable attempt start time, including cached
+successes, context conflicts, provider timeouts and no-indexable-text refusals.
+Ordering never compares proposal completion time or browser time. Legacy records
+remain explicitly undated; a same-run legacy cache response cannot erase a known
+timestamp and hide a later successful attempt.
+
+The old-ID, overlapping-start and legacy-cache browser regressions each failed
+against the preceding implementation at their intended accounting-ID assertions.
+The corrected API and reader suites pass 126 cases; all response timestamps agree
+with their durable summaries. Final frontend lint, 23 unit tests and build pass,
+as do Ruff, strict mypy, configuration, type and contract checks. All nine final
+native browser cases pass in 1.4 minutes. Sol xhigh approved the final correction
+after its earlier findings were addressed. GitNexus reports the expected critical
+shared-code scope: 70 files, 1,006 symbols and 95 affected flows. The CLI still
+caps its displayed names with a larger limit, while reporting that its counts and
+risk cover all changes; exact staged paths were checked separately. A fresh PR
+review and full CI run follow.

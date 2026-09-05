@@ -319,4 +319,10 @@ def test_write_catalog_files_writes_catalog_mirror_and_gateway_config_together(t
     assert model_list[1]["litellm_params"] == {
         "model": "openrouter/openai/gpt-5.4-mini",
         "api_key": "os.environ/OPENROUTER_API_KEY",
+        "num_retries": 0,
+        "max_retries": 0,
     }
+    assert all(
+        row["litellm_params"]["num_retries"] == row["litellm_params"]["max_retries"] == 0
+        for row in model_list
+    )

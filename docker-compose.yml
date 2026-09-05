@@ -224,9 +224,10 @@ services:
     image: ghcr.io/berriai/litellm:v1.94.0
     labels:
       io.ragweld.managed: "true"
-    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    command: ["--config", "/app/config.yaml", "--port", "4000", "--use_v2_migration_resolver", "--enforce_prisma_migration_check"]
     environment:
       LITELLM_MASTER_KEY: ${LITELLM_API_KEY:-sk-ragweld-local}
+      DEFAULT_MAX_RETRIES: "0"
     env_file:
       - ./infra/litellm.env.example
       - path: ./infra/litellm.env

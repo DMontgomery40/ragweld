@@ -609,17 +609,19 @@ export interface DashboardEmbeddingConfigSummary {
 
 /** Indexing cost summary for dashboard display. */
 export interface DashboardIndexCosts {
+  /** Saved accounting for the exact live generation's index run. */
+  accounting?: IndexRunAccounting | null; // default: None
   /** Total tokens processed during indexing. */
   total_tokens?: number; // default: 0
-  /** Estimated embedding cost (USD) when pricing data is available. */
+  /** Saved pre-run embedding estimate (USD) for the live generation; never repriced from current settings. */
   embedding_cost?: number | null; // default: None
-  /** Estimated GraphRAG semantic extraction cost (USD) when enabled. */
+  /** Saved pre-run semantic GraphRAG estimate (USD) for the live generation. */
   semantic_kg_cost?: number | null; // default: None
-  /** Ceiling on the vision-call cost (USD) of the latest run's figure descriptions, as that run recorded it; null when no run described a figure or its alias is unpriced. */
+  /** Saved pre-run figure-description estimate (USD) for the live generation, or its historical saved figure ceiling when no quote exists; never a measured charge. */
   figure_description_cost?: number | null; // default: None
-  /** Figures the latest indexing run described. */
+  /** Figures described by the live generation's index run. */
   figures_described?: number; // default: 0
-  /** Estimated total indexing cost (USD): embedding + semantic KG + figure description (each when applicable); null when any applicable component has no known price. */
+  /** Saved pre-run total estimate (USD) for the live generation. Null when the original quote is unavailable or any applicable component had no known price. */
   total_cost?: number | null; // default: None
 }
 
@@ -1264,11 +1266,15 @@ export interface GraphSchemaPolicyConflictDetail {
 }
 
 export interface GraphSchemaProposalFailureDetail {
-  code: "graph_schema_generation_failed" | "graph_schema_deadline_exceeded" | "graph_schema_context_changed";
+  code: "graph_schema_generation_failed" | "graph_schema_deadline_exceeded" | "graph_schema_context_changed" | "graph_schema_unusable";
   corpus_id: string;
   model_alias: string;
   message: string;
   operator_hint: string;
+  /** Saved accounting attempt, including failed provider work. */
+  accounting_run_id?: string | null; // default: None
+  /** Server-recorded start of the saved accounting attempt; absent from legacy failures. */
+  accounting_started_at?: string | null; // default: None
 }
 
 export interface GraphSchemaSample {
@@ -1391,6 +1397,18 @@ export interface ImageGenConfig {
   default_resolution?: string; // default: "1024x1024"
 }
 
+/** An immutable pre-run quote, distinct from native observed charges. */
+export interface IndexCostEstimateSnapshot {
+  captured_at: string;
+  embedding_usd?: number | null; // default: None
+  semantic_kg_usd?: number | null; // default: None
+  figure_description_usd?: number | null; // default: None
+  total_usd?: number | null; // default: None
+  estimated_chunks?: number | null; // default: None
+  estimated_tokens?: number | null; // default: None
+  detail: string;
+}
+
 /** Public error detail (HTTP 503) while a corpus's de-index tombstone is still being cleaned up. */
 export interface IndexDeletionIncompleteDetail {
   code?: "index_deletion_incomplete"; // default: "index_deletion_incomplete"
@@ -1417,6 +1435,31 @@ export interface IndexFenceCorruptDetail {
   message: string;
   /** What the operator can do next */
   operator_hint: string;
+}
+
+/** Accounting extension of the existing index run summary, with no call rows. */
+export interface IndexRunAccounting {
+  session_id: string;
+  corpus_id: string;
+  started_at: string;
+  ended_at?: string | null; // default: None
+  config_fingerprint: string;
+  /** Original gateway management root without credentials; retained for historical reconciliation. */
+  gateway_base_url?: string | null; // default: None
+  models?: Record<string, string>;
+  census?: Record<string, RunRequestCensus>;
+  /** The owner process ended before a durable closed census; also covers runs with no paid lanes. */
+  owner_interrupted?: boolean; // default: False
+  coverage_complete?: boolean; // default: False
+  gateway_attempt_policy_verified?: boolean; // default: False
+  coverage_notes?: string[];
+  estimate?: IndexCostEstimateSnapshot | null; // default: None
+  processed_files?: number; // default: 0
+  processed_chunks?: number; // default: 0
+  processed_tokens?: number; // default: 0
+  reconciled_at?: string | null; // default: None
+  costs?: NativeRunCosts | null; // default: None
+  reconciliation_error?: string | null; // default: None
 }
 
 /** Public error detail returned (HTTP 409) when a corpus is fenced by a running index run. */
@@ -1871,6 +1914,26 @@ export interface ModelValidationWarning {
   model_value: string;
   /** Human-readable warning message */
   message: string;
+}
+
+/** Derived native measurements; completeness and price evidence are separate. */
+export interface NativeRunCosts {
+  state: "pending" | "complete" | "incomplete";
+  coverage_state: "pending" | "complete" | "incomplete";
+  pricing_state: "complete" | "incomplete";
+  provider_reported_usd: number;
+  gateway_calculated_usd: number;
+  native_logged_usd: number | null;
+  provider_reported_requests: number;
+  gateway_calculated_requests: number;
+  cached_requests: number;
+  unmeasured_requests: number;
+  matched_gateway_requests: number;
+  missing_requests: number;
+  native_rows: number;
+  excluded_rows: number;
+  pages_read: number;
+  reasons: string[];
 }
 
 /** One alerting rule as Prometheus currently evaluates it. */
@@ -2604,6 +2667,27 @@ export interface RetrievalContractMismatchDetail {
   current_contract: Record<string, unknown>;
   /** Exact operator action required to resolve the mismatch */
   required_action: string;
+}
+
+export interface RunCostIdentity {
+  session_id: string;
+  corpus_id: string;
+  lane: "embedding" | "semantic_kg" | "figure_description" | "schema_proposal";
+}
+
+/** Acknowledged aggregate checkpoint, never an inferred request count. */
+export interface RunRequestCensus {
+  identity: RunCostIdentity;
+  revision: number;
+  started_requests: number;
+  completed_requests: number;
+  failed_requests: number;
+  uncertain_requests: number;
+  inflight: number;
+  active_producers: number;
+  owner_finished: boolean;
+  dispatch_enabled: boolean;
+  state: "open" | "closed" | "interrupted";
 }
 
 /** Generic runtime capability option. */
@@ -4149,6 +4233,10 @@ export interface GraphSchemaProposal {
   model_alias: string;
   graphrag_version?: "1.19.0";
   created_at: string;
+  /** Persisted schema-proposal attempt; separate from a later index run. */
+  accounting_run_id?: string | null;
+  /** Server-recorded start of the persisted schema-proposal attempt; absent on legacy proposals. */
+  accounting_started_at?: string | null;
 }
 
 export interface GraphSchemaProposalFailureResponse {
@@ -4293,6 +4381,7 @@ export interface IndexRunEventPage {
 export interface IndexRunSummary {
   /** Unique indexing run identifier */
   run_id: string;
+  run_kind?: "index" | "schema_proposal";
   /** Corpus identifier */
   corpus_id: string;
   /** Final or current run state */
@@ -4305,6 +4394,8 @@ export interface IndexRunSummary {
   progress?: number;
   /** Error message when status='error' */
   error?: string | null;
+  /** Saved model-API accounting and request census; absent on runs before native attribution. */
+  accounting?: IndexRunAccounting | null;
   /** Graph extraction, resolution, community, and override telemetry for this run */
   graph_metadata?: GraphGenerationMetadata | null;
   /** Typed graph promotion invariant failures observed before commit */
