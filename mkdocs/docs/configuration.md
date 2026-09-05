@@ -40,6 +40,9 @@
 !!! note "Credentials are redacted on the wire"
     `GET /api/config` serves the password inside `indexing.postgres_url` and the authorization value in `tracing.otlp_headers` as `[redacted]`; a PUT/PATCH that returns the marker restores the stored value, so "leave it unchanged" round-trips safely. Typing a real value rotates the secret, and a marker with nothing stored behind it is a `422`. Run-record config snapshots (eval, reranker, agent, synthetic) are redacted the same way. See [Security](security.md).
 
+!!! note "Cloud embeddings are validated against the gateway route at write time"
+    Saving a config where `embedding.embedding_backend=provider` and `embedding.embedding_type=openai` is checked against the catalog's native embedding routes (`server/api/config.py` `_validate_model_capabilities`): the selected `embedding.embedding_model` must be a gateway-served OpenAI embedding row (`text-embedding-3-small` or `text-embedding-3-large`), and `embedding.embedding_dim` must not exceed that model's full capacity (1536 / 3072 — catalog dimensions are model capacity, not your shortened output size). A write that fails either check answers `422` and persists nothing, global or corpus-scoped. The check applies even with `indexing.skip_dense` set, because retrieval and the semantic cache can still need embeddings; deterministic and non-OpenAI embedding backends are unaffected.
+
 ## Derivation Chain
 
 ```mermaid

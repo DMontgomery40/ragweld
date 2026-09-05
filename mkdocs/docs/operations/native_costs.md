@@ -34,12 +34,14 @@
 
 | Lane | What it pays for | Where the charge comes from |
 |------|------------------|------------------------------|
-| `embedding` | Provider-backed dense embeddings during indexing | Native spend rows attributed to the run (direct provider calls are noted as uncovered) |
+| `index_embeddings` | Dense embeddings while indexing a corpus | Native spend rows attributed to the run when the corpus's cloud embeddings route through the LiteLLM gateway; a non-gateway embedding provider is listed in the run's coverage reasons instead |
 | `semantic_kg` | GraphRAG extraction calls per chunk | Native spend rows attributed to the run |
 | `figure_description` | Docling vision calls for described figures | Native spend rows attributed to the run |
 | `schema_proposal` | The one GraphRAG schema-proposal call | Native spend rows attributed to the saved attempt |
 
 Each lane writes a durable **request census** (`RunRequestCensus`) into the run record (`server/indexing/run_records.py`): requests are admitted before transport dispatch, checkpoints are monotonic, and a worker that dies leaves the lane `interrupted` — never reconstructed as complete from ledger rows.
+
+Embedding requests now carry that census identity end to end. Every cloud embedding dispatch — indexing (`index_embeddings`), the fused retrieval query embed (`retrieval_embeddings`), and the semantic-cache fingerprint embed (`cache_embeddings`) — is built through `embedding_gateway_for_config` (`server/indexing/embedding_gateway.py`), which captures the route plus a `RunIdentity` (run id, corpus id, lane) and stamps `x-litellm-session-id` / `x-litellm-spend-logs-metadata` on the native request (`native_request_headers` in `server/observability/run_census.py`). Search, answer, and chat pass their run id down as `billing_session_id`, so the retrieval and cache embeddings of one request reconcile against the same gateway session as its generation; a complete semantic-cache hit needs no provider dispatch and is recorded as zero requests, never as a request without a charge. `embedding.embedding_retry_max` stays the total attempt budget — SDK and gateway-side retries are disabled (`num_retries` / `max_retries` = 0 on every embedding route) so retry layers cannot multiply it.
 
 ## Where you see it
 
