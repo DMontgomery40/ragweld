@@ -5,7 +5,7 @@
     mount prefixes in `server/main.py` on every docs-autopilot run. The wire schemas are the registered
     Pydantic models; see the configuration reference for their fields.
 
-172 routes across 24 routers, all served by the FastAPI app in `server/main.py`.
+173 routes across 24 routers, all served by the FastAPI app in `server/main.py`.
 
 ```mermaid
 flowchart LR
@@ -32,7 +32,7 @@ flowchart LR
     app --> n_eval
     n_feedback["feedback\n1 routes: POST"]
     app --> n_feedback
-    n_graph["graph\n10 routes: GET, POST"]
+    n_graph["graph\n11 routes: GET, POST"]
     app --> n_graph
     n_health["health\n2 routes: GET"]
     app --> n_health
@@ -385,7 +385,7 @@ flowchart LR
 |---|---|---|---|
 | `POST` | `/api/feedback` | `post_feedback` | `FeedbackResponse` |
 
-### `graph` (10 routes)
+### `graph` (11 routes)
 
 ```mermaid
 flowchart LR
@@ -404,12 +404,14 @@ flowchart LR
     n_graph --> n_graph_5
     n_graph_6["GET /api/graph/{corpus_id}/entity/relationships\n-> list[Relationship]"]
     n_graph --> n_graph_6
-    n_graph_7["POST /api/graph/{corpus_id}/query"]
+    n_graph_7["GET /api/graph/{corpus_id}/entity/sources\n-> GraphEntitySourcesResponse"]
     n_graph --> n_graph_7
-    n_graph_8["GET /api/graph/{corpus_id}/stats\n-> GraphStats"]
+    n_graph_8["POST /api/graph/{corpus_id}/query"]
     n_graph --> n_graph_8
-    n_graph_9["GET /api/graph/{corpus_id}/subgraph\n-> GraphNeighborsResponse"]
+    n_graph_9["GET /api/graph/{corpus_id}/stats\n-> GraphStats"]
     n_graph --> n_graph_9
+    n_graph_10["GET /api/graph/{corpus_id}/subgraph\n-> GraphNeighborsResponse"]
+    n_graph --> n_graph_10
 ```
 
 | Method | Path | Handler | Response model |
@@ -421,6 +423,7 @@ flowchart LR
 | `GET` | `/api/graph/{corpus_id}/entity` | `get_entity` | `Entity` |
 | `GET` | `/api/graph/{corpus_id}/entity/neighbors` | `get_entity_neighbors` | `GraphNeighborsResponse` |
 | `GET` | `/api/graph/{corpus_id}/entity/relationships` | `get_entity_relationships` | `list[Relationship]` |
+| `GET` | `/api/graph/{corpus_id}/entity/sources` | `get_entity_sources` | `GraphEntitySourcesResponse` |
 | `POST` | `/api/graph/{corpus_id}/query` | `graph_query` | `-` |
 | `GET` | `/api/graph/{corpus_id}/stats` | `get_graph_stats` | `GraphStats` |
 | `GET` | `/api/graph/{corpus_id}/subgraph` | `get_repo_subgraph` | `GraphNeighborsResponse` |

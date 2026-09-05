@@ -33,7 +33,7 @@ flowchart TB
     shape["Dedup / MMR / neighbours\ndedup_by=chunk_id\nmax_chunks_per_file=3\nneighbor_window=1\nenable_mmr=False\nmmr_lambda=0.7\nchunk_summary_search_enabled=True"]
     end
     subgraph s_rerank["Reranking (server/retrieval/rerank.py, gateway_reranker.py)"]
-    rerank["Reranker\nreranker_mode=none\nreranker_cloud_provider=litellm\nreranker_cloud_model=openai.gpt-4.1-nano\nreranker_cloud_top_n=50\ntribrid_reranker_alpha=0.7\ntribrid_reranker_topn=50\nreranker_timeout=30"]
+    rerank["Reranker\nreranker_mode=none\nreranker_cloud_provider=litellm\nreranker_cloud_model=\nreranker_cloud_top_n=50\ntribrid_reranker_alpha=0.7\ntribrid_reranker_topn=50\nreranker_timeout=30"]
     end
     subgraph s_out["Answer"]
     conf["Confidence gate\nconf_top1=0.62\nconf_avg5=0.55\nconf_any=0.55\nfallback_confidence=0.55\nfinal_k=10\neval_final_k=5"]
@@ -219,7 +219,7 @@ flowchart TB
 |---|---|---|
 | `reranker_mode` | `none` | Reranker mode: 'cloud' (LiteLLM gateway alias or Cohere API), 'learning' (MLX Qwen3 LoRA learning reranker), 'none' (disabled). Stale values such as 'local'/'hf' fail validation and must be migrated. |
 | `reranker_cloud_provider` | `litellm` | Cloud reranker provider when mode=cloud: 'litellm' scores candidates listwise through a LiteLLM gateway alias (no local model, no extra credential); 'cohere' calls the Cohere rerank API (COHERE_API_KEY). |
-| `reranker_cloud_model` | `openai.gpt-4.1-nano` | Cloud reranker model when mode=cloud: a LiteLLM gateway alias for provider 'litellm' (a cheap non-reasoning instruct model is ideal), or a Cohere rerank model id for provider 'cohere'. |
+| `reranker_cloud_model` | `` | Cloud reranker model when mode=cloud: a LiteLLM gateway alias for provider 'litellm' or a Cohere rerank model id for provider 'cohere'. Select an allowed model before enabling cloud reranking. |
 | `tribrid_reranker_alpha` | `0.7` | Blend weight for reranker scores |
 | `tribrid_reranker_topn` | `50` | Number of candidates to rerank (learning mode) |
 | `reranker_cloud_top_n` | `50` | Number of candidates to rerank (cloud mode) |

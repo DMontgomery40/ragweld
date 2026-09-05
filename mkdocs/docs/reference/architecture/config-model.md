@@ -26,7 +26,7 @@ flowchart LR
     root --> n_indexing
     n_graph_storage["graph_storage\n11 fields"]
     root --> n_graph_storage
-    n_graph_indexing["graph_indexing\n11 fields"]
+    n_graph_indexing["graph_indexing\n14 fields"]
     root --> n_graph_indexing
     n_qdrant["qdrant\n1 fields"]
     root --> n_qdrant
@@ -83,7 +83,7 @@ flowchart LR
 | `chunking` | 18 | Chunking configuration for documents and code. | [chunking](../config/chunking.md) |
 | `indexing` | 20 | Indexing and vector storage configuration. | [indexing](../config/indexing.md) |
 | `graph_storage` | 11 | Configuration for Neo4j graph storage and traversal. | [graph_storage](../config/graph_storage.md) |
-| `graph_indexing` | 11 | Configuration for building/persisting graph data during indexing. | [graph_indexing](../config/graph_indexing.md) |
+| `graph_indexing` | 14 | Configuration for building/persisting graph data during indexing. | [graph_indexing](../config/graph_indexing.md) |
 | `qdrant` | 1 | Qdrant vector-store connection for the canonical dense + sparse retrieval lane. | [qdrant](../config/qdrant.md) |
 | `fusion` | 6 | Configuration for tri-brid fusion of vector + sparse + graph results. | [fusion](../config/fusion.md) |
 | `vector_search` | 3 | Configuration for the vector (dense) leg served by Qdrant. | [vector_search](../config/vector_search.md) |

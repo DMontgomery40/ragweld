@@ -26,7 +26,7 @@
 [Config API & workflow](../../configuration.md){ .md-button }
 [Glossary](../../glossary.md){ .md-button }
 
-**Total parameters**: 11
+**Total parameters**: 14
 
 ??? info "Group index"
     - `(root)`
@@ -42,6 +42,9 @@
 | `graph_indexing.build_code_graph` | — | `bool` | `false` | — | Build an AST code graph during indexing: module, class and function entities with contains/inherits/imports/calls relationships (tree-sitter; Python, TypeScript, JavaScript), each linked to the chunk that defines it |
 | `graph_indexing.build_lexical_graph` | — | `bool` | `true` | — | Build lexical graph (Document/Chunk nodes + NEXT_CHUNK relationships) |
 | `graph_indexing.enabled` | — | `bool` | `true` | — | Enable graph building during indexing (Neo4j) |
+| `graph_indexing.schema_proposal_max_output_tokens` | — | `int` | `16384` | ≥ 256, ≤ 32768 | Maximum output tokens for one schema proposal; incomplete responses fail without approval |
+| `graph_indexing.schema_proposal_reasoning_effort` | — | `Literal["minimal", "low", "medium", "high", "xhigh"]` | `"low"` | allowed="minimal", "low", "medium", "high", "xhigh" | Reasoning effort for schema proposals, independent of semantic KG extraction effort |
+| `graph_indexing.schema_proposal_timeout_s` | — | `int` | `60` | ≥ 5, ≤ 80 | Total seconds allowed for schema proposal sampling and generation, below the public HTTP deadline |
 | `graph_indexing.semantic_kg_llm_model` | — | `str` | `""` | — | Optional LiteLLM alias for GraphRAG semantic extraction; empty uses the gateway default |
 | `graph_indexing.semantic_kg_llm_timeout_s` | — | `int` | `90` | ≥ 5, ≤ 600 | Timeout (seconds) for semantic KG LLM extraction per chunk |
 | `graph_indexing.semantic_kg_max_chunks` | — | `int` | `40000` | ≥ 1, ≤ 100000 | Maximum eligible chunks for a semantic GraphRAG run. Runs above this ceiling fail before promotion; the corpus is never sliced into a partial graph. |
