@@ -40,7 +40,8 @@
 
 | File | Purpose |
 |------|---------|
-| `web/src/stores/useConfigStore.ts` | Holds the working `config` and server-acknowledged `persisted` snapshots plus staging helpers; records `fieldErrors` keyed by dotted config path from a rejected save, and `saveConflict` when a 409 index-contract lock refused the write |
+| `web/src/stores/useConfigStore.ts` | Holds the working `config` and server-acknowledged `persisted` snapshots plus staging helpers; records `fieldErrors` keyed by dotted config path from a rejected save, and `saveConflict` when a 409 index-contract lock refused the write. Loads are corpus-scoped: the registry's resolved active corpus (global when the registry resolves to no corpus) decides which `/api/config` scope is fetched, an epoch guard discards a late response for a superseded scope, and a scope change clears both snapshots and reloads |
+| `web/src/stores/useRepoStore.ts` | The corpus registry: loads corpora with generation-based supersession (only the newest request publishes state and canonicalizes browser scope), and reports `resolved` only after a registry response applied — including a successful empty list — so consumers never mistake a failed first load for global scope. A mutation whose follow-up registry refresh fails raises with the completed operation named, so a caller never repeats a mutation the server already performed |
 | `web/src/hooks/useConfig.ts` | Read/update config |
 | `web/src/hooks/useFusion.ts` | Fusion-related derived state |
 | `web/src/hooks/useReranker.ts` | Reranker configuration and status |

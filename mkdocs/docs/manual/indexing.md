@@ -262,7 +262,7 @@ curl -sS -X POST "http://127.0.0.1:58012/api/index/estimate" \
 ```
 
 !!! note "The estimate measures your corpus — and it is the consent gate"
-    Tokens and chunks are **measured**, not divided out of bytes: `POST /api/index/estimate` samples files across every format in the corpus, runs them through the configured chunker, and scales by byte share (`server/indexing/estimate.py`). The dialog shows a point estimate with a band — `Tokens (est): 362,000 (317,000–407,000)` — plus how many files were sampled and how long the measurement took.
+    Tokens and chunks are **measured**, not divided out of bytes: `POST /api/index/estimate` samples files across every format in the corpus, runs them through the configured chunker, and scales by byte share (`server/indexing/estimate.py`). The dialog shows a point estimate with a band — `Tokens (est): 362,000 (317,000–407,000)` — plus how many files were sampled and how long the measurement took. The headline stays short — files, estimated chunks, estimated cost and time, and an explicit uncertainty line when a total is unknown or the forecast baseline comes from a failed run — while every number, the cost/time breakdown, and the saved estimate assumptions live behind an **Estimate details** drawer, so consenting is never done against a payload you cannot inspect.
 
     Three things can happen instead of a number:
 
@@ -296,12 +296,15 @@ In the UI, this typically maps to **RAG → Indexing** and **Dashboard → Stora
 
 ### Reading the run report
 
-The replayed log comes from `GET /api/index/{corpus_id}/runs/{run_id}/events`, which returns an `IndexRunEventPage` — the most recent events, the run's real `total`, and where the slice starts. The header therefore reports what the run recorded, never the cap it asked for: a run whose log holds 1,284 events reads "showing the most recent 500 of 1,284 events" instead of "500 replayed events".
+The replayed log comes from `GET /api/index/{corpus_id}/runs/{run_id}/events`, which returns an `IndexRunEventPage` — the most recent events, the run's real `total`, and where the slice starts. The run's collapsible **Run details** disclosure therefore reports what the run recorded, never the cap it asked for: a run whose log holds 1,284 events reads "showing the most recent 500 of 1,284 events" instead of "500 replayed events". The disclosure starts collapsed, so the header stays a status line — status pill, run cost headline, and graph verdict — and the identifiers open on demand.
 
 Two things the tab does so the signal survives the replay:
 
 - **Conversion heartbeats collapse.** A long Docling conversion emits a `Converting <file>: still running (Ns elapsed)` beat every few minutes, which used to bury everything around it — the figure summary included — under dozens of identical lines. Only the last beat per file is kept, labelled `[N progress notices]`, so the figure summary and per-file events stay readable.
 - **Figure outcomes are listed per document.** When a figure-enabled run finishes, the tab shows a **Figures this run failed to describe** panel (or "Figures this run filtered out, as configured" when nothing failed), one row per document with failed / filtered-out / described counts, from the run's own per-document `figure_outcome` events. "Failed" means the vision call was made and the gateway returned nothing — check the alias and `indexing.figures.max_completion_tokens`, then re-run with Force reindex. "Filtered out" means the picture never reached the vision call (`indexing.figures.skip_classes`, `min_area_fraction`, or `classify`) — the configured rules working, not a fault. The event also carries per-figure detail for the non-described pictures (`FigureOutcome` in `server/models/index.py` — the Docling `self_ref`, the 1-based page, the classifier class when one resolved, and a reason), so the panel can name *which* figures failed or were filtered out rather than only counting them.
+
+!!! note "The status pill and the graph verdict read like outcomes, not codes"
+    The run status pill renders the resolved state in words — **Running**, **Complete**, **Failed**, **Cancelled**, **Idle** — and resolves live indexing against saved history: a run in flight always reads Running, an idle current status never erases the last completed run's outcome, and a run that ended in an error shows its message in a red panel directly under the header, above the run-cost panel. The **Graph generation** card is worded the same way: **Validated**, **Chunks only** (the audited sparse-graph override promoted chunks and vectors only), **Not published** (promotion refused), or **Pending validation**, with the policy, schema hash, telemetry, and any override reason behind a **Graph details** disclosure. Read the verdict first; open details only when the verdict needs explaining. See the [Indexing pipeline](../indexing.md) for what promotion validates.
 
 ### Runs started outside the tab are mirrored, not lost
 
@@ -418,6 +421,9 @@ Recommended workflow:
 
 !!! warning "Embeddings are not always compatible"
     If you change embedding dimensions or switch providers/models, you usually need a full reindex. Mixing incompatible embeddings can silently degrade retrieval quality.
+
+!!! note "The mismatch guard reads the canonical embedding identity"
+    An incremental run compares its embedding settings against the corpus's promoted identity columns (`embedding_backend`, `embedding_model`, `embedding_dimensions` — written when the generation commits), not the legacy `meta` JSON: a stale or absent metadata copy can no longer force an unnecessary rebuild, and it can no longer hide one. A blank or unknown canonical backend still refuses the run (the error names `stored=unknown, config=...`) with a `force_reindex=true` hint, and a refused identity change never promotes a replacement generation — the previous chunks, manifest, and Qdrant generation stay untouched.
 
 !!! note "Force reindex is a replacement, not a wipe"
     A force run builds a replacement generation and switches the active index **only after validation** — the old generation keeps serving searches until the rebuild commits. Changed embedding or sparse settings can still make searches unavailable until the rebuild succeeds, but a failed rebuild no longer leaves the corpus empty.

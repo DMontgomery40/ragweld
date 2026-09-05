@@ -71,6 +71,17 @@ const m = await (await fetch('/api/metrics')).text();
 console.log(m.split('\n').slice(0,5));
 ```
 
+## Cost & Capacity dashboard
+
+The provisioned **Cost & Capacity** dashboard (`ragweld-cost-capacity`, `infra/grafana/provisioning/dashboards/cost-capacity.json`) is the gateway-spend surface, and its current revision makes the time range honest:
+
+- **The default range is today, midnight UTC to now** — calendar-day totals, not a rolling 24 hours — with the dashboard timezone pinned to UTC. **Today (UTC)** and **Last 7 days** header links restore the canonical ranges after you explore history; custom and absolute selections keep their actual boundaries, so a panel title never claims "today" over a historical range.
+- **Spend and token totals are native and reset-aware.** `sum(increase(litellm_spend_metric_total[...]))` and `sum(increase(litellm_total_tokens_metric_total[...]))` run over the selected range and a rolling 7 days ending at the selected end. Prometheus `increase` handles counter resets and extrapolates between scrapes, so these are approximate gateway totals, not a billing ledger. A missing series renders **No data**, never a fake zero; a recorded zero stays zero. Token totals count input + output once — cached and reasoning tokens are subsets, never added again.
+- **Breakdowns are by model and lane.** Two bar-gauge panels split selected-range spend and tokens by `model` × `metadata_lane`, with pre-lane history and lane-less callers visible as **unattributed** rather than filtered away. No run/corpus Prometheus labels are invented; exact per-run reconciliation stays in the [run accounting](operations/native_costs.md) API and UI.
+- **An export-error panel counts real log lines.** A Loki panel counts terminal native OTLP "Failed to export ... batch" log lines from the LiteLLM service over the range. It is a batch diagnostic, not proof of Langfuse delivery: zero only means scoped gateway logs existed in the same range with no terminal errors; no scoped logs renders **Unavailable**, not zero. Recovered retries are excluded, and provider request failures are not callback-delivery failures.
+
+Direct provider calls (including embeddings) are outside every panel here; the dashboard's operator-notes panel says so, and per-request reported cost stays in the run trace with estimates identified separately.
+
 ## "Latest" ML-quality gauges are read from persisted runs
 
 The four "Latest" series behind the **Eval / Benchmark / Prompt Regressions** dashboard — `tribrid_eval_last_top1_accuracy`, `tribrid_eval_last_topk_accuracy`, `tribrid_promptfoo_last_pass_ratio`, and `tribrid_benchmark_last_avg_latency_ms` — are scraped from the **most recently persisted** eval / Promptfoo / benchmark run at scrape time, not set from whichever request happened to complete a run inside the current process. What that means operationally:

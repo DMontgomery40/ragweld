@@ -43,9 +43,11 @@ Each lane writes a durable **request census** (`RunRequestCensus`) into the run 
 
 ## Where you see it
 
-- **RAG → Indexing**: a **Run accounting** panel under the run replay, and a **Schema proposal accounting** panel beside the graph-schema card (failed proposals are saved too, so their spend is attributable).
+- **RAG → Indexing**: a **Run cost** panel under the run replay, and a **Schema proposal cost** panel beside the graph-schema card (failed proposals are saved too, so their spend is attributable).
 - **Dashboard → System**: the **Recent Index Runs** table carries a compact accounting cell that refreshes with the 30-second status poll; the System index panel shows the live generation's **Live index accounting**.
 - **Benchmark**: the run card shows **Answer-generation cost** — the sum of the per-model generation calls only, with shared retrieval explicitly excluded rather than silently counted as zero.
+
+The panel leads with the number that answers "what did this run cost": a headline like `$0.01 recorded · Complete` — sub-cent spend reads `<$0.01 recorded`, so a metered zero and a rounding loss never look the same — the reconciliation state as one word (**Pending**, **Complete**, **Incomplete**, **Incomplete · Interrupted**, **Check failed**, or **Unavailable** when the run predates saved accounting), and a **Refresh** button beside it. The frozen estimate, native evidence, request census, and denominators live behind a **Details** disclosure that starts collapsed and resets on reload, so expanding it is an operator action, never a side effect of the panel refreshing.
 
 ## The states, in plain language
 

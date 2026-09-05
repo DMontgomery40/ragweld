@@ -33,6 +33,9 @@
 !!! note "CI Hooks"
     Stop hook blocks completion until validators and tests succeed.
 
+!!! note "CI provisions Docling's PDF models from a pinned manifest"
+    Docling's real PDF tests no longer depend on mutable Hugging Face `main` revisions or model-download rate limits. `scripts/prepare_docling_ci.py` provisions the layout, figure-classifier, tableformer, and RapidOCR artifacts listed in `scripts/docling_ci_models.json` — immutable revisions with SHA-256-verified bytes, cross-checked against the locked package versions and Docling's configured defaults — into `DOCLING_ARTIFACTS_PATH`, which CI caches only after verification. A failed download never publishes an artifact, and `--verify-only` re-checks the cache without any network access.
+
 !!! danger "No Mocks"
     - No Playwright `page.route(...).fulfill(...)`
     - No Python `unittest.mock` / `monkeypatch`

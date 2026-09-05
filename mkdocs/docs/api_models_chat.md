@@ -32,6 +32,9 @@
 !!! note "Vision"
     `images` supports up to 5 attachments when the model/provider supports multimodal.
 
+!!! note "Image token budgets are per documented model"
+    The chat prompt budget prices attached images from a per-model table of published OpenAI image-token formulas (`server/chat/prompt_budget.py`). An OpenAI vision alias the table does not document — including a newly published model id that inherits no predecessor's formula — fails closed with a "no published finite image token bound" error instead of reserving tokens from a guessed formula, so a new vision model is entered deliberately rather than absorbed by a family-prefix heuristic. Until it is, image attachments to that alias are refused rather than under-budgeted.
+
 !!! warning "Recall Scope"
     Recall gating only affects Recall; RAG corpora are always queried when checked.
 
