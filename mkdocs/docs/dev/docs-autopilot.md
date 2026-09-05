@@ -94,6 +94,20 @@ Anything still failing after both rounds is dropped with a `::warning::docs-auto
 raw replies (`mkdocs-docs-llm-repair-raw.txt`, `mkdocs-docs-llm-page-repair-raw.txt`) are kept so you
 can see what the model actually said. Set `DOCS_AUTOPILOT_PAGE_REPAIR=0` to skip the page repair round.
 
+Either way, one more provider-free gate guards publication: the **page-wrapper check**. It walks every
+materialized page under `mkdocs/docs/` looking for a leaked Markdown *presentation* wrapper — a leading
+`` ```markdown `` fence wrapped around a generated title plus a feature grid — and removes exactly
+that wrapper, preserving every other byte. Inner code examples are parsed independently, so their own
+closing fences are never mistaken for the wrapper's; a page whose leading fence is ambiguous (a genuine
+Markdown-syntax example, an unclosed inner fence) refuses the whole batch rather than guess. The check
+runs against the final tree — config reference included — before the strict build, so no output path
+(patch, diff repair, or page repair) can publish a wrapped page. The CI orchestrator can also run it
+standalone as a bot-owned commit with no content generator or provider call:
+
+```bash
+python scripts/docs_ai/run_ci_autopilot.py --repair-page-wrappers-only
+```
+
 ## Bootstrap / catch-up (one time)
 
 If you need a “generate everything” pass (e.g., first setup, or docs are badly behind), run against the **git empty tree**:

@@ -57,6 +57,7 @@
     - The "Generate docs patch (apply)" step has `id: docs_patch` and `continue-on-error: true`.
     - The failure summary step is gated by `if: steps.docs_patch.outcome == 'failure'` instead of a job-wide `failure()`.
     - Inside the apply step, the generator runs two recovery rounds before dropping a file: a diff repair round (re-emit rejected files) and a whole-page repair round (complete replacement pages; `DOCS_AUTOPILOT_PAGE_REPAIR=1` by default).
+    - After the patch (and either repair round) has written its pages, and after the config-reference regeneration, a page-wrapper gate validates every materialized docs page and strips only a leaked Markdown presentation wrapper; an ambiguous page refuses publication with the branch left unchanged.
     - After a patch failure, the workflow still:
         - Regenerates the config reference docs (Pydantic + glossary)
         - Builds the site with MkDocs in strict mode
@@ -64,7 +65,7 @@
 
 ## CI flow at a glance
 
-*Mechanism diagram (the apply-and-repair ladder inside the “Generate docs patch (apply)” step; the job steps around it are described below):*
+*Mechanism diagram (the apply-and-repair ladder inside the “Generate docs patch (apply)” step, plus the post-patch page-wrapper gate; the job steps around it are described below):*
 
 ```mermaid
 flowchart TB
@@ -76,7 +77,9 @@ flowchart TB
   R2 -->|"pages written"| D
   R2 -->|"still rejected"| C["Write marker + warn\\nand upload patch"]
   C --> D
-  D --> E["Build docs\\n(MkDocs --strict)"]
+  D --> W{"Page-wrapper gate\\nclean?"}
+  W -->|"yes"| E["Build docs\\n(MkDocs --strict)"]
+  W -->|"ambiguous page"| X["Refuse publication\\nbranch unchanged"]
 ```
 
 !!! tip "API first, MCP second (docs, too)"
@@ -192,6 +195,8 @@ const cfg = await res.json();
   - To catch broken links, malformed tabs/admonitions, and Mermaid errors before publishing.
 - What does the page repair round do?
   - When `git apply` still rejects a file after the diff repair round, the model is asked for that page’s complete new content (between `### FILE: <path>` / `### END FILE` markers) instead of another hunk. Whole-page replacements are re-validated against the same safety rules as hunks (rejected files only, docs-only paths, delete limits), and the raw reply is kept as `mkdocs-docs-llm-page-repair-raw.txt`.
+- What does the page-wrapper gate do?
+  - After every patch/repair path has written its pages and the generated config reference has been rebuilt, the orchestrator validates the final materialized tree (`generate_docs_from_diff.py --repair-page-wrappers`). It removes only a recognizable leaked Markdown presentation wrapper — a leading `` ```markdown `` fence around a generated title + feature grid — byte-preserving everything else, and refuses an ambiguous page (a real Markdown-syntax example, an unclosed inner fence) for the whole batch instead of guessing. A gate failure aborts with the branch unchanged; `run_ci_autopilot.py --repair-page-wrappers-only` runs the same check standalone as a provider-free repair commit.
 
 ## Related reading
 

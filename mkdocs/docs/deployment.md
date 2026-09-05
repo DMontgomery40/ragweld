@@ -1,4 +1,3 @@
-```markdown
 # Deployment
 
 <div class="grid chunk_summaries" markdown>

@@ -1,4 +1,3 @@
-```markdown
 # MCP (Model Context Protocol)
 
 <div class="grid chunk_summaries" markdown>
@@ -107,4 +106,3 @@ flowchart LR
 
 ??? info "Legacy stdio"
     `python_stdio_available` indicates whether the stdio transport can be launched by clients (no daemon).
-```

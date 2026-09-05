@@ -1,4 +1,3 @@
-```markdown
 
 
 # Indexing a corpus
@@ -64,6 +63,23 @@ Indexing turns a folder into a set of **retrieval primitives**:
 
 ??? question "Generate proposal returns 422: 'no embedded PDF text'"
     The schema-proposal sampler reads a bounded, positionally representative set of PDF pages — every page of a document with 36 pages or fewer, 36 evenly spaced pages of a larger one — instead of converting the whole document behind the synchronous request. A corpus of image-only or unreadable PDFs yields no sample text, so the API refuses with a typed `422` rather than starting unbounded whole-document OCR behind the public proxy window. Run a real index first (text extraction and figure description happen during indexing, not during the proposal call), or point the corpus at a text-bearing source, then generate the proposal again. See the [Indexing pipeline](../indexing.md).
+
+!!! tip "A reload restores your saved schema review — it does not regenerate it"
+    A generated proposal is persisted per corpus. Reloading the page, or leaving and coming back, restores that saved review **read-only** through `GET /api/index/{corpus_id}/graph-schema/proposal`: the one-line summary and the review/technical disclosures return exactly as saved (closed), with zero provider requests. When there is nothing usable to restore, the card says which — **No saved schema. Generate one to review.** or **The saved schema is out of date. Generate one to review.** — and the restore pauses while the page is holding unapplied config edits, because the saved review was produced under the persisted settings, not your draft. Only an explicit **Generate** / **Regenerate proposed schema** spends a proposal.
+
+### Chunk-level extraction checkpoints: re-index without re-paying extraction
+
+While a semantic run indexes, every chunk's validated extraction is checkpointed to Postgres under an exact identity: the source file's digest, the chunk's content and metadata digests, the rendered-prompt digest, and the full approved recipe (approved schema, prompt-template hash, extraction alias, upstream, model parameters, extractor/pruner versions). On a later run where **all of that still matches**, the stored graph is reused with no model call — reuse adds no native request and no spend — and only what actually changed dispatches fresh. A run that failed halfway leaves its committed checkpoints in place, so the retry reuses them instead of re-paying the whole corpus.
+
+What you'll notice:
+
+- **Re-indexing under an unchanged recipe is cheap at the extraction phase**, even with Force reindex: the replacement generation is rebuilt from reused chunk graphs plus fresh chunks for whatever changed.
+- **Graph details report measured outcomes**: selected chunks, admitted, reusable successes, reused, failed, cancelled, and unfinished. Successful reuse does not publish a failed run; older runs keep their file-level aggregates and say so.
+- **Corruption refuses rather than re-billing.** A stored checkpoint that no longer validates is a typed error; the run stops instead of silently re-extracting over data the server cannot trust. Explicit de-index clears checkpoints.
+- **Unreadable sources fail the run.** A semantic source that cannot be read, contains binary text, is empty after extraction, or exceeds the size limit fails the run with a named error instead of being skipped — the previous generation stays active.
+- **Sources are snapshotted during the run**, so the checkpoint identity and the document record always describe the same bytes, even if a file changes while the run is in flight.
+
+See the [Indexing pipeline](../indexing.md) for the recipe, ownership, and fail-closed details.
 
 ```mermaid
 flowchart LR
@@ -428,6 +444,9 @@ Recommended workflow:
 !!! note "Force reindex is a replacement, not a wipe"
     A force run builds a replacement generation and switches the active index **only after validation** — the old generation keeps serving searches until the rebuild commits. Changed embedding or sparse settings can still make searches unavailable until the rebuild succeeds, but a failed rebuild no longer leaves the corpus empty.
 
+!!! tip "Force reindex still reuses paid extraction when nothing changed"
+    Checkpoint reuse is orthogonal to the force flag: a force rebuild replaces the generation, but its extraction bill is the **delta** — chunks whose source bytes, prompt, approved schema, or extraction alias changed. An unchanged corpus re-indexed under the same recipe reuses every chunk graph and pays for extraction only where something moved. See the [Indexing pipeline](../indexing.md).
+
 ## The knobs that matter (where to tune)
 
 You tune indexing through config (Pydantic-first). For deep reference, see:
@@ -468,4 +487,3 @@ Here’s the short list of “most likely to matter” knobs:
 
 ??? question "Starting the run returns 409 with `code: figure_vision_alias`"
     `indexing.figures.vision_model` is either not a vision-capable gateway alias in the model catalog, or it cannot be routed right now (for example, the LiteLLM gateway is disabled). ragweld refuses the run **before** it takes the per-corpus run fence, so nothing is claimed, leased, or staged. Fix the alias — pick a vision-capable alias from the model catalog — or turn `indexing.figures.describe` off, then start the run again.
-```

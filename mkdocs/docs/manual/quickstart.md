@@ -1,4 +1,3 @@
-```markdown
 # Quickstart
 
 <div class="grid chunk_summaries" markdown>

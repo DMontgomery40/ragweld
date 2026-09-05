@@ -1,4 +1,3 @@
-```markdown
 # API Reference
 
 <div class="grid chunk_summaries" markdown>
@@ -57,6 +56,7 @@
 | Index | `/api/index/{corpus_id}/runs/{run_id}` | GET | Read one exact index or schema-proposal run, including its saved accounting |
 | Index | `/api/index/{corpus_id}/runs/{run_id}/costs/reconcile` | POST | Refresh a saved run's native spend from the gateway ledger |
 | Index | `/api/index/estimate` | POST | Best-effort indexing estimate |
+| Index | `/api/index/{corpus_id}/graph-schema/proposal` | GET | Read the saved graph-schema proposal (`current` / `missing` / `stale` / `ineligible`) for a read-only review restore — never generates, never bills |
 | Index | `/api/index/vocab-preview` | GET | BM25 vocabulary sample |
 | Documents | `/api/corpora/{corpus_id}/documents/view` | GET | Typed document view (text/pdf/rich) with provenance state |
 | Documents | `/api/corpora/{corpus_id}/documents/page` | GET | Server-rendered PDF page PNG (`page`/`thumb`, ETag/304) |

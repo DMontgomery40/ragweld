@@ -1,4 +1,3 @@
-```markdown
 # Testing and Verification
 
 <div class="grid chunk_summaries" markdown>
@@ -186,4 +185,3 @@ Proves legibility invariants for tabs rendered in the narrow dock pane, with rea
 
 ??? info "Artifacts"
     Temporary feature tests and results go in `.tests/`; permanent tests go under `tests/`.
-```

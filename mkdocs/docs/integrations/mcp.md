@@ -1,4 +1,3 @@
-```markdown
 # MCP Integration (Model Context Protocol)
 
 <div class="grid chunk_summaries" markdown>
@@ -94,4 +93,3 @@ async function mcpStatus() {
 !!! note "Search failures are structured, never partial"
     The MCP `search` tool fails closed: when retrieval cannot complete it returns `isError=true` with a typed error detail — `dependency_unavailable`, `required_retrieval_leg_failed`, or an index-contract mismatch (`embedding_contract_mismatch` / `sparse_contract_mismatch`) — instead of partial rows, and `POST /api/mcp/probe` surfaces the same details as typed `503`/`409` HTTP errors. See [MCP](../mcp.md) for the payload shape.
     The `answer` tool follows the same fail-closed contract through `MCPAnswerToolResult`, and `reranker_failed` joins the typed error set: a configured cloud/learning reranker that cannot run fails the tool instead of returning the unreranked fusion order, and a generation outage returns the typed `generation_unavailable` detail — never an answer assembled from the sources without context. See [MCP](../mcp.md).
-```

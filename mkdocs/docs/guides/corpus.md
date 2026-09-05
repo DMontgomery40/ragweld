@@ -41,6 +41,9 @@
 !!! note "Deleting a corpus takes its dead runs with it"
     `DELETE /api/corpora/{corpus_id}` removes the corpus's own rows **and** the staging rows (`__staging__<corpus>__<run>`) its index runs wrote before promotion — both in one transaction, through the shared staging sweep (`_delete_corpus_staging_rows` in `server/db/postgres.py`). A run that died mid-index therefore cannot leave orphan rows behind a deleted corpus, and the sweep is prefix-scoped so a sibling corpus whose id merely starts with the same text (corpus `a` vs `a__b`) is never touched.
 
+!!! note "Conditional cleanup refuses to delete a corpus that finished indexing"
+    `DELETE /api/corpora/{corpus_id}` (and `/api/repos/{corpus_id}`) accepts `?only_unindexed=true`: the deletion is then refused with a typed `409 corpus_already_indexed` — naming the corpus and the `last_indexed` timestamp read under the corpus write lock — when an index has completed, even if it committed after the caller listed the corpora. The UI's "delete all unindexed corpora" sends this guard, refreshes the registry **before** proposing any candidate (and aborts when that refresh fails), and skips a raced corpus instead of erroring, reconciling it on the final refresh. An explicit delete without the flag behaves exactly as before. See [UI tour](../manual/ui.md).
+
 ## Models Using corpus_id
 
 | Model | Fields |

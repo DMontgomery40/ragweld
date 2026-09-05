@@ -1,4 +1,3 @@
-```markdown
 # Indexing Pipeline
 
 <div class="grid chunk_summaries" markdown>
@@ -46,7 +45,7 @@
     Chunks, embeddings, and FTS are in PostgreSQL. Graph artifacts are in Neo4j. Sizes are summarized via dashboard endpoints.
 
 !!! note "The pre-run estimate is measured"
-    `POST /api/index/estimate` no longer divides bytes by a constant. It samples the corpus through the configured chunker (`server/indexing/estimate.py`), reports token/chunk bands (`estimated_*_low/high`, `±estimate_relative_error`), what it measured (`sampled_files`, `sampled_bytes`), and a `status` of `ready`, `warming` (tokenizer still loading; every measured field is `null`) or `insufficient_sample`. The estimate is also the consent gate: a failed or refused estimate blocks the run instead of letting it start unpriced. See [Indexing API](api_indexing.md) and [Indexing a corpus](manual/indexing.md).
+    `POST /api/index/estimate` no longer divides bytes by a constant. It samples the corpus through the configured chunker (`server/indexing/estimate.py`), reports token/chunk bands (`estimated_*_low/high`, `±estimate_relative_error`), what it measured (`sampled_files`, `sampled_bytes`), and a `status` of `ready`, `warming` (tokenizer still loading; every measured field is `null`) or `insufficient_sample`. The estimate is also the consent gate: a failed or refused estimate blocks the run instead of letting it start unpriced. Generation tokens are measured separately from the configured tokenizer's units, and the semantic KG input is priced from the fully rendered extraction request. See [Indexing API](api_indexing.md) and [Indexing a corpus](manual/indexing.md).
 
 !!! warning "Large Corpora"
     Configure Neo4j heap and page cache via environment for multi-million edge graphs. Monitor Postgres disk growth for pgvector indexes.
@@ -233,6 +232,54 @@ When `graph_storage.include_communities` is on and the staged graph passes, ragw
 
 One deliberate exception: when a fully successful approved extraction found no graph at all, an authenticated operator (the `Remote-User` header behind the auth proxy) may retry with `graph_empty_override_reason` (at least 20 visible characters). The override promotes only the chunk/vector generation — the empty graph is deleted and omitted from the manifest, so graph retrieval can never present it — and the actor, reason, timestamp, and telemetry are persisted on the manifest.
 
+### Extraction checkpoints: durable, reusable semantic chunk graphs
+
+A semantic run checkpoints each chunk's **pruned, validated graph** to Postgres (`graph_extraction_checkpoints`) as soon as it commits, under an exact identity: the source file's SHA-256, the chunk's content and metadata digests, its line range and provenance, the rendered-prompt digest, and the whole approved recipe — schema, prompt-template hash, extraction alias, upstream and endpoint, model parameters, and the GraphRAG extractor/pruner versions. The recipe is deliberately safe to persist: only digests of source text and prompts are stored (never the text itself), the endpoint is stored without credentials, query or fragment, and the model parameters are a reviewed typed allowlist — credentials, timeouts, retries and free-form provider payloads are refused before anything is written.
+
+What this buys the next run:
+
+- **Reuse instead of re-paying.** A re-index whose recipe and source bytes still match reuses the stored chunk graphs with no provider call; reuse adds no native request and no spend, and reuse events are counted on the run record (`reused_chunks`). Change the prompt, the approved schema, the alias, the reasoning effort, or a file's bytes, and exactly the affected chunks dispatch fresh.
+- **Failures keep their work.** A run that fails partway — a refusal on file 3 of 5, a cancellation, a worker crash — leaves every already-committed checkpoint in place; the next owner under the same recipe reuses them and dispatches only what is missing. A run's recipe partition is closed only after a complete, invariant-passing build.
+- **Corruption fails closed.** A checkpoint that fails validation on read is a typed error refusing the run — never a silent re-dispatch over a row the server cannot trust. Writes are fenced through the corpus row, and explicit de-index (not staging cleanup) is the removal path.
+- **Ownership is serialized in Postgres.** Checkpoint mutations take the same advisory + row locks as fence takeover and corpus deletion, so a checkpoint write, a delete, and a recipe rotation cannot interleave.
+
+Two supporting pieces make the identity trustworthy: each selected source file is copied to a **private snapshot** and hashed before extraction, so document records and checkpoint identities describe the same bytes even if the file changes mid-run (the copy is released once that file's graph work drains); and a **progress owner** persists the per-chunk outcome counters into the run summary as they happen, so a cancelled or failed run still reports what completed and what remains unfinished.
+
+*Concept diagram (the extraction-checkpoint lifecycle only — the full fused pipeline is on the [generated retrieval-pipeline page](reference/architecture/retrieval-pipeline.md)):*
+
+```mermaid
+flowchart LR
+  subgraph s_prep["Per-file preparation"]
+    SNAP["Source snapshot\n(private copy + sha256)"]
+    IDENT["Chunk identities\ncontent + metadata + prompt digests\n+ approved recipe"]
+    PREP["prepare_graph_extraction_checkpoint_file\nrecipe partition under the corpus fence"]
+    SNAP --> IDENT
+    IDENT --> PREP
+  end
+  subgraph s_extract["Per-chunk extraction"]
+    LOAD{"Checkpoint read\nunder the fence"}
+    REUSE["Reuse stored graph\nno request, no spend"]
+    CALL["Official extractor\none fresh dispatch"]
+    PRUNE["Domain pruning + validation"]
+    COMMIT["put_graph_extraction_checkpoint\ndurable validated graph"]
+    LOAD -->|"hit + valid"| REUSE
+    LOAD -->|"miss"| CALL
+    CALL --> PRUNE
+    PRUNE --> COMMIT
+  end
+  subgraph s_finish["Run completion"]
+    WRITE["File graph written\nentities + lexical"]
+    INV["Generation invariants"]
+    FIN["finish_success\npartition complete"]
+    WRITE --> INV
+    INV --> FIN
+  end
+  PREP --> LOAD
+  REUSE --> WRITE
+  COMMIT --> WRITE
+  FIN -->|"prunes deleted files"| DONE["Next run reuses\nthe matching identity"]
+```
+
 ### AST code graph (`build_code_graph`)
 
 When `graph_indexing.build_code_graph=true`, indexing additionally runs a tree-sitter AST pass per source file (`server/indexing/code_graph.py`) for **Python, TypeScript, and JavaScript**:
@@ -342,4 +389,3 @@ For the operator walkthrough (cost estimation, per-corpus tuning, troubleshootin
     - Graph build failures: retrieval continues with vector/sparse; flagged in logs.
     - Code graph: extraction is skipped entirely for unsupported languages (empty graph, not an error); only Python, TypeScript, and JavaScript are parsed.
     - Docling extraction is serialized process-wide: a run queued behind another run's conversion logs `Waiting for the document extractor …` notices with the measured elapsed wait, and a long conversion emits `Converting <file>: still running (Ns elapsed)` heartbeats — the first lands after ~60 seconds to rule out a wedged worker, then the interval widens (to ~5 minutes) so a 40-minute conversion narrates itself a handful of times instead of forty identical lines. See [Indexing a corpus](manual/indexing.md).
-```

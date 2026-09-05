@@ -126,7 +126,7 @@ flowchart LR
 ??? info "For engineers"
     - Ownership and reconciliation: `server/indexing/accounting.py` (`IndexAccountingOwner`, `reconcile_run_costs`)
     - Durable checkpoints on the existing run summary: `server/indexing/run_records.py`
-    - Native ledger reader and cost classification: `server/observability/gateway_costs.py`
+    - Native ledger reader and cost classification: `server/observability/gateway_costs.py` (`select_native_run_rows` resolves request identities before any variant is discarded; `NativeSpendReader.read_rows_for_run` is the bounded authenticated transport that reconciliation and the semantic-KG output forecast share)
     - Per-dispatch census transports: `server/observability/run_census.py`
     - Boundary models: `server/models/run_accounting.py`, regenerated into `web/src/types/generated.ts`
     - UI panels: `web/src/components/RAG/IndexRunCosts.tsx` (Indexing tab and Dashboard), `web/src/components/Benchmark/CostAttribution.tsx`

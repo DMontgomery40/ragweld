@@ -86,6 +86,26 @@ replies.
 !!! tip "Turning the round off"
     Set `DOCS_AUTOPILOT_PAGE_REPAIR=0` to skip the whole-page recovery pass. Default is `1` (enabled).
 
+## The page-wrapper gate (before any publish)
+
+Since the two repair rounds, one more provider-free check guards what actually publishes. After the
+config-reference regeneration, the CI orchestrator runs the validator against the **final materialized
+tree** in its worktree (`generate_docs_from_diff.py --repair-page-wrappers --docs-root <worktree>`) —
+including pages the AI patch never touched:
+
+- It removes only a recognizable generated-page wrapper: a leading `` ```markdown `` (or `~~~markdown`)
+  fence wrapped around a title plus a `grid chunk_summaries` feature div. Every other byte is
+  preserved, and inner code examples' closing fences are parsed independently so they are never
+  mistaken for the wrapper's.
+- It validates the entire batch before writing anything: a page whose leading fence is ambiguous (a
+  genuine Markdown-syntax example, an unclosed inner fence) refuses the whole run with no partial
+  writes.
+- A gate failure aborts with the branch unchanged and an error annotation, ahead of the strict build —
+  the job summary records what the check reported.
+- `python scripts/docs_ai/run_ci_autopilot.py --repair-page-wrappers-only` runs the same check
+  standalone: a bot-owned commit containing exactly the mechanical wrapper deletions, with no content
+  generator or provider call involved.
+
 ## Updated GitHub Actions workflow snippets
 
 === "Generate docs patch (apply)"
@@ -170,7 +190,7 @@ mkdocs-docs-llm-page-repair-raw.txt
 
 ## CI flow (at a glance)
 
-*Mechanism diagram (the apply-and-repair ladder inside the apply step; the surrounding CI steps are shown in the workflow snippets above):*
+*Mechanism diagram (the apply-and-repair ladder inside the apply step plus the post-patch page-wrapper gate; the surrounding CI steps are shown in the workflow snippets above):*
 
 ```mermaid
 flowchart LR
@@ -178,16 +198,18 @@ flowchart LR
   B --> C["LLM patch\\n(mkdocs-docs-llm.patch)"]
   C --> D["git apply"]
   D --> E{"Apply ok?"}
-  E -- "yes" --> F["Build docs\\nmkdocs build --strict"]
+  E -- "yes" --> W["Page-wrapper gate\\nvalidate final materialized pages"]
   E -- "no" --> R1["Diff repair round\\nre-emit rejected files"]
   R1 --> E2{"All applied?"}
-  E2 -- "yes" --> F
+  E2 -- "yes" --> W
   E2 -- "no" --> R2["Page repair round\\nwhole replacement pages"]
   R2 --> E3{"Pages written?"}
-  E3 -- "all" --> F
+  E3 -- "all" --> W
   E3 -- "some refused" --> G["Write marker\\nmkdocs-docs-llm.apply-failed.txt"]
   G --> H["Warn in CI\\n::warning::docs-autopilot"]
-  H --> F
+  H --> W
+  W -->|"clean"| F["Build docs\\nmkdocs build --strict"]
+  W -->|"ambiguous page refused"| X["Abort:\\nbranch unchanged"]
 ```
 
 ## Operator checklist (triage quickly)

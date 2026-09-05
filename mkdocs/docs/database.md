@@ -1,4 +1,3 @@
-```markdown
 # Storage: PostgreSQL (chunk rows + manifests) and Neo4j
 
 <div class="grid chunk_summaries" markdown>

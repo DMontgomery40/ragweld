@@ -1,4 +1,3 @@
-```markdown
 # Graph Retrieval and Storage
 
 <div class="grid chunk_summaries" markdown>

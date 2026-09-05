@@ -53,6 +53,9 @@ This prevents subtle races where a handler mutates a previously returned config 
 !!! note "Unit test coverage"
     See `tests/unit/test_config_store.py` for a minimal assertion that repeated `get(None)` calls return detached objects and that mutating one does not affect subsequent reads.
 
+!!! note "Preview reads: `persist=False`"
+    `ConfigStore.get(repo_id, persist=False)` resolves a scope through the same upgrade and production-reconciliation rules but writes nothing: no migration persisted, no new corpus seeded from the global template, no cache entry, and no touch of the global template file. Conditional corpus cleanup uses it so *checking* a corpus before deleting it cannot quietly migrate or seed that corpus's stored config; the next ordinary `get()` still performs any pending migration exactly as before. Both paths return a fresh deep copy — a preview can never hand out a live cached snapshot, and it never warms the cache that a later ordinary read would use.
+
 ## Snapshot semantics (GET → mutate local → PUT/POST)
 
 ```mermaid

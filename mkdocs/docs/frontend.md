@@ -1,4 +1,3 @@
-```markdown
 # Frontend Integration and Types
 
 <div class="grid chunk_summaries" markdown>
@@ -169,4 +168,3 @@ The test parses the hex values straight out of `tokens.css` (zero mocks, no hand
     - `RepoSelector.tsx` binds UI to `corpus_id`
     - `RAGTab.tsx`, `GrafanaTab.tsx`, `AdminTab.tsx` orchestrate panels using typed hooks
 
-```

@@ -1,4 +1,3 @@
-```markdown
 # Configuration
 
 <div class="grid chunk_summaries" markdown>
