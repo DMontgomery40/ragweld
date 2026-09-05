@@ -19,16 +19,16 @@ from server.api.generation_errors import (
     prompt_budget_http_exception,
 )
 from server.api.retrieval_errors import (
-    reranker_failed_http_exception,
     RETRIEVAL_RUNTIME_UNAVAILABLE_RESPONSES,
     required_retrieval_leg_http_exception,
+    reranker_failed_http_exception,
     retrieval_contract_mismatch_http_exception,
 )
-from server.chat.query_record import append_chat_query_record
 from server.chat.handler import ChatGenerationError, chat_once
 from server.chat.handler import chat_stream as chat_stream_handler
 from server.chat.model_discovery import discover_litellm_models
 from server.chat.prompt_budget import PromptBudgetError
+from server.chat.query_record import append_chat_query_record
 from server.chat.recall_indexer import RecallConversationIdError, index_recall_conversation
 from server.chat.source_router import resolve_sources
 from server.db.postgres import PostgresClient

@@ -1550,6 +1550,7 @@ litellm_settings:
   callbacks:
   - prometheus
   require_auth_for_metrics_endpoint: false
+  include_cost_in_streaming_usage: true
 router_settings:
   num_retries: 0
 general_settings:

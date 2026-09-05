@@ -5,6 +5,7 @@ import ForceGraph2D from 'react-force-graph-2d';
 import { useGraph } from '@/hooks/useGraph';
 import { useIndexing } from '@/hooks/useIndexing';
 import { SyntheticCallout } from '@/components/RAG/SyntheticCallout';
+import { GraphEntitySources } from '@/components/RAG/GraphEntitySources';
 import { NumberField } from '@/components/ui/NumberField';
 import { useRepoStore } from '@/stores/useRepoStore';
 import { DEFAULT_ENTITY_LIMIT, ENTITY_LIMIT_CHOICES } from '@/stores/useGraphStore';
@@ -84,7 +85,7 @@ function formatRelProvenance(r: Relationship): string {
   if (filePath) bits.push(`file:${filePath}`);
   if (runId) bits.push(`run:${runId}`);
   if (model) bits.push(`model:${model}`);
-  if (!bits.length) return 'No provenance';
+  if (!bits.length) return 'Edge-specific evidence not recorded';
   return bits.join(' • ');
 }
 
@@ -1466,6 +1467,12 @@ export function GraphSubtab() {
               </div>
             )}
           </div>
+          {activeRepo && selectedEntity ? (
+            <div style={{ maxHeight: '420px', overflowY: 'auto', marginTop: '14px' }}>
+              <strong style={{ fontSize: '12px' }}>{selectedEntity.name}</strong>
+              <GraphEntitySources key={`${activeRepo}:${selectedEntity.entity_id}`} corpusId={activeRepo} entityId={selectedEntity.entity_id} />
+            </div>
+          ) : null}
         </div>
 
         {viewMode === 'table' ? (
@@ -1617,7 +1624,7 @@ export function GraphSubtab() {
                     <th style={thStyle}>Source</th>
                     <th style={thStyle}>Relation</th>
                     <th style={thStyle}>Target</th>
-                    <th style={thStyle}>Provenance</th>
+                    <th style={thStyle}>Edge evidence</th>
                   </tr>
                 </thead>
                 <tbody>

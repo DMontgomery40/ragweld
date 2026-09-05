@@ -91,6 +91,7 @@ from server.indexing.graphrag_pipeline import (
 )
 from server.indexing.graphrag_schema import (
     derive_graph_schema_proposal,
+    schema_proposal_prompt,
     select_schema_chunks,
 )
 from server.indexing.loader import FileLoader
@@ -1994,9 +1995,9 @@ async def _run_index(
                 detail = "; ".join(mismatches)
                 msg = (
                     f"Embedding configuration mismatch for corpus '{repo_id}': {detail}. "
-                    "Re-indexing without force_reindex would mix incompatible vectors. "
-                    "Set force_reindex=true to clear the existing index first, "
-                    "or restore the embedding config to match the current index."
+                    "Set force_reindex=true to rebuild with the changed settings, "
+                    "or restore the embedding config to match the active index. "
+                    "The replacement becomes active only after validation."
                 )
                 if event_queue is not None:
                     _emit_event(
@@ -2431,7 +2432,7 @@ async def _run_index_body(
         if event_queue is not None:
             _emit_event(
                 event_queue,
-                {"type": "log", "message": "🧹 Cleared existing index (force_reindex=1)"},
+                {"type": "log", "message": "🧹 Cleared staging index data (force_reindex=1)"},
                 drop_oldest=True,
             )
 
@@ -3448,6 +3449,7 @@ async def _background_index_job(
         approved_proposal = await require_approved_graph_schema(
             policy_corpus or {},
             cfg,
+            repo_path=request.repo_path,
             provided_hash=request.approved_graph_schema_hash,
         )
         graph_schema = (
@@ -4150,9 +4152,19 @@ async def graph_schema_input_fingerprint(
         return sorted(rows)
 
     payload = {
+        "root": str(root),
         "files": await asyncio.to_thread(_inventory),
         "model_alias": _semantic_kg_model_override(cfg),
-        "sampling_recipe": "documents-and-positions-v1",
+        "reasoning_effort": cfg.graph_indexing.semantic_kg_reasoning_effort,
+        "chunking": cfg.chunking.model_dump(mode="json"),
+        "tokenization": cfg.tokenization.model_dump(mode="json"),
+        "parquet_extraction": cfg.indexing.model_dump(mode="json", include={
+            "parquet_extract_max_rows", "parquet_extract_max_chars",
+            "parquet_extract_max_cell_chars", "parquet_extract_text_columns_only",
+            "parquet_extract_include_column_names",
+        }),
+        "prompt_sha256": hashlib.sha256(schema_proposal_prompt().template.encode()).hexdigest(),
+        "sampling_recipe": "documents-and-positions-v2",
         "graphrag": "neo4j-graphrag:1.19.0",
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
@@ -4165,7 +4177,7 @@ def proposal_matches(
     return (
         existing.input_fingerprint == fingerprint
         and existing.model_alias == _semantic_kg_model_override(cfg)
-        and existing.sample.recipe == "documents-and-positions-v1"
+        and existing.sample.recipe == "documents-and-positions-v2"
         and existing.graphrag_version == "1.19.0"
     )
 
@@ -4244,7 +4256,7 @@ async def build_proposal_from_corpus(
 
 
 def _extract_schema_sample_text_for_path(path: Path, cfg: TriBridConfig) -> str:
-    """Bound PDF proposal work to nine positionally representative pages.
+    """Bound PDF proposal work to 36 evenly distributed pages.
 
     A schema proposal needs representative domain text, not a complete document
     conversion.  Running whole-document Docling conversion behind this synchronous
@@ -4263,23 +4275,11 @@ def _extract_schema_sample_text_for_path(path: Path, cfg: TriBridConfig) -> str:
                 document = pdfium.PdfDocument(str(path))
                 try:
                     page_count = len(document)
-                    if page_count <= 12:
+                    if page_count <= 36:
                         indexes = list(range(page_count))
                     else:
                         last = page_count - 1
-                        indexes = sorted(
-                            {
-                                0,
-                                1,
-                                2,
-                                max(0, last // 2 - 1),
-                                last // 2,
-                                min(last, last // 2 + 1),
-                                last - 2,
-                                last - 1,
-                                last,
-                            }
-                        )
+                        indexes = [round(index * last / 35) for index in range(36)]
                     parts: list[str] = []
                     for index in indexes:
                         page = document[index]
@@ -4367,6 +4367,7 @@ async def require_approved_graph_schema(
     corpus: dict[str, Any],
     cfg: TriBridConfig,
     *,
+    repo_path: str,
     provided_hash: str | None,
 ) -> GraphSchemaProposal | None:
     meta = corpus.get("meta") if isinstance(corpus.get("meta"), dict) else {}
@@ -4377,6 +4378,16 @@ async def require_approved_graph_schema(
     )
     if policy != "semantic":
         return None
+    registered_root = _resolve_corpus_root(str(corpus.get("path") or ""))
+    if _resolve_corpus_root(repo_path) != registered_root:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Semantic indexing repo_path must match the corpus's registered path. "
+                "Update the corpus source and review its graph schema before indexing "
+                "a different directory."
+            ),
+        )
     fingerprint = await graph_schema_input_fingerprint(corpus, cfg)
     postgres = PostgresClient(cfg.indexing.postgres_url)
     await postgres.connect()
@@ -4841,6 +4852,7 @@ async def start_index(request: IndexRequest, http_request: Request) -> IndexStat
     await require_approved_graph_schema(
         corpus,
         cfg,
+        repo_path=request.repo_path,
         provided_hash=request.approved_graph_schema_hash,
     )
     # Refuse an unroutable or non-vision figure alias here, before the fence and the lease

@@ -9,6 +9,7 @@ from typing import Any
 from neo4j import AsyncDriver, AsyncGraphDatabase
 
 from server.models.graph import Community, Entity, GraphNeighborsResponse, GraphStats, Relationship
+from server.models.graph_sources import GraphEntitySource
 
 _BATCH_SIZE_DEFAULT = 500
 _DEFAULT_REPO_SCOPED_NODE_LABELS: tuple[str, ...] = ("Document", "Chunk", "__Entity__")
@@ -185,6 +186,37 @@ class Neo4jClient:
         if not rec:
             return None
         return _entity_from_record(rec)
+
+    async def get_entity_sources(
+        self, repo_id: str, run_id: str, entity_id: str, *, limit: int, offset: int
+    ) -> list[GraphEntitySource] | None:
+        """Page direct mentions, plus one look-ahead row, with all graph elements scoped."""
+        if not 1 <= limit <= 100 or offset < 0:
+            raise ValueError("source pagination requires limit 1..100 and nonnegative offset")
+        driver = self._require_driver()
+        async with driver.session(database=self.database) as session:
+            result = await session.run(
+                """
+                MATCH (e:__Entity__ {repo_id: $repo_id, run_id: $run_id, entity_id: $entity_id})
+                CALL {
+                    WITH e
+                    MATCH (e)-[:FROM_CHUNK {repo_id: $repo_id, run_id: $run_id}]->
+                        (c:Chunk {repo_id: $repo_id, run_id: $run_id})
+                    WITH DISTINCT c
+                    ORDER BY c.file_path, c.start_line, c.chunk_id
+                    SKIP $offset LIMIT $fetch_limit
+                    RETURN collect({chunk_id: c.chunk_id, file_path: c.file_path,
+                        start_line: c.start_line, end_line: c.end_line, content: c.text}) AS sources
+                }
+                RETURN sources
+                """,
+                repo_id=repo_id, run_id=run_id, entity_id=entity_id,
+                offset=offset, fetch_limit=limit + 1,
+            )
+            record = await result.single()
+        if record is None:
+            return None
+        return [GraphEntitySource.model_validate(row) for row in record["sources"]]
 
     async def list_entities(
         self, repo_id: str, entity_type: str | None, limit: int, query: str | None = None
@@ -811,6 +843,14 @@ class Neo4jClient:
                 RETURN count(entity) AS total_entities
             }
             CALL () {
+                MATCH (entity:__Entity__ {repo_id: $repo_id})
+                WHERE NOT EXISTS {
+                    MATCH (entity)-[provenance:FROM_CHUNK]->(:Chunk {repo_id: $repo_id})
+                    WHERE provenance.repo_id = $repo_id
+                }
+                RETURN count(entity) AS orphan_entities
+            }
+            CALL () {
                 MATCH (:__Entity__ {repo_id: $repo_id})-[relationship]->
                       (:__Entity__ {repo_id: $repo_id})
                 WHERE relationship.repo_id = $repo_id
@@ -851,7 +891,7 @@ class Neo4jClient:
             }
             RETURN total_chunks, total_entities, semantic_relationships,
                    from_chunk_relationships, linked_chunks, duplicate_groups,
-                   cross_scope_nodes, cross_scope_relationships
+                   cross_scope_nodes, cross_scope_relationships, orphan_entities
             """,
             {"repo_id": repo_id, "run_id": run_id, "identity_property": identity},
         )
@@ -867,6 +907,7 @@ class Neo4jClient:
                 "duplicate_groups",
                 "cross_scope_nodes",
                 "cross_scope_relationships",
+                "orphan_entities",
             )
         }
 

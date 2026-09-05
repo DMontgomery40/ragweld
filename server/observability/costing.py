@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import math
+from collections.abc import Mapping, Sequence
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -57,11 +59,13 @@ def _find_model_spec(*, provider: str | None, model: str | None) -> dict[str, An
 
 
 def _to_float(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
     try:
         parsed = float(value)
     except Exception:
         return None
-    if parsed != parsed:
+    if not math.isfinite(parsed) or parsed < 0:
         return None
     return parsed
 
@@ -76,28 +80,43 @@ def _to_int(value: Any) -> int | None:
 
 def _extract_usage_tokens(usage: dict[str, Any] | None) -> tuple[int | None, int | None, int | None]:
     usage = usage or {}
-    input_tokens = _to_int(
-        usage.get("prompt_tokens")
-        or usage.get("input_tokens")
-        or usage.get("promptTokens")
-        or usage.get("inputTokens")
+    input_tokens = _first_token_count(
+        usage, ("prompt_tokens", "input_tokens", "promptTokens", "inputTokens", "input")
     )
-    output_tokens = _to_int(
-        usage.get("completion_tokens")
-        or usage.get("output_tokens")
-        or usage.get("completionTokens")
-        or usage.get("outputTokens")
+    output_tokens = _first_token_count(
+        usage, ("completion_tokens", "output_tokens", "completionTokens", "outputTokens", "output")
     )
-    total_tokens = _to_int(
-        usage.get("total_tokens")
-        or usage.get("totalTokens")
-        or (
-            (int(input_tokens or 0) + int(output_tokens or 0))
-            if input_tokens is not None or output_tokens is not None
-            else None
-        )
-    )
+    total_tokens = _first_token_count(usage, ("total_tokens", "totalTokens", "total"))
+    if total_tokens is None and (input_tokens is not None or output_tokens is not None):
+        total_tokens = int(input_tokens or 0) + int(output_tokens or 0)
     return input_tokens, output_tokens, total_tokens
+
+
+def _first_token_count(usage: dict[str, Any], keys: tuple[str, ...]) -> int | None:
+    for key in keys:
+        value = usage.get(key)
+        if value is not None:
+            parsed = _to_int(value)
+            if parsed is not None:
+                return parsed
+    return None
+
+
+def langfuse_usage_details(usage: dict[str, Any] | None) -> dict[str, int]:
+    """Map inclusive gateway totals to Langfuse's nonoverlapping token buckets.
+
+    Low-level Langfuse observations store custom usage dictionaries unchanged.
+    Raw gateway keys (especially usage.cost) defeat OpenAI schema recognition,
+    making prompt/completion/total three additive buckets. Keep cache/reasoning
+    subsets inside their inclusive input/output totals, never additional buckets.
+    Raw provider details remain on the generation result for callers that need them.
+    """
+    counts = _extract_usage_tokens(usage)
+    return {
+        key: count
+        for key, count in zip(("input", "output", "total"), counts, strict=True)
+        if count is not None
+    }
 
 
 def usage_total_tokens(usage: dict[str, Any] | None) -> int:
@@ -125,7 +144,9 @@ def _parse_provider_cost(raw: Any) -> float | None:
     return _to_float(raw)
 
 
-def extract_provider_cost(data: dict[str, Any] | None) -> float | None:
+def extract_provider_cost(
+    data: dict[str, Any] | None, *, headers: Mapping[str, str] | None = None
+) -> float | None:
     payload = data or {}
     for key in (
         "response_cost",
@@ -138,10 +159,10 @@ def extract_provider_cost(data: dict[str, Any] | None) -> float | None:
         if parsed is not None:
             return parsed
 
-    hidden = payload.get("hidden_params")
-    parsed = _parse_provider_cost(hidden)
-    if parsed is not None:
-        return parsed
+    for key in ("hidden_params", "_hidden_params"):
+        parsed = _parse_provider_cost(payload.get(key))
+        if parsed is not None:
+            return parsed
 
     usage = payload.get("usage")
     parsed = _parse_provider_cost(usage)
@@ -153,7 +174,8 @@ def extract_provider_cost(data: dict[str, Any] | None) -> float | None:
     if parsed is not None:
         return parsed
 
-    return None
+    # LiteLLM's completed-response header carries the final gateway charge.
+    return _parse_provider_cost((headers or {}).get("x-litellm-response-cost"))
 
 
 def _find_gateway_spec(alias: str | None) -> dict[str, Any] | None:
@@ -177,6 +199,7 @@ def build_trace_cost_summary(
 ) -> TraceCostSummary:
     input_tokens, output_tokens, total_tokens = _extract_usage_tokens(usage)
 
+    provider_cost_usd = _to_float(provider_cost_usd)
     if provider_cost_usd is not None:
         return TraceCostSummary(
             provider=provider,
@@ -184,7 +207,7 @@ def build_trace_cost_summary(
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             total_tokens=total_tokens,
-            estimated_cost_usd=float(round(provider_cost_usd, 6)),
+            estimated_cost_usd=provider_cost_usd,
             cost_source="provider",
             authoritative=True,
             detail="Cost came from provider or gateway response metadata.",
@@ -230,4 +253,48 @@ def build_trace_cost_summary(
         cost_source="catalog",
         authoritative=False,
         detail="Cost estimated from token usage and base-tier catalog pricing (provider volume tiers may apply).",
+    )
+
+
+def aggregate_cost_summaries(summaries: Sequence[TraceCostSummary | None]) -> TraceCostSummary:
+    """Aggregate a bounded run without presenting partial costs as its total."""
+    known = [summary for summary in summaries if summary is not None]
+    token_totals: dict[str, int | None] = {}
+    for field in ("input_tokens", "output_tokens", "total_tokens"):
+        values = [getattr(summary, field) for summary in known]
+        token_totals[field] = (
+            sum(values)
+            if values and len(known) == len(summaries) and all(value is not None for value in values)
+            else None
+        )
+    complete = bool(summaries) and len(known) == len(summaries) and all(
+        summary.estimated_cost_usd is not None and summary.cost_source != "unavailable"
+        for summary in known
+    )
+    authoritative = complete and all(summary.authoritative for summary in known)
+    if authoritative:
+        detail = "Sum of all model-call charges reported by the gateway."
+    elif complete:
+        detail = "Run total includes catalog estimates; see each model's cost source."
+    else:
+        detail = (
+            "Run total unavailable because at least one model call has no cost; "
+            "known charges remain on individual results."
+        )
+    return TraceCostSummary(
+        provider="LiteLLM",
+        input_tokens=token_totals["input_tokens"],
+        output_tokens=token_totals["output_tokens"],
+        total_tokens=token_totals["total_tokens"],
+        estimated_cost_usd=(
+            math.fsum(
+                summary.estimated_cost_usd
+                for summary in known
+                if summary.estimated_cost_usd is not None
+            )
+            if complete else None
+        ),
+        cost_source="provider" if authoritative else "catalog" if complete else "unavailable",
+        authoritative=authoritative,
+        detail=detail,
     )

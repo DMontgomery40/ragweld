@@ -18,10 +18,13 @@ type SetDockedOptions = {
   rememberLast?: boolean;
 };
 
-/** A citation opened in the right rail: the corpus it belongs to plus the cited chunk. */
+/** The document viewer consumes a location, whether reached from retrieval or the graph. */
+export type DocumentSource = Pick<ChunkMatch, 'chunk_id' | 'file_path' | 'start_line' | 'end_line' | 'content' | 'metadata' | 'provenance'>;
+
+/** A source opened in the right rail and the corpus it belongs to. */
 export type DocumentTarget = {
   corpusId: string;
-  source: ChunkMatch;
+  source: DocumentSource;
 };
 
 interface DockStore {
@@ -94,4 +97,3 @@ export const useDockStore = create<DockStore>()(
     }
   )
 );
-

@@ -14,6 +14,7 @@ from server.indexing.code_graph import extract_code_graph, module_id, symbol_id
 from server.indexing.graphrag_pipeline import (
     RESERVED_SCOPE_KEYS,
     GraphScopeCollisionError,
+    ScopedNeo4jWriter,
     assemble_code_file_graph,
     build_semantic_pipeline,
     chunks_to_text_chunks,
@@ -108,14 +109,20 @@ def test_scope_stamp_is_complete_and_removes_chunk_embeddings() -> None:
 
 
 @pytest.mark.parametrize("item_kind", ["node", "relationship"])
-def test_reserved_scope_collision_is_rejected_before_stamping(item_kind: str) -> None:
+@pytest.mark.parametrize("key", ["repo_id", "run_id", "graphJoinId", "__tmp_internal_id"])
+def test_reserved_scope_collision_is_rejected_before_stamping(item_kind: str, key: str) -> None:
     graph = _graph()
     if item_kind == "node":
-        graph.nodes[0].properties["repo_id"] = "attacker"
+        graph.nodes[0].properties[key] = "attacker"
     else:
-        graph.relationships[0].properties["graphJoinId"] = "attacker"
+        graph.relationships[0].properties[key] = "attacker"
     with pytest.raises(GraphScopeCollisionError, match=item_kind):
         validate_no_reserved_scope_keys(graph, RESERVED_SCOPE_KEYS)
+
+
+def test_writer_refuses_a_run_id_that_disagrees_with_the_graph_generation() -> None:
+    with pytest.raises(ValueError, match="must match the staging graph generation"):
+        ScopedNeo4jWriter(driver=object(), repo_id=STAGING_ID, run_id="b" * 32)
 
 
 @pytest.mark.asyncio
@@ -211,16 +218,13 @@ def test_duplicate_extracted_node_ids_are_folded_before_the_official_writer() ->
     so a model response that repeats a node id inside one chunk yields two rows with the same
     chunk-prefixed ``entity_id``; the store's uniqueness constraint then aborted a 2 h Epstein
     run at 99.7 % coverage. Duplicates of the same label fold into the first occurrence
-    (properties merged, first value wins); a duplicate with a different label keeps a
-    deterministic ordinal suffix so nothing is silently dropped. Relationships keep
-    pointing at the first occurrence.
+    (properties merged, first value wins). Conflicting identities are refused separately.
     """
     graph = Neo4jGraph(
         nodes=[
             Neo4jNode(id="chunk-1:0", label="Person", properties={"name": "Ada"}),
             Neo4jNode(id="chunk-1:1", label="Person", properties={"name": "Babbage"}),
             Neo4jNode(id="chunk-1:0", label="Person", properties={"name": "Ada", "role": "author"}),
-            Neo4jNode(id="chunk-1:0", label="Place", properties={"name": "London"}),
         ],
         relationships=[
             Neo4jRelationship(start_node_id="chunk-1:0", end_node_id="chunk-1:1", type="WROTE_TO"),
@@ -230,13 +234,12 @@ def test_duplicate_extracted_node_ids_are_folded_before_the_official_writer() ->
     assert [(n.id, n.label) for n in folded.nodes] == [
         ("chunk-1:0", "Person"),
         ("chunk-1:1", "Person"),
-        ("chunk-1:0#2", "Place"),
     ]
     assert folded.nodes[0].properties == {"name": "Ada", "role": "author"}
     assert [(r.start_node_id, r.end_node_id, r.type) for r in folded.relationships] == [
         ("chunk-1:0", "chunk-1:1", "WROTE_TO")
     ]
-    assert report == {"folded_same_label": 1, "rekeyed_other_label": 1}
+    assert report == {"folded_same_label": 1}
 
 
 def test_unique_extracted_node_ids_pass_through_unchanged() -> None:
@@ -246,7 +249,27 @@ def test_unique_extracted_node_ids_pass_through_unchanged() -> None:
     )
     folded, report = fold_duplicate_node_ids(graph)
     assert folded == graph
-    assert report == {"folded_same_label": 0, "rekeyed_other_label": 0}
+    assert report == {"folded_same_label": 0}
+
+
+@pytest.mark.parametrize(
+    ("label", "name"), [("Place", "London"), ("Person", "Babbage")]
+)
+@pytest.mark.parametrize("occupied_suffix", [False, True])
+def test_conflicting_node_identity_is_rejected_without_mutating_input(
+    label: str, name: str, occupied_suffix: bool
+) -> None:
+    nodes = [
+        Neo4jNode(id="c:0", label="Person", properties={"name": "Ada"}),
+        Neo4jNode(id="c:0", label=label, properties={"name": name}),
+    ]
+    if occupied_suffix:
+        nodes.append(Neo4jNode(id="c:0#2", label="Person", properties={"name": "Grace"}))
+    graph = Neo4jGraph(nodes=nodes, relationships=[])
+    before = graph.model_dump()
+    with pytest.raises(ValueError, match="conflicting identity"):
+        fold_duplicate_node_ids(graph)
+    assert graph.model_dump() == before
 
 
 async def test_a_files_document_node_never_shares_its_writer_id_with_the_module_entity(
@@ -298,7 +321,7 @@ async def test_a_files_document_node_never_shares_its_writer_id_with_the_module_
     assert symbol_id(file_path, "Thing") in ids
     folded, report = fold_duplicate_node_ids(combined)
     assert folded == combined
-    assert report == {"folded_same_label": 0, "rekeyed_other_label": 0}
+    assert report == {"folded_same_label": 0}
 
     colliding = Neo4jGraph(
         nodes=[Neo4jNode(id=document_node_id(file_path), label="module", properties={})],

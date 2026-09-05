@@ -7,6 +7,7 @@ import { LineageMeta } from '@/components/ui/LineageMeta';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { PipelineProfile } from '@/components/Benchmark/PipelineProfile';
 import { ResultsTable } from '@/components/Benchmark/ResultsTable';
+import { CostAttribution } from '@/components/Benchmark/CostAttribution';
 import { SplitScreen } from '@/components/Benchmark/SplitScreen';
 import {
   defaultBenchmarkSelection,
@@ -203,6 +204,7 @@ export default function BenchmarkTab() {
       latency_ms: r.latency_ms,
       error: r.error ?? undefined,
       context_chunks_used: r.context_chunks_used ?? 0,
+      cost_summary: r.cost_summary,
     }));
   }, [runResult]);
 
@@ -585,6 +587,10 @@ export default function BenchmarkTab() {
       <section style={{ display: 'grid', gap: 12 }} aria-label="Benchmark results">
         {runResult ? (
           <>
+            <div data-testid="benchmark-run-cost" style={{ padding: 12, border: '1px solid var(--line)', borderRadius: 8 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>Run cost</div>
+              <CostAttribution summary={runResult.cost_summary} showDetail />
+            </div>
             <ResultsTable results={splitResults} />
             {splitResults.length > 0 ? <SplitScreen results={splitResults} /> : null}
             <PipelineProfile results={pipelineResults} />

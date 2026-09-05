@@ -148,9 +148,9 @@ reuses it for all chunks.
    patterns, properties, and constraints before the paid bulk pass.
 5. Set the actual 1.19 `GraphSchema` openness fields — `additional_node_types`,
    `additional_relationship_types`, and `additional_patterns` — explicitly to false for the
-   approved run. Node and relationship properties are closed by their declared `NodeType` and
-   `RelationshipType` definitions; 1.19 does not expose separate additional-property flags.
-   Prune undefined graph output.
+   approved run. Set `NodeType.additional_properties` and
+   `RelationshipType.additional_properties` to false as well, so the official pruner removes
+   undeclared properties. Prune undefined graph output.
 6. Treat a schema that prunes all nodes or produces no usable graph as an invariant failure,
    not a green empty result.
 
@@ -177,6 +177,16 @@ proposal before it is hashed, so the operator reviews exactly the shape that wil
 A proposal that still has no node types, relationship types, or patterns after these rules is
 answered with a typed 422 `graph_schema_unusable`, never a server fault.
 
+Amendment 2026-09-04: 1.19 does expose per-type `additional_properties`, but its
+`RelationshipType` validator automatically reopens relationships with no declared attributes.
+That allowed an undeclared `body` property through the official pruner despite proposal
+normalization removing document-text fields. `closed_graph_schema` applies the closed flags
+to a validated copy after that constructor behavior, both for canonical serialization and
+for the reloaded instance supplied to extraction and pruning. The official Pipeline preserves
+those instance flags. Empty-property relationships remain valid edges, declared nontext
+attributes remain available, and undeclared node/relationship properties are pruned. No
+invented attributes or custom pruning algorithm are introduced.
+
 ## 7. Pipeline boundary and scoped writing
 
 Use the composable `Pipeline` components rather than `SimpleKGPipeline` because Ragweld already
@@ -189,13 +199,26 @@ Neo4j writer. It stamps every staged node and relationship with the manifest-res
 metadata limitation tracked upstream in issue 588. It must not reimplement extraction,
 pruning, lexical graph creation, or Cypher serialization.
 
-The concrete 1.19 seam is a `Neo4jWriter` subclass that overrides only
-`run(graph: Neo4jGraph, lexical_graph_config: LexicalGraphConfig)`. It first rejects any extracted
-node or relationship that already contains a reserved scope key, then stamps the canonical
-caller-owned scope properties onto `graph.nodes` and `graph.relationships`, and delegates the
-graph to `super().run(...)`. This is the exact no-fork mechanism documented in upstream issue
-588; the official writer retains batching, labels, Cypher generation, cleanup, and error
-behavior. A reserved-key collision always aborts before writes; it is never silently overridden.
+The concrete 1.19 seam is a `Neo4jWriter` subclass. Its `run` first rejects extracted
+reserved scope properties, stamps canonical caller-owned properties, qualifies the official
+writer's temporary node and endpoint IDs, and delegates node/relationship serialization and
+batching to `super().run(...)`. Canonical entity, chunk, document, and Qdrant join IDs remain
+unchanged. A reserved-key collision, including `__tmp_internal_id`, aborts before writes.
+
+Amendment 2026-09-04: stamping properties alone did not isolate concurrent writers. Pinned
+1.19 matches endpoints globally by `__KGBuilder__.__tmp_internal_id`, and its default cleanup
+clears that property across the database. Two overlapping staged graphs with the same raw
+IDs reproduced four edges from one intended edge, including cross-generation edges. The
+wrapper therefore also overrides temporary-ID cleanup, scoped to its configured database,
+generation, and invocation. Complete writes use a fresh invocation namespace; deferred code
+writes retain a generation namespace until their cross-file relationships are written and
+`finalize()` runs. A task-local context carries the invocation through the delegated worker,
+so completing one write cannot erase another write's endpoint IDs. Real-store interleaving
+tests cover different generations and concurrent complete writes within one generation.
+
+Repeated IDs may fold only when they describe the same label and named identity. Conflicting
+labels or names fail before writes; renaming an ambiguous entity would detach its provenance
+or misassign relationships. Promotion independently requires provenance for every entity.
 
 For each lexical `Chunk`, the writer also stamps `graphJoinId =
 "<graph_repo_id>:<chunk_id>"`. The Qdrant write for the same promoted generation stores this

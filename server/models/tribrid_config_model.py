@@ -30,6 +30,14 @@ except ImportError:
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from server.model_policy import ensure_model_allowed
+from server.models.graph_sources import GraphEntitySource as GraphEntitySource
+from server.models.graph_sources import GraphEntitySourcesResponse as GraphEntitySourcesResponse
+from server.models.graph_sources import (
+    GraphSourceGenerationChangedDetail as GraphSourceGenerationChangedDetail,
+)
+from server.models.graph_sources import (
+    GraphSourceGenerationChangedResponse as GraphSourceGenerationChangedResponse,
+)
 from server.models.index import ChunkProvenance, IndexStats
 from server.models.runtime_gateway import BenchmarkConfig as BenchmarkConfig
 from server.models.runtime_gateway import ChatModelInfo as ChatModelInfo
@@ -2778,6 +2786,8 @@ class BenchmarkResult(BaseModel):
     )
     model_id: str | None = Field(default=None, description="Optional resolved model id.")
     model_name: str | None = Field(default=None, description="Optional human-readable model name.")
+    usage: dict[str, Any] | None = Field(default=None, description="Raw gateway usage for this model call, including billed reasoning-only failures.")
+    cost_summary: TraceCostSummary | None = Field(default=None, description="Per-call reported charge or explicitly marked catalog estimate; null when no accounting was returned.")
 
 
 class BenchmarkRetrieval(BaseModel):
@@ -2816,6 +2826,7 @@ class BenchmarkRun(BaseModel):
     started_at_ms: int = Field(default=0, ge=0, description="Run start timestamp in milliseconds since epoch.")
     ended_at_ms: int = Field(default=0, ge=0, description="Run completion timestamp in milliseconds since epoch.")
     results: list[BenchmarkResult] = Field(default_factory=list, description="Per-model benchmark results.")
+    cost_summary: TraceCostSummary | None = Field(default=None, description="Sum of all model-call costs, unavailable if any call lacks accounting; null on older saved runs.")
     retrieval: BenchmarkRetrieval | None = Field(
         default=None,
         description="Grounding used for this run; null on records persisted before retrieval-backed benchmarks.",
@@ -6544,6 +6555,13 @@ Naming rules. Every node carries a "name" property; it is the entity's identity 
 
 Assign a unique ID (string) to each node, and reuse it to define relationships.
 Do respect the source and target node types for relationship and the relationship direction.
+
+Grounding rules:
+- Extract a relationship only when this passage explicitly supports that relationship between those exact entities. The schema lists allowed relationships; it is not evidence that any relationship occurred. Omit unsupported edges even when both entities appear.
+- Adjacency, temporal order, shared headings, and neighboring table rows do not establish causality, inhibition, correction, or any other relationship. Preserve a relationship stated within a table row only when its columns or wording establish the endpoints and meaning; never connect separate event rows merely because one follows another.
+- Respect clause scope and distinguish context from mechanism. In a list of separate changes or actions, do not transfer one clause's target or condition to another. "An alarm was prevented during an operation" does not say that the operation prevented the alarm; omit a causal or preventive edge when the text does not identify its agent.
+- Keep every status and other attribute attached to the entity and section that states it. A new heading starts a new section. Do not carry "closed", "resolved", "failed", dates, or other attributes from the preceding section into the next one. If a chunk starts mid-section and an attribute's subject is unclear, omit that attribute.
+- Preserve negation and uncertainty. Do not turn "did not cause", "may have caused", "possible", "suspected", or an open investigation into an affirmative causal fact. Represent a negated or uncertain relationship only if the supplied schema can express its negation or uncertainty explicitly; otherwise omit that relationship. Evaluate each claim independently: negation or uncertainty in one claim must not suppress a separately confirmed relationship or its named entities elsewhere in the passage.
 
 Make sure you adhere to the following rules to produce valid JSON objects:
 - Do not return any additional information other than the JSON in it.

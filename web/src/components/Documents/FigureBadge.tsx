@@ -1,8 +1,8 @@
 import { figureBadgeLabel } from '@/components/Documents/sourceLabels';
-import type { ChunkMatch } from '@/types/generated';
+import type { DocumentSource } from '@/stores/useDockStore';
 
 type Props = {
-  source: ChunkMatch;
+  source: Pick<DocumentSource, 'metadata'>;
   /** Test id for this placement; the same pill appears in citations and in the viewer. */
   testId: string;
 };

@@ -7,9 +7,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from server.api.dependency_errors import raise_required_dependency_unavailable_if_applicable
 from server.api.retrieval_errors import (
-    reranker_failed_http_exception,
     RETRIEVAL_RUNTIME_UNAVAILABLE_RESPONSES,
     required_retrieval_leg_http_exception,
+    reranker_failed_http_exception,
     retrieval_contract_mismatch_http_exception,
 )
 from server.chat.benchmark_runner import run_benchmark

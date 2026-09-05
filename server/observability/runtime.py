@@ -31,6 +31,7 @@ from server.models.tribrid_config_model import (
     TracingConfig,
     TriBridConfig,
 )
+from server.observability.costing import langfuse_usage_details
 
 try:
     from langfuse import Langfuse
@@ -702,7 +703,7 @@ def record_langfuse_generation(
             model=model,
             input=input_payload,
             output=output_text,
-            usage_details=usage_details or {},
+            usage_details=langfuse_usage_details(usage_details),
             cost_details=cost_details or {},
             metadata=metadata or {},
         ):

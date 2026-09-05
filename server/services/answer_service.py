@@ -2,17 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
 import time
 from collections.abc import AsyncIterator
 from typing import Any, cast
 
 from server.chat.context_formatter import format_context_for_llm
 from server.chat.generation import GenerationResult, generate_chat_text, stream_chat_text
-from server.dependency_errors import is_required_dependency_unavailable
 from server.chat.generation_failure import generation_unavailable_detail, safe_error_message
 from server.chat.prompt_builder import get_system_prompt
 from server.chat.provider_router import select_provider_route
+from server.dependency_errors import is_required_dependency_unavailable
 from server.models.retrieval import ChunkMatch
 from server.models.tribrid_config_model import ChatDebugInfo, ChatProviderInfo, TriBridConfig
 from server.retrieval.cache import CacheMode, SemanticCacheService
@@ -22,9 +21,7 @@ from server.retrieval.errors import (
     RerankerFailedError,
     RetrievalContractMismatchError,
 )
-
 from server.services.rag import FusionProtocol, build_chat_debug_info
-
 
 
 def _normalize_cache_mode(cache_mode: str | CacheMode | None) -> CacheMode:

@@ -7,7 +7,7 @@ import uuid
 from pathlib import Path
 
 from server.chat.context_formatter import format_context_for_llm
-from server.chat.generation import generate_chat_text
+from server.chat.generation import GatewayContentMissingError, generate_chat_text
 from server.chat.handler import fit_context_to_route
 from server.chat.prompt_builder import get_system_prompt
 from server.chat.provider_router import select_provider_route
@@ -18,6 +18,8 @@ from server.models.tribrid_config_model import (
     BenchmarkRun,
     TriBridConfig,
 )
+from server.observability.costing import aggregate_cost_summaries
+from server.observability.runtime import set_cost_summary
 
 _ROOT = Path(__file__).resolve().parents[2]
 
@@ -107,6 +109,8 @@ async def _run_one(
                 error=None,
                 context_chunks_used=len(rag_chunks),
                 model_id=str(route.model),
+                usage=result.usage,
+                cost_summary=result.cost_summary,
             )
         except Exception as e:
             gen_ms = float((time.perf_counter() - t0) * 1000.0)
@@ -117,6 +121,8 @@ async def _run_one(
                 breakdown_ms={"generate": gen_ms},
                 error=_format_error(e),
                 model_id=str(route.model),
+                usage=e.usage if isinstance(e, GatewayContentMissingError) else None,
+                cost_summary=e.cost_summary if isinstance(e, GatewayContentMissingError) else None,
             )
 
 
@@ -168,6 +174,8 @@ async def run_benchmark(
         for m in models
     ]
     results = await asyncio.gather(*tasks) if tasks else []
+    cost_summary = aggregate_cost_summaries([result.cost_summary for result in results])
+    set_cost_summary(cost_summary)
 
     ended_at_ms = _now_ms()
     payload = BenchmarkRun(
@@ -178,6 +186,7 @@ async def run_benchmark(
         started_at_ms=int(started_at_ms),
         ended_at_ms=int(ended_at_ms),
         results=list(results),
+        cost_summary=cost_summary,
         retrieval=retrieval,
     )
 

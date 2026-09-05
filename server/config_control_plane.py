@@ -19,8 +19,8 @@ from server.chat.gateway_runtime import (
     resolve_vllm_base_url,
 )
 from server.db.neo4j import Neo4jClient
-from server.gateway_catalog import LOCAL_GATEWAY_ALIAS
 from server.db.postgres import PostgresClient
+from server.gateway_catalog import LOCAL_GATEWAY_ALIAS
 from server.indexing.generations import qdrant_collection_of
 from server.models.tribrid_config_model import (
     ConfigFieldDescriptor,

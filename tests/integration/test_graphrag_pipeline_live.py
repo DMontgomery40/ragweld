@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import os
+import threading
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -11,6 +12,8 @@ from uuid import uuid4
 import pytest
 from httpx import AsyncClient
 from neo4j import GraphDatabase
+from neo4j_graphrag.components.graph_pruning import GraphPruning
+from neo4j_graphrag.components.kg_writer import KGWriterModel
 from neo4j_graphrag.components.schema import (
     GraphSchema,
     NodeType,
@@ -18,7 +21,14 @@ from neo4j_graphrag.components.schema import (
     PropertyType,
     RelationshipType,
 )
-from neo4j_graphrag.components.types import Neo4jGraph, Neo4jNode
+from neo4j_graphrag.components.types import (
+    LexicalGraphConfig,
+    Neo4jGraph,
+    Neo4jNode,
+    Neo4jRelationship,
+    TextChunk,
+    TextChunks,
+)
 
 from server.api.index import _resolve_semantic_kg_route, graph_schema_input_fingerprint
 from server.config import load_config
@@ -30,11 +40,16 @@ from server.indexing.graphrag_pipeline import (
     GraphScopeCollisionError,
     ScopedNeo4jWriter,
     build_semantic_pipeline,
+    lexical_graph_config,
+    semantic_entity_relation_extractor,
+    semantic_extraction_llm,
     write_code_file_graph,
     write_deferred_code_relationships,
     write_semantic_file_graph,
 )
+from server.indexing.graphrag_schema import closed_graph_schema
 from server.models.index import Chunk, GraphSchemaProposal, GraphSchemaSample
+from server.models.tribrid_config_model import TriBridConfig
 from server.services import config_store
 from tests.service_requirements import require_env
 
@@ -44,6 +59,101 @@ pytestmark = [
     pytest.mark.requires_qdrant,
     pytest.mark.asyncio,
 ]
+
+
+@pytest.mark.parametrize(
+    ("case", "text", "expected_edges"),
+    [
+        (
+            "table_adjacency",
+            "## Event timeline\n"
+            "| Time | Event |\n| 10:01 | Aster alarm |\n"
+            "| 10:02 | Channel reset |\n| 10:03 | Aster alarm |\n\n"
+            "## Demonstrated control\nClosing Orion switch inhibits Beacon alarm.",
+            {("closing orion switch", "INHIBITS", "beacon alarm")},
+        ),
+        (
+            "section_status",
+            "## Coolant pressure anomaly\nThe pressure returned to normal. "
+            "This anomaly is closed.\n\n## Water in glove\n"
+            "Water began entering the glove after the test started. "
+            "The investigation has not established the cause or a repair.",
+            set(),
+        ),
+        (
+            "context_not_mechanism",
+            "Equipment changes included inhibiting the Sensor Q temperature alarm "
+            "and preventing the master alarm during Relay R selection. "
+            "Closing Orion switch inhibits Beacon alarm.",
+            {("closing orion switch", "INHIBITS", "beacon alarm")},
+        ),
+        (
+            "negation_and_uncertainty",
+            "Inspections found that Seal A did not cause Leak A. "
+            "Bearing B may have caused Vibration B; the investigation remains open. "
+            "Tests established that Gear C caused Jam C.",
+            {("gear c", "CAUSES", "jam c")},
+        ),
+    ],
+)
+async def test_semantic_extraction_grounds_edges_and_attributes_in_their_own_passage(
+    case: str, text: str, expected_edges: set[tuple[str, str, str]],
+) -> None:
+    """A broad schema must not turn table order, prior headings, or hypotheses into facts."""
+    cfg = load_config()
+    cfg.graph_indexing.semantic_kg_llm_model = os.environ.get(
+        "GRAPH_E2E_KG_MODEL", "openai.gpt-5.6-luna"
+    )
+    await asyncio.to_thread(warm_gateway_catalog)
+    route = _resolve_semantic_kg_route(cfg)
+    llm = semantic_extraction_llm(
+        route_model=route.model, route_base_url=route.base_url, route_api_key=route.api_key,
+        route_upstream=gateway_upstream_for_alias(route.model), llm_timeout_s=120,
+        reasoning_effort="medium",
+    )
+    named = [PropertyType(name="name", type="STRING")]
+    schema = closed_graph_schema(GraphSchema(
+        node_types=[
+            NodeType(label=label, properties=named) for label in ("Event", "Alarm", "Part")
+        ] + [NodeType(label="Anomaly", properties=[
+            *named, PropertyType(name="status", type="STRING"),
+        ])],
+        relationship_types=[RelationshipType(label="INHIBITS"), RelationshipType(label="CAUSES")],
+        patterns=[
+            Pattern(source="Event", relationship="INHIBITS", target="Alarm"),
+            Pattern(source="Part", relationship="CAUSES", target="Anomaly"),
+        ],
+    ))
+    lexical = lexical_graph_config()
+    extractor = semantic_entity_relation_extractor(
+        llm=llm, prompt_template=TriBridConfig().system_prompts.semantic_kg_extraction,
+        max_concurrency=1,
+    )
+    extracted = await extractor.run(
+        chunks=TextChunks(chunks=[TextChunk(text=text, index=0, uid=f"grounding:{case}")]),
+        schema=schema, lexical_graph_config=lexical,
+    )
+    pruned = await GraphPruning().run(graph=extracted, schema=schema, lexical_graph_config=lexical)
+    entities = {
+        node.id: node for node in pruned.graph.nodes
+        if node.label not in lexical.lexical_graph_node_labels
+    }
+    edges = {
+        (str(entities[rel.start_node_id].properties["name"]).casefold(), rel.type,
+         str(entities[rel.end_node_id].properties["name"]).casefold())
+        for rel in pruned.graph.relationships
+        if rel.start_node_id in entities and rel.end_node_id in entities
+    }
+    if case == "context_not_mechanism":
+        assert expected_edges <= edges, pruned.graph.model_dump(mode="json")
+        assert not any("relay r" in source for source, _, _ in edges), edges
+    else:
+        assert edges == expected_edges, pruned.graph.model_dump(mode="json")
+    if case == "section_status":
+        water = [node for node in entities.values()
+                 if str(node.properties.get("name", "")).casefold() == "water in glove"]
+        assert water, pruned.graph.model_dump(mode="json")
+        assert all(str(node.properties.get("status", "")).casefold() != "closed" for node in water)
 
 
 def _driver_and_database(corpus_id: str):
@@ -89,6 +199,113 @@ def _schema() -> GraphSchema:
 async def _count(neo: Neo4jClient, query: str, repo_id: str) -> int:
     rows = await neo.execute_cypher(query, {"repo_id": repo_id})
     return int((rows[0] if rows else {}).get("n") or 0)
+
+
+def _writer_fixture(prefix: str, *, with_nodes: bool = True, with_edge: bool = True) -> Neo4jGraph:
+    return Neo4jGraph(
+        nodes=[
+            Neo4jNode(id=f"{prefix}:ada", label="Person", properties={"name": "Ada"}),
+            Neo4jNode(id=f"{prefix}:grace", label="Person", properties={"name": "Grace"}),
+        ] if with_nodes else [],
+        relationships=[Neo4jRelationship(
+            start_node_id=f"{prefix}:ada", end_node_id=f"{prefix}:grace", type="WROTE_TO"
+        )] if with_edge else [],
+    )
+
+
+@pytest.mark.parametrize("second_cleans", [False, True])
+async def test_interleaved_writers_keep_endpoints_and_cleanup_inside_their_generation(
+    second_cleans: bool,
+) -> None:
+    runs = [uuid4().hex, uuid4().hex]
+    repos = [f"__staging__pytest_writer_scope_{i}__{run}" for i, run in enumerate(runs)]
+    cfg, driver, database = _driver_and_database("pytest_writer_scope")
+    neo = Neo4jClient(cfg.graph_storage.neo4j_uri, cfg.graph_storage.neo4j_user,
+                      cfg.graph_storage.resolve_password(), database=database)
+    await neo.connect()
+    prefix = uuid4().hex
+    try:
+        writers = [await asyncio.to_thread(
+            ScopedNeo4jWriter, driver=driver, neo4j_database=database,
+            repo_id=repo, run_id=run, clean_db=second_cleans and i == 1,
+        ) for i, (repo, run) in enumerate(zip(repos, runs, strict=True))]
+        await writers[0].run(_writer_fixture(prefix, with_edge=False), LexicalGraphConfig())
+        await writers[1].run(_writer_fixture(prefix), LexicalGraphConfig())
+        # The other writer's automatic cleanup must leave our deferred endpoints usable.
+        assert await _count(neo,
+            "MATCH (n {repo_id: $repo_id}) WHERE n.__tmp_internal_id IS NOT NULL RETURN count(n) AS n",
+            repos[0]) == 2
+        await writers[0].run(_writer_fixture(prefix, with_nodes=False), LexicalGraphConfig())
+        for repo in repos:
+            rows = await neo.execute_cypher(
+                "MATCH (a)-[r:WROTE_TO {repo_id:$repo_id}]->(b) "
+                "RETURN count(r) AS edges, "
+                "sum(CASE WHEN a.repo_id=$repo_id AND b.repo_id=$repo_id THEN 0 ELSE 1 END) AS foreign",
+                {"repo_id": repo},
+            )
+            assert rows == [{"edges": 1, "foreign": 0}]
+        await writers[0].finalize()
+        if not second_cleans:
+            assert await _count(neo,
+                "MATCH (n {repo_id: $repo_id}) WHERE n.__tmp_internal_id IS NOT NULL RETURN count(n) AS n",
+                repos[1]) == 2
+        await writers[1].finalize()
+    finally:
+        for repo in repos:
+            await neo.delete_graph(repo)
+        await neo.disconnect()
+        await asyncio.to_thread(driver.close)
+
+
+async def test_complete_writes_in_one_generation_do_not_clean_another_invocation() -> None:
+    """Pause real writer phases to prove the cleanup race deterministically; no fake DB results."""
+    ready = threading.Barrier(2)
+    first_cleaned = threading.Event()
+
+    class InterleavingWriter(ScopedNeo4jWriter):
+        async def run(
+            self, graph: Neo4jGraph, lexical_graph_config: LexicalGraphConfig | None = None
+        ) -> KGWriterModel:
+            return await super().run(graph, lexical_graph_config)
+
+        def _upsert_nodes(self, nodes, lexical_graph_config):
+            super()._upsert_nodes(nodes, lexical_graph_config)
+            ready.wait(timeout=20)
+
+        def _upsert_relationships(self, rels):
+            if rels[0].start_node_id.endswith(":second:ada"):
+                assert first_cleaned.wait(timeout=20)
+            super()._upsert_relationships(rels)
+
+        def _db_cleaning(self):
+            super()._db_cleaning()
+            first_cleaned.set()
+
+    run = uuid4().hex
+    repo = f"__staging__pytest_writer_invocations__{run}"
+    cfg, driver, database = _driver_and_database("pytest_writer_invocations")
+    neo = Neo4jClient(cfg.graph_storage.neo4j_uri, cfg.graph_storage.neo4j_user,
+                      cfg.graph_storage.resolve_password(), database=database)
+    await neo.connect()
+    try:
+        writer = await asyncio.to_thread(
+            InterleavingWriter, driver=driver, neo4j_database=database, repo_id=repo, run_id=run
+        )
+        results = await asyncio.gather(
+            writer.run(_writer_fixture(f"{run}:first"), LexicalGraphConfig()),
+            writer.run(_writer_fixture(f"{run}:second"), LexicalGraphConfig()),
+            return_exceptions=True,
+        )
+        assert not [result for result in results if isinstance(result, BaseException)]
+        assert await _count(neo,
+            "MATCH ()-[r:WROTE_TO {repo_id:$repo_id}]->() RETURN count(r) AS n", repo) == 2
+        assert await _count(neo,
+            "MATCH (n {repo_id:$repo_id}) WHERE n.__tmp_internal_id IS NOT NULL RETURN count(n) AS n",
+            repo) == 0
+    finally:
+        await neo.delete_graph(repo)
+        await neo.disconnect()
+        await asyncio.to_thread(driver.close)
 
 
 async def _wait_for_index(

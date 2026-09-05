@@ -1255,7 +1255,7 @@ export function IndexingSubtab() {
           ...(hasIndexedCorpus
             ? [
                 forceReindex
-                  ? 'This run CLEARS the current index first, then rebuilds it: searches return nothing until it commits.'
+                  ? 'This run builds a replacement generation and switches the active index after validation. If you changed embedding or sparse settings, searches may be unavailable until the rebuild succeeds.'
                   : 'On commit this run publishes a new generation and retires the one now serving searches.',
               ]
             : []),
@@ -4181,9 +4181,9 @@ export function IndexingSubtab() {
                   style={{ marginTop: '2px' }}
                 />
                 <span>
-                  <strong style={{ color: 'var(--err)' }}>Force reindex</strong> — clears the current index
-                  before rebuilding (destructive). Searches return nothing until the new generation commits,
-                  and it unlocks the provider/model/dimension/tokenizer fields so the contract can change.
+                  <strong style={{ color: 'var(--err)' }}>Force reindex</strong> — allows changes to embedding
+                  and sparse index settings. The replacement becomes active after validation. Changed settings
+                  may make searches unavailable until the rebuild succeeds.
                 </span>
               </label>
               <button

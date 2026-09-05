@@ -252,6 +252,7 @@ def build_litellm_config(catalog: dict[str, Any]) -> dict[str, Any]:
             "context_window_fallbacks": [],
             "callbacks": ["prometheus"],
             "require_auth_for_metrics_endpoint": False,
+            "include_cost_in_streaming_usage": True,
         },
         "router_settings": {"num_retries": 0},
         "general_settings": {

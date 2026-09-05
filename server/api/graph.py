@@ -16,7 +16,13 @@ from server.api.dependency_errors import (
 from server.db.neo4j import Neo4jClient
 from server.db.postgres import PostgresClient
 from server.indexing.generations import graph_repo_id_of
+from server.indexing.graphrag_pipeline import require_staging_graph_id
 from server.models.graph import Community, Entity, GraphNeighborsResponse, GraphStats, Relationship
+from server.models.graph_sources import (
+    GraphEntitySourcesResponse,
+    GraphSourceGenerationChangedDetail,
+    GraphSourceGenerationChangedResponse,
+)
 from server.services.config_store import CorpusNotFoundError
 from server.services.config_store import get_config as load_scoped_config
 
@@ -38,6 +44,8 @@ class GraphScope:
 
     neo4j: Neo4jClient
     graph_repo_id: str | None
+    run_id: str | None
+    postgres_url: str
 
 
 @asynccontextmanager
@@ -53,7 +61,8 @@ async def _graph_client(repo_id: str, *, boundary: str) -> AsyncIterator[GraphSc
         pg = PostgresClient(cfg.indexing.postgres_url)
         await pg.connect()
         try:
-            graph_repo_id = graph_repo_id_of(await pg.get_generation(repo_id))
+            generation = await pg.get_generation(repo_id)
+            graph_repo_id = graph_repo_id_of(generation)
         finally:
             with contextlib.suppress(Exception):
                 await pg.disconnect()
@@ -70,7 +79,12 @@ async def _graph_client(repo_id: str, *, boundary: str) -> AsyncIterator[GraphSc
     try:
         await neo4j.connect()
         await neo4j.ping()
-        yield GraphScope(neo4j=neo4j, graph_repo_id=graph_repo_id)
+        yield GraphScope(
+            neo4j=neo4j,
+            graph_repo_id=graph_repo_id,
+            run_id=generation.run_id if generation else None,
+            postgres_url=cfg.indexing.postgres_url,
+        )
     except HTTPException:
         raise
     except Exception as exc:
@@ -122,6 +136,64 @@ async def get_entity_relationships(corpus_id: str, entity_id: EntityIdQuery) -> 
         if scope.graph_repo_id is None:
             raise HTTPException(status_code=404, detail=_entity_missing_detail(entity_id))
         return await neo4j.get_relationships(scope.graph_repo_id, entity_id)
+
+
+@router.get(
+    "/graph/{corpus_id}/entity/sources",
+    response_model=GraphEntitySourcesResponse,
+    responses={409: {"model": GraphSourceGenerationChangedResponse}},
+)
+async def get_entity_sources(
+    corpus_id: str,
+    entity_id: EntityIdQuery,
+    limit: int = Query(default=25, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    run_id: str | None = Query(default=None, min_length=1),
+) -> GraphEntitySourcesResponse:
+    """Direct entity mention sources; these do not establish evidence for an edge."""
+    async with _graph_client(corpus_id, boundary="Graph entity sources API") as scope:
+        if scope.graph_repo_id is None or scope.run_id is None:
+            raise HTTPException(status_code=404, detail=_entity_missing_detail(entity_id))
+        if run_id is not None and run_id != scope.run_id:
+            raise HTTPException(status_code=409, detail=GraphSourceGenerationChangedDetail().model_dump())
+        # A newer manifest may intentionally reuse an older graph resource. Its
+        # token fences pagination; the validated graph ID owns the stored run.
+        graph_run_id = require_staging_graph_id(scope.graph_repo_id).rsplit("__", 1)[-1]
+        sources = await scope.neo4j.get_entity_sources(
+            scope.graph_repo_id, graph_run_id, entity_id, limit=limit, offset=offset
+        )
+        pg = PostgresClient(scope.postgres_url)
+        try:
+            await pg.connect()
+            chunks = await pg.get_chunks(corpus_id, [source.chunk_id for source in sources[:limit]]) if sources else []
+            # Every completed graph lookup must still belong to the manifest we
+            # started with, including empty pages and missing entities.
+            current = await pg.get_generation(corpus_id)
+            if current is None or (current.run_id, current.graph_repo_id) != (scope.run_id, scope.graph_repo_id):
+                raise HTTPException(status_code=409, detail=GraphSourceGenerationChangedDetail().model_dump())
+        except Exception as exc:
+            raise_postgres_unavailable_if_applicable(exc, boundary="Graph entity source locations")
+            raise
+        finally:
+            with contextlib.suppress(Exception):
+                await pg.disconnect()
+        if sources is None:
+            raise HTTPException(status_code=404, detail=_entity_missing_detail(entity_id))
+        page = GraphEntitySourcesResponse(
+            entity_id=entity_id, run_id=scope.run_id, sources=sources[:limit],
+            next_offset=offset + limit if len(sources) > limit else None,
+        )
+        # Only enrich from the exact same indexed text/location. A newer Postgres
+        # chunk must not attach its page regions to an older graph mention.
+        by_id = {chunk.chunk_id: chunk for chunk in chunks}
+        for source in page.sources:
+            chunk = by_id.get(source.chunk_id)
+            if chunk is not None and (
+                chunk.file_path, chunk.start_line, chunk.end_line, chunk.content
+            ) == (source.file_path, source.start_line, source.end_line, source.content):
+                source.metadata = chunk.metadata
+                source.provenance = chunk.provenance
+        return page
 
 
 @router.get("/graph/{corpus_id}/entity/neighbors", response_model=GraphNeighborsResponse)

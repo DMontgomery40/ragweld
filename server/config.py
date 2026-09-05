@@ -25,10 +25,16 @@ _REMOVED_CHAT_PROMPT_KEYS = (
 # verbatim; a stored value equal to a retired default is the default, not an operator edit,
 # and is dropped so the LAW default applies. Keyed by (section, field) -> sha256 of the
 # retired text. `semantic_kg_extraction`: the pre-official JSON prompt (no ``{schema}``/``{text}``
-# placeholders), replaced by the official extraction template with naming rules (D24).
+# placeholders), replaced by the official extraction template with naming rules (D24),
+# and the two shipped pre-grounding templates (before/after the redaction-name repair).
+# Exact hashes preserve every operator-edited variant.
 _RETIRED_PROMPT_DEFAULTS: dict[tuple[str, str], frozenset[str]] = {
     ("system_prompts", "semantic_kg_extraction"): frozenset(
-        {"09403fdaed97ddfecf2574ae434da9669bdebe16e5522f61a5ae4f939f71b194"}
+        {
+            "09403fdaed97ddfecf2574ae434da9669bdebe16e5522f61a5ae4f939f71b194",
+            "bebbc19e8e211dd0d925f1554afc89681b398e735ea242579bf6195c4565efab",
+            "aaef41c214aa49a4d71b8009183a2f8e27d1fba16393670d2b0104a17ad016db",
+        }
     ),
 }
 

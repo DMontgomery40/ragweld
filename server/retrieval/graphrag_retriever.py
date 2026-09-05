@@ -12,9 +12,10 @@ from neo4j import GraphDatabase
 from neo4j_graphrag.retrievers import QdrantNeo4jRetriever
 from neo4j_graphrag.types import RetrieverResultItem
 from qdrant_client import QdrantClient
+from qdrant_client import models as qmodels
 
 from server.indexing.graphrag_pipeline import lexical_graph_config, require_staging_graph_id
-from server.retrieval.qdrant_store import DENSE_VECTOR_NAME
+from server.retrieval.qdrant_store import DENSE_VECTOR_NAME, point_id_for_chunk
 
 ENTITY_LABEL = "__Entity__"
 MAX_RELATED_ENTITIES_PER_SEED_CEILING = 1000
@@ -259,7 +260,31 @@ def _retrieve_sync(
             entity_ids = {str(value) for value in metadata.get("resolved_entity_ids", []) if value}
             resolved.update(entity_ids)
             chunk_scores.append((chunk_id, float(content.get("score") or 0.0)))
-        chunk_scores.sort(key=lambda hit: (-hit[1], hit[0]))
+        # A common entity can connect hundreds of chunks with identical graph
+        # evidence. Choosing those by chunk id returns the same arbitrary text for
+        # unrelated questions. Use the existing query vector only to break ties
+        # within this traversal-derived candidate set; graph scores and the seed
+        # exclusion remain unchanged, so dense seeds receive no second credit.
+        relevance: dict[str, float] = {}
+        if chunk_scores:
+            candidates = qdrant.query_points(
+                collection_name=collection_name,
+                query=query_vector,
+                using=DENSE_VECTOR_NAME,
+                query_filter=qmodels.Filter(must=[qmodels.HasIdCondition(
+                    has_id=[point_id_for_chunk(chunk_id) for chunk_id, _ in chunk_scores],
+                )]),
+                limit=len(chunk_scores),
+                with_payload=["id"],
+                with_vectors=False,
+            )
+            relevance = {
+                str((point.payload or {}).get("id") or ""): float(point.score)
+                for point in candidates.points
+            }
+            if any(chunk_id not in relevance for chunk_id, _ in chunk_scores):
+                raise ValueError("Graph candidates are missing from their Qdrant generation")
+        chunk_scores.sort(key=lambda hit: (-hit[1], -relevance[hit[0]], hit[0]))
         selected = tuple(chunk_scores[: max(1, int(top_k))])
         return GraphTraversalResult(
             chunk_scores=selected,

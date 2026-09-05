@@ -7,6 +7,7 @@ from collections import defaultdict
 from datetime import datetime
 from typing import Any, Literal
 
+from server.chat.generation_failure import safe_error_message
 from server.db.postgres import PostgresClient
 from server.dependency_errors import (
     DependencyUnavailableError,
@@ -45,7 +46,6 @@ from server.observability.metrics import (
     VECTOR_LEG_LATENCY_SECONDS,
 )
 from server.observability.runtime import stage_span
-from server.chat.generation_failure import safe_error_message
 from server.retrieval.cache import CacheEndpoint, CacheMode, SemanticCacheService
 from server.retrieval.contracts import contract_hash
 from server.retrieval.errors import (
@@ -837,7 +837,13 @@ class TriBridFusion:
                             for chunk in hydrated
                             if chunk.chunk_id in score_by_id
                         ]
-                        graph_results.sort(key=lambda hit: (-hit.score, hit.chunk_id))
+                        # Hydration order is unspecified. Restore the retriever's
+                        # query-aware order, including ties in structural score.
+                        graph_rank = {
+                            chunk_id: rank
+                            for rank, (chunk_id, _) in enumerate(traversal.chunk_scores)
+                        }
+                        graph_results.sort(key=lambda hit: graph_rank[hit.chunk_id])
                         debug["fusion_graph_hydrated_chunks"] = len(graph_results)
                 except Exception as e:
                     if isinstance(e, (DependencyUnavailableError, RequiredRetrievalLegError)):

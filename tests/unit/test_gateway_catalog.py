@@ -148,6 +148,7 @@ def test_rendered_config_has_no_retries_or_fallbacks_and_is_file_authoritative()
         "context_window_fallbacks": [],
         "callbacks": ["prometheus"],
         "require_auth_for_metrics_endpoint": False,
+        "include_cost_in_streaming_usage": True,
     }
     assert config["router_settings"] == {"num_retries": 0}
     assert config["general_settings"] == {"master_key": "os.environ/LITELLM_MASTER_KEY", "store_model_in_db": False}

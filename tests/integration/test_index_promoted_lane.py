@@ -149,6 +149,52 @@ async def _delete_neo4j_residue(corpus_id: str) -> None:
             await neo4j.disconnect()
 
 
+@pytest.mark.parametrize("source_contents", ["empty", "excluded"])
+async def test_registered_corpus_without_indexable_files_cannot_promote(
+    client: AsyncClient, tmp_path: Path, source_contents: str
+) -> None:
+    """An authorized root with no usable inputs must fail without an empty cutover."""
+    corpus_id = f"pytest_empty_index_{uuid.uuid4().hex[:8]}"
+    corpus_root = tmp_path / "empty-corpus"
+    corpus_root.mkdir()
+    if source_contents == "excluded":
+        ignored = corpus_root / ".git"
+        ignored.mkdir()
+        (ignored / "ignored.py").write_text("def ignored(): pass\n", encoding="utf-8")
+    pg = PostgresClient(require_env("POSTGRES_DSN"))
+    await pg.connect()
+    try:
+        created = await client.post(
+            "/api/corpora",
+            json={"corpus_id": corpus_id, "name": corpus_id, "path": str(corpus_root)},
+        )
+        assert created.status_code in (200, 201), created.text
+        cfg = load_config()
+        cfg.embedding.embedding_backend = "deterministic"
+        cfg.graph_indexing.enabled = False
+        cfg.graph_search.enabled = False
+        cfg.semantic_cache.enabled = False
+        await pg.upsert_corpus_config_json(corpus_id, cfg.model_dump(mode="serialization"))
+        config_store._store = None
+        started = await client.post(
+            "/api/index",
+            json={"corpus_id": corpus_id, "repo_path": str(corpus_root)},
+        )
+        assert started.status_code == 200, started.text
+        failed = await _wait_for_index(client, corpus_id)
+        assert failed["status"] == "error", failed
+        assert "No indexable files" in str(failed.get("error") or ""), failed
+        await _wait_fence_released(pg, corpus_id)
+        assert await pg.get_generation(corpus_id) is None
+        assert await pg.count_chunks(corpus_id) == 0
+    finally:
+        config_store._store = None
+        await client.post(f"/api/index/{corpus_id}/stop")
+        await client.delete(f"/api/index/{corpus_id}")
+        await client.delete(f"/api/corpora/{corpus_id}")
+        await pg.disconnect()
+
+
 async def test_index_search_and_delete_on_promoted_lane(
     client: AsyncClient, tmp_path: Path
 ) -> None:
@@ -712,21 +758,22 @@ async def test_index_search_and_delete_on_promoted_lane(
             },
         )
         assert missing.status_code == 400, missing.text
-        # A readable but empty directory starts a run that fails instead of promoting an empty index.
+        # A different readable directory cannot reuse this corpus's approved schema.
+        # Refuse it before starting a run, preserving the promoted generation.
         empty_dir = tempfile.mkdtemp(prefix="ragweld-empty-corpus-")
         try:
             bogus = await client.post(
                 "/api/index",
                 json={**index_request, "repo_path": empty_dir, "force_reindex": False},
             )
-            assert bogus.status_code == 200, bogus.text
-            failed = await _wait_for_index(client, corpus_id)
+            assert bogus.status_code == 400, bogus.text
+            assert "registered path" in bogus.json()["detail"]
         finally:
             os.rmdir(empty_dir)
-        assert failed["status"] == "error", failed
-        assert "No indexable files" in str(failed.get("error") or ""), failed
         stats_after = (await client.get("/api/index/stats", params={"corpus_id": corpus_id})).json()
-        assert stats_after == stats_before, "a failed run must not touch the active index stats"
+        assert stats_after == stats_before, "a refused run must not touch the active index stats"
+        assert (await pg.get_generation(corpus_id)).run_id == regeneration.run_id
+        assert await pg.get_index_fence(corpus_id) is None
         assert await pg.count_chunks(corpus_id) == chunk_rows
         still = await client.post("/api/search", json={**body, "cache_mode": "bypass"})
         assert still.status_code == 200 and still.json()["matches"], still.text

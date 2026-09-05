@@ -11,9 +11,6 @@ from typing import Any, cast
 
 from server.chat.context_formatter import format_context_for_llm
 from server.chat.generation import GenerationResult, generate_chat_text, stream_chat_text
-from server.chat.query_record import append_chat_query_record
-from server.models.chat import Message
-from server.services.conversation_store import get_conversation_store
 from server.chat.generation_failure import generation_unavailable_detail, safe_error_message
 from server.chat.prompt_budget import (
     PromptBudgetError,
@@ -23,10 +20,12 @@ from server.chat.prompt_budget import (
 )
 from server.chat.prompt_builder import get_system_prompt
 from server.chat.provider_router import select_provider_route
+from server.chat.query_record import append_chat_query_record
 from server.chat.retrieval_gate import classify_for_recall
 from server.chat.source_router import resolve_sources
 from server.db.postgres import PostgresClient
 from server.gateway_catalog import OPENROUTER_UPSTREAM_PREFIX, gateway_rows_snapshot
+from server.models.chat import Message
 from server.models.chat_config import ImageAttachment, RecallConfig, RecallIntensity, RecallPlan
 from server.models.retrieval import ChunkMatch
 from server.models.tribrid_config_model import (
@@ -38,7 +37,7 @@ from server.models.tribrid_config_model import (
 )
 from server.observability.costing import usage_total_tokens
 from server.retrieval.cache import CacheMode, SemanticCacheService
-from server.services.conversation_store import Conversation
+from server.services.conversation_store import Conversation, get_conversation_store
 from server.services.rag import FusionProtocol
 
 

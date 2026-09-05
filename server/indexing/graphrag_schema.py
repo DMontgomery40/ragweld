@@ -5,6 +5,7 @@ import json
 import re
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Any
 
@@ -17,6 +18,7 @@ from neo4j_graphrag.components.schema import (
     RelationshipType,
     SchemaFromTextExtractor,
 )
+from neo4j_graphrag.generation.prompts import SchemaExtractionTemplate
 from neo4j_graphrag.llm import OpenAILLM
 
 from server.gateway_reasoning import reasoning_model_params
@@ -50,9 +52,46 @@ DOCUMENT_TEXT_PROPERTIES = frozenset(
 )
 
 
+def schema_proposal_prompt() -> SchemaExtractionTemplate:
+    """Keep the official schema contract while preserving less frequent facts.
+
+    The upstream minimal-schema instruction can omit whole diagnostic domains
+    from mixed reports. Override that instruction through the supported template
+    API; fail explicitly if a dependency upgrade changes the instruction.
+    """
+    minimal_rule = (
+        "7. Keep your schema minimal and focused on clearly identifiable patterns in the text."
+    )
+    coverage_rule = (
+        "7. Cover the distinct concepts and explicit relationships represented across the entire "
+        "supplied sample. Preserve causal, diagnostic, and operational relationships when the "
+        "text states them; do not reduce the schema to only its most common topics or "
+        "participant/containment relationships. Keep types general enough to reuse across "
+        "examples, but do not collapse distinct roles or omit less frequent concepts needed "
+        "to express the sample's facts. Do not invent types or relationships unsupported by the text."
+        "\n7.1 Use meaningful domain types. These generic labels are prohibited (case-insensitive): "
+        f"node labels {', '.join(sorted(_GENERIC_NODE_LABELS))}; "
+        f"relationship labels {', '.join(sorted(_GENERIC_RELATIONSHIP_LABELS))}. "
+        "Omit a relationship whose meaning the text does not establish; never substitute a catch-all link."
+    )
+    template = SchemaExtractionTemplate.DEFAULT_TEMPLATE
+    if template.count(minimal_rule) != 1:
+        raise RuntimeError("GraphRAG schema template changed; review the domain-coverage override")
+    return SchemaExtractionTemplate(template=template.replace(minimal_rule, coverage_rule))
+
+
 def select_schema_chunks(
     chunks: Sequence[Chunk], *, corpus_id: str, max_documents: int = 12
 ) -> list[Chunk]:
+    """Spread a fixed 36-chunk budget over documents and their full length.
+
+    Three chunks per document undersamples a corpus made of one long report.
+    Allocate that same bounded total across the available documents instead.
+    Selecting an already selected sample is idempotent.
+    """
+    if max_documents < 1:
+        raise ValueError("max_documents must be positive")
+    max_documents = min(max_documents, 36)
     grouped: dict[str, list[Chunk]] = defaultdict(list)
     for chunk in chunks:
         if str(chunk.content or "").strip():
@@ -63,13 +102,23 @@ def select_schema_chunks(
     )
     if len(paths) > max_documents:
         paths = [
-            paths[round(index * (len(paths) - 1) / (max_documents - 1))]
+            paths[round(index * (len(paths) - 1) / max(1, max_documents - 1))]
             for index in range(max_documents)
         ]
+    budgets = dict.fromkeys(paths, 0)
+    remaining = min(36, sum(len(grouped[path]) for path in paths))
+    while remaining:
+        for path in paths:
+            if budgets[path] < len(grouped[path]):
+                budgets[path] += 1
+                remaining -= 1
+                if not remaining:
+                    break
     selected: list[Chunk] = []
     for path in paths:
         ordered = sorted(grouped[path], key=lambda chunk: (chunk.start_line, chunk.chunk_id))
-        for index in sorted({0, len(ordered) // 2, len(ordered) - 1}):
+        count = budgets[path]
+        for index in sorted({round(i * (len(ordered) - 1) / max(1, count - 1)) for i in range(count)}):
             selected.append(ordered[index])
     return selected
 
@@ -80,6 +129,29 @@ def _is_document_text(name: str) -> bool:
 
 def _keeps_attributes(properties: Sequence[PropertyType]) -> list[PropertyType]:
     return [prop for prop in properties if not _is_document_text(prop.name)]
+
+
+def closed_graph_schema(schema: GraphSchema | Mapping[str, Any]) -> GraphSchema:
+    """Validate a schema, then apply its closed-world execution contract to a copy.
+
+    GraphRAG 1.19 reopens an empty-property RelationshipType during validation.
+    Its extractor and official pruner honor a closed validated instance, including
+    through Pipeline inputs. Apply the flags after validation, both when persisting
+    the approved shape and after loading it for execution; never add fake attributes
+    merely to suppress the upstream default.
+    """
+    closed = GraphSchema.model_validate(deepcopy(schema)).model_copy(
+        update={
+            "additional_node_types": False,
+            "additional_relationship_types": False,
+            "additional_patterns": False,
+        },
+    )
+    for node in closed.node_types:
+        node.additional_properties = False
+    for relationship in closed.relationship_types:
+        relationship.additional_properties = False
+    return closed
 
 
 def normalize_domain_schema(schema: GraphSchema) -> GraphSchema:
@@ -131,7 +203,7 @@ def normalize_domain_schema(schema: GraphSchema) -> GraphSchema:
                     property_names=(IDENTITY_PROPERTY,),
                 )
             )
-    return GraphSchema(
+    return closed_graph_schema(GraphSchema(
         node_types=tuple(node_types),
         relationship_types=tuple(relationship_types),
         patterns=schema.patterns,
@@ -139,19 +211,11 @@ def normalize_domain_schema(schema: GraphSchema) -> GraphSchema:
         additional_node_types=False,
         additional_relationship_types=False,
         additional_patterns=False,
-    )
+    ))
 
 
 def canonical_schema_dict(schema: GraphSchema) -> dict[str, Any]:
-    return GraphSchema(
-        node_types=schema.node_types,
-        relationship_types=schema.relationship_types,
-        patterns=schema.patterns,
-        constraints=schema.constraints,
-        additional_node_types=False,
-        additional_relationship_types=False,
-        additional_patterns=False,
-    ).model_dump(mode="json")
+    return closed_graph_schema(schema).model_dump(mode="json")
 
 
 def graph_schema_hash(schema_dict: Mapping[str, Any]) -> str:
@@ -170,7 +234,7 @@ def validate_domain_schema(schema_dict: Mapping[str, Any]) -> None:
             label = str(raw.get("label") or "").strip()
             if label.upper() in _GENERIC_RELATIONSHIP_LABELS:
                 raise ValueError(f"generic graph label is prohibited: {label}")
-    schema = GraphSchema.model_validate(schema_dict)
+    schema = GraphSchema.model_validate(deepcopy(schema_dict))
     if not schema.node_types or not schema.relationship_types or not schema.patterns:
         raise ValueError("graph schema requires node types, relationship types, and patterns")
     for node in schema.node_types:
@@ -187,6 +251,12 @@ def validate_domain_schema(schema_dict: Mapping[str, Any]) -> None:
             raise ValueError(f"invalid Neo4j relationship label: {label}")
     if schema.additional_node_types or schema.additional_relationship_types or schema.additional_patterns:
         raise ValueError("graph schema must be closed to additional nodes, relationships, and patterns")
+    # Inspect the serialized flags: validating an empty-property RelationshipType
+    # reopens its instance in 1.19, but the reviewed/persisted contract must be closed.
+    for kind in ("node_types", "relationship_types"):
+        for raw in schema_dict.get(kind, []):
+            if isinstance(raw, Mapping) and raw.get("additional_properties") is not False:
+                raise ValueError("graph schema must be closed to additional properties")
     for node in schema.node_types:
         identity = [prop for prop in node.properties if prop.name == IDENTITY_PROPERTY]
         if not identity or identity[0].type != "STRING":
@@ -243,7 +313,11 @@ async def derive_graph_schema_proposal(
         api_key=route_api_key,
         base_url=route_base_url,
     )
-    extracted = await SchemaFromTextExtractor(llm=llm, use_structured_output=True).run(text)
+    extracted = await SchemaFromTextExtractor(
+        llm=llm,
+        prompt_template=schema_proposal_prompt(),
+        use_structured_output=True,
+    ).run(text)
     schema = canonical_schema_dict(normalize_domain_schema(extracted))
     validate_domain_schema(schema)
     return GraphSchemaProposal(

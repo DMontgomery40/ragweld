@@ -32,7 +32,12 @@ def test_grafana_observability_dashboard_families_are_provisioned() -> None:
         assert payload["uid"] == uid
         assert len(payload["uid"]) <= 40
         variables = {item.get("name") for item in payload.get("templating", {}).get("list", [])}
-        assert required_variables.issubset(variables)
+        if file_name == "cost-capacity.json":
+            # Gateway counters have no corpus/run attribution. Unused filter
+            # controls falsely suggest these deployment totals can be scoped.
+            assert not variables
+        else:
+            assert required_variables.issubset(variables)
 
 
 def _ml_quality_dashboard() -> dict:

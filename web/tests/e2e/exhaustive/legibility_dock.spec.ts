@@ -11,6 +11,44 @@ import { expect, test } from '@playwright/test';
 
 test.use({ viewport: { width: 1366, height: 768 }, deviceScaleFactor: 1 });
 
+for (const route of [
+  { label: 'Dashboard', path: 'dashboard', tabs: [{ id: 'glossary', title: 'Glossary' }, { id: 'system', title: 'System Status' }] },
+  { label: 'RAG', path: 'rag', tabs: [{ id: 'retrieval', title: 'Retrieval' }, { id: 'reranker', title: 'Reranker' }] },
+]) {
+  test(`dock chooser and subtab navigation stay in sync for ${route.label}`, async ({ page, baseURL }) => {
+    await page.goto(new URL('start', baseURL).toString(), { waitUntil: 'domcontentloaded' });
+    await expect(page.getByTestId('dock-choose')).toBeVisible();
+    const mainUrl = page.url();
+    const dock = page.getByTestId('dock-native');
+
+    for (const tab of [...route.tabs, route.tabs[0]]) {
+      await page.getByTestId('dock-choose').click();
+      const picker = page.getByRole('dialog', { name: 'Choose something to dock' });
+      await picker.getByRole('combobox').fill(`${route.label} ${tab.title}`);
+      await picker.getByRole('option').filter({ hasText: tab.title }).first().click();
+      await expect(page.getByTestId('dock-title')).toContainText(`${route.label} — ${tab.title}`);
+      await expect(dock.locator(`.subtab-btn[data-subtab="${tab.id}"]`)).toHaveClass(/active/);
+      await expect(dock.locator(`#tab-${route.path}-${tab.id}`)).toBeVisible();
+      expect(page.url(), 'choosing a dock target must leave the main pane in place').toBe(mainUrl);
+    }
+
+    // A subtab click is also navigation: title, persisted target and visible content must agree.
+    const next = route.tabs[1];
+    await dock.locator(`.subtab-btn[data-subtab="${next.id}"]`).click();
+    await expect(page.getByTestId('dock-title')).toContainText(`${route.label} — ${next.title}`);
+    await expect(dock.locator(`.subtab-btn[data-subtab="${next.id}"]`)).toHaveClass(/active/);
+    await expect(dock.locator(`#tab-${route.path}-${next.id}`)).toBeVisible();
+    expect(page.url()).toBe(mainUrl);
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(page.getByTestId('dock-title')).toContainText(`${route.label} — ${next.title}`);
+    await expect(dock.locator(`.subtab-btn[data-subtab="${next.id}"]`)).toHaveClass(/active/);
+    await expect(dock.locator(`#tab-${route.path}-${next.id}`)).toBeVisible();
+    await page.getByTestId('dock-swap').click();
+    await expect(page).toHaveURL(new RegExp(`subtab=${next.id}`));
+    await expect(page.getByTestId('dock-title')).toContainText('Get Started');
+  });
+}
+
 test('the docked glossary wraps or scrolls -- no line is clipped mid-word', async ({ page, baseURL }) => {
   await page.goto(new URL('dashboard?subtab=glossary', baseURL).toString(), { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('.layout', { timeout: 20000 });

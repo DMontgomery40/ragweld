@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { getRouteByPath } from '@/config/routes';
 import { resolveSubtabAlias } from '@/config/subtabAliases';
+import { useDockStore } from '@/stores/useDockStore';
 import { showToast } from '@/utils/toast';
 
 export type UseSubtabOptions<T extends string = string> = {
@@ -61,37 +62,34 @@ export function useSubtab<T extends string = string>({
   const isValid = rawValid || aliasValid;
 
   const effective = (rawValid ? raw : aliasValid ? aliasTarget : defaultSubtab) as T;
-  const derivedActive = effective;
-  const [localSubtab, setLocalSubtab] = useState<T>(derivedActive);
-
-  // In docked native views we must NOT mutate the global URL/history. Instead, keep subtab state local.
-  // The docked route is rendered via <Routes location={{ key: 'dock', ... }}>, so we can detect it
-  // deterministically without leaking additional props through the component tree.
-  useEffect(() => {
-    if (!isDockContext) return;
-    if (!allowed.length) return;
-    // Ensure local subtab is valid; if not, snap to the derived/default value.
-    setLocalSubtab((prev) => (allowedSet.has(String(prev)) ? prev : derivedActive));
-  }, [allowed.length, allowedSet, derivedActive, isDockContext]);
-
-  const activeSubtab = (isDockContext ? localSubtab : derivedActive) as T;
+  // DockView supplies the persisted dock target as a virtual location. Keeping a second
+  // local subtab made chooser changes update the title while content stayed on the old
+  // valid tab, and lost in-dock navigation on reload and Swap (S45).
+  const activeSubtab = effective;
 
   const setSubtab = useCallback(
     (nextSubtab: T, opts?: { replace?: boolean }) => {
       if (!allowed.length) return;
       const next = allowedSet.has(String(nextSubtab)) ? String(nextSubtab) : String(defaultSubtab);
-      if (isDockContext) {
-        setLocalSubtab(next as T);
-        return;
-      }
       const nextParams = new URLSearchParams(location.search || '');
       nextParams.set(param, next);
+      if (isDockContext) {
+        const { docked, setDocked } = useDockStore.getState();
+        if (!docked || docked.path !== location.pathname) return;
+        const route = getRouteByPath(routePath);
+        setDocked({
+          ...docked,
+          search: `?${nextParams.toString()}`,
+          subtabTitle: route?.subtabs?.find((tab) => tab.id === next)?.title,
+        }, { rememberLast: false });
+        return;
+      }
       navigate(
         { pathname: location.pathname, search: `?${nextParams.toString()}` },
         { replace: opts?.replace ?? replaceOnChange }
       );
     },
-    [allowed.length, allowedSet, defaultSubtab, isDockContext, location.pathname, location.search, navigate, param, replaceOnChange]
+    [allowed.length, allowedSet, defaultSubtab, isDockContext, location.pathname, location.search, navigate, param, replaceOnChange, routePath]
   );
 
   // A slug the operator actually typed (or followed from a runbook, doc or bookmark)
@@ -143,4 +141,3 @@ export function useSubtab<T extends string = string>({
     rawSubtab: raw,
   };
 }
-
