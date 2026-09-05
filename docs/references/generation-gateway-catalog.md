@@ -88,8 +88,12 @@ still a validation error and `gen_model: openai.gpt-5.4-mini` is a gateway route
 
 ## Refresh procedure
 
+Run runtime commands on LXC100 in `/opt/ragweld`; the Mac checkout is source only.
+Use the deployed Compose overlays and private environment for that deployment.
+The base Compose example is:
+
 ```bash
-cd /Users/davidmontgomery/ragweld
+cd /opt/ragweld
 uv run python scripts/refresh_models_catalog.py            # dry run, prints stats
 uv run python scripts/refresh_models_catalog.py --apply    # writes catalog, mirror, litellm-config.yaml
 docker compose --project-name ragweld -f docker-compose.yml -f infra/docker-compose.observability.yml \
@@ -112,8 +116,38 @@ Refresh semantics (replacement-only):
   the row was `catalog_only`.)
 - Missing feed pricing is recorded as `[auto-refresh] pricing_unknown=true`,
   never invented. Missing context is a skip.
-- `OPENROUTER_API_KEY` lives only in `infra/litellm.env` (LiteLLM container);
-  the API process still sees only `LITELLM_API_KEY`.
+- `OPENROUTER_API_KEY` and the OpenAI embedding key `OPENAI_API_KEY` live only
+  in the gateway's private `infra/litellm.env`; the API authenticates to the
+  gateway with `LITELLM_API_KEY`.
+
+## Gateway credentials
+
+OpenAI embeddings use LiteLLM's native embedding endpoint. Configure the upstream
+`OPENAI_API_KEY` in the ignored, mode-0600 `infra/litellm.env`, using
+`infra/litellm.env.example` only to initialize a new file. Its `disabled` value is
+not a working provider credential. Keep existing gateway and Langfuse settings
+when updating a file.
+
+The app's `.env` supplies `LITELLM_BASE_URL` and `LITELLM_API_KEY`. Compose maps
+`LITELLM_API_KEY` to the native gateway's `LITELLM_MASTER_KEY`. These names describe
+the client and server sides of gateway authentication; neither is the upstream
+OpenAI key. `start.sh` removes inherited upstream provider keys from the app's
+environment, and the Compose API service explicitly clears them.
+
+On Proxmox, the environment files are symlinks to existing owner-only files:
+`.env` -> `/etc/ragweld/runtime.env` and `infra/litellm.env` ->
+`/etc/ragweld/litellm.env`. Update those files privately on LXC100. Reconcile the
+deployment with Compose so the `litellm` container is recreated after its
+environment changes; a plain container restart or an API-only restart does not
+apply a new container environment. Use the existing Proxmox deployment procedure
+with its full overlays and private environment, during an idle interval as
+described in [Proxmox activation](native-run-accounting.md#proxmox-activation).
+
+`GET /api/secrets/check?keys=LITELLM_API_KEY` reports presence in the app process
+only. It does not establish gateway authentication or upstream-provider readiness.
+`OPENAI_API_KEY` is not an app secret registered with this endpoint. Check the
+native gateway's configuration and existing request evidence separately without
+printing credentials or issuing a paid request merely to check key presence.
 
 ## Verified 2026-08-22
 

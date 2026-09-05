@@ -7,7 +7,10 @@ from urllib.parse import urlsplit
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
-CostLane = Literal["embedding", "semantic_kg", "figure_description", "schema_proposal"]
+CostLane = Literal[
+    "embedding", "semantic_kg", "figure_description", "schema_proposal",
+    "index_embeddings", "retrieval_embeddings", "cache_embeddings",
+]
 CostState = Literal["pending", "complete", "incomplete"]
 NonnegativeMoney = Annotated[float, Field(ge=0, allow_inf_nan=False)]
 Counter = Annotated[int, Field(ge=0, strict=True)]

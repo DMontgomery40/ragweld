@@ -1,5 +1,5 @@
 # GENERATED from data/models.json by scripts/generate_litellm_config.py. DO NOT HAND-EDIT.
-# Every GEN catalog row with a gateway_alias becomes one model_list entry; regenerate after
+# Every gateway-served GEN or EMB catalog row becomes one model_list entry; regenerate after
 # `uv run python scripts/refresh_models_catalog.py --apply` or any catalog edit.
 model_list:
 - model_name: ragweld-local
@@ -1659,6 +1659,22 @@ model_list:
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
+- model_name: openai.text-embedding-3-large
+  litellm_params:
+    model: openai/text-embedding-3-large
+    num_retries: 0
+    max_retries: 0
+    api_key: os.environ/OPENAI_API_KEY
+  model_info:
+    mode: embedding
+- model_name: openai.text-embedding-3-small
+  litellm_params:
+    model: openai/text-embedding-3-small
+    num_retries: 0
+    max_retries: 0
+    api_key: os.environ/OPENAI_API_KEY
+  model_info:
+    mode: embedding
 - model_name: perceptron.perceptron-mk1
   litellm_params:
     model: openrouter/perceptron/perceptron-mk1

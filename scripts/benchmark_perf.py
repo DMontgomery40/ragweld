@@ -1,31 +1,38 @@
 #!/usr/bin/env python3
-"""TriBridRAG performance benchmark runner.
+"""Ragweld performance benchmark against an explicitly selected running API.
 
 This script is intentionally self-contained and reproducible:
-- Index a corpus via the same internal pipeline used by the API
-- Run a fixed set of searches and report latency distributions
+- Index through the normal server-owned fence, accounting and promotion lifecycle
+- Measure complete HTTP search requests, including the application boundary
 
 Notes:
-- Requires Postgres + Neo4j to be running (see README).
-- Uses the current validated `tribrid_config.json` as the baseline.
+- Requires a running Ragweld API with a registered corpus and its saved config.
+- Corpus paths are interpreted by that server, never by the benchmark client.
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import fcntl
 import json
 import os
 import platform
 import sys
+import tempfile
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote, urlsplit
 
-from server.api.index import _run_index
-from server.retrieval.fusion import TriBridFusion
-from server.services.config_store import get_config as load_scoped_config
+import httpx
+from pydantic import BaseModel, Field, field_validator
+
+from server.models.index import IndexRequest, IndexRunSummary, IndexStatus
+from server.models.tribrid_config_model import Corpus, SearchRequest, SearchResponse
 
 DEFAULT_QUERIES: list[str] = [
     "authentication flow",
@@ -34,6 +41,57 @@ DEFAULT_QUERIES: list[str] = [
     "where is /api/search implemented",
     "fusion rrf_k parameter",
 ]
+
+
+class BenchmarkConnection(BaseModel):
+    """Validated CLI connection and wait limits; no application runtime is started."""
+
+    api_base_url: str
+    request_timeout_s: float = Field(default=60, gt=0, le=3600)
+    index_timeout_s: float = Field(default=3600, gt=0, le=86400)
+
+    @field_validator("api_base_url")
+    @classmethod
+    def _api_origin(cls, value: str) -> str:
+        parsed = urlsplit(value.strip())
+        if (parsed.scheme not in {"http", "https"} or not parsed.netloc
+                or parsed.username or parsed.password or parsed.query or parsed.fragment
+                or parsed.path.rstrip("/") not in {"", "/api"}):
+            raise ValueError("API base URL must be an explicit HTTP(S) origin, optionally ending in /api")
+        return f"{parsed.scheme}://{parsed.netloc}/api/"
+
+
+@contextmanager
+def _owned_report_output(path: Path | None) -> Iterator[Path | None]:
+    """An explicit report path belongs to one invocation from before its first API call."""
+    if path is None:
+        yield None
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # Keep a stable lock inode: removing this sidecar would let a later writer
+    # acquire a different inode while another invocation still owns the old one.
+    with path.with_name(path.name + ".lock").open("a") as owner:
+        try:
+            fcntl.flock(owner, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise RuntimeError("Report output is already owned by another benchmark") from error
+        # --out-json explicitly replaces this report. A failed replacement must
+        # not leave an earlier invocation's successful measurements in its place.
+        path.unlink(missing_ok=True)
+        yield path
+
+
+def _publish_report(path: Path, result: dict[str, Any]) -> None:
+    """Readers see the complete successful report, never a partially written JSON file."""
+    descriptor, temporary = tempfile.mkstemp(prefix=".ragweld-benchmark-", suffix=".json", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+            json.dump(result, output, indent=2, sort_keys=True)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, path)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
 
 
 def _percentile_ms(values_ms: list[float], p: float) -> float:
@@ -66,21 +124,12 @@ def _env_summary() -> dict[str, Any]:
         "machine": platform.machine(),
         "processor": platform.processor(),
         "cwd": str(Path.cwd()),
-        "env": {
-            # Redact any key material; just record whether it is set.
-            "NEO4J_URI": os.getenv("NEO4J_URI") or None,
-            "NEO4J_USER": os.getenv("NEO4J_USER") or None,
-            "NEO4J_PASSWORD_set": bool(os.getenv("NEO4J_PASSWORD")),
-            "POSTGRES_DSN": os.getenv("POSTGRES_DSN") or None,
-            "POSTGRES_HOST": os.getenv("POSTGRES_HOST") or None,
-            "POSTGRES_PORT": os.getenv("POSTGRES_PORT") or None,
-            "POSTGRES_DB": os.getenv("POSTGRES_DB") or None,
-        },
     }
 
 
 async def _benchmark_search(
     *,
+    client: httpx.AsyncClient,
     corpus_id: str,
     queries: list[str],
     iterations: int,
@@ -90,44 +139,35 @@ async def _benchmark_search(
     include_graph: bool,
     top_k: int | None,
 ) -> dict[str, Any]:
-    cfg = await load_scoped_config(repo_id=corpus_id)
-    fusion = TriBridFusion()
-
     per_query: list[dict[str, Any]] = []
     all_lat_ms: list[float] = []
     total_calls = 0
-    t0_all = time.perf_counter()
 
     for q in queries:
         q = str(q or "").strip()
         if not q:
             continue
 
-        # Warmup
+        request = SearchRequest(
+            repo_id=corpus_id, query=q, include_vector=include_vector,
+            include_sparse=include_sparse, include_graph=include_graph,
+            top_k=top_k if top_k is not None else int(SearchRequest.model_fields["top_k"].default),
+        )
+        body = request.model_dump(mode="json", by_alias=True)
+
+        # Warmup is excluded from both measured latency and throughput.
         for _ in range(max(0, int(warmup))):
-            await fusion.search(
-                corpus_id,
-                q,
-                cfg.fusion,
-                include_vector=include_vector,
-                include_sparse=include_sparse,
-                include_graph=include_graph,
-                top_k=top_k,
-            )
+            response = await client.post("search", json=body)
+            response.raise_for_status()
+            SearchResponse.model_validate(response.json())
 
         lat_ms: list[float] = []
         matches_counts: list[int] = []
         for _ in range(max(1, int(iterations))):
             t0 = time.perf_counter()
-            matches = await fusion.search(
-                corpus_id,
-                q,
-                cfg.fusion,
-                include_vector=include_vector,
-                include_sparse=include_sparse,
-                include_graph=include_graph,
-                top_k=top_k,
-            )
+            response = await client.post("search", json=body)
+            response.raise_for_status()
+            matches = SearchResponse.model_validate(response.json()).matches
             dt_ms = (time.perf_counter() - t0) * 1000.0
             lat_ms.append(dt_ms)
             matches_counts.append(len(matches))
@@ -154,7 +194,7 @@ async def _benchmark_search(
             }
         )
 
-    total_s = max(0.000001, time.perf_counter() - t0_all)
+    total_s = max(0.000001, sum(all_lat_ms) / 1000)
     qps = float(total_calls) / total_s
     return {
         "config": {
@@ -181,10 +221,62 @@ async def _benchmark_search(
     }
 
 
+async def _benchmark_index(
+    client: httpx.AsyncClient, request: IndexRequest, *, timeout_s: float,
+) -> dict[str, Any]:
+    """Wait for this accepted run, never a later run's status or latest stats."""
+    started_clock = time.perf_counter()
+    response = await client.post("index", json=request.model_dump(mode="json", by_alias=True))
+    response.raise_for_status()
+    accepted = IndexStatus.model_validate(response.json())
+    if accepted.repo_id != request.repo_id or accepted.started_at is None or accepted.status != "indexing":
+        raise RuntimeError("API did not return a matching accepted index run")
+    corpus_path = quote(request.repo_id, safe="")
+    run_id: str | None = None
+    try:
+        async with asyncio.timeout(timeout_s):
+            while True:
+                suffix = run_id or "latest"
+                response = await client.get(f"index/{corpus_path}/runs/{suffix}")
+                if response.status_code == 404 and run_id is None:
+                    await asyncio.sleep(0.1)
+                    continue
+                response.raise_for_status()
+                run = IndexRunSummary.model_validate(response.json())
+                if run.repo_id != request.repo_id or run.run_kind != "index":
+                    raise RuntimeError("Index history belongs to a different corpus or operation")
+                if run.started_at < accepted.started_at and run_id is None:
+                    # The accepted background owner has not written its first summary yet.
+                    await asyncio.sleep(0.1)
+                    continue
+                if run.started_at != accepted.started_at or (run_id is not None and run.run_id != run_id):
+                    raise RuntimeError("Index history no longer identifies the accepted benchmark run")
+                run_id = run.run_id
+                if run.status == "complete":
+                    return {
+                        "duration_seconds": time.perf_counter() - started_clock,
+                        "run_id": run_id,
+                        "stats": {"total_files": run.total_files, "total_chunks": run.total_chunks,
+                                  "total_tokens": run.total_tokens},
+                    }
+                if run.status in {"error", "cancelled"}:
+                    raise RuntimeError(f"Index run failed ({run_id}): {run.error or run.status}")
+                await asyncio.sleep(0.1)
+    except TimeoutError as error:
+        owner = run_id or f"started at {accepted.started_at.isoformat()}"
+        raise RuntimeError(
+            f"Index wait timed out for {request.repo_id} ({owner}); indexing may continue on the server"
+        ) from error
+
+
 async def main_async() -> None:
-    parser = argparse.ArgumentParser(description="TriBridRAG benchmark runner")
+    parser = argparse.ArgumentParser(description="Benchmark complete HTTP requests against a running Ragweld API")
+    parser.add_argument("--api-base-url", required=True, help="Explicit running API origin (or origin/api); starts no local runtime")
+    parser.add_argument("--request-timeout", type=float, default=60, help="Maximum seconds per HTTP request")
+    parser.add_argument("--index-timeout", type=float, default=3600, help="Maximum seconds to wait for the accepted index run; expiration does not stop it")
     parser.add_argument("--corpus-id", default="tribrid-rag", help="Corpus ID (repo_id)")
-    parser.add_argument("--corpus-path", default=".", help="Path to corpus root (indexed content)")
+    parser.add_argument("--corpus-path", default="", help="Corpus root on the API server; defaults to the registered corpus path")
+    parser.add_argument("--approved-graph-schema-hash", default=None, help="Exact reviewed schema hash required for semantic graph indexing")
     parser.add_argument("--force-reindex", action="store_true", help="Rebuild the index before benchmarking")
     parser.add_argument("--skip-index", action="store_true", help="Skip indexing step (assumes corpus already indexed)")
 
@@ -207,13 +299,12 @@ async def main_async() -> None:
         default="",
         help="Optional path to a newline-delimited query file.",
     )
-    parser.add_argument("--out-json", default="", help="Optional path to write JSON results.")
+    parser.add_argument("--out-json", default="", help="Replace this report before API work; publish JSON only on success (one writer per path)")
     args = parser.parse_args()
+    connection = BenchmarkConnection(api_base_url=args.api_base_url, request_timeout_s=args.request_timeout,
+                                     index_timeout_s=args.index_timeout)
 
     corpus_id = str(args.corpus_id).strip()
-    corpus_path = Path(str(args.corpus_path)).expanduser().resolve()
-    if not corpus_path.exists():
-        raise SystemExit(f"Corpus path not found: {corpus_path}")
 
     include_vector = not bool(args.no_vector)
     include_sparse = not bool(args.no_sparse)
@@ -229,57 +320,48 @@ async def main_async() -> None:
     if not queries:
         queries = list(DEFAULT_QUERIES)
 
-    result: dict[str, Any] = {
-        "env": _env_summary(),
-        "corpus": {"corpus_id": corpus_id, "corpus_path": str(corpus_path)},
-    }
-
-    # Index (optional)
-    if not args.skip_index:
-        t0 = time.perf_counter()
-        stats = await _run_index(
-            repo_id=corpus_id,
-            repo_path=str(corpus_path),
-            force_reindex=bool(args.force_reindex),
-            event_queue=None,
-        )
-        idx_s = time.perf_counter() - t0
-        result["indexing"] = {
-            "duration_seconds": float(idx_s),
-            "stats": stats.model_dump(mode="serialization", by_alias=True),
-        }
-    else:
-        result["indexing"] = {"skipped": True}
-
-    # Search
-    search = await _benchmark_search(
-        corpus_id=corpus_id,
-        queries=queries,
-        iterations=int(args.iterations),
-        warmup=int(args.warmup),
-        include_vector=include_vector,
-        include_sparse=include_sparse,
-        include_graph=include_graph,
-        top_k=int(args.top_k) if args.top_k is not None else None,
-    )
-    result["search"] = search
-
-    # Output JSON
-    if args.out_json:
-        out_path = Path(str(args.out_json)).expanduser().resolve()
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(json.dumps(result, indent=2, sort_keys=True), encoding="utf-8")
+    out_path = Path(str(args.out_json)).expanduser().resolve() if args.out_json else None
+    with _owned_report_output(out_path) as report_path:
+        async with httpx.AsyncClient(base_url=connection.api_base_url, timeout=connection.request_timeout_s,
+                                     trust_env=False) as client:
+            response = await client.get(f"corpora/{quote(corpus_id, safe='')}")
+            response.raise_for_status()
+            corpus = Corpus.model_validate(response.json())
+            if corpus.repo_id != corpus_id:
+                raise RuntimeError("API returned a different corpus")
+            corpus_path = str(args.corpus_path).strip() or corpus.path
+            result: dict[str, Any] = {
+                "env": _env_summary(), "measurement": "application_http", "api_base_url": connection.api_base_url,
+                "corpus": {"corpus_id": corpus_id, "corpus_path": corpus_path},
+            }
+            if not args.skip_index:
+                result["indexing"] = await _benchmark_index(client, IndexRequest(
+                    repo_id=corpus_id, repo_path=corpus_path, force_reindex=bool(args.force_reindex),
+                    approved_graph_schema_hash=args.approved_graph_schema_hash,
+                ), timeout_s=connection.index_timeout_s)
+            else:
+                result["indexing"] = {"skipped": True}
+            search = await _benchmark_search(
+                client=client, corpus_id=corpus_id, queries=queries, iterations=int(args.iterations),
+                warmup=int(args.warmup), include_vector=include_vector, include_sparse=include_sparse,
+                include_graph=include_graph, top_k=int(args.top_k) if args.top_k is not None else None,
+            )
+        result["search"] = search
+        if report_path is not None:
+            _publish_report(report_path, result)
 
     # Print markdown summary (copy/paste into README)
     idx = result.get("indexing") or {}
     idx_stats = (idx.get("stats") or {}) if isinstance(idx, dict) else {}
     search_sum = search["summary"]
 
-    print("# TriBridRAG Benchmark Result")
+    print("# Ragweld HTTP Benchmark Result")
     print()
     print(f"- timestamp: `{result['env']['timestamp']}`")
     print(f"- corpus_id: `{corpus_id}`")
     print(f"- corpus_path: `{corpus_path}`")
+    print(f"- API: `{connection.api_base_url}`")
+    print("- measurement: complete HTTP search requests; warmup excluded from latency and throughput")
     print(f"- include_vector/sparse/graph: `{include_vector}/{include_sparse}/{include_graph}`")
     print(f"- iterations/warmup: `{int(args.iterations)}/{int(args.warmup)}`")
     print()

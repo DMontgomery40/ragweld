@@ -80,12 +80,21 @@ class _SyntheticProvider(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802 - stdlib HTTP handler
         request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-        payload = json.dumps({
+        response: dict[str, object] = {
             "id": f"chatcmpl-native-ledger-{uuid4().hex}",
             "object": "chat.completion", "created": int(time.time()), "model": request["model"],
             "choices": [{"index": 0, "message": {"role": "assistant", "content": "synthetic response"}, "finish_reason": "stop"}],
             "usage": {"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18, "cost": 0.0123},
-        }).encode()
+        }
+        if self.path.endswith("/embeddings"):
+            response = {
+                "object": "list", "model": request["model"],
+                "data": [{"object": "embedding", "index": index,
+                          "embedding": [0.125] * int(request["dimensions"])}
+                         for index, _ in enumerate(request["input"])],
+                "usage": {"prompt_tokens": 11, "total_tokens": 11},
+            }
+        payload = json.dumps(response).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(payload)))
@@ -122,8 +131,11 @@ def native_gateway(tmp_path_factory: pytest.TempPathFactory) -> Iterator[_Native
         "model_list": [{"model_name": "fixture-provider-cost", "litellm_params": {
             "model": "openrouter/astra/provider-cost", "api_key": "synthetic-local-provider-only",
             "api_base": f"http://127.0.0.1:{provider.server_port}/v1",
+        }}, {"model_name": "fixture-embedding", "model_info": {"mode": "embedding"}, "litellm_params": {
+            "model": "openai/text-embedding-3-small", "api_key": "synthetic-local-provider-only",
+            "api_base": f"http://127.0.0.1:{provider.server_port}/v1", "num_retries": 0, "max_retries": 0,
         }}],
-        "litellm_settings": {"num_retries": 0, "fallbacks": [], "context_window_fallbacks": []},
+        "litellm_settings": {"DEFAULT_MAX_RETRIES": 0, "num_retries": 0, "fallbacks": [], "context_window_fallbacks": []},
         "router_settings": {"num_retries": 0},
         "general_settings": {
             "master_key": "os.environ/LITELLM_MASTER_KEY", "store_model_in_db": False,
@@ -135,7 +147,7 @@ def native_gateway(tmp_path_factory: pytest.TempPathFactory) -> Iterator[_Native
     env_file = directory / "gateway.env"
     env_file.write_text(
         f"DATABASE_URL={dsn}\nLITELLM_MASTER_KEY={key.get_secret_value()}\n"
-        "STORE_PROMPTS_IN_SPEND_LOGS=false\nLITELLM_LOCAL_MODEL_COST_MAP=True\nLITELLM_TELEMETRY=False\n"
+        "STORE_PROMPTS_IN_SPEND_LOGS=false\nLITELLM_LOCAL_MODEL_COST_MAP=True\nLITELLM_TELEMETRY=False\nDEFAULT_MAX_RETRIES=0\n"
     )
     env_file.chmod(0o600)
     gateway = _NativeGateway(f"http://127.0.0.1:{gateway_port}", key, name)
@@ -247,3 +259,57 @@ async def test_real_paused_gateway_honors_explicit_deadline(native_gateway: _Nat
         assert asyncio.get_running_loop().time() - started < 1
     finally:
         _docker("unpause", native_gateway.container_name)
+
+
+@pytest.mark.asyncio
+async def test_real_native_embedding_ledger_keeps_price_map_cost_distinct_from_provider_charge(
+    native_gateway: _NativeGateway, tmp_path: Path,
+) -> None:
+    from server.indexing.embedder import Embedder
+    from server.indexing.embedding_gateway import EmbeddingGateway
+    from server.models.tribrid_config_model import EmbeddingConfig
+    from server.observability.run_census import RunCensusScope, RunIdentity
+
+    session = "embedding-ledger-" + uuid4().hex
+    identity = RunIdentity(session, "embedding-corpus", "index_embeddings")
+    checkpoint_path = tmp_path / "embedding-census.json"
+    def persist(checkpoint):
+        temporary = checkpoint_path.with_suffix(".tmp")
+        with temporary.open("w") as stream:
+            json.dump(asdict(checkpoint), stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, checkpoint_path)
+        descriptor = os.open(tmp_path, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+    scope = RunCensusScope(identity, persist)
+    started = datetime.now(UTC) - timedelta(seconds=1)
+    route = EmbeddingGateway(native_gateway.base_url + "/v1", "fixture-embedding", "text-embedding-3-small",
+        1536, identity, api_key=native_gateway.key, census_scope=scope)
+    embedder = Embedder(EmbeddingConfig(embedding_backend="provider", embedding_type="openai",
+        embedding_model="text-embedding-3-small", embedding_dim=128, embedding_retry_max=1), gateway=route)
+    assert await embedder.embed_batch(["Native ledger embedding calibration"]) == [[0.125] * 128]
+    scope.finish_owner()
+    checkpoint = json.loads(checkpoint_path.read_text())
+    assert checkpoint["started_requests"] == checkpoint["completed_requests"] == 1
+    ended = datetime.now(UTC) + timedelta(seconds=1)
+    reader = NativeSpendReader(base_url=native_gateway.base_url, api_key=native_gateway.key,
+        request_timeout_s=2, total_timeout_s=10)
+    # Full effective provider-attempt policy is still unobservable through native
+    # public endpoints. Native pricing stays visible without claiming completeness.
+    census = RequestCensus("closed", 1, 1, 0, 0, True, True, False)
+    for _ in range(30):
+        result = await reader.read_run(session_id=session, corpus_id=identity.corpus_id,
+            lanes=frozenset({identity.lane}), started_at=started, ended_at=ended, census=census)
+        if result.matched_gateway_requests == 1:
+            break
+        await asyncio.sleep(0.5)
+    assert result.matched_gateway_requests == result.gateway_calculated_requests == 1
+    assert result.provider_reported_requests == 0 and result.provider_reported_usd == 0
+    assert result.gateway_calculated_usd > 0 and result.missing_requests == 0
+    assert result.state == result.coverage_state == "incomplete"
+    assert result.pricing_state == "complete"
+    (tmp_path / "native-embedding-cost-evidence.json").write_text(json.dumps(asdict(result), default=str, indent=2))

@@ -1892,9 +1892,9 @@ export interface ModelCatalogEntry {
   notes?: string | null; // default: None
   /** Human-readable model name when the upstream feed provides one */
   display_name?: string | null; // default: None
-  /** LiteLLM gateway alias that serves this generation row. Set only on GEN rows that are rendered into infra/litellm-config.yaml; selectable as litellm:<gateway_alias>. */
+  /** LiteLLM gateway alias for a GEN or supported native EMB row rendered into infra/litellm-config.yaml. GEN aliases are selectable as litellm:<gateway_alias>; EMB aliases retain the configured embedding model identity. */
   gateway_alias?: string | null; // default: None
-  /** LiteLLM litellm_params.model for gateway_alias (for example openrouter/openai/gpt-5.4-mini or openai/ragweld-local for the vLLM serving path). */
+  /** LiteLLM litellm_params.model for gateway_alias (for example openrouter/openai/gpt-5.4-mini openai/ragweld-local for the vLLM serving path, or openai/text-embedding-3-small for native embeddings). */
   gateway_upstream?: string | null; // default: None
   /** Whether the upstream route accepts image inputs (OpenRouter input_modalities includes image). */
   supports_vision?: boolean; // default: False
@@ -2672,7 +2672,7 @@ export interface RetrievalContractMismatchDetail {
 export interface RunCostIdentity {
   session_id: string;
   corpus_id: string;
-  lane: "embedding" | "semantic_kg" | "figure_description" | "schema_proposal";
+  lane: "embedding" | "semantic_kg" | "figure_description" | "schema_proposal" | "index_embeddings" | "retrieval_embeddings" | "cache_embeddings";
 }
 
 /** Acknowledged aggregate checkpoint, never an inferred request count. */

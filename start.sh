@@ -348,7 +348,7 @@ fi
 # Upstream provider credentials belong to the LiteLLM container's private
 # infra/litellm.env boundary. Never pass inherited shell values into the host
 # Ragweld API or Vite processes.
-unset OPENROUTER_API_KEY ANTHROPIC_API_KEY GOOGLE_API_KEY
+unset OPENAI_API_KEY OPENROUTER_API_KEY ANTHROPIC_API_KEY GOOGLE_API_KEY
 
 if [[ -n "${COMPOSE_PROJECT_NAME:-}" && "$COMPOSE_PROJECT_NAME" != "$RAGWELD_COMPOSE_PROJECT" ]]; then
   die "COMPOSE_PROJECT_NAME must be '${RAGWELD_COMPOSE_PROJECT}', got '${COMPOSE_PROJECT_NAME}'"

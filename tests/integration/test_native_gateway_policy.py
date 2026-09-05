@@ -35,6 +35,7 @@ _IMAGE = "ghcr.io/berriai/litellm:v1.94.0"
 class _ProviderState:
     mode: str = "success"
     calls: list[str] = field(default_factory=list)
+    payloads: list[dict[str, object]] = field(default_factory=list)
     lock: threading.Lock = field(default_factory=threading.Lock)
 
 
@@ -96,6 +97,7 @@ def native_policy_gateway(request: pytest.FixtureRequest, tmp_path_factory: pyte
             with state.lock:
                 mode = state.mode
                 state.calls.append(self.path)
+                state.payloads.append(body)
             secondary = self.path.startswith("/secondary/")
             if mode == "disconnect" and not secondary:
                 self.close_connection = True
@@ -104,7 +106,12 @@ def native_policy_gateway(request: pytest.FixtureRequest, tmp_path_factory: pyte
             if status != 200:
                 payload = {"error": {"message": "Synthetic calibration provider failure", "type": "rate_limit_error" if status == 429 else "server_error"}}
             elif self.path.endswith("embeddings"):
-                payload = {"object": "list", "model": body["model"], "data": [{"object": "embedding", "index": 0, "embedding": [0.1, 0.2, 0.3]}], "usage": {"prompt_tokens": 5, "total_tokens": 5}}
+                dimensions = body.get("dimensions")
+                vector = [0.1] * dimensions if dimensions is not None else [0.1, 0.2, 0.3]
+                payload = {"object": "list", "model": body["model"], "data": [
+                    {"object": "embedding", "index": index, "embedding": vector}
+                    for index, _ in enumerate(body["input"])
+                ], "usage": {"prompt_tokens": 5, "total_tokens": 5}}
             else:
                 payload = {"id": "chatcmpl-" + uuid4().hex, "object": "chat.completion", "created": 1, "model": body["model"], "choices": [{"index": 0, "message": {"role": "assistant", "content": "Calibration completed."}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8}}
             encoded = json.dumps(payload).encode()

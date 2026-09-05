@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from server.gateway_catalog import LOCAL_GATEWAY_ALIAS
+from server.gateway_catalog import LOCAL_GATEWAY_ALIAS, OPENAI_EMBEDDING_CAPACITIES
 from server.models.tribrid_config_model import (
     ChatProviderInfo,
     ChunkingRuntimeCapabilities,
@@ -381,8 +381,20 @@ def selection_metadata_for_catalog_row(row: dict[str, Any]) -> dict[str, Any]:
     components = _normalized_components(row.get("components"))
     provider = str(row.get("provider") or "").strip().lower()
 
+    # Catalog presence alone does not establish an executable cloud route.
+    # Unsupported OpenAI entries remain useful as catalog-only records.
+    model = str(row.get("model") or "").strip()
+    dimensions = row.get("dimensions")
+    native_embedding_route = (
+        components == ["EMB"] and model in OPENAI_EMBEDDING_CAPACITIES
+        and row.get("gateway_alias") == f"openai.{model}"
+        and row.get("gateway_upstream") == f"openai/{model}"
+        and type(dimensions) is int and dimensions == OPENAI_EMBEDDING_CAPACITIES[model]
+        and not str(row.get("base_url") or "").strip()
+    )
     roles: list[str] = []
-    if "EMB" in components and provider in SUPPORTED_PROVIDER_BACKEND_EMBEDDING_PROVIDERS:
+    if ("EMB" in components and provider in SUPPORTED_PROVIDER_BACKEND_EMBEDDING_PROVIDERS
+            and (provider != "openai" or native_embedding_route)):
         roles.append("embedding_provider")
     if "RERANK" in components and provider in SUPPORTED_RERANKER_CLOUD_PROVIDERS:
         roles.append("reranker_cloud")
@@ -398,7 +410,10 @@ def selection_metadata_for_catalog_row(row: dict[str, Any]) -> dict[str, Any]:
     if "GEN" in components:
         reasons.append(_GENERATION_CATALOG_ONLY_REASON)
     if "EMB" in components:
-        reasons.append(_EMBEDDING_CATALOG_ONLY_REASON)
+        reasons.append(
+            "Catalog entry only: no supported native embedding route is configured for this OpenAI model."
+            if provider == "openai" else _EMBEDDING_CATALOG_ONLY_REASON
+        )
     if "RERANK" in components:
         reasons.append(_RERANKER_CATALOG_ONLY_REASON)
 

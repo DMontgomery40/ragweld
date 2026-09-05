@@ -35,6 +35,7 @@ class _DeterministicFusion:
         top_k: int | None = None,  # noqa: ARG002
         cache_mode: str = "default",  # noqa: ARG002
         cache_namespace: str = "search",  # noqa: ARG002
+        billing_session_id: str | None = None,  # noqa: ARG002
     ) -> list[ChunkMatch]:
         cid = str(corpus_ids[0] if corpus_ids else "unknown")
         q = str(query or "").strip()

@@ -36,6 +36,7 @@ class _StoreBrokenFusion:
         top_k: int | None = None,
         cache_mode: str = "default",
         cache_namespace: str = "search",
+        billing_session_id: str | None = None,
     ) -> list[ChunkMatch]:
         raise LookupError(f"collection for {corpus_ids[0]} is missing its sparse generation")
 

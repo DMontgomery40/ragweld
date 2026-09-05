@@ -166,3 +166,40 @@ def test_runtime_capabilities_default_probe_matches_the_real_mlx_runtime_on_this
 
     assert response.training.learning_agent.host_available is mlx_is_available()
     assert response.generation.local_serving.alias == LOCAL_GATEWAY_ALIAS
+
+
+@pytest.mark.parametrize("updates", [
+    {}, {"model": "text-embedding-3-large", "gateway_alias": "openai.text-embedding-3-large",
+         "gateway_upstream": "openai/text-embedding-3-large", "dimensions": 3072},
+    {"model": "text-embedding-ada-002"}, {"model": "fixture-new-embedding"},
+    {"gateway_alias": None}, {"gateway_upstream": None}, {"gateway_alias": "wrong.alias"},
+    {"gateway_upstream": "openrouter/openai/text-embedding-3-small"},
+    {"dimensions": None}, {"dimensions": 0}, {"dimensions": True},
+    {"base_url": "https://api.openai.com/v1"}, {"components": ["EMB", "GEN"]},
+])
+def test_openai_embedding_picker_requires_a_supported_native_route(updates: dict) -> None:
+    from server.runtime_capabilities import selection_metadata_for_catalog_row
+
+    row = {"provider": "openai", "model": "text-embedding-3-small", "components": ["EMB"],
+           "gateway_alias": "openai.text-embedding-3-small",
+           "gateway_upstream": "openai/text-embedding-3-small", "dimensions": 1536, **updates}
+    result = selection_metadata_for_catalog_row(row)
+    supported = not updates or updates.get("model") == "text-embedding-3-large"
+    assert ("embedding_provider" in result["selection_roles"]) is supported
+    assert result["selection_status"] == ("runtime_selectable" if supported else "catalog_only")
+    if not supported:
+        assert "native embedding route" in result["selection_reason"]
+
+
+@pytest.mark.parametrize("model,capacity", [("text-embedding-3-small", 1536), ("text-embedding-3-large", 3072)])
+@pytest.mark.parametrize("dimensions", [1, 128, 1535, 1536, 1537, 3071, 3072, 3073, 4096])
+def test_native_embedding_selection_requires_model_capacity_not_requested_output_size(
+    model: str, capacity: int, dimensions: int,
+) -> None:
+    from server.runtime_capabilities import selection_metadata_for_catalog_row
+
+    result = selection_metadata_for_catalog_row({
+        "provider": "openai", "model": model, "components": ["EMB"], "dimensions": dimensions,
+        "gateway_alias": f"openai.{model}", "gateway_upstream": f"openai/{model}",
+    })
+    assert ("embedding_provider" in result["selection_roles"]) is (dimensions == capacity)

@@ -30,6 +30,7 @@ class FusionProtocol(Protocol):
         top_k: int | None = None,
         cache_mode: CacheMode = "default",
         cache_namespace: str = "search",
+        billing_session_id: str | None = None,
     ) -> list[ChunkMatch]:
         ...
 

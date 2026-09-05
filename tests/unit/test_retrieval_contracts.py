@@ -58,3 +58,27 @@ def test_provider_tokenizer_rules() -> None:
     assert provider_requires_tokenizer("local") == {"huggingface"}
     assert provider_requires_tokenizer("mlx") == {"huggingface"}
     assert provider_requires_tokenizer("unknown-provider") is None
+
+
+def test_native_gateway_route_and_billing_context_do_not_change_dense_identity() -> None:
+    from server.gateway_catalog import warm_gateway_catalog
+    from server.indexing.embedding_gateway import embedding_gateway_for_config
+    from server.observability.run_census import RunIdentity
+
+    warm_gateway_catalog()
+    cfg = TriBridConfig()
+    cfg.embedding.embedding_backend = "provider"
+    cfg.embedding.embedding_model = "text-embedding-3-small"
+    cfg.embedding.embedding_dim = 128
+    original = dense_contract_from_config(cfg)
+    for run, corpus, lane in [("index-run", "corpus-a", "index_embeddings"),
+                              ("online-run", "corpus-b", "retrieval_embeddings"),
+                              ("cache-run", "corpus-a", "cache_embeddings")]:
+        route = embedding_gateway_for_config(cfg, identity=RunIdentity(run, corpus, lane))
+        assert route is not None and route.alias == "openai.text-embedding-3-small"
+        assert route.provider_model == original["model"] == "text-embedding-3-small"
+        assert dense_contract_from_config(cfg) == original
+    changed_transport = cfg.model_copy(deep=True)
+    changed_transport.chat.litellm.base_url = "http://127.0.0.1:54842/v1"
+    changed_transport.embedding.embedding_retry_max = 1
+    assert contract_hash(dense_contract_from_config(changed_transport)) == contract_hash(original)

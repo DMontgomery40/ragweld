@@ -5952,6 +5952,8 @@
       "provider": "openai",
       "family": "text-embedding-3-large",
       "model": "text-embedding-3-large",
+      "gateway_alias": "openai.text-embedding-3-large",
+      "gateway_upstream": "openai/text-embedding-3-large",
       "components": [
         "EMB"
       ],
@@ -5969,6 +5971,8 @@
       "provider": "openai",
       "family": "text-embedding-3-small",
       "model": "text-embedding-3-small",
+      "gateway_alias": "openai.text-embedding-3-small",
+      "gateway_upstream": "openai/text-embedding-3-small",
       "components": [
         "EMB"
       ],

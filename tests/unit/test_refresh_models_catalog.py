@@ -194,7 +194,19 @@ def test_gateway_row_marks_missing_pricing_instead_of_inventing_it() -> None:
     assert row["notes"] == AUTO_PRICING_UNKNOWN
 
 
-def test_refresh_replaces_provider_direct_generation_rows_and_preserves_embedding_and_local_rows() -> None:
+@pytest.mark.parametrize("native_model", [None, "text-embedding-3-small", "text-embedding-3-large"])
+def test_refresh_replaces_provider_direct_generation_rows_and_preserves_embedding_and_local_rows(
+    native_model: str | None,
+) -> None:
+    embedding = _embedding_row()
+    if native_model is not None:
+        embedding.pop("base_url")
+        embedding.update(
+            model=native_model,
+            dimensions=3072 if native_model.endswith("large") else 1536,
+            gateway_alias=f"openai.{native_model}",
+            gateway_upstream=f"openai/{native_model}",
+        )
     catalog = {
         "currency": "USD",
         "last_updated": "2026-02-01",
@@ -221,7 +233,7 @@ def test_refresh_replaces_provider_direct_generation_rows_and_preserves_embeddin
                 "output_per_1k": 0.0,
                 "context": 8192,
             },
-            _embedding_row(),
+            embedding,
             _local_row(),
         ],
     }
@@ -236,15 +248,17 @@ def test_refresh_replaces_provider_direct_generation_rows_and_preserves_embeddin
     models = [(row["provider"], row["model"]) for row in _rows(merged)]
     assert models == [
         ("openai", "openai/gpt-5.4-mini"),
-        ("openai", "text-embedding-3-small"),
+        ("openai", embedding["model"]),
         ("ragweld", "mlx-community/Qwen3.8-27B-4bit"),
     ]
     assert all("gpt-4" not in row["model"] for row in _rows(merged))
-    assert _find(merged, "text-embedding-3-small") == {
-        **_embedding_row(),
-        "selection_roles": ["embedding_provider"],
-        "selection_status": "runtime_selectable",
-        "selection_reason": None,
+    assert _find(merged, embedding["model"]) == {
+        **embedding,
+        "selection_roles": ["embedding_provider"] if native_model else [],
+        "selection_status": "runtime_selectable" if native_model else "catalog_only",
+        "selection_reason": None if native_model else (
+            "Catalog entry only: no supported native embedding route is configured for this OpenAI model."
+        ),
     }
     assert _find(merged, "mlx-community/Qwen3.8-27B-4bit")["gateway_alias"] == "ragweld-local"
     assert stats.removed_rows == 2
@@ -253,6 +267,13 @@ def test_refresh_replaces_provider_direct_generation_rows_and_preserves_embeddin
     assert stats.gateway_rows == 1
     assert merged["last_updated"] == "2026-08-22"
     assert merged["sources"] == [f"{OPENROUTER_SOURCE_PREFIX} (2026-08-22)"]
+    repeated, _, changed_again = build_refreshed_catalog(
+        merged,
+        [_feed_row("openai/gpt-5.4-mini"), _feed_row("openai/gpt-4.1")],
+        as_of_date="2026-08-22",
+    )
+    assert not changed_again
+    assert repeated == merged
 
 
 def test_refresh_removes_routes_that_left_the_feed_and_is_idempotent() -> None:
@@ -326,3 +347,16 @@ def test_write_catalog_files_writes_catalog_mirror_and_gateway_config_together(t
         row["litellm_params"]["num_retries"] == row["litellm_params"]["max_retries"] == 0
         for row in model_list
     )
+
+
+@pytest.mark.parametrize("model,dimensions", [("text-embedding-3-small", 1536), ("text-embedding-3-large", 3072)])
+def test_generation_refresh_preserves_native_embedding_route_and_vector_identity(model: str, dimensions: int) -> None:
+    embedding = {**_embedding_row(), "model": model, "dimensions": dimensions,
+                 "gateway_alias": f"openai.{model}", "gateway_upstream": f"openai/{model}"}
+    embedding.pop("base_url")
+    source = {"currency": "USD", "sources": [], "models": [_local_row(), embedding]}
+    merged, _, _ = build_refreshed_catalog(source, [_feed_row("openai/gpt-5.6-sol")], as_of_date="2026-09-05")
+    actual = _find(merged, model)
+    assert {key: actual[key] for key in embedding} == embedding
+    assert actual["selection_roles"] == ["embedding_provider"]
+    assert actual["selection_status"] == "runtime_selectable"

@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import math
 import re
+import uuid
 from collections import defaultdict
 from datetime import datetime
 from typing import Any, Literal
@@ -16,6 +17,7 @@ from server.dependency_errors import (
     is_transport_unavailable,
 )
 from server.indexing.embedder import Embedder, configure_postgres_embedding_cache_backend
+from server.indexing.embedding_gateway import embedding_gateway_for_config
 from server.indexing.generations import (
     generation_from_corpus_row,
     graph_repo_id_of,
@@ -45,6 +47,7 @@ from server.observability.metrics import (
     SPARSE_LEG_LATENCY_SECONDS,
     VECTOR_LEG_LATENCY_SECONDS,
 )
+from server.observability.run_census import RunIdentity
 from server.observability.runtime import stage_span
 from server.retrieval.cache import CacheEndpoint, CacheMode, SemanticCacheService
 from server.retrieval.contracts import contract_hash
@@ -124,6 +127,7 @@ class TriBridFusion:
         top_k: int | None = None,
         cache_mode: CacheMode = "default",
         cache_namespace: str = "search",
+        billing_session_id: str | None = None,
     ) -> list[ChunkMatch]:
         # Resolve corpus_ids from backwards-compatible inputs.
         if corpus_ids is None:
@@ -165,6 +169,7 @@ class TriBridFusion:
                     top_k=top_k,
                     cache_mode=cache_mode,
                     cache_namespace=cache_namespace,
+                    billing_session_id=billing_session_id or str(uuid.uuid4()),
                 )
             except Exception:
                 SEARCH_ERRORS_TOTAL.inc()
@@ -182,6 +187,7 @@ class TriBridFusion:
         top_k: int | None,
         cache_mode: CacheMode,
         cache_namespace: str,
+        billing_session_id: str,
     ) -> list[ChunkMatch]:
         cache_service: SemanticCacheService | None = None
         cache_scope_key = SemanticCacheService.scope_key(corpus_ids)
@@ -201,13 +207,17 @@ class TriBridFusion:
         primary_cfg: TriBridConfig | None = None
         primary_cfg = scoped_cfgs.get(corpus_ids[0])
         if primary_cfg is not None:
-            cache_service = SemanticCacheService(primary_cfg)
+            cache_service = SemanticCacheService(
+                primary_cfg, identity=RunIdentity(billing_session_id, corpus_ids[0], "cache_embeddings"),
+            )
             cache_lookup_outcome = "ready"
         else:
             try:
                 primary_cfg = await load_scoped_config(repo_id=corpus_ids[0])
                 scoped_cfgs[corpus_ids[0]] = primary_cfg
-                cache_service = SemanticCacheService(primary_cfg)
+                cache_service = SemanticCacheService(
+                    primary_cfg, identity=RunIdentity(billing_session_id, corpus_ids[0], "cache_embeddings"),
+                )
                 cache_lookup_outcome = "ready"
             except Exception:
                 primary_cfg = None
@@ -498,7 +508,12 @@ class TriBridFusion:
                 _raise_postgres_boundary_error(e, operation="retrieval Postgres connect")
                 raise
 
-            embedder = Embedder(cfg.embedding, cfg.tokenization)
+            embedder = Embedder(
+                cfg.embedding, cfg.tokenization,
+                gateway=embedding_gateway_for_config(
+                    cfg, identity=RunIdentity(billing_session_id, cid, "retrieval_embeddings"),
+                ) if include_vector or include_graph else None,
+            )
             configure_postgres_embedding_cache_backend(embedder, postgres)
             qdrant = QdrantChunkStore(cfg)
 

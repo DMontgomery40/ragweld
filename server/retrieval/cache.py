@@ -10,6 +10,7 @@ from typing import Any, Literal
 
 from server.db.postgres import PostgresClient
 from server.indexing.embedder import Embedder, configure_postgres_embedding_cache_backend
+from server.indexing.embedding_gateway import embedding_gateway_for_config
 from server.models.tribrid_config_model import SemanticCacheConfig, TriBridConfig
 from server.observability.metrics import (
     SEMANTIC_CACHE_LOOKUP_LATENCY_SECONDS,
@@ -17,6 +18,7 @@ from server.observability.metrics import (
     SEMANTIC_CACHE_SEMANTIC_SIMILARITY,
     SEMANTIC_CACHE_WRITES_TOTAL,
 )
+from server.observability.run_census import RunIdentity
 
 CacheMode = Literal["default", "bypass", "refresh"]
 CacheAction = Literal["read", "write"]
@@ -48,11 +50,14 @@ class SemanticCacheHit:
 class SemanticCacheService:
     """High-level semantic cache wrapper over Postgres storage."""
 
-    def __init__(self, config: TriBridConfig):
+    def __init__(self, config: TriBridConfig, *, identity: RunIdentity | None = None):
         self._config = config
         self._cache_cfg: SemanticCacheConfig = config.semantic_cache
         self._pg = PostgresClient(config.indexing.postgres_url)
-        self._embedder = Embedder(config.embedding, config.tokenization)
+        self._embedder = Embedder(
+            config.embedding, config.tokenization,
+            gateway=embedding_gateway_for_config(config, identity=identity) if identity is not None else None,
+        )
         configure_postgres_embedding_cache_backend(self._embedder, self._pg)
 
     @property

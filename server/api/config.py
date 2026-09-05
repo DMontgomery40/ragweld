@@ -64,6 +64,7 @@ from server.retrieval.contracts import (
     sparse_contract_from_config,
 )
 from server.retrieval.qdrant_store import QdrantChunkStore
+from server.runtime_capabilities import selection_metadata_for_catalog_row
 from server.services.config_store import CorpusNotFoundError
 from server.services.config_store import get_config as load_scoped_config
 from server.services.config_store import reset_config as reset_scoped_config
@@ -286,6 +287,23 @@ def _validate_model_capabilities(config: TriBridConfig) -> None:
             )
 
     catalog_models = _load_catalog_models_for_validation()
+    if config.embedding.embedding_backend == "provider" and config.embedding.embedding_type == "openai":
+        # This validates configured runtime intent, including graph-only index
+        # settings: retrieval may still use embeddings when skip_dense is set.
+        model = config.embedding.effective_model
+        candidates = [row for row in catalog_models
+                      if row.get("provider") == "openai" and row.get("model") == model]
+        if (len(candidates) != 1 or "embedding_provider" not in
+                selection_metadata_for_catalog_row(candidates[0])["selection_roles"]):
+            raise HTTPException(
+                status_code=422,
+                detail="embedding.embedding_model requires a supported OpenAI model with a native embedding route.",
+            )
+        if config.embedding.embedding_dim > int(candidates[0]["dimensions"]):
+            raise HTTPException(
+                status_code=422,
+                detail="embedding.embedding_dim exceeds the selected OpenAI model's supported dimensions.",
+            )
     if not catalog_models:
         return
 

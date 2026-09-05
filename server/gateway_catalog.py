@@ -26,11 +26,12 @@ import json
 import os
 import re
 import threading
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from types import MappingProxyType
+from typing import Any, Literal
 
 import yaml
 
@@ -46,6 +47,14 @@ LITELLM_CONFIG_PATH = REPO_ROOT / "infra" / "litellm-config.yaml"
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 OPENROUTER_UPSTREAM_PREFIX = "openrouter/"
 OPENROUTER_API_KEY_REF = "os.environ/OPENROUTER_API_KEY"
+OPENAI_EMBEDDING_API_KEY_REF = "os.environ/OPENAI_API_KEY"
+# Full model capacities, not the operator's requested shortened output size.
+# https://developers.openai.com/api/docs/guides/embeddings#reducing-embedding-dimensions
+OPENAI_EMBEDDING_CAPACITIES: Mapping[str, int] = MappingProxyType({
+    "text-embedding-3-small": 1536,
+    "text-embedding-3-large": 3072,
+})
+OPENAI_EMBEDDING_MODELS = frozenset(OPENAI_EMBEDDING_CAPACITIES)
 META_ROUTER_PROVIDER = "openrouter"  # openrouter/auto, openrouter/free, ... resolve per request
 
 LOCAL_GATEWAY_ALIAS = "ragweld-local"
@@ -59,7 +68,7 @@ LOCAL_GATEWAY_BASE_URL = "http://host.docker.internal:58080/v1"
 
 GENERATED_HEADER = (
     "# GENERATED from data/models.json by scripts/generate_litellm_config.py. DO NOT HAND-EDIT.\n"
-    "# Every GEN catalog row with a gateway_alias becomes one model_list entry; regenerate after\n"
+    "# Every gateway-served GEN or EMB catalog row becomes one model_list entry; regenerate after\n"
     "# `uv run python scripts/refresh_models_catalog.py --apply` or any catalog edit.\n"
 )
 
@@ -84,6 +93,8 @@ class GatewayRow:
     input_per_1k: float | None
     output_per_1k: float | None
     supports_vision: bool
+    capability: Literal["GEN", "EMB"] = "GEN"
+    dimensions: int | None = None
 
 
 def gateway_alias_for_openrouter_id(model_id: str) -> str:
@@ -137,7 +148,7 @@ def _validate_row(row: dict[str, Any]) -> ModelCatalogEntry:
 
 
 def gateway_rows(catalog: dict[str, Any]) -> list[GatewayRow]:
-    """Return every gateway-served GEN row, validated, local alias first."""
+    """Return every gateway-served GEN/EMB row, validated, local alias first."""
 
     rows: list[GatewayRow] = []
     seen: set[str] = set()
@@ -157,8 +168,11 @@ def gateway_rows(catalog: dict[str, Any]) -> list[GatewayRow]:
                     f"{identity}: generation rows must be gateway-served (gateway_alias + gateway_upstream missing)"
                 )
             continue
-        if "GEN" not in entry.components:
-            raise GatewayCatalogError(f"{identity}: gateway fields are only valid on GEN rows")
+        is_embedding = entry.components == ["EMB"]
+        if "EMB" in entry.components and not is_embedding:
+            raise GatewayCatalogError(f"{identity}: an embedding gateway row must have only the EMB capability")
+        if not is_embedding and "GEN" not in entry.components:
+            raise GatewayCatalogError(f"{identity}: gateway fields are only valid on GEN or EMB rows")
         alias = str(entry.gateway_alias or "").strip()
         upstream = str(entry.gateway_upstream or "").strip()
         if not alias or not upstream:
@@ -174,7 +188,23 @@ def gateway_rows(catalog: dict[str, Any]) -> list[GatewayRow]:
         seen.add(alias)
 
         base_url = str(entry.base_url or "").strip() or None
-        if upstream.startswith(OPENROUTER_UPSTREAM_PREFIX):
+        if is_embedding:
+            if (
+                entry.provider != "openai" or entry.model not in OPENAI_EMBEDDING_MODELS
+                or upstream != f"openai/{entry.model}" or alias != f"openai.{entry.model}"
+                or entry.dimensions is None or entry.dimensions <= 0 or base_url is not None
+            ):
+                raise GatewayCatalogError(
+                    f"{identity}: OpenAI embedding rows must preserve the catalog model, native upstream, "
+                    "dimensions and canonical alias without a provider URL override"
+                )
+            capacity = OPENAI_EMBEDDING_CAPACITIES[entry.model]
+            if entry.dimensions != capacity:
+                raise GatewayCatalogError(
+                    f"{identity}: catalog dimensions must describe the model's full capacity ({capacity}); "
+                    "choose shortened output dimensions in embedding.embedding_dim"
+                )
+        elif upstream.startswith(OPENROUTER_UPSTREAM_PREFIX):
             expected_alias = gateway_alias_for_openrouter_id(entry.model)
             if alias != expected_alias:
                 raise GatewayCatalogError(
@@ -198,7 +228,7 @@ def gateway_rows(catalog: dict[str, Any]) -> list[GatewayRow]:
                 f"{identity}: gateway_upstream must be openrouter/<id> or the {LOCAL_GATEWAY_ALIAS} vLLM row"
             )
 
-        if entry.context is None or int(entry.context) <= 0:
+        if not is_embedding and (entry.context is None or int(entry.context) <= 0):
             raise GatewayCatalogError(
                 f"{identity}: gateway rows must carry a positive context window (prompt budgeting fails closed without it)"
             )
@@ -215,6 +245,8 @@ def gateway_rows(catalog: dict[str, Any]) -> list[GatewayRow]:
                 input_per_1k=entry.input_per_1k,
                 output_per_1k=entry.output_per_1k,
                 supports_vision=entry.supports_vision,
+                capability="EMB" if is_embedding else "GEN",
+                dimensions=entry.dimensions,
             )
         )
 
@@ -232,7 +264,9 @@ def gateway_rows_by_alias(catalog: dict[str, Any]) -> dict[str, GatewayRow]:
 def _litellm_params(row: GatewayRow) -> dict[str, str | int]:
     # Native deployment values can override a request's num_retries=0.
     params: dict[str, str | int] = {"model": row.upstream, "num_retries": 0, "max_retries": 0}
-    if row.upstream.startswith(OPENROUTER_UPSTREAM_PREFIX):
+    if row.capability == "EMB":
+        params["api_key"] = OPENAI_EMBEDDING_API_KEY_REF
+    elif row.upstream.startswith(OPENROUTER_UPSTREAM_PREFIX):
         params["api_key"] = OPENROUTER_API_KEY_REF
     else:
         params.update({"api_base": str(row.base_url), "api_key": "none"})
@@ -242,7 +276,11 @@ def _litellm_params(row: GatewayRow) -> dict[str, str | int]:
 def build_model_list(catalog: dict[str, Any]) -> list[dict[str, Any]]:
     """Render LiteLLM ``model_list`` entries from the catalog."""
 
-    return [{"model_name": row.alias, "litellm_params": _litellm_params(row)} for row in gateway_rows(catalog)]
+    return [
+        {"model_name": row.alias, "litellm_params": _litellm_params(row),
+         **({"model_info": {"mode": "embedding"}} if row.capability == "EMB" else {})}
+        for row in gateway_rows(catalog)
+    ]
 
 
 def build_litellm_config(catalog: dict[str, Any]) -> dict[str, Any]:
@@ -325,15 +363,20 @@ def load_catalog_cached(path: Path = CATALOG_PATH) -> dict[str, Any]:
     return catalog
 
 
-def gateway_rows_by_alias_cached(path: Path = CATALOG_PATH) -> dict[str, GatewayRow]:
-    """Alias -> GatewayRow for the on-disk catalog, cached by file stamp (blocking)."""
+def gateway_rows_by_alias_cached(
+    path: Path = CATALOG_PATH, *, capability: Literal["GEN", "EMB"] | None = "GEN",
+) -> dict[str, GatewayRow]:
+    """Catalog view cached by file stamp; existing consumers select generation only."""
 
     load_catalog_cached(path)
     with _CACHE_LOCK:
-        return dict(_CACHE[path][2])
+        return {alias: row for alias, row in _CACHE[path][2].items()
+                if capability is None or row.capability == capability}
 
 
-def gateway_rows_snapshot(path: Path = CATALOG_PATH) -> dict[str, GatewayRow]:
+def gateway_rows_snapshot(
+    path: Path = CATALOG_PATH, *, capability: Literal["GEN", "EMB"] | None = "GEN",
+) -> dict[str, GatewayRow]:
     """Alias -> GatewayRow from memory only; empty until warmed. Never touches disk.
 
     Safe to call on the event loop. Warm it with :func:`warm_gateway_catalog`
@@ -342,7 +385,8 @@ def gateway_rows_snapshot(path: Path = CATALOG_PATH) -> dict[str, GatewayRow]:
 
     with _CACHE_LOCK:
         cached = _CACHE.get(path)
-        return dict(cached[2]) if cached is not None else {}
+        return {alias: row for alias, row in cached[2].items()
+                if capability is None or row.capability == capability} if cached is not None else {}
 
 
 def gateway_upstream_for_alias(alias: str, path: Path = CATALOG_PATH) -> str:
@@ -361,7 +405,7 @@ def gateway_upstream_for_alias(alias: str, path: Path = CATALOG_PATH) -> str:
 def warm_gateway_catalog(path: Path = CATALOG_PATH) -> int:
     """Load the catalog into the in-memory snapshot (blocking). Returns the alias count."""
 
-    return len(gateway_rows_by_alias_cached(path))
+    return len(gateway_rows_by_alias_cached(path, capability=None))
 
 
 @contextmanager

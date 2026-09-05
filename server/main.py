@@ -69,7 +69,6 @@ from server.observability.runtime import (
 from server.services.config_store import CorpusNotFoundError
 from server.services.config_store import get_config as load_scoped_config
 
-
 # Load repo-root .env early so env-backed secrets (API keys) are available even
 # when the backend is started directly (e.g. `uv run uvicorn ...`) instead of
 # through `./start.sh` or Docker Compose.
@@ -77,6 +76,9 @@ from server.services.config_store import get_config as load_scoped_config
 # IMPORTANT:
 # - Never override already-set environment variables.
 # - No error if .env is missing (CI/prod).
+_GATEWAY_OWNED_PROVIDER_KEYS = ("OPENAI_API_KEY", "OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY")
+
+
 def _load_dotenv_file(dotenv_path: Path) -> bool:
     """Best-effort dotenv loader for local/dev.
 
@@ -95,6 +97,11 @@ def _load_dotenv_file(dotenv_path: Path) -> bool:
         return True
     except Exception:
         return False
+    finally:
+        # Upgraded installations may still contain provider keys in .env. This
+        # loader must not reintroduce credentials already removed by start.sh.
+        for key in _GATEWAY_OWNED_PROVIDER_KEYS:
+            os.environ.pop(key, None)
 
 
 def _dotenv_loading_enabled(value: str | None = None) -> bool:
@@ -106,6 +113,10 @@ def _dotenv_loading_enabled(value: str | None = None) -> bool:
 # lanes pass configuration explicitly and disable repository dotenv loading.
 if _dotenv_loading_enabled():
     _load_dotenv_file(Path(__file__).resolve().parents[1] / ".env")
+
+# Direct Uvicorn/container launches may inherit keys even with dotenv disabled.
+for _provider_key in _GATEWAY_OWNED_PROVIDER_KEYS:
+    os.environ.pop(_provider_key, None)
 
 _global_cfg = load_config()
 if _global_cfg.mcp.enabled:

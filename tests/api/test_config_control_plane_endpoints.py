@@ -158,7 +158,7 @@ async def test_gateway_registry_owns_only_litellm_client_key(client: AsyncClient
     assert "openrouter_api_key" not in secrets
     assert "anthropic_api_key" not in secrets
     assert "google_api_key" not in secrets
-    assert "litellm" not in secrets["openai_api_key"]["integrations"]
+    assert "openai_api_key" not in secrets
 
 
 @pytest.mark.asyncio

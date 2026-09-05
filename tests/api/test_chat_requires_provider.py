@@ -37,6 +37,7 @@ class _FakeFusion:
         top_k: int | None = None,
         cache_mode: str = "default",
         cache_namespace: str = "search",
+        billing_session_id: str | None = None,
     ) -> list[ChunkMatch]:
         _ = (corpus_ids, query, config, include_vector, include_sparse, include_graph, top_k)
         self.last_debug = {

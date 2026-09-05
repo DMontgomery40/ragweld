@@ -43,6 +43,7 @@ class _RetrievedEvidence:
         top_k: int | None = None,
         cache_mode: str = "default",
         cache_namespace: str = "search",
+        billing_session_id: str | None = None,
     ) -> list[ChunkMatch]:
         _ = (query, config, include_vector, include_sparse, include_graph, top_k)
         self.last_debug = {"fusion_corpora": list(corpus_ids), "fusion_vector_results": 1, "fusion_sparse_results": 0}

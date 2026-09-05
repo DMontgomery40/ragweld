@@ -145,6 +145,7 @@ async def search(request: SearchRequest, response: Response) -> SearchResponse:
                 include_graph=bool(request.include_graph),
                 top_k=int(request.top_k),
                 cache_mode=request_cache_mode,
+                billing_session_id=run_id,
                 cache_namespace="search",
             )
         except RetrievalContractMismatchError as e:
@@ -299,6 +300,7 @@ async def answer(request: AnswerRequest, response: Response) -> AnswerResponse:
                 system_prompt_override=request.system_prompt,
                 model_override=str(request.model_override or ""),
                 cache_mode=request_cache_mode,
+                billing_session_id=run_id,
             )
         except RetrievalContractMismatchError as e:
             if trace_enabled:
@@ -461,6 +463,7 @@ async def answer_stream(request: AnswerRequest) -> StreamingResponse:
             include_graph=bool(request.include_graph),
             top_k=int(request.top_k),
             cache_mode=request_cache_mode,
+            billing_session_id=run_id,
         )
     except asyncio.CancelledError:
         # Cancelled while retrieval was pending: the wrapper that would close the trace and
