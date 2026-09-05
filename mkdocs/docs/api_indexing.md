@@ -1,3 +1,4 @@
+```markdown
 # Indexing API
 
 <div class="grid chunk_summaries" markdown>
@@ -42,6 +43,8 @@
 | `/index/status` | GET | Current state |
 | `/index/stats` | GET | Storage stats |
 | `/index/{corpus_id}/runs/latest` | GET | Latest run summary (run id, status, progress, figure counts); `?finalize=false` for a pure read |
+| `/index/{corpus_id}/runs/{run_id}` | GET | Read one exact index or schema-proposal run, including its saved accounting |
+| `/index/{corpus_id}/runs/{run_id}/costs/reconcile` | POST | Refresh a saved run's native spend from the gateway ledger it recorded |
 | `/index/{corpus_id}/runs/{run_id}/events` | GET | One page of a run's event log as `IndexRunEventPage` (`?limit=500`): the most recent events plus the run's real `total` and `first_index`, so a cap is never shown as a fact |
 
 !!! note "Runs are observable regardless of who started them"
@@ -58,6 +61,12 @@
 !!! note "A poll for a deleted corpus is a typed 404, not a 500"
     `GET /api/index/status` and `GET /api/index/stats` resolve the corpus's scoped config as part of answering; when the named corpus is not registered — for example, a Dashboard tab left open across a corpus deletion — both answer `404` with the corpus-not-found message instead of an unhandled `500`, and both document the `404` in their OpenAPI responses (`server/api/index.py`).
 
+!!! note "Run history survives deletion"
+    Deleting an index — or the corpus itself — no longer deletes its run records. Every saved attempt, including its frozen pre-run estimate, request census and reconciled native costs, stays readable through `GET /api/index/{corpus_id}/runs/{run_id}` even after the index or the corpus registration is gone. Current-state readers (`GET /api/index/{corpus_id}/status`) key off the durable generation manifest instead, so a deleted corpus answers `404` there while its paid history remains auditable. See [Native run accounting](operations/native_costs.md).
+
+!!! tip "Runs keep their own frozen quote — and schema proposals are runs"
+    When a run starts, the index job freezes the pre-run estimate under that exact config and saves it on the run record (`IndexRunAccounting.estimate`), so a later config change can never reprice a past run. `GET /api/index/{corpus_id}/runs/latest` also accepts `run_kind=schema_proposal` (default `index`) to read the latest schema-proposal attempt, and `POST /api/index/{corpus_id}/runs/{run_id}/costs/reconcile` re-reads the native spend ledger for the gateway the run recorded — never the currently selected gateway. See [Native run accounting](operations/native_costs.md).
+
 !!! note "Run event logs are pages, not bare lists"
     `GET /api/index/{corpus_id}/runs/{run_id}/events` now answers `IndexRunEventPage`: `events` (the most recent `limit`, oldest first), `total` (everything the run recorded) and `first_index` (where this slice starts). A client that asked for `?limit=500` of a 1,284-event run can now say so, instead of printing its own cap as a fact about the run.
 
@@ -65,10 +74,13 @@
     When the derived graph policy is `semantic` (external corpus, `graph_indexing.enabled`, AST policy off), `POST /api/index` requires `approved_graph_schema_hash` — the exact hash from a reviewed proposal (`POST /api/index/{corpus_id}/graph-schema/proposal`). A missing hash, or a corpus change since the review, answers `409 graph_schema_approval_required` before any run fence is taken. An authenticated operator may also retry a refused entity-sparse run with `graph_empty_override_reason`; the override promotes chunks and vectors only. See [Indexing a corpus](manual/indexing.md) and [Indexing pipeline](indexing.md).
 
 !!! note "Schema proposal sampling is bounded, and a textless PDF refuses fast"
-    `POST /api/index/{corpus_id}/graph-schema/proposal` no longer converts whole documents behind the synchronous HTTP boundary. Text-bearing PDFs are sampled through a fast pypdfium2 page reader (`_extract_schema_sample_text_for_path` in `server/api/index.py`) — every page of a document with twelve or fewer pages, or nine positionally representative pages (front, middle, back) of a larger one — with each sampled page stamped `# <file> page <n>` so the sampled positions stay reviewable. The chunker tokenizer's warm-up is deferred until the first non-empty sample. A corpus whose sampled documents yield no text answers `422` naming the problem instead of starting whole-document OCR behind the public proxy window. See [Indexing pipeline](indexing.md).
+    `POST /api/index/{corpus_id}/graph-schema/proposal` no longer converts whole documents behind the synchronous HTTP boundary. Text-bearing PDFs are sampled through a fast pypdfium2 page reader (`_extract_schema_sample_text_for_path` in `server/api/index.py`) — every page of a document with 36 or fewer pages, or 36 evenly spaced pages of a larger one — with each sampled page stamped `# <file> page <n>` so the sampled positions stay reviewable. A fixed 36-chunk budget is spread across the sampled documents and their full length (`documents-and-positions-v2`). The chunker tokenizer's warm-up is deferred until the first non-empty sample. A corpus whose sampled documents yield no text answers `422` naming the problem instead of starting whole-document OCR behind the public proxy window. See [Indexing pipeline](indexing.md).
+
+!!! note "Proposal budgets and typed failures"
+    One proposal is bounded by `graph_indexing.schema_proposal_timeout_s` (default `60` s, range 5–80 — always below the public HTTP deadline), `schema_proposal_reasoning_effort` (default `low`, independent of the per-chunk extraction effort) and `schema_proposal_max_output_tokens` (default `16384`). The total budget covers config loading, sampling, the gateway call and the persisted write: a timed-out proposal answers `504 graph_schema_deadline_exceeded`, an incomplete or refused gateway reply answers `502 graph_schema_generation_failed`, and a corpus or setting that changed while the proposal ran answers `409 graph_schema_context_changed` — in every case the previous proposal and its approval are preserved. Every attempt, including failed provider work, is saved as a `schema_proposal` run record the Indexing card prices through [native accounting](operations/native_costs.md), and changing any budget or the effort invalidates proposal reuse, so the approval you review is always tied to the settings that generated it.
 
 !!! note "A corpus with no usable domain schema answers a typed 422, not a 500"
-    When the sampled text yields no extractable domain — the proposer returns no node types or relationships, or a forbidden label — the domain validator rejects the shape and `POST /api/index/{corpus_id}/graph-schema/proposal` answers a typed `422 graph_schema_unusable` (previously the proposer's `ValueError` escaped as an unhandled `500`). The detail carries `corpus_id`, the extraction alias that ran (`model_alias`), the proposer's own `message`, and an `operator_hint`: provide text with named entities and relationships, or point `graph_indexing.semantic_kg_llm_model` at another KG model alias, then generate the proposal again. This is a review outcome the operator must read, not a server fault. See [Indexing pipeline](indexing.md).
+    When the sampled text yields no extractable domain — the proposer returns no node types or relationships, or a forbidden label — the domain validator rejects the shape and `POST /api/index/{corpus_id}/graph-schema/proposal` answers a typed `422 graph_schema_unusable` (previously the proposer's `ValueError` escaped as an unhandled `500`). The detail carries `corpus_id`, the extraction alias that ran (`model_alias`), the proposer's own `message`, an `operator_hint` (provide text with named entities and relationships, or point `graph_indexing.semantic_kg_llm_model` at another KG model alias, then generate the proposal again), plus `accounting_run_id` and `accounting_started_at` for the saved attempt, so a failed proposal's provider spend stays attributable. This is a review outcome the operator must read, not a server fault. See [Indexing pipeline](indexing.md).
 
 ```mermaid
 flowchart LR
@@ -131,3 +143,4 @@ await fetch('http://127.0.0.1:58012/api/index', { method:'POST', headers:{'Conte
 
 ??? info "Dashboard"
     Use `DashboardIndexStatusResponse` and `DashboardIndexStatsResponse` to populate UI storage and status panels per corpus.
+```

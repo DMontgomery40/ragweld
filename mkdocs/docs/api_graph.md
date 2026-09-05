@@ -50,10 +50,14 @@
 | `/graph/{corpus_id}/entity/{entity_id}` | GET | Entity details |
 | `/graph/{corpus_id}/entity/{entity_id}/relationships` | GET | Direct edges |
 | `/graph/{corpus_id}/entity/{entity_id}/neighbors` | GET | 1-hop neighborhood |
+| `/graph/{corpus_id}/entity/sources` | GET | Paged direct mentions of one entity in the active generation |
 | `/graph/{corpus_id}/communities` | GET | List communities |
 
 !!! note "Entity ids may contain slashes"
     Code-graph entity ids are corpus-relative paths such as `server/services/traces.py::TraceStore.add_event` (a module id is its `file_path`, a symbol id is `file_path::qualname`). The entity detail routes match `{entity_id}` as a full path segment (`{entity_id:path}` in `server/api/graph.py`), so ids containing `/` are accepted as-is — no extra encoding of the id is needed. Plain ids like `apollo_11` keep working unchanged.
+
+!!! note "Entity sources are mentions, not relationship evidence"
+    `GET /api/graph/{corpus_id}/entity/sources?entity_id=…` pages the chunks the graph links to an entity through `FROM_CHUNK` in the active generation — up to 100 per page, with a one-row look-ahead so the client knows whether another page exists (`next_offset`). A mention shows where the extractor saw an entity; it is not evidence that any relationship touching it is true. Responses are generation-scoped: a `run_id` from an older manifest answers a typed `409 graph_generation_changed`, and a graph stored without generation-scoped source links answers `409 graph_source_reindex_required` with a pointer to rebuild. Mention locations are enriched from the matching Postgres chunk only when path, lines and content all still match, so a newer index can never attach its page regions to an older mention. See [Graph retrieval](retrieval/graph.md).
 
 ```mermaid
 flowchart LR

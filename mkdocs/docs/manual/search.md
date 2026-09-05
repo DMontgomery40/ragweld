@@ -74,6 +74,9 @@
 
 `/api/answer` uses retrieval matches as context and asks the selected generation model to produce an answer.
 
+!!! warning "Answers fail closed"
+    If generation cannot run (no provider, spend limit, empty reply) or retrieval itself fails, `/api/answer` answers a typed `503` and `/api/answer/stream` emits a typed `error` event before `done` — neither returns a "retrieval-only" answer assembled from the sources. The error card names the failure class and the operator hint; see [Chat models](../api_models_chat.md).
+
 ```bash
 BASE="http://127.0.0.1:8012/api"
 curl -sS -X POST "$BASE/answer" \

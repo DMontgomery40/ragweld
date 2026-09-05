@@ -82,5 +82,8 @@ The four "Latest" series behind the **Eval / Benchmark / Prompt Regressions** da
 !!! note "Probe hysteresis on the observability status"
     Component readiness behind `/api/observability/status` and the in-app Operator Deck debounces flapping probes: an incident needs `tracing.probe_failure_threshold` (default `3`, env `PROBE_FAILURE_THRESHOLD`) **consecutive** failed probes, each component shows its last-8 probe history, and surfaces the API cannot probe at all (an auth-protected ingress that redirects off-host) never count as failures. See [Tracing](operations/tracing.md).
 
+!!! note "The Langfuse component reports UI health only"
+    In `otel_langfuse` mode the Operator Deck's Langfuse card is now the **Langfuse UI** component: it probes the Langfuse web endpoint for reachability and states plainly that native callback activation and generation delivery are unverified by this probe — generation export to Langfuse is owned by the gateway's native OTel callback, which a web-UI health check cannot see. The old card required this process's `LANGFUSE_PUBLIC_KEY`/`LANGFUSE_SECRET_KEY` and read "not configured" without them, which described the wrong surface. See [Tracing](operations/tracing.md).
+
 ??? info "Dashboards"
     Mount your own Grafana provisioning under `infra/grafana/provisioning` to add/override dashboards and datasources.

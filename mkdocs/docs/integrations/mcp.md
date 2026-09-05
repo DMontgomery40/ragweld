@@ -1,3 +1,4 @@
+```markdown
 # MCP Integration (Model Context Protocol)
 
 <div class="grid chunk_summaries" markdown>
@@ -38,8 +39,8 @@
 !!! tip "The advertised URL comes from config"
     `GET /api/mcp/status` reports the connect URL as `mcp.public_base_url` plus the mount path; behind a proxy, set `public_base_url` to the public origin and add its host to `mcp.allowed_hosts`. See [MCP](../mcp.md) for the full field list.
 
-!!! tip "The probe shows the client-facing defaults"
-    The **Infrastructure → MCP** probe card runs the `search` tool with no mode or Top-K override, so it exercises this deployment's `mcp.default_mode` and `mcp.default_top_k` rather than a hardcoded `top_k=5`. Its result line marks the transport URL it echoes as the **in-process** address; the URL an external client actually dials is the advertised `mcp.public_base_url` + mount path above.
+!!! tip "The probe shows the mounted tools' defaults"
+    The **Infrastructure → MCP** probe card runs the `search` tool with no mode or Top-K override, so it exercises the defaults the **mounted** tools captured when this process built the MCP server, not live config: the FastMCP singleton keeps its captured `mcp.default_mode`/`mcp.default_top_k` until the API restarts, and the card shows a **restart pending** notice when config has moved on. Its result line marks the transport URL it echoes as the **in-process** address; the URL an external client actually dials is the advertised `mcp.public_base_url` + mount path above.
 
 ## Configuration (Selected)
 
@@ -92,3 +93,5 @@ async function mcpStatus() {
 
 !!! note "Search failures are structured, never partial"
     The MCP `search` tool fails closed: when retrieval cannot complete it returns `isError=true` with a typed error detail — `dependency_unavailable`, `required_retrieval_leg_failed`, or an index-contract mismatch (`embedding_contract_mismatch` / `sparse_contract_mismatch`) — instead of partial rows, and `POST /api/mcp/probe` surfaces the same details as typed `503`/`409` HTTP errors. See [MCP](../mcp.md) for the payload shape.
+    The `answer` tool follows the same fail-closed contract through `MCPAnswerToolResult`, and `reranker_failed` joins the typed error set: a configured cloud/learning reranker that cannot run fails the tool instead of returning the unreranked fusion order, and a generation outage returns the typed `generation_unavailable` detail — never an answer assembled from the sources without context. See [MCP](../mcp.md).
+```

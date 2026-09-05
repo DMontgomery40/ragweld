@@ -35,6 +35,9 @@
     - Errors via standard status codes with `detail`
     - Streaming responses for long operations are `text/event-stream` or chunked JSON
 
+!!! note "The generated API surface is authoritative"
+    The code-generated [API surface reference](reference/architecture/api-surface.md) enumerates every route, handler and response model from the code on every docs run — the inventory table below is a reading aid, not the contract.
+
 !!! warning "Model Usage Costs"
     Reranking and keyword generation may incur API costs depending on selected models. Control via `data/models.json` and `TriBridConfig`.
 
@@ -51,6 +54,8 @@
 | Index | `/api/index` | POST | Start indexing |
 | Index | `/api/index/{corpus_id}/status` | GET | Per-corpus status |
 | Index | `/api/index/{corpus_id}/stats` | GET | Per-corpus storage breakdown |
+| Index | `/api/index/{corpus_id}/runs/{run_id}` | GET | Read one exact index or schema-proposal run, including its saved accounting |
+| Index | `/api/index/{corpus_id}/runs/{run_id}/costs/reconcile` | POST | Refresh a saved run's native spend from the gateway ledger |
 | Index | `/api/index/estimate` | POST | Best-effort indexing estimate |
 | Index | `/api/index/vocab-preview` | GET | BM25 vocabulary sample |
 | Documents | `/api/corpora/{corpus_id}/documents/view` | GET | Typed document view (text/pdf/rich) with provenance state |
@@ -62,6 +67,7 @@
 | Graph | `/api/graph/{corpus_id}/entities` | GET | List entities (`?q=`, `?limit=`) |
 | Graph | `/api/graph/{corpus_id}/entity` | GET | Entity details (`?entity_id=`) |
 | Graph | `/api/graph/{corpus_id}/entity/neighbors` | GET | Neighborhood (`?entity_id=&max_hops=&limit=`) |
+| Graph | `/api/graph/{corpus_id}/entity/sources` | GET | Paged direct entity mentions, generation-scoped (`?entity_id=&offset=&run_id=`) |
 | Graph | `/api/graph/{corpus_id}/subgraph` | GET | Corpus or search subgraph (`?limit=`, `?q=`) |
 | Models | `/api/models/by-type/{component}` | GET | Models by component `GEN/EMB/RERANK` |
 | Keywords | `/api/keywords/generate` | POST | Generate discriminative keywords |
@@ -74,6 +80,9 @@
 
 !!! note "Credentials never ride these payloads"
     Config endpoints (`GET/PUT/PATCH /api/config*`) replace the password inside `indexing.postgres_url` and the authorization value in `tracing.otlp_headers` with `[redacted]`, and every run-record route (`/api/eval/results*`, `/api/reranker/train/run*`, `/api/agent/train/run*`, `/api/synthetic/run*`) redacts the config snapshot it pins. A write that returns the marker keeps the stored credential; a real value rotates it. `GET /api/mcp/status` additionally reports the advertised `url`, `host_allowed`, `public_base_url_configured` and `request_host` for the MCP transport. See [Security](security.md).
+
+!!! note "Answer and chat fail closed"
+    `/api/answer` no longer returns a "retrieval-only" answer when generation is unavailable: the non-stream route answers the typed `503 generation_unavailable` the chat lane raises, and the stream emits a typed `error` event before `done`. A retrieval failure is its own typed `503` (`required_retrieval_leg_failed`, `reranker_failed`, or `answer_retrieval_failed`) — never an answer assembled from the sources without context, and never a bare 500. See [Chat models](api_models_chat.md).
 
 !!! tip "Citations you can open"
     `ChunkMatch` now carries typed `provenance` (extraction method; cited pages and normalized regions for Docling PDFs), and `ChatResponse` carries `web_grounding` with validated web citations. See [Source document viewer](manual/source_viewer.md) and [Web search in Chat](manual/web_search.md).

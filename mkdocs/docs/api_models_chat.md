@@ -53,6 +53,9 @@
 
     The trace panel is also honest when the run it is showing did not come from this conversation: with no answer in the conversation yet, its fallback query is the corpus's most recent run — which a Retrieval-tab search, an MCP probe, or another tab can have produced — and the panel says so in place instead of presenting that run silently as this conversation's trace. See [UI tour](manual/ui.md).
 
+!!! note "Nothing is persisted before the exchange is committed"
+    A chat exchange reaches durable history, the generation cache and the query record in one commit that happens **before** the stream's terminal `done` event goes out (the commit is shielded, so a closing client cannot interrupt it halfway). An exchange that fails, is cancelled, or loses its client leaves nothing behind: no assistant message built from failure text, and no unanswered question for Recall to index as a conversation. A client that reads `done` and disconnects immediately still gets the whole exchange committed. The Routing Trace panel derives "which runs this conversation produced" from the stored thread, so its foreign-run label survives reloads and follows session switches. See [UI tour](manual/ui.md).
+
 ```mermaid
 flowchart LR
     Req["ChatRequest"] --> API

@@ -141,6 +141,7 @@ nav:
       - Deployment: deployment.md
       - Operations & metrics: operations.md
       - Docker services UI: operations/docker_ui.md
+      - Native run accounting: operations/native_costs.md
       - Production scope & links: operations/production_scope.md
       - Tracing: operations/tracing.md
       - Startup & lifecycle: operations/lifecycle.md

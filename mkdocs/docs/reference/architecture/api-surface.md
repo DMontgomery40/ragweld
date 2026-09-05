@@ -5,7 +5,7 @@
     mount prefixes in `server/main.py` on every docs-autopilot run. The wire schemas are the registered
     Pydantic models; see the configuration reference for their fields.
 
-173 routes across 24 routers, all served by the FastAPI app in `server/main.py`.
+175 routes across 24 routers, all served by the FastAPI app in `server/main.py`.
 
 ```mermaid
 flowchart LR
@@ -36,7 +36,7 @@ flowchart LR
     app --> n_graph
     n_health["health\n2 routes: GET"]
     app --> n_health
-    n_index["index\n12 routes: DELETE, GET, POST"]
+    n_index["index\n14 routes: DELETE, GET, POST"]
     app --> n_index
     n_keywords["keywords\n1 routes: POST"]
     app --> n_keywords
@@ -444,7 +444,7 @@ flowchart LR
 | `GET` | `/api/health` | `health_check` | `HealthStatus` |
 | `GET` | `/api/ready` | `readiness_check` | `ReadinessStatus` |
 
-### `index` (12 routes)
+### `index` (14 routes)
 
 ```mermaid
 flowchart LR
@@ -463,16 +463,20 @@ flowchart LR
     n_index --> n_index_5
     n_index_6["GET /api/index/{corpus_id}/runs/latest\n-> IndexRunSummary"]
     n_index --> n_index_6
-    n_index_7["GET /api/index/{corpus_id}/runs/{run_id}/events\n-> IndexRunEventPage"]
+    n_index_7["GET /api/index/{corpus_id}/runs/{run_id}\n-> IndexRunSummary"]
     n_index --> n_index_7
-    n_index_8["GET /api/index/{corpus_id}/stats\n-> IndexStats"]
+    n_index_8["POST /api/index/{corpus_id}/runs/{run_id}/costs/reconcile\n-> IndexRunSummary"]
     n_index --> n_index_8
-    n_index_9["GET /api/index/{corpus_id}/status\n-> IndexStatus"]
+    n_index_9["GET /api/index/{corpus_id}/runs/{run_id}/events\n-> IndexRunEventPage"]
     n_index --> n_index_9
-    n_index_10["POST /api/index/{corpus_id}/stop\n-> IndexStatus"]
+    n_index_10["GET /api/index/{corpus_id}/stats\n-> IndexStats"]
     n_index --> n_index_10
-    n_index_11["GET /api/stream/operations/index"]
+    n_index_11["GET /api/index/{corpus_id}/status\n-> IndexStatus"]
     n_index --> n_index_11
+    n_index_12["POST /api/index/{corpus_id}/stop\n-> IndexStatus"]
+    n_index --> n_index_12
+    n_index_13["GET /api/stream/operations/index"]
+    n_index --> n_index_13
 ```
 
 | Method | Path | Handler | Response model |
@@ -484,6 +488,8 @@ flowchart LR
 | `DELETE` | `/api/index/{corpus_id}` | `delete_index` | `-` |
 | `POST` | `/api/index/{corpus_id}/graph-schema/proposal` | `propose_graph_schema` | `GraphSchemaProposal` |
 | `GET` | `/api/index/{corpus_id}/runs/latest` | `get_latest_index_run` | `IndexRunSummary` |
+| `GET` | `/api/index/{corpus_id}/runs/{run_id}` | `get_index_run` | `IndexRunSummary` |
+| `POST` | `/api/index/{corpus_id}/runs/{run_id}/costs/reconcile` | `reconcile_index_run_costs` | `IndexRunSummary` |
 | `GET` | `/api/index/{corpus_id}/runs/{run_id}/events` | `get_index_run_events` | `IndexRunEventPage` |
 | `GET` | `/api/index/{corpus_id}/stats` | `get_index_stats` | `IndexStats` |
 | `GET` | `/api/index/{corpus_id}/status` | `get_index_status` | `IndexStatus` |

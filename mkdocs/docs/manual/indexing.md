@@ -1,3 +1,4 @@
+```markdown
 
 
 # Indexing a corpus
@@ -62,7 +63,7 @@ Indexing turns a folder into a set of **retrieval primitives**:
     Both rules are enforced again when the approved proposal is validated, so a hand-edited or stale proposal cannot sneak either shape through. See the [Indexing pipeline](../indexing.md).
 
 ??? question "Generate proposal returns 422: 'no embedded PDF text'"
-    The schema-proposal sampler reads a bounded, positionally representative set of PDF pages — every page of a document with twelve pages or fewer, nine representative pages (front, middle, back) of a larger one — instead of converting the whole document behind the synchronous request. A corpus of image-only or unreadable PDFs yields no sample text, so the API refuses with a typed `422` rather than starting unbounded whole-document OCR behind the public proxy window. Run a real index first (text extraction and figure description happen during indexing, not during the proposal call), or point the corpus at a text-bearing source, then generate the proposal again. See the [Indexing pipeline](../indexing.md).
+    The schema-proposal sampler reads a bounded, positionally representative set of PDF pages — every page of a document with 36 pages or fewer, 36 evenly spaced pages of a larger one — instead of converting the whole document behind the synchronous request. A corpus of image-only or unreadable PDFs yields no sample text, so the API refuses with a typed `422` rather than starting unbounded whole-document OCR behind the public proxy window. Run a real index first (text extraction and figure description happen during indexing, not during the proposal call), or point the corpus at a text-bearing source, then generate the proposal again. See the [Indexing pipeline](../indexing.md).
 
 ```mermaid
 flowchart LR
@@ -173,7 +174,7 @@ For retrieval, this means figure evidence can be preferred or excluded by chunk 
 To measure whether these figure chunks actually move retrieval on a document corpus, score a page-grounded question set with the [figure grounding eval](../guides/eval_figure_grounding.md).
 
 !!! note "The counts and the cost survive the run"
-    These counts — plus a `figure_description_cost_usd` ceiling priced from catalog pricing for the run’s vision alias over its full completion budget — are persisted on the run summary under `GET /api/index/{corpus_id}/runs/latest`, so they stay auditable after the terminal stream is gone. The Dashboard cost card reads this record, and the Dashboard → System **Recent Index Runs** panel shows the counts per corpus.
+    These counts — plus a `figure_description_cost_usd` ceiling priced from catalog pricing for the run’s vision alias over its full completion budget, counted over every **attempted** description (described plus failed — a failed call was still made and billed) — are persisted on the run summary under `GET /api/index/{corpus_id}/runs/latest`, so they stay auditable after the terminal stream is gone. The Dashboard → System **Recent Index Runs** panel shows the counts plus the run's saved accounting per corpus — see [Native run accounting](../operations/native_costs.md).
 
 !!! note "Profiles are protocol, not configuration"
     The two prompt templates (`technical_figure`, `schematic`) live in `server/indexing/figure_prompts.py` as code — they are the reply-schema contract between ragweld and the vision alias, not per-corpus config. You choose the profile with `indexing.figures.prompt_profile`; the `schematic` profile additionally asks the model to put drawing number, sheet and revision into `references`, connector/pin/signal designators into `labels`, and every drawn connection into `connections` as `A -> B` with units exactly as printed.
@@ -418,6 +419,9 @@ Recommended workflow:
 !!! warning "Embeddings are not always compatible"
     If you change embedding dimensions or switch providers/models, you usually need a full reindex. Mixing incompatible embeddings can silently degrade retrieval quality.
 
+!!! note "Force reindex is a replacement, not a wipe"
+    A force run builds a replacement generation and switches the active index **only after validation** — the old generation keeps serving searches until the rebuild commits. Changed embedding or sparse settings can still make searches unavailable until the rebuild succeeds, but a failed rebuild no longer leaves the corpus empty.
+
 ## The knobs that matter (where to tune)
 
 You tune indexing through config (Pydantic-first). For deep reference, see:
@@ -458,5 +462,4 @@ Here’s the short list of “most likely to matter” knobs:
 
 ??? question "Starting the run returns 409 with `code: figure_vision_alias`"
     `indexing.figures.vision_model` is either not a vision-capable gateway alias in the model catalog, or it cannot be routed right now (for example, the LiteLLM gateway is disabled). ragweld refuses the run **before** it takes the per-corpus run fence, so nothing is claimed, leased, or staged. Fix the alias — pick a vision-capable alias from the model catalog — or turn `indexing.figures.describe` off, then start the run again.
-
-
+```

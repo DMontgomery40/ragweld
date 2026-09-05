@@ -209,12 +209,12 @@ The UI is organized into top-level tabs. Here’s the practical meaning of each:
 
 ### Dashboard → System: Recent Index Runs
 
-The System subtab’s **Recent Index Runs** panel lists one row per corpus: its latest persisted index run with status (`complete` in green, `error` in red, **never indexed** when the corpus has no runs), completion time, chunk count, figures described (with a failed count in parentheses when any), and the run’s figure-description cost ceiling. “Never indexed” and “unavailable” (the request failed) are different answers, and the panel colors them differently.
+The System subtab’s **Recent Index Runs** panel lists one row per corpus: its latest persisted index run with status (`complete` in green, `error` in red, **never indexed** when the corpus has no runs), completion time, chunk count, figures described (with a failed count in parentheses when any), and a compact **Run accounting** cell — the saved run's accounting state and, once settled, its native cost. “Never indexed” and “unavailable” (the request failed) are different answers, and the panel colors them differently.
 
 Runtime-managed corpora are excluded from this panel: the chat Recall corpus (`recall_default`) and the two Codex session corpora are registered by the runtime, carry the typed `internal` flag on `Corpus`, and index through their own path — so they have no operator-run index run and would otherwise sit here reading “never indexed” forever. The same marker keeps them out of “delete all unindexed corpora” cleanup, since runtime-registered corpora are never the operator’s to clean up.
 
-!!! tip "This panel is deliberately off the 30-second poll"
-    Nothing in it changes without an indexing run, so fetching on mount and on the dashboard’s explicit refresh action is enough — one request per corpus every 30 seconds would be real load against the run store. The panel reads `GET /api/index/{corpus_id}/runs/latest?finalize=false`, a pure read that never rewrites a run summary as a side effect of displaying it. See [Indexing API](../api_indexing.md).
+!!! tip "This panel refreshes with the status poll now"
+    Native accounting can settle after indexing ends, so the panel refreshes its saved summaries on the same 30-second status poll. These listing reads are pure reads — they never rewrite a run summary as a side effect of displaying it. Expand the Run accounting cell for the full breakdown (frozen estimate, native spend, request census, denominators); see [Native run accounting](../operations/native_costs.md).
 
 !!! warning "If something looks empty"
     Most RAG panels depend on a **selected corpus** and a **completed index**. If you haven’t indexed yet, start at [Indexing](indexing.md).
