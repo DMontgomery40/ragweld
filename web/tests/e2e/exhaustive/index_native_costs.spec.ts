@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import type { IndexRunSummary } from '../../../src/types/generated';
 import { API_BASE, patchCorpusConfigSection, provisionExhaustiveCorpus, type ExhaustiveCorpus } from './corpus_fixture';
 import { assertPrivateNativeConfig, assertPrivateNativeTargets, type NativeFixtureConfig } from './native_cost_fixture';
@@ -80,10 +80,24 @@ function publishRows(run: IndexRunSummary, indexes: number[]) {
 
 async function openRun(page: Page, run: IndexRunSummary) {
   await page.goto(`rag?subtab=indexing&corpus=${encodeURIComponent(run.corpus_id)}`);
-  const panel = page.getByTestId('index-run-costs').filter({ has: page.getByText('Run accounting', { exact: true }) });
+  const panel = page.getByTestId('index-run-costs').filter({ has: page.getByText('Run cost', { exact: true }) });
   await expect(panel).toHaveAttribute('data-run-id', run.run_id);
-  await expect(panel.getByRole('button', { name: 'Refresh accounting', exact: true })).toBeEnabled();
+  await expect(panel.getByRole('button', { name: 'Refresh cost', exact: true })).toBeEnabled();
+  await expectCostsCollapsed(panel);
   return panel;
+}
+
+async function expectCostsCollapsed(panel: Locator) {
+  await expect(panel.getByTestId('index-cost-details')).toHaveJSProperty('open', false);
+  await expect(panel.getByTestId('index-cost-estimate')).not.toBeVisible();
+  await expect(panel.getByTestId('index-cost-coverage')).not.toBeVisible();
+  await expect(panel.getByTestId('index-cost-denominator')).not.toBeVisible();
+  expect(await panel.innerText()).not.toMatch(/Frozen estimate|admitted requests|Automatic checks finished/);
+}
+
+async function expandCosts(panel: Locator) {
+  await panel.getByTestId('index-cost-details').locator('> summary').click();
+  await expect(panel.getByTestId('index-cost-details')).toHaveJSProperty('open', true);
 }
 
 async function assertFixtureIsolation(request: APIRequestContext, corpusId: string): Promise<void> {
@@ -188,19 +202,28 @@ test.afterAll(async ({ request }) => {
 
 test('saved estimates, native evidence, cache zero, missing prices, and legacy absence stay distinct', async ({ page, request }) => {
   const variants = [
-    { rows: [0, 2, 6], count: 3, state: 'complete', native: '$0.01231675', cached: 1, unmeasured: 0 },
-    { rows: [6], count: 1, state: 'complete', native: '$0.0000', cached: 1, unmeasured: 0 },
-    { rows: [0, 3], count: 3, state: 'incomplete', native: '$0.0123', cached: 0, unmeasured: 1 },
+    { rows: [0, 2, 6], count: 3, state: 'complete', native: '$0.01231675', readable: '$0.01 recorded', cached: 1, unmeasured: 0 },
+    { rows: [6], count: 1, state: 'complete', native: '$0.0000', readable: '$0.00 recorded', cached: 1, unmeasured: 0 },
+    { rows: [0, 3], count: 3, state: 'incomplete', native: '$0.0123', readable: '$0.01 recorded', cached: 0, unmeasured: 1 },
+    { rows: [2], count: 1, state: 'complete', native: '$0.00001675', readable: '<$0.01 recorded', cached: 0, unmeasured: 0 },
   ];
   for (const [index, variant] of variants.entries()) {
-    const run = saveRun(corpus.corpusId, variant.count, index === 2 ? 'cancelled' : 'complete');
+    const run = saveRun(corpus.corpusId, variant.count, index === 2 ? 'cancelled' : index === 3 ? 'error' : 'complete');
     publishRows(run, variant.rows);
     const refreshed = await request.post(`${API_BASE}/index/${corpus.corpusId}/runs/${run.run_id}/costs/reconcile`);
     expect(refreshed.ok()).toBeTruthy();
     const saved = await refreshed.json() as IndexRunSummary;
     expect(saved.accounting?.costs?.state, saved.accounting?.reconciliation_error ?? 'native reconciliation').toBe(variant.state);
     const panel = await openRun(page, run);
-    await expect(panel.getByTestId('index-cost-state')).toHaveText(`Accounting ${variant.state}`);
+    await expect(page.getByTestId('index-run-status-pill')).toHaveText(index === 2 ? 'Cancelled' : index === 3 ? 'Failed' : 'Complete');
+    await expect(panel.getByRole('status')).toBeVisible();
+    await expect(panel.getByTestId('index-cost-state')).toHaveText(variant.state === 'complete' ? 'Complete' : 'Incomplete');
+    await expect(panel.getByTestId('index-cost-amount')).toHaveText(variant.readable);
+    if (index === 0 || index === 2) {
+      await panel.screenshot({ path: test.info().outputPath(index === 0 ? 'main-cost-collapsed.png' : 'incomplete-cost-collapsed.png') });
+    }
+    await expandCosts(panel);
+    await expect(panel.getByTestId('index-cost-estimate')).toBeVisible();
     await expect(panel.getByTestId('index-cost-estimate')).toContainText('Frozen estimate: $0.7500');
     await expect(panel.getByTestId('index-cost-native')).toContainText(variant.native);
     await expect(panel.getByTestId('index-cost-coverage')).toContainText(`${variant.cached} cached · ${variant.unmeasured} unmeasured`);
@@ -209,6 +232,7 @@ test('saved estimates, native evidence, cache zero, missing prices, and legacy a
       await expect(panel.getByTestId('index-cost-provider')).toHaveText('$0.0123');
       await expect(panel.getByTestId('index-cost-calculated')).toHaveText('$0.00001675');
       await expect(panel.getByTestId('index-cost-denominator')).toContainText('$0.0030791875 native logged per processed chunk');
+      await panel.screenshot({ path: test.info().outputPath('main-cost-details.png') });
     } else if (index === 2) {
       await expect(panel.getByTestId('index-cost-native')).toContainText('partial accounting');
       await expect(panel.getByTestId('index-cost-denominator')).toContainText('Per-chunk cost unavailable');
@@ -218,38 +242,44 @@ test('saved estimates, native evidence, cache zero, missing prices, and legacy a
   }
   const legacy = saveRun(corpus.corpusId, 0, 'complete', true);
   const panel = await openRun(page, legacy);
-  await expect(panel).toContainText('Accounting unavailable');
+  await expect(panel).toContainText('Unavailable');
+  await expect(panel.getByTestId('index-cost-amount')).toHaveCount(0);
   await expect(panel).not.toContainText('$0');
 });
 
 test('one run settles after native ingestion and incomplete follow-up stops until a manual retry', async ({ page }) => {
   const delayed = saveRun(corpus.corpusId, 1);
   const panel = await openRun(page, delayed);
-  await expect(panel.getByTestId('index-cost-state')).toHaveText('Accounting pending');
+  await expect(panel.getByTestId('index-cost-state')).toHaveText('Pending');
   await expect.poll(() => ledgers.get(delayed.run_id)!.reads).toBe(1);
-  await expect(panel.getByTestId('index-cost-state')).toHaveText('Accounting incomplete');
+  await expect(panel.getByTestId('index-cost-state')).toHaveText('Incomplete');
   publishRows(delayed, [0]);
-  await expect(panel.getByTestId('index-cost-state')).toHaveText('Accounting complete');
+  await expect(panel.getByTestId('index-cost-state')).toHaveText('Complete');
   expect(ledgers.get(delayed.run_id)!.reads).toBe(2);
 
   const absent = saveRun(corpus.corpusId, 1);
   const missing = await openRun(page, absent);
-  await expect(missing.getByTestId('index-cost-refresh-paused')).toBeVisible({ timeout: 45_000 });
+  await expect(missing.getByTestId('index-cost-refresh-paused')).toHaveCount(1, { timeout: 45_000 });
+  await expectCostsCollapsed(missing);
+  await expandCosts(missing);
+  await expect(missing.getByTestId('index-cost-refresh-paused')).toBeVisible();
   expect(ledgers.get(absent.run_id)!.reads).toBe(5);
   // Browser time can advance here: all five actual HTTP reads have settled.
   await page.clock.install();
   await page.clock.fastForward(60_000);
   expect(ledgers.get(absent.run_id)!.reads).toBe(5);
   publishRows(absent, [0]);
-  await missing.getByRole('button', { name: 'Refresh accounting', exact: true }).click();
-  await expect(missing.getByTestId('index-cost-state')).toHaveText('Accounting complete');
+  await missing.getByRole('button', { name: 'Refresh cost', exact: true }).click();
+  await expect(missing.getByTestId('index-cost-state')).toHaveText('Complete');
   await expect(missing.getByTestId('index-cost-refresh-paused')).toHaveCount(0);
   expect(ledgers.get(absent.run_id)!.reads).toBe(6);
   expect(ledgers.get(absent.run_id)!.maximumActive).toBe(1);
 
   const interrupted = saveRun(corpus.corpusId, 1, 'indexing', false, true);
   const interruptedPanel = await openRun(page, interrupted);
-  await expect(interruptedPanel.getByTestId('index-cost-state')).toHaveText('Accounting incomplete (run interrupted)');
+  await expect(interruptedPanel.getByTestId('index-cost-state')).toHaveText('Incomplete · Interrupted');
+  await expect(interruptedPanel.getByTestId('index-cost-owner-interrupted')).not.toBeVisible();
+  await expandCosts(interruptedPanel);
   await expect(interruptedPanel.getByTestId('index-cost-owner-interrupted')).toBeVisible();
   for (const [attempt, delay] of [1000, 2000, 4000, 8000, 16000].entries()) {
     await page.clock.fastForward(delay);
@@ -270,7 +300,7 @@ test('a held reconciliation cannot publish its amounts after a corpus change', a
   const panel = await openRun(page, other);
   await expect.poll(() => ledgers.get(held.run_id)!.active).toBe(0);
   await expect(panel).toHaveAttribute('data-run-id', other.run_id);
-  await expect(panel).toContainText('Accounting unavailable');
+  await expect(panel).toContainText('Unavailable');
   await expect(panel).not.toContainText('$0.0123');
 });
 
@@ -294,7 +324,7 @@ test('a delayed latest-run response cannot replace the newly selected corpus', a
   await page.goto(`rag?subtab=indexing&corpus=${encodeURIComponent(first.corpus_id)}`);
   await requestSeen;
   await page.getByTestId('target-corpus-select').selectOption(second.corpus_id);
-  const panel = page.getByTestId('index-run-costs').filter({ has: page.getByText('Run accounting', { exact: true }) });
+  const panel = page.getByTestId('index-run-costs').filter({ has: page.getByText('Run cost', { exact: true }) });
   await expect(panel).toHaveAttribute('data-run-id', second.run_id);
   const delayedResponse = page.waitForResponse((response) =>
     new URL(response.url()).pathname === `/api/index/${first.corpus_id}/runs/latest`);
@@ -309,18 +339,24 @@ test('Dashboard refreshes accounting for the same saved run without causing ledg
   await page.clock.install();
   await page.goto(`dashboard?subtab=system&corpus=${encodeURIComponent(corpus.corpusId)}`);
   const row = page.getByTestId(`dash-recent-run-${corpus.corpusId}`);
-  await expect(row).toContainText('Accounting pending');
+  await expect(row).toContainText('Pending');
+  await expectCostsCollapsed(row);
   expect(ledgers.get(run.run_id)!.reads).toBe(0);
   publishRows(run, [0]);
   const reconciled = await request.post(`${API_BASE}/index/${corpus.corpusId}/runs/${run.run_id}/costs/reconcile`);
   expect(reconciled.ok()).toBeTruthy();
   await page.clock.fastForward(31_000);
-  await expect(row).toContainText('Accounting complete · $0.0123 native logged');
+  await expect(row).toContainText('$0.01 recorded · Complete');
   expect(ledgers.get(run.run_id)!.reads).toBe(1);
-  await row.getByText('Accounting complete · $0.0123 native logged', { exact: true }).click();
+  await expectCostsCollapsed(row);
+  await expandCosts(row);
   await expect(row.getByTestId('index-cost-estimate')).toContainText('Frozen estimate: $0.7500');
   await row.scrollIntoViewIfNeeded();
   await page.screenshot({ path: test.info().outputPath('dashboard-native-accounting.png') });
+  await page.reload();
+  await expect(row).toContainText('$0.01 recorded · Complete');
+  await expectCostsCollapsed(row);
+  expect(ledgers.get(run.run_id)!.reads).toBe(1);
 });
 
 for (const reverse of [false, true]) {
@@ -438,10 +474,28 @@ test('schema accounting follows successful regeneration when latest history fail
   expect(initialProposal.accounting_started_at).toBeTruthy();
   const proposal = page.getByTestId('graph-schema-proposal');
   await expect(proposal).toBeVisible();
-  const schemaHash = await page.getByTestId('graph-schema-hash').innerText();
+  const schemaHash = await page.getByTestId('graph-schema-hash').textContent();
+  expect(schemaHash).toBeTruthy();
   let successfulRunId = initialProposal.accounting_run_id;
-  const attempt = page.getByTestId('index-run-costs').filter({ has: page.getByText('Schema proposal accounting', { exact: true }) });
+  const attempt = page.getByTestId('index-run-costs').filter({ has: page.getByText('Schema proposal cost', { exact: true }) });
   await expect(attempt).toHaveAttribute('data-run-id', successfulRunId);
+  await expectCostsCollapsed(attempt);
+  const review = proposal.getByTestId('graph-schema-review');
+  await expect(review).toHaveJSProperty('open', false);
+  await expect(proposal.getByTestId('graph-schema-technical')).toHaveJSProperty('open', false);
+  await expect(proposal.getByTestId('graph-schema-hash')).not.toBeVisible();
+  await proposal.screenshot({ path: test.info().outputPath('schema-collapsed.png') });
+  await proposal.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: test.info().outputPath('schema-and-cost-collapsed.png') });
+  await review.locator('> summary').click();
+  await proposal.getByTestId('graph-schema-node-types').locator('> summary').click();
+  await proposal.getByTestId('graph-schema-relationship-types').locator('> summary').click();
+  await proposal.getByTestId('graph-schema-patterns').locator('> summary').click();
+  await expect(proposal.getByTestId('graph-schema-node-types').locator('ul')).toBeVisible();
+  await expect(proposal.getByTestId('graph-schema-json')).not.toBeVisible();
+  await proposal.screenshot({ path: test.info().outputPath('schema-human-review.png') });
+  await review.locator('> summary').click();
+  await expect(review).toHaveJSProperty('open', false);
 
   // A forced regeneration always creates a new attempt. Its returned ID must become visible
   // even when the best-effort historical lookup fails or reports its own timeout.
@@ -522,8 +576,10 @@ test('schema accounting follows successful regeneration when latest history fail
   expect(failedRun.accounting?.gateway_base_url).toBe(gatewayUrl);
   await expect(page.getByTestId('graph-schema-error')).toContainText(failure.detail.message);
   await expect(page.getByTestId('graph-schema-proposal')).toBeVisible();
-  await expect(page.getByTestId('graph-schema-hash')).toHaveText(schemaHash);
+  await expect(page.getByTestId('graph-schema-hash')).toHaveText(schemaHash!);
   await expect(attempt).toHaveAttribute('data-run-id', failure.detail.accounting_run_id);
+  await expectCostsCollapsed(attempt);
+  await expandCosts(attempt);
   await expect(attempt.getByTestId('index-cost-provider')).toHaveText('$0.0123');
   latestSchemaLookupMode = null;
   heldLookup.release();
@@ -569,7 +625,7 @@ test('schema accounting follows successful regeneration when latest history fail
     Date.parse(failure.detail.accounting_started_at),
   );
   await timedOutCachedLookup;
-  await expect(page.getByTestId('graph-schema-hash')).toHaveText(schemaHash);
+  await expect(page.getByTestId('graph-schema-hash')).toHaveText(schemaHash!);
   await expect(page.getByTestId('graph-schema-error')).toHaveCount(0);
   await expect(attempt).toHaveAttribute('data-run-id', failure.detail.accounting_run_id);
 
@@ -577,7 +633,7 @@ test('schema accounting follows successful regeneration when latest history fail
   proposalCreatedAtOverride = null;
   await page.reload();
   await page.getByTestId('indexing-component-card-enrichment').click();
-  const restoredAttempt = page.getByTestId('index-run-costs').filter({ has: page.getByText('Schema proposal accounting', { exact: true }) });
+  const restoredAttempt = page.getByTestId('index-run-costs').filter({ has: page.getByText('Schema proposal cost', { exact: true }) });
   await expect(restoredAttempt).toHaveAttribute('data-run-id', failure.detail.accounting_run_id);
   proposalScenario = 'valid';
   const reloadedReasoning = page.getByTestId('schema-proposal-reasoning-effort');
@@ -674,17 +730,69 @@ test('main and default-width dock share a single in-flight native read for the s
   await picker.getByRole('option').filter({ hasText: 'Indexing' }).first().click();
   const panels = page.getByTestId('index-run-costs');
   await expect(panels).toHaveCount(2);
-  await expect(panels.nth(0).getByTestId('index-cost-state')).toHaveText('Accounting complete');
-  await expect(panels.nth(1).getByTestId('index-cost-state')).toHaveText('Accounting complete');
+  await expect(panels.nth(0).getByTestId('index-cost-state')).toHaveText('Complete');
+  await expect(panels.nth(1).getByTestId('index-cost-state')).toHaveText('Complete');
   expect(ledgers.get(run.run_id)!.reads).toBe(1);
   expect(ledgers.get(run.run_id)!.maximumActive).toBe(1);
+  let runReads = 0;
+  page.on('request', (request) => {
+    const pathname = new URL(request.url()).pathname;
+    if (pathname === `/api/index/${run.corpus_id}/runs/${run.run_id}`
+      || pathname === `/api/index/${run.corpus_id}/runs/${run.run_id}/costs/reconcile`) runReads += 1;
+  });
+  for (const panel of await panels.all()) {
+    await expectCostsCollapsed(panel);
+    const details = panel.getByTestId('index-cost-details');
+    const toggle = details.locator('> summary');
+    await toggle.focus();
+    await toggle.press('Enter');
+    await expect(details).toHaveJSProperty('open', true);
+    await expect(panel.getByTestId('index-cost-native')).toBeVisible();
+    expect(await panel.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+    await toggle.press('Space');
+    await expectCostsCollapsed(panel);
+  }
+  expect(runReads).toBe(0);
+  expect(ledgers.get(run.run_id)!.reads).toBe(1);
   const dock = page.getByTestId('dock-native');
   const dockPanel = dock.getByTestId('index-run-costs');
-  const refresh = dockPanel.getByRole('button', { name: 'Refresh accounting', exact: true });
+  const dockBounds = await dock.boundingBox();
+  const costBounds = await dockPanel.boundingBox();
+  expect(dockBounds).not.toBeNull();
+  expect(costBounds).not.toBeNull();
+  expect(costBounds!.x + costBounds!.width).toBeLessThanOrEqual(dockBounds!.x + dockBounds!.width + 1);
+  const refresh = dockPanel.getByRole('button', { name: 'Refresh cost', exact: true });
   await refresh.scrollIntoViewIfNeeded();
   await expect(refresh).toBeInViewport();
   await refresh.click();
   await expect.poll(() => ledgers.get(run.run_id)!.reads).toBe(2);
   await expect(refresh).toBeEnabled();
   await page.screenshot({ path: test.info().outputPath('docked-native-accounting.png') });
+  await page.reload();
+  await expect(panels).toHaveCount(2);
+  for (const panel of await panels.all()) {
+    await expect(panel.getByTestId('index-cost-state')).toHaveText('Complete');
+    await expectCostsCollapsed(panel);
+  }
+  expect(ledgers.get(run.run_id)!.reads).toBe(2);
+});
+
+test('run cost stays concise at a narrow viewport and resets its disclosure after reload', async ({ page, request }) => {
+  const run = saveRun(corpus.corpusId, 1);
+  publishRows(run, [0]);
+  const response = await request.post(`${API_BASE}/index/${corpus.corpusId}/runs/${run.run_id}/costs/reconcile`);
+  expect(response.ok()).toBe(true);
+  await page.setViewportSize({ width: 390, height: 844 });
+  const panel = await openRun(page, run);
+  await expect(panel.getByTestId('index-cost-headline')).toHaveText('$0.01 recorded · Complete');
+  expect(await panel.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+  await expandCosts(panel);
+  await expect(panel.getByTestId('index-cost-provider')).toBeVisible();
+  expect(await panel.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+  await page.reload();
+  await expect(panel).toHaveAttribute('data-run-id', run.run_id);
+  await expectCostsCollapsed(panel);
+  expect(ledgers.get(run.run_id)!.reads).toBe(1);
+  await panel.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: test.info().outputPath('narrow-run-cost-collapsed.png') });
 });

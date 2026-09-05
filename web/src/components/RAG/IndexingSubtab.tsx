@@ -25,6 +25,9 @@ import { LiveTerminal, type LiveTerminalHandle } from '@/components/LiveTerminal
 import { RepositoryConfig } from '@/components/RAG/RepositoryConfig';
 import { SyntheticCallout } from '@/components/RAG/SyntheticCallout';
 import { IndexRunCosts } from '@/components/RAG/IndexRunCosts';
+import { GraphSchemaReview } from '@/components/RAG/GraphSchemaReview';
+import { indexEstimateConsent } from '@/components/RAG/indexEstimateConsent';
+import { indexRunStatus } from '@/components/RAG/indexRunStatus';
 import { ModelPicker } from '@/components/RAG/ModelPicker';
 import { ModelPicker as ChatModelPicker } from '@/components/Chat/ModelPicker';
 import { PromptLink } from '@/components/ui/PromptLink';
@@ -574,27 +577,6 @@ export function IndexingSubtab() {
 
   const resolvedPath = useMemo(() => String(activeCorpus?.path || ''), [activeCorpus]);
   const effectivePath = useMemo(() => (pathOverride.trim() ? pathOverride.trim() : resolvedPath), [pathOverride, resolvedPath]);
-
-  // The phases the API measured, printed as they are. Deriving the embedding leg by
-  // subtracting the others from the range's midpoint made it disagree with the range beside
-  // it -- the midpoint of a x0.6/x1.9 band is 1.25x the run, so the embed line came out a
-  // quarter of a run too long and could exceed the range's own lower bound.
-  const estimateTimeBreakdown = useMemo(() => {
-    if (!indexEstimate) return '';
-    const embedSeconds = indexEstimate.estimated_seconds_embedding;
-    const kgSeconds = indexEstimate.estimated_seconds_semantic_kg;
-    const figureSeconds = indexEstimate.estimated_seconds_figures;
-    const overheadSeconds = indexEstimate.estimated_seconds_overhead;
-    if (embedSeconds == null) return '';
-    return [
-      `Embed ~${formatDuration(durationMs(Number(embedSeconds)))}`,
-      kgSeconds == null ? null : `KG ~${formatDuration(durationMs(Number(kgSeconds)))}`,
-      figureSeconds == null ? null : `Figures ~${formatDuration(durationMs(Number(figureSeconds)))}`,
-      overheadSeconds == null ? null : `startup ~${formatDuration(durationMs(Number(overheadSeconds)))}`,
-    ]
-      .filter(Boolean)
-      .join(' + ');
-  }, [indexEstimate]);
 
   // Invalidate displayed and in-flight proposals when their sampling/configuration
   // context changes. The API independently validates the authoritative fingerprint.
@@ -1318,92 +1300,23 @@ export function IndexingSubtab() {
       // Scope for the dialog copy. The estimate is always present here -- a failed one
       // returned above rather than falling through to the run.
       {
-        const totalCostUsd = estimate.total_cost_usd ?? estimate.embedding_cost_usd;
-        const embedCostUsd = estimate.embedding_cost_usd;
-        const semanticKgCostUsd = estimate.semantic_kg_cost_usd;
-        const figureCostUsd = estimate.figure_description_cost_usd;
-        const cost = totalCostUsd == null ? 'N/A' : formatCurrency(Number(totalCostUsd || 0));
-        const costBreakdown =
-          semanticKgCostUsd == null && figureCostUsd == null
-            ? null
-            : [
-                `Embed ${embedCostUsd == null ? 'N/A' : formatCurrency(Number(embedCostUsd || 0))}`,
-                semanticKgCostUsd == null ? null : `Semantic KG ${formatCurrency(Number(semanticKgCostUsd || 0))}`,
-                figureCostUsd == null
-                  ? null
-                  : `Figures ≤ ${formatFigureCostUsd(Number(figureCostUsd || 0))}${
-                      estimate.estimated_figures != null
-                        ? ` (~${formatNumber(Number(estimate.estimated_figures))} figures)`
-                        : ''
-                    }`,
-              ]
-                .filter(Boolean)
-                .join(' + ');
-        // One model, so the range and the breakdown can never contradict each other: the
-        // point estimate is the sum of the phases printed beside it, and the range is that
-        // same number scaled.
-        const pointSeconds = estimate.estimated_seconds;
-        const time =
-          pointSeconds != null &&
-          estimate.estimated_seconds_low != null &&
-          estimate.estimated_seconds_high != null
-            ? `~${formatDuration(durationMs(Number(pointSeconds)))} (${formatDuration(
-                durationMs(Number(estimate.estimated_seconds_low))
-              )}–${formatDuration(durationMs(Number(estimate.estimated_seconds_high)))})`
-            : 'N/A';
-        const semanticKgSeconds = estimate.estimated_seconds_semantic_kg;
-        const figureSeconds = estimate.estimated_seconds_figures;
-        const embedSeconds = estimate.estimated_seconds_embedding;
-        const overheadSeconds = estimate.estimated_seconds_overhead;
-        const timeBreakdown = [
-          embedSeconds == null ? null : `Embed ~${formatDuration(durationMs(Number(embedSeconds)))}`,
-          semanticKgSeconds == null ? null : `Semantic KG ~${formatDuration(durationMs(Number(semanticKgSeconds)))}`,
-          figureSeconds == null ? null : `Figures ~${formatDuration(durationMs(Number(figureSeconds)))}`,
-          overheadSeconds == null ? null : `startup ~${formatDuration(durationMs(Number(overheadSeconds)))}`,
-        ]
-          .filter(Boolean)
-          .join(' + ');
-        const msg = [
-          `Index estimate for "${rid}"`,
-          `Files: ${formatNumber(Number(estimate.total_files || 0))} • Size: ${formatBytes(
-            Number(estimate.total_size_bytes || 0)
-          )}`,
-          `Tokens (est): ${formatNumber(Number(estimate.estimated_total_tokens || 0))} (${formatNumber(
-            Number(estimate.estimated_tokens_low)
-          )}–${formatNumber(Number(estimate.estimated_tokens_high))})`,
-          `Chunks (est): ${formatNumber(Number(estimate.estimated_total_chunks || 0))} (${formatNumber(
-            Number(estimate.estimated_chunks_low)
-          )}–${formatNumber(Number(estimate.estimated_chunks_high))})`,
-          `Measured by chunking ${formatNumber(Number(estimate.sampled_files))} sampled files in ${formatDuration(
-            durationMs(Number(estimate.elapsed_seconds))
-          )} • band ±${Math.round(Number(estimate.estimate_relative_error) * 100)}%`,
-          `Embedding: ${String(estimate.embedding_provider || '—')}/${String(estimate.embedding_model || '—')} (${
-            estimate.embedding_backend
-          }, skip_dense=${estimate.skip_dense ? 'yes' : 'no'})`,
-          `Cost (est): ${cost} • Time (est): ${time}`,
-          ...(costBreakdown ? [`Cost breakdown: ${costBreakdown}`] : []),
-          ...(timeBreakdown ? [`Time breakdown (est): ${timeBreakdown}`] : []),
+        const notices = [
           ...(auditedOverrideReason
             ? [
-                'AUDITED ENTITY-SPARSE OVERRIDE: this retry may promote only the complete chunk/vector generation. Graph retrieval remains disabled.',
+                'This override publishes chunks and vectors only. Graph retrieval remains disabled.',
                 `Reason: ${auditedOverrideReason}`,
-                'The API accepts this only through an authenticated proxy Remote-User and only when the sole failures are zero entities/semantic relationships after complete extraction.',
               ]
             : []),
-          // A run does not add to the live index, it replaces it: the new generation is
-          // published on commit and the current one is retired.
           ...(hasIndexedCorpus
-            ? [
-                forceReindex
-                  ? 'This run builds a replacement generation and switches the active index after validation. If you changed embedding or sparse settings, searches may be unavailable until the rebuild succeeds.'
-                  : 'On commit this run publishes a new generation and retires the one now serving searches.',
-              ]
+            ? [forceReindex
+                ? 'This replaces the current index after validation. Changes to embedding or sparse settings may interrupt search until it succeeds.'
+                : 'This replaces the current index after validation.']
             : []),
-        ].join('\n');
+        ];
 
         const proceed = await confirmDialog({
           title: auditedOverrideReason ? 'Retry with audited sparse-graph override?' : 'Start indexing?',
-          message: msg,
+          ...indexEstimateConsent(estimate, { corpusName: rid, notices }),
           confirmLabel: auditedOverrideReason ? 'Re-index without graph retrieval' : 'Start indexing',
           danger: Boolean(auditedOverrideReason),
         });
@@ -1552,6 +1465,7 @@ export function IndexingSubtab() {
   }, [activeRepo, api, loadStats, refreshStatus]);
 
   const graphRunMetadata = latestRun?.graph_metadata ?? null;
+  const displayedRunStatus = indexRunStatus(isIndexing, _indexStatus?.status, latestRun?.status);
   const graphFailureCodes = Array.isArray(latestRun?.graph_failure_codes)
     ? latestRun.graph_failure_codes
     : [];
@@ -1656,45 +1570,38 @@ export function IndexingSubtab() {
                 borderRadius: '999px',
                 border: '1px solid var(--line)',
                 color:
-                  (_indexStatus?.status || latestRun?.status) === 'error'
+                  displayedRunStatus === 'error'
                     ? 'var(--error)'
-                    : (_indexStatus?.status || latestRun?.status) === 'complete'
+                    : displayedRunStatus === 'complete'
                       ? 'var(--ok)'
-                      : (_indexStatus?.status || latestRun?.status) === 'indexing'
+                      : displayedRunStatus === 'indexing'
                         ? 'var(--link)'
                         : 'var(--fg)',
               }}
               data-testid="index-run-status-pill"
             >
-              {String(_indexStatus?.status || latestRun?.status || 'idle')}
+              {({ error: 'Failed', complete: 'Complete', indexing: 'Running', cancelled: 'Cancelled' } as Record<string, string>)[displayedRunStatus] ?? 'Idle'}
             </span>
-            {latestRun?.run_id ? (
-              <span
-                data-testid="index-run-id"
-                style={{ fontSize: '11px', color: 'var(--fg-muted)', fontFamily: 'var(--font-mono)' }}
-              >
-                run_id: {String(latestRun.run_id)}
-              </span>
-            ) : null}
-            {latestRunEvents.length > 0 ? (
-              <span data-testid="index-run-event-count" style={{ fontSize: '11px', color: 'var(--fg-muted)' }}>
-                {latestRunEventTotal > latestRunEvents.length
-                  ? `showing the most recent ${formatNumber(latestRunEvents.length)} of ${formatNumber(
-                      latestRunEventTotal
-                    )} events`
-                  : `${formatNumber(latestRunEvents.length)} ${isIndexing ? 'events so far' : 'replayed events'}`}
-              </span>
-            ) : null}
-            {foreignRun ? (
-              <span
-                data-testid="index-run-foreign-note"
-                style={{ fontSize: '11.5px', color: 'var(--fg-muted)' }}
-              >
-                started outside this tab (API, another operator, or a schedule) — progress mirrored from the server
-              </span>
-            ) : null}
           </div>
 
+
+          {(_indexStatus?.error || latestRun?.error) && (
+            <div
+              style={{
+                marginTop: '10px',
+                padding: '10px',
+                borderRadius: '8px',
+                border: '1px solid var(--error)',
+                background: 'rgba(var(--error-rgb), 0.08)',
+                color: 'var(--error)',
+                fontSize: '12px',
+                whiteSpace: 'pre-wrap',
+              }}
+              data-testid="index-run-error-panel"
+            >
+              {String(_indexStatus?.error || latestRun?.error || '')}
+            </div>
+          )}
 
           {latestRun?.corpus_id === activeRepo && <IndexRunCosts
             key={`${latestRun.corpus_id}:${latestRun.run_id}`}
@@ -1718,7 +1625,6 @@ export function IndexingSubtab() {
             >
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '8px' }}>
                 <strong>Graph generation</strong>
-                <span data-testid="index-run-graph-policy">policy: {graphRunMetadata.policy}</span>
                 <span
                   data-testid="index-run-graph-verdict"
                   style={{
@@ -1734,14 +1640,18 @@ export function IndexingSubtab() {
                   }}
                 >
                   {latestRun?.graph_promotable === false
-                    ? 'PROMOTION REFUSED'
+                    ? 'Not published'
                     : latestRun?.graph_promotable == null
-                      ? 'PROMOTION NOT EVALUATED'
+                      ? 'Pending validation'
                     : graphRunMetadata.partial
-                      ? 'PARTIAL CHUNK-ONLY OVERRIDE'
-                      : 'PROMOTABLE'}
+                      ? 'Chunks only'
+                      : 'Validated'}
                 </span>
               </div>
+              <details key={latestRun?.run_id ?? activeRepo} data-testid="graph-generation-details">
+                <summary style={{ cursor: 'pointer', color: 'var(--fg-muted)' }}>Graph details</summary>
+                <div style={{ display: 'grid', gap: 10, marginTop: 10 }}>
+                  <span data-testid="index-run-graph-policy">Policy: {graphRunMetadata.policy}</span>
               {graphRunMetadata.schema_hash ? (
                 <div style={{ marginBottom: '6px', color: 'var(--fg-muted)', fontFamily: 'var(--font-mono)', wordBreak: 'break-all' }}>
                   schema: {graphRunMetadata.schema_hash}
@@ -1793,8 +1703,41 @@ export function IndexingSubtab() {
                   {' '}{graphRunMetadata.override.reason}
                 </div>
               ) : null}
+                </div>
+              </details>
             </div>
           )}
+
+          <details key={latestRun?.run_id ?? activeRepo} data-testid="index-run-details" style={{ marginTop: 12, fontSize: 12, color: 'var(--fg-muted)' }}>
+            <summary style={{ cursor: 'pointer' }}>Run details</summary>
+            <div style={{ display: 'grid', gap: 8, marginTop: 10, overflowWrap: 'anywhere' }}>
+            {latestRun?.run_id ? (
+              <span
+                data-testid="index-run-id"
+                style={{ fontSize: '11px', color: 'var(--fg-muted)', fontFamily: 'var(--font-mono)' }}
+              >
+                run_id: {String(latestRun.run_id)}
+              </span>
+            ) : null}
+            {latestRunEvents.length > 0 ? (
+              <span data-testid="index-run-event-count" style={{ fontSize: '11px', color: 'var(--fg-muted)' }}>
+                {latestRunEventTotal > latestRunEvents.length
+                  ? `showing the most recent ${formatNumber(latestRunEvents.length)} of ${formatNumber(
+                      latestRunEventTotal
+                    )} events`
+                  : `${formatNumber(latestRunEvents.length)} ${isIndexing ? 'events so far' : 'replayed events'}`}
+              </span>
+            ) : null}
+            {foreignRun ? (
+              <span
+                data-testid="index-run-foreign-note"
+                style={{ fontSize: '11.5px', color: 'var(--fg-muted)' }}
+              >
+                started outside this tab (API, another operator, or a schedule) — progress mirrored from the server
+              </span>
+            ) : null}
+            </div>
+          </details>
 
           {graphOverrideEligible && (
             <div
@@ -1886,23 +1829,7 @@ export function IndexingSubtab() {
               </div>
             </div>
           )}
-          {(_indexStatus?.error || latestRun?.error) && (
-            <div
-              style={{
-                marginTop: '10px',
-                padding: '10px',
-                borderRadius: '8px',
-                border: '1px solid var(--error)',
-                background: 'rgba(var(--error-rgb), 0.08)',
-                color: 'var(--error)',
-                fontSize: '12px',
-                whiteSpace: 'pre-wrap',
-              }}
-              data-testid="index-run-error-panel"
-            >
-              {String(_indexStatus?.error || latestRun?.error || '')}
-            </div>
-          )}
+
         </div>
       )}
 
@@ -3819,89 +3746,11 @@ export function IndexingSubtab() {
                       key={`${activeRepo}:${schemaAccountingRunId}`}
                       corpusId={activeRepo}
                       runId={schemaAccountingRunId}
-                      title="Schema proposal accounting"
+                      title="Schema proposal cost"
                     /> : null}
 
                     {graphSchemaProposal ? (
-                      <div
-                        data-testid="graph-schema-proposal"
-                        style={{
-                          padding: 12,
-                          border: '1px solid rgba(var(--accent-rgb), 0.45)',
-                          borderRadius: 7,
-                          background: 'var(--bg)',
-                          display: 'grid',
-                          gap: 9,
-                          fontSize: 11,
-                        }}
-                      >
-                        <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--fg)' }}>
-                          Proposed closed-world graph contract
-                        </div>
-                        <div style={{ display: 'grid', gap: 3, color: 'var(--fg-muted)' }}>
-                          <span>Model: <strong style={{ color: 'var(--fg)' }}>{graphSchemaProposal.model_alias}</strong></span>
-                          <span>Neo4j GraphRAG: {graphSchemaProposal.graphrag_version}</span>
-                          <span>
-                            Schema hash:{' '}
-                            <code data-testid="graph-schema-hash" style={{ overflowWrap: 'anywhere', color: 'var(--fg)' }}>
-                              {graphSchemaProposal.schema_hash}
-                            </code>
-                          </span>
-                          <span>Sample recipe: {graphSchemaProposal.sample.recipe}</span>
-                          <span>
-                            Estimated bulk cost:{' '}
-                            {indexEstimate?.semantic_kg_cost_usd == null
-                              ? 'measured before the final approval; indexing cannot start without that estimate'
-                              : formatCurrency(Number(indexEstimate.semantic_kg_cost_usd))}
-                          </span>
-                        </div>
-                        {[
-                          ['Node types & properties', 'node_types'],
-                          ['Relationships', 'relationship_types'],
-                          ['Directed patterns', 'patterns'],
-                          ['Constraints', 'constraints'],
-                        ].map(([label, key]) => (
-                          <details key={key} data-testid={`graph-schema-${key.replace(/_/g, '-')}`}>
-                            <summary style={{ cursor: 'pointer', fontWeight: 750, color: 'var(--fg)' }}>{label}</summary>
-                            <pre
-                              style={{
-                                margin: '7px 0 0',
-                                padding: 8,
-                                maxHeight: 220,
-                                overflow: 'auto',
-                                borderRadius: 5,
-                                background: 'var(--bg-elev2)',
-                                color: 'var(--fg-muted)',
-                                whiteSpace: 'pre-wrap',
-                                overflowWrap: 'anywhere',
-                              }}
-                            >
-                              {JSON.stringify(
-                                (graphSchemaProposal.schema as Record<string, unknown>)[key] ?? [],
-                                null,
-                                2
-                              )}
-                            </pre>
-                          </details>
-                        ))}
-                        <details data-testid="graph-schema-sample">
-                          <summary style={{ cursor: 'pointer', fontWeight: 750, color: 'var(--fg)' }}>
-                            Sample documents & positions ({graphSchemaProposal.sample.chunk_ids.length} chunks)
-                          </summary>
-                          <ol style={{ margin: '7px 0 0', paddingLeft: 24, color: 'var(--fg-muted)' }}>
-                            {graphSchemaProposal.sample.chunk_ids.map((chunkId, index) => (
-                              <li key={`${chunkId}:${index}`} style={{ marginBottom: 4, overflowWrap: 'anywhere' }}>
-                                <code>{chunkId}</code>
-                                <span> · SHA-256 {graphSchemaProposal.sample.chunk_hashes[index]}</span>
-                              </li>
-                            ))}
-                          </ol>
-                        </details>
-                        <div style={{ color: 'var(--warn)', lineHeight: 1.45 }}>
-                          Approval is bound to this exact schema hash, model, GraphRAG version, and source fingerprint.
-                          Changing any of them invalidates this review.
-                        </div>
-                      </div>
+                      <GraphSchemaReview key={graphSchemaProposal.schema_hash} proposal={graphSchemaProposal} />
                     ) : null}
                   </div>
                 </div>
@@ -4442,43 +4291,17 @@ export function IndexingSubtab() {
         )}
 
         {!isIndexing && indexEstimate ? (
-          <div
-            data-testid="index-estimate-summary"
-            style={{
-              marginTop: '10px',
-              fontSize: '12px',
-              color: 'var(--fg-muted)',
-              fontFamily: "'SF Mono', monospace",
-            }}
-          >
-            Est:{' '}
-            {indexEstimate.total_cost_usd == null
-              ? indexEstimate.embedding_cost_usd == null
-                ? 'N/A'
-                : formatCurrency(Number(indexEstimate.embedding_cost_usd || 0))
-              : formatCurrency(Number(indexEstimate.total_cost_usd || 0))}
-            {indexEstimate.semantic_kg_cost_usd != null
-              ? ` (Embed ${indexEstimate.embedding_cost_usd == null ? 'N/A' : formatCurrency(Number(indexEstimate.embedding_cost_usd || 0))} + KG ${formatCurrency(
-                  Number(indexEstimate.semantic_kg_cost_usd || 0)
-                )})`
-              : ''}
-            {indexEstimate.figure_description_cost_usd != null
-              ? ` + Figures ≤ ${formatFigureCostUsd(Number(indexEstimate.figure_description_cost_usd || 0))}${
-                  indexEstimate.estimated_figures != null
-                    ? ` (~${formatNumber(Number(indexEstimate.estimated_figures))} figures)`
-                    : ''
-                }`
-              : ''}
-            {' • '}
-            {indexEstimate.estimated_seconds_low != null && indexEstimate.estimated_seconds_high != null
-              ? `${formatDuration(durationMs(Number(indexEstimate.estimated_seconds_low)))}–${formatDuration(
-                  durationMs(Number(indexEstimate.estimated_seconds_high))
-                )}`
-              : 'N/A'}
-            {estimateTimeBreakdown ? ` (${estimateTimeBreakdown})` : ''}
-            {' '}
-            • {formatNumber(Number(indexEstimate.total_files || 0))} files • {formatBytes(Number(indexEstimate.total_size_bytes || 0))}
-          </div>
+          <details data-testid="index-estimate-summary" style={{ marginTop: 12, fontSize: 12, color: 'var(--fg-muted)' }}>
+            <summary style={{ cursor: 'pointer' }}>
+              Estimated cost: {indexEstimate.total_cost_usd == null ? 'Unknown' : formatFigureCostUsd(indexEstimate.total_cost_usd)}
+              {' · '}
+              {indexEstimate.estimated_seconds_low != null && indexEstimate.estimated_seconds_high != null
+                ? `${formatDuration(durationMs(indexEstimate.estimated_seconds_low))}–${formatDuration(durationMs(indexEstimate.estimated_seconds_high))}`
+                : 'Time unknown'}
+              {' · Details'}
+            </summary>
+            <div style={{ marginTop: 10 }}>{indexEstimateConsent(indexEstimate, { corpusName: activeRepo }).details}</div>
+          </details>
         ) : null}
 
         {/* Live terminal - slide down with cubic-bezier */}

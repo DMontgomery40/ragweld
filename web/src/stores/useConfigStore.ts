@@ -3,6 +3,7 @@ import { configApi } from '@/api/config';
 import type { TriBridConfig } from '@/types/generated';
 import { formatSaveError, type IndexContractConflict } from '@/utils/saveErrorMessage';
 import { indexInvalidatingChanges } from '@/utils/configDiff';
+import { useRepoStore } from './useRepoStore';
 
 interface ConfigStore {
   config: TriBridConfig | null;
@@ -86,9 +87,14 @@ export const useConfigStore = create<ConfigStore>((set) => {
   // same mount (app init, `useConfig`'s mount effect, the corpus-changed listener) and each one
   // used to issue its own request: a single dashboard load spent four round trips fetching the
   // identical document (M-129). This shares the request; it does not cache the answer.
-  const inFlightLoadByCorpus: Record<string, Promise<void>> = {};
+  const inFlightLoadByCorpus: Record<string, { epoch: number; promise: Promise<void> }> = {};
+  let scopeEpoch = 0;
 
   const getActiveCorpusId = (): string => {
+    const registry = useRepoStore.getState();
+    // A successful empty registry is explicit global scope. Failed first loads and their pending
+    // retries retain the URL/storage scope until a real registry response resolves that scope.
+    if (registry.resolved) return registry.activeRepo;
     try {
       const u = new URL(window.location.href);
       return (
@@ -106,6 +112,18 @@ export const useConfigStore = create<ConfigStore>((set) => {
       );
     }
   };
+
+  let activeScope = getActiveCorpusId();
+  useRepoStore.subscribe(() => {
+    const nextScope = getActiveCorpusId();
+    if (nextScope === activeScope) return;
+    activeScope = nextScope;
+    scopeEpoch += 1;
+    set({ config: null, persisted: null, loading: false, error: null, fieldErrors: {}, saveConflict: null });
+    // Corpus-change hook listeners share this same in-flight request. Registry
+    // refresh and last-corpus removal must also load when no changed event fires.
+    void useConfigStore.getState().loadConfig();
+  });
 
   const stageSection = (section: keyof TriBridConfig, updates: Record<string, unknown>) => {
     const sectionKey = String(section);
@@ -139,15 +157,17 @@ export const useConfigStore = create<ConfigStore>((set) => {
   };
 
   /** The real load. `loadConfig` wraps it so concurrent callers share one request. */
-  const loadConfigOnce = async (): Promise<void> => {
+  const loadConfigOnce = async (corpusId: string, epoch: number): Promise<void> => {
     // A load replaces both the working copy and the server snapshot: navigation and corpus
     // switches never read as an operator edit, and any unapplied staged edits for the old scope
     // are dropped (the staged-form contract — apply before you leave).
     set({ loading: true, error: null });
     try {
-      const config = await configApi.load();
+      const config = await configApi.load(corpusId || null);
+      if (scopeEpoch !== epoch || getActiveCorpusId() !== corpusId) return;
       set({ config, persisted: config, loading: false, error: null, fieldErrors: {}, saveConflict: null });
     } catch (error) {
+      if (scopeEpoch !== epoch || getActiveCorpusId() !== corpusId) return;
       set({ loading: false, error: formatSaveError(error).message });
     }
   };
@@ -163,15 +183,16 @@ export const useConfigStore = create<ConfigStore>((set) => {
 
   loadConfig: async () => {
     const key = String(getActiveCorpusId() || '');
+    const epoch = scopeEpoch;
     const shared = inFlightLoadByCorpus[key];
-    if (shared) return shared;
+    if (shared?.epoch === epoch) return shared.promise;
 
-    const run = loadConfigOnce();
-    inFlightLoadByCorpus[key] = run;
+    const run = loadConfigOnce(key, epoch);
+    inFlightLoadByCorpus[key] = { epoch, promise: run };
     try {
       await run;
     } finally {
-      if (inFlightLoadByCorpus[key] === run) delete inFlightLoadByCorpus[key];
+      if (inFlightLoadByCorpus[key]?.promise === run) delete inFlightLoadByCorpus[key];
     }
   },
 

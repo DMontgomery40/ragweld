@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 
 // In-app replacement for window.confirm. Native dialogs block the renderer's
@@ -9,6 +9,8 @@ import { createRoot } from 'react-dom/client';
 export type ConfirmDialogOptions = {
   title: string;
   message: string;
+  /** Optional supporting content; callers keep material uncertainty in the message. */
+  details?: ReactNode;
   confirmLabel?: string;
   cancelLabel?: string;
   danger?: boolean;
@@ -99,8 +101,9 @@ function ConfirmDialogView({
           background: 'var(--card-bg)',
           border: '1px solid var(--line)',
           borderRadius: 8,
-          minWidth: 360,
+          width: 'calc(100vw - 32px)',
           maxWidth: 560,
+          boxSizing: 'border-box',
           maxHeight: '80vh',
           overflow: 'auto',
           padding: '20px 24px',
@@ -115,6 +118,14 @@ function ConfirmDialogView({
         >
           {options.message}
         </div>
+        {options.details != null ? (
+          <details style={{ marginBottom: 18, fontSize: '13px', lineHeight: 1.5 }}>
+            <summary style={{ cursor: 'pointer', color: 'var(--fg-muted)' }}>Estimate details</summary>
+            <div data-testid="confirm-dialog-details" style={{ marginTop: 10, overflowWrap: 'anywhere' }}>
+              {options.details}
+            </div>
+          </details>
+        ) : null}
         {options.requireTyped ? (
           <label
             style={{ display: 'block', fontSize: '0.8rem', color: 'var(--fg)', marginBottom: 18 }}

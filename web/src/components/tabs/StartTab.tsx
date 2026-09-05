@@ -4,7 +4,9 @@
 // help controls had no code behind them (2026-08-25 drive finding M1).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { configApi } from '@/api/config';
 import { indexingApi } from '@/api/indexing';
+import { indexEstimateConsent } from '@/components/RAG/indexEstimateConsent';
 import { AssistantMarkdown } from '@/components/ui/AssistantMarkdown';
 import { confirmDialog } from '@/components/ui/confirmDialog';
 import { useAPI } from '@/hooks/useAPI';
@@ -51,6 +53,11 @@ export default function StartTab() {
   // Step 3 — index
   const [indexStats, setIndexStats] = useState<IndexStats | null>(null);
   const [indexing, setIndexing] = useState(false);
+  const [indexPreparing, setIndexPreparing] = useState(false);
+  const [graphReviewCorpusId, setGraphReviewCorpusId] = useState<string | null>(null);
+  const indexPreparingRef = useRef(false);
+  const currentCorpusIdRef = useRef(corpusId);
+  currentCorpusIdRef.current = corpusId;
   const [indexProgress, setIndexProgress] = useState(0);
   const [indexStatusText, setIndexStatusText] = useState('Ready to index');
   const [indexLog, setIndexLog] = useState<string[]>([]);
@@ -148,88 +155,107 @@ export default function StartTab() {
   );
 
   const handleStartIndex = useCallback(async () => {
-    if (!corpus) return;
+    if (!corpus || indexPreparingRef.current) return;
+    indexPreparingRef.current = true;
+    setIndexPreparing(true);
     setIndexError(null);
-    // The same estimate + confirmation gate as RAG → Indexing: no index run
-    // (and no embedding/GraphRAG spend) starts before the operator sees the
-    // file/chunk/cost/time estimate and agrees.
-    const request = { corpus_id: corpus.corpus_id, repo_path: corpus.path, force_reindex: false };
-    let estimate;
+    setGraphReviewCorpusId(null);
     try {
-      // indexingApi.estimate waits out a cold or under-sampled estimator and only ever resolves
-      // with a measured one, so the confirmation below cannot be built from a payload that has
-      // no numbers in it. Surface the wait rather than sitting silent for up to two minutes.
-      estimate = await indexingApi.estimate(request, {
-        // Only reached while warming: an insufficient sample throws instead of waiting.
-        onWaiting: (pending) =>
-          setIndexStatusText(
-            `Preparing the estimator (about ${Math.max(
-              1,
-              Math.ceil(Number(pending.warmup_seconds_remaining ?? 0))
-            )}s)…`
-          ),
-      });
-    } catch (error) {
-      setIndexError(`Index estimate failed: ${error instanceof Error ? error.message : 'unknown error'}`);
-      return;
-    } finally {
-      setIndexStatusText('');
-    }
-    const cost = estimate.total_cost_usd ?? estimate.embedding_cost_usd;
-    const proceed = await confirmDialog({
-      title: 'Build indexes?',
-      message: [
-        `Index estimate for "${corpus.name}"`,
-        `Files: ${estimate.total_files} (${estimate.skipped_large_files ?? 0} skipped as too large)`,
-        `Estimated tokens: ${estimate.estimated_total_tokens.toLocaleString()} (${estimate.estimated_tokens_low.toLocaleString()}–${estimate.estimated_tokens_high.toLocaleString()})`,
-        `Estimated chunks: ${estimate.estimated_total_chunks.toLocaleString()} (${estimate.estimated_chunks_low.toLocaleString()}–${estimate.estimated_chunks_high.toLocaleString()})`,
-        `Measured by chunking ${estimate.sampled_files.toLocaleString()} sampled files, band ±${Math.round(estimate.estimate_relative_error * 100)}%`,
-        `Embeddings: ${estimate.embedding_backend} (${estimate.embedding_provider || 'n/a'} / ${estimate.embedding_model || 'n/a'})${estimate.skip_dense ? ' — dense skipped' : ''}`,
-        `Estimated cost: ${cost == null ? 'N/A' : `$${Number(cost).toFixed(4)}`}`,
-        estimate.estimated_seconds_low != null && estimate.estimated_seconds_high != null
-          ? `Estimated time: ${Math.round(Number(estimate.estimated_seconds_low))}–${Math.round(Number(estimate.estimated_seconds_high))} s`
-          : 'Estimated time: N/A',
-      ].join('\n'),
-      confirmLabel: 'Build indexes',
-    });
-    if (!proceed) return;
-    setIndexing(true);
-    setIndexProgress(0);
-    setIndexLog([]);
-    setIndexStatusText('Starting…');
-    try {
-      await startAndStream(
-        request,
-        {
-          terminalId: INDEX_TERMINAL_ID,
-          onLine: (line) => setIndexLog((prev) => [...prev.slice(-199), line]),
-          onProgress: (percent, message) => {
-            setIndexProgress(Math.max(0, Math.min(100, percent)));
-            if (message) setIndexStatusText(message);
-          },
-          onError: (error) => {
-            setIndexing(false);
-            setIndexError(error);
-            setIndexStatusText('Indexing failed');
-          },
-          onComplete: (_status, stats) => {
-            setIndexing(false);
-            setIndexProgress(100);
-            setIndexStats(stats);
+      // The wizard corpus can differ from the corpus in the URL/config store.
+      // Read its persisted policy explicitly; a proposal hash is never approval
+      // unless the operator reviews it in the existing Graph flow.
+      let scopedConfig;
+      try {
+        scopedConfig = await configApi.load(corpus.corpus_id);
+      } catch (error) {
+        setIndexError(`Index configuration failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+        return;
+      }
+      if (currentCorpusIdRef.current !== corpus.corpus_id) return;
+      const graphPolicy = scopedConfig.graph_indexing;
+      if (!graphPolicy || typeof graphPolicy.enabled !== 'boolean' || typeof graphPolicy.build_code_graph !== 'boolean') {
+        setIndexError('The corpus graph configuration is incomplete. Reload it before indexing.');
+        return;
+      }
+      if (!corpus.internal && graphPolicy.enabled && !graphPolicy.build_code_graph) {
+        setGraphReviewCorpusId(corpus.corpus_id);
+        setIndexError('Review the graph schema before starting semantic indexing.');
+        return;
+      }
+      // The same estimate + confirmation gate as RAG → Indexing: no index run
+      // (and no embedding/GraphRAG spend) starts before the operator sees the
+      // file/chunk/cost/time estimate and agrees.
+      const request = { corpus_id: corpus.corpus_id, repo_path: corpus.path, force_reindex: false };
+      let estimate;
+      try {
+        // indexingApi.estimate waits out a cold or under-sampled estimator and only ever resolves
+        // with a measured one, so the confirmation below cannot be built from a payload that has
+        // no numbers in it. Surface the wait rather than sitting silent for up to two minutes.
+        estimate = await indexingApi.estimate(request, {
+          // Only reached while warming: an insufficient sample throws instead of waiting.
+          onWaiting: (pending) =>
             setIndexStatusText(
-              stats ? `Indexed ${stats.total_files} files into ${stats.total_chunks} chunks` : 'Indexing complete'
-            );
-          },
-          onCancelled: () => {
-            setIndexing(false);
-            setIndexStatusText('Indexing cancelled');
-          },
-        }
-      );
-    } catch (error) {
-      setIndexing(false);
-      setIndexError(error instanceof Error ? error.message : 'Failed to start indexing');
-      setIndexStatusText('Indexing failed');
+              `Preparing the estimator (about ${Math.max(
+                1,
+                Math.ceil(Number(pending.warmup_seconds_remaining ?? 0))
+              )}s)…`
+            ),
+        });
+      } catch (error) {
+        setIndexError(`Index estimate failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+        return;
+      } finally {
+        setIndexStatusText('');
+      }
+      if (currentCorpusIdRef.current !== corpus.corpus_id) return;
+      const proceed = await confirmDialog({
+        title: 'Build indexes?',
+        ...indexEstimateConsent(estimate, { corpusName: corpus.name }),
+        confirmLabel: 'Build indexes',
+      });
+      if (!proceed || currentCorpusIdRef.current !== corpus.corpus_id) return;
+      setIndexPreparing(false);
+      setIndexing(true);
+      setIndexProgress(0);
+      setIndexLog([]);
+      setIndexStatusText('Starting…');
+      try {
+        await startAndStream(
+          request,
+          {
+            terminalId: INDEX_TERMINAL_ID,
+            onLine: (line) => setIndexLog((prev) => [...prev.slice(-199), line]),
+            onProgress: (percent, message) => {
+              setIndexProgress(Math.max(0, Math.min(100, percent)));
+              if (message) setIndexStatusText(message);
+            },
+            onError: (error) => {
+              setIndexing(false);
+              setIndexError(error);
+              setIndexStatusText('Indexing failed');
+            },
+            onComplete: (_status, stats) => {
+              setIndexing(false);
+              setIndexProgress(100);
+              setIndexStats(stats);
+              setIndexStatusText(
+                stats ? `Indexed ${stats.total_files} files into ${stats.total_chunks} chunks` : 'Indexing complete'
+              );
+            },
+            onCancelled: () => {
+              setIndexing(false);
+              setIndexStatusText('Indexing cancelled');
+            },
+          }
+        );
+      } catch (error) {
+        setIndexing(false);
+        setIndexError(error instanceof Error ? error.message : 'Failed to start indexing');
+        setIndexStatusText('Indexing failed');
+      }
+    } finally {
+      indexPreparingRef.current = false;
+      setIndexPreparing(false);
     }
   }, [corpus, startAndStream]);
 
@@ -441,10 +467,11 @@ export default function StartTab() {
                       type="button"
                       className="ob-primary-btn"
                       onClick={() => void handleStartIndex()}
-                      disabled={indexing}
+                      disabled={indexing || indexPreparing}
+                      aria-busy={indexPreparing}
                       data-testid="onboarding-index-start"
                     >
-                      {indexing ? 'Indexing…' : indexed ? 'Rebuild indexes' : 'Build indexes'}
+                      {indexing ? 'Indexing…' : indexPreparing ? 'Preparing…' : indexed ? 'Rebuild indexes' : 'Build indexes'}
                     </button>
                   </div>
                   <div className="ob-progress-bar">
@@ -461,6 +488,16 @@ export default function StartTab() {
                   {indexError ? (
                     <div className="ob-warning-box" role="alert" data-testid="onboarding-index-error">
                       {indexError}
+                      {graphReviewCorpusId === corpus.corpus_id ? (
+                        <div style={{ marginTop: 6 }}>
+                          <Link
+                            to={`/rag?subtab=indexing&component=enrichment&corpus=${encodeURIComponent(corpus.corpus_id)}`}
+                            data-testid="onboarding-review-graph"
+                          >
+                            Review graph schema →
+                          </Link>
+                        </div>
+                      ) : null}
                     </div>
                   ) : null}
                 </>

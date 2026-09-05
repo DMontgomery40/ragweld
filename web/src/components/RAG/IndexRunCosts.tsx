@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useAPI } from '@/hooks/useAPI';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import type { IndexRunAccounting, IndexRunSummary } from '@/types/generated';
@@ -39,9 +39,16 @@ function money(value: number | null | undefined): string {
 }
 
 function accountingState(accounting: IndexRunAccounting | null | undefined): string {
-  if (!accounting || accounting.reconciliation_error) return 'Accounting unavailable';
-  if (accounting.owner_interrupted) return 'Accounting incomplete (run interrupted)';
-  return `Accounting ${accounting.costs?.state ?? 'pending'}`;
+  if (!accounting) return 'Unavailable';
+  if (accounting.reconciliation_error) return 'Check failed';
+  if (accounting.owner_interrupted) return 'Incomplete · Interrupted';
+  const state = accounting.costs?.state ?? 'pending';
+  return state.charAt(0).toUpperCase() + state.slice(1);
+}
+
+function readableMoney(value: number): string {
+  if (value > 0 && value < 0.01) return '<$0.01';
+  return `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function accountingIsComplete(run: IndexRunSummary | undefined): boolean {
@@ -51,23 +58,27 @@ function accountingIsComplete(run: IndexRunSummary | undefined): boolean {
 }
 
 /** Render saved accounting only; current configuration cannot price a past run. */
-export function IndexCostSummary({ accounting, compact = false }: {
+export function IndexCostSummary({ accounting, compact = false, action, refreshError, refreshPaused = false }: {
   accounting: IndexRunAccounting | null | undefined;
   compact?: boolean;
+  action?: ReactNode;
+  refreshError?: string | null;
+  refreshPaused?: boolean;
 }) {
-  if (!accounting) {
-    return <div data-testid="index-cost-summary"><strong>Accounting unavailable</strong><p>This run has no saved native accounting.</p></div>;
-  }
-  const costs = accounting.costs;
-  const quote = accounting.estimate;
-  const census = Object.values(accounting.census ?? {});
+  const costs = accounting?.costs;
+  const quote = accounting?.estimate;
+  const census = Object.values(accounting?.census ?? {});
   const admitted = census.reduce((sum, lane) => sum + lane.started_requests, 0);
   const inflight = census.reduce((sum, lane) => sum + lane.inflight, 0);
   const workers = census.reduce((sum, lane) => sum + lane.active_producers, 0);
-  const chunks = accounting.processed_chunks ?? 0;
+  const chunks = accounting?.processed_chunks ?? 0;
   const state = accountingState(accounting);
   const details = (
     <div style={{ display: 'grid', gap: 8, marginTop: 8, fontSize: 12, lineHeight: 1.5, overflowWrap: 'anywhere' }}>
+      {!accounting && <div>This run has no saved native accounting.</div>}
+      {refreshError && <div>{refreshError}</div>}
+      {refreshPaused && <div data-testid="index-cost-refresh-paused">Automatic checks finished. Refresh to check again.</div>}
+      {accounting && <>
       {accounting.reconciliation_error && <div role="status">Native accounting could not be refreshed: {accounting.reconciliation_error}</div>}
       {accounting.owner_interrupted && <div data-testid="index-cost-owner-interrupted" role="status">
         The run owner stopped before accounting closed. Automatic checks are bounded; refresh manually to check again.
@@ -82,7 +93,7 @@ export function IndexCostSummary({ accounting, compact = false }: {
       <dl style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '5px 12px', margin: 0 }}>
         <dt>Provider reported</dt><dd style={{ margin: 0 }} data-testid="index-cost-provider">{costs && costs.provider_reported_requests > 0 ? money(costs.provider_reported_usd) : 'Not recorded'}</dd>
         <dt>Gateway calculated</dt><dd style={{ margin: 0 }} data-testid="index-cost-calculated">{costs && costs.gateway_calculated_requests > 0 ? money(costs.gateway_calculated_usd) : 'Not recorded'}</dd>
-        <dt>Native logged amount</dt><dd style={{ margin: 0 }} data-testid="index-cost-native">{money(costs?.native_logged_usd)}{costs && costs.state !== 'complete' ? ' (partial accounting)' : ''}</dd>
+        <dt>Native logged amount</dt><dd style={{ margin: 0 }} data-testid="index-cost-native">{money(costs?.native_logged_usd)}{costs && state !== 'Complete' ? ' (partial accounting)' : ''}</dd>
         <dt>Request coverage</dt><dd style={{ margin: 0 }}>{costs?.coverage_state ?? 'Pending reconciliation'}</dd>
         <dt>Pricing</dt><dd style={{ margin: 0 }}>{costs?.pricing_state ?? 'Pending reconciliation'}</dd>
       </dl>
@@ -93,7 +104,7 @@ export function IndexCostSummary({ accounting, compact = false }: {
       <div>{admitted} admitted requests · {inflight} in flight · {workers} retained workers</div>
       <div data-testid="index-cost-denominator">
         {chunks.toLocaleString()} chunks processed · {(accounting.processed_files ?? 0).toLocaleString()} files · {(accounting.processed_tokens ?? 0).toLocaleString()} tokens
-        <div>{costs?.state === 'complete' && costs.native_logged_usd != null && chunks > 0
+        <div>{state === 'Complete' && costs?.native_logged_usd != null && chunks > 0
           ? `${money(costs.native_logged_usd / chunks)} native logged per processed chunk`
           : 'Per-chunk cost unavailable until accounting is complete and chunks have been processed.'}</div>
       </div>
@@ -105,11 +116,22 @@ export function IndexCostSummary({ accounting, compact = false }: {
         </ul>
       </details>}
       {accounting.reconciled_at && <div style={{ color: 'var(--fg-muted)' }}>Last checked {new Date(accounting.reconciled_at).toLocaleString()}</div>}
+      </>}
     </div>
   );
   return <div data-testid="index-cost-summary" style={{ textAlign: 'left', color: 'var(--fg)', minWidth: 0 }}>
-    {compact ? <details><summary style={{ cursor: 'pointer' }}>{state}{costs?.state === 'complete' ? ` · ${money(costs.native_logged_usd)} native logged` : ''}</summary>{details}</details>
-      : <><strong data-testid="index-cost-state">{state}</strong>{details}</>}
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '4px 12px' }}>
+      <div data-testid="index-cost-headline" style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
+        {costs?.native_logged_usd != null && <><strong data-testid="index-cost-amount">{readableMoney(costs.native_logged_usd)} recorded</strong><span aria-hidden="true"> · </span></>}
+        <span data-testid="index-cost-state" role="status" style={{ color: 'var(--fg-muted)' }}>{state}</span>
+      </div>
+      {action}
+    </div>
+    {(refreshError || accounting?.reconciliation_error) && <div role="status" style={{ marginTop: 4, color: 'var(--warn)' }}>Cost check failed. Refresh to retry.</div>}
+    <details key={accounting?.session_id ?? 'unavailable'} data-testid="index-cost-details" style={{ marginTop: compact ? 4 : 6 }}>
+      <summary style={{ cursor: 'pointer', color: 'var(--fg-muted)', width: 'fit-content' }}>Details</summary>
+      {details}
+    </details>
   </div>;
 }
 
@@ -127,7 +149,7 @@ function newerRun(previous: IndexRunSummary | undefined, incoming: IndexRunSumma
   return incoming;
 }
 
-export function IndexRunCosts({ corpusId, runId, initialRun, compact = false, autoRefresh = true, title = 'Run accounting' }: {
+export function IndexRunCosts({ corpusId, runId, initialRun, compact = false, autoRefresh = true, title = 'Run cost' }: {
   corpusId: string;
   runId: string;
   initialRun?: IndexRunSummary;
@@ -207,16 +229,15 @@ export function IndexRunCosts({ corpusId, runId, initialRun, compact = false, au
     };
   }, [api, corpusId, runId, autoRefresh]);
 
+  const refreshAction = <button type="button" aria-label="Refresh cost" onClick={() => retry.current()} disabled={loading} style={{ padding: '4px 8px', color: 'var(--fg)', background: 'var(--bg-elev2)', border: '1px solid var(--line)', borderRadius: 5, cursor: loading ? 'wait' : 'pointer' }}>
+    {loading ? 'Checking…' : 'Refresh'}
+  </button>;
   return <section data-testid="index-run-costs" data-run-id={runId} style={{ marginTop: compact ? 0 : 12, padding: compact ? 0 : 12, border: compact ? undefined : '1px solid var(--line)', borderRadius: 8, minWidth: 0, fontSize: 12 }}>
-    {!compact && <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontWeight: 700, marginBottom: 8 }}>
+    {!compact && <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontWeight: 700, marginBottom: 6 }}>
       <span data-testid="index-run-costs-title">{title}</span>
       <TooltipIcon name="INDEX_NATIVE_ACCOUNTING" />
     </div>}
-    {run ? <IndexCostSummary accounting={run.accounting} compact={compact} /> : <div>{error ? 'Accounting unavailable' : 'Loading saved accounting…'}</div>}
-    {error && <div role="status" style={{ marginTop: 8, color: 'var(--warn)' }}>{error}</div>}
-    {paused && <div data-testid="index-cost-refresh-paused" style={{ marginTop: 8 }}>Automatic checks finished. Refresh accounting to check again.</div>}
-    <button type="button" onClick={() => retry.current()} disabled={loading} style={{ marginTop: 8, padding: '5px 9px', color: 'var(--fg)', background: 'var(--bg-elev2)', border: '1px solid var(--line)', borderRadius: 5, cursor: loading ? 'wait' : 'pointer' }}>
-      {loading ? 'Checking accounting…' : 'Refresh accounting'}
-    </button>
+    {run || error ? <IndexCostSummary key={`${corpusId}:${runId}`} accounting={run?.accounting} compact={compact} action={refreshAction} refreshError={error} refreshPaused={paused} />
+      : <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}><span>Loading cost…</span>{refreshAction}</div>}
   </section>;
 }

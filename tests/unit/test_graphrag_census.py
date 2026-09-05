@@ -44,8 +44,8 @@ def census_gateway():
                 second_arrival.set()
             text = json.dumps(payload)
             status = 200
-            if state["mode"] == "retry" and len(received) == 1:
-                status = 429
+            if state["mode"].startswith("recover-") and len(received) == 1:
+                status = int(state["mode"].removeprefix("recover-"))
             if state["mode"] == "failure-held":
                 if "chunk-fail" in text:
                     failed.set()
@@ -55,6 +55,9 @@ def census_gateway():
                     held.set()
                     release.wait(5)
             if state["mode"] == "held":
+                held.set()
+                release.wait(5)
+            if state["mode"] == "timeout" and len(received) == 1:
                 held.set()
                 release.wait(5)
             content = {"nodes": [{"id": "thing", "label": "Thing", "properties": {"name": "Thing"}}], "relationships": []}
@@ -112,27 +115,54 @@ def assert_headers(received, lane):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("mode", ["sync", "async", "retry"])
-async def test_official_kg_clients_count_actual_sync_async_and_sdk_retry_attempts(census_gateway, mode):
+@pytest.mark.parametrize("method", ["sync", "async"])
+@pytest.mark.parametrize("with_census", [False, True])
+@pytest.mark.parametrize(
+    "mode",
+    ["valid", "recover-408", "recover-409", "recover-429", "recover-500", "recover-502", "recover-503", "recover-504", "timeout"],
+)
+async def test_official_kg_clients_count_actual_sync_async_and_sdk_retry_attempts(
+    census_gateway, mode, method, with_census,
+):
+    """One invocation dispatches once, including transient failures and unknown timeout outcomes."""
     base, received, state, *_ = census_gateway
     state["mode"] = mode
     scope, history = scope_for()
-    llm = semantic_extraction_llm(**route(base), llm_timeout_s=3, census_scope=scope)
+    llm = semantic_extraction_llm(
+        **route(base), llm_timeout_s=1 if mode == "timeout" else 3,
+        census_scope=scope if with_census else None,
+    )
+    prompt = "Extract the observatory sensor and its calibration relationship."
     try:
-        if mode == "sync":
-            await asyncio.to_thread(llm.invoke, "synthetic input")
+        if mode == "valid":
+            if method == "sync":
+                result = await asyncio.to_thread(llm.invoke, prompt)
+            else:
+                result = await llm.ainvoke(prompt)
+            assert "Thing" in result.content
         else:
-            await llm.ainvoke("synthetic input")
+            # The server would succeed on a second dispatch. Neither the SDK
+            # nor Neo4j's separate rate-limit handler may hide this first error.
+            with pytest.raises(LLMGenerationError):
+                if method == "sync":
+                    await asyncio.to_thread(llm.invoke, prompt)
+                else:
+                    await llm.ainvoke(prompt)
     finally:
         await llm.aclose()
-    scope.finish_owner()
+        scope.finish_owner()
+    assert len(received) == 1
     checkpoint = history[-1]
     assert checkpoint.state == "closed"
-    assert checkpoint.started_requests == checkpoint.completed_requests == len(received) == (2 if mode == "retry" else 1)
-    assert checkpoint.failed_requests == (1 if mode == "retry" else 0)
-    assert checkpoint.uncertain_requests == 0
+    assert checkpoint.active_producers == checkpoint.inflight == 0
+    assert checkpoint.started_requests == checkpoint.completed_requests == int(with_census)
+    assert checkpoint.failed_requests == int(with_census and mode.startswith("recover-"))
+    assert checkpoint.uncertain_requests == int(with_census and mode == "timeout")
     assert llm.client.is_closed() and llm.async_client.is_closed()
-    assert_headers(received, "semantic_kg")
+    if with_census:
+        assert_headers(received, "semantic_kg")
+    else:
+        assert all("x-litellm-session-id" not in row["headers"] for row in received)
 
 
 @pytest.mark.asyncio

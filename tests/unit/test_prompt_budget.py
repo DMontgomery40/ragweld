@@ -190,14 +190,18 @@ def test_historical_image_bounds_remain_correct_without_publishing_retired_model
 
 
 def test_every_openai_vision_alias_in_the_catalog_is_bounded_at_or_above_its_documented_maximum() -> None:
-    """Independent oracle: a new OpenAI vision id must be entered here before it can ship; bounds never under-reserve."""
+    """Known formulas never under-reserve; a new catalog id cannot inherit an unverified formula."""
     catalog = json.loads((ROOT / "data" / "models.json").read_text(encoding="utf-8"))
     seen: set[str] = set()
     for row in catalog["models"]:
         if row.get("provider") != "openai" or not row.get("gateway_alias") or not row.get("supports_vision"):
             continue
         base = row["model"][: -len(":batch")] if row["model"].endswith(":batch") else row["model"]
-        assert base in OPENAI_DOCUMENTED_IMAGE_MAX, f"undocumented OpenAI vision id {row['model']}"
+        if base not in OPENAI_DOCUMENTED_IMAGE_MAX:
+            for size in (None, (1, 1), (1024, 1024), (8192, 8192)):
+                with pytest.raises(ImageBoundError, match="no published finite image token bound"):
+                    image_tokens_for_attachment("openai", row["model"], supports_vision=True, size=size)
+            continue
         seen.add(base)
         documented = OPENAI_DOCUMENTED_IMAGE_MAX[base]
         if documented is None:
@@ -215,6 +219,21 @@ def test_every_openai_vision_alias_in_the_catalog_is_bounded_at_or_above_its_doc
         # Over-reservation is bounded too: never more than 3x the documented maximum.
         assert bound <= 3 * documented, f"{row['model']}: bound {bound} over-reserves more than 3x {documented}"
     assert seen == set(OPENAI_DOCUMENTED_IMAGE_MAX), set(OPENAI_DOCUMENTED_IMAGE_MAX) ^ seen
+
+
+@pytest.mark.parametrize("model", [
+    "openai/gpt-6-astra", "openai/gpt-6-astra-pro", "openai/gpt-6-future",
+    "openai/gpt-5.9", "openai/gpt-5.50", "openai/gpt-5.6-future",
+    "openai/gpt-5.4-preview-unknown", "openai/gpt-5-mini-unknown",
+    "openai/o10", "openai/o30", "openai/o4-future",
+    "unrelated/gpt-4o-mini", "", None,
+])
+@pytest.mark.parametrize("batch", [False, True])
+@pytest.mark.parametrize("size", [None, (1, 1), (1024, 1024), (8192, 8192)])
+def test_undocumented_openai_image_formulas_fail_closed_for_all_attachment_sizes(model, batch, size) -> None:
+    name = f"{model}:batch" if batch and model else model
+    with pytest.raises(ImageBoundError, match="no published finite image token bound"):
+        image_tokens_for_attachment("openai", name, supports_vision=True, size=size)
 
 
 def test_uncapped_openai_models_are_costed_from_real_pixels_and_refuse_url_images() -> None:

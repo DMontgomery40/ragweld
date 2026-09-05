@@ -1915,12 +1915,9 @@ async def _run_index(
     # accident. Only guard when the corpus still has dense vectors in Qdrant:
     # after a delete, embedding metadata lingers on the corpora row.
     if corpus and not force_reindex and not skip_dense and embedder is not None:
-        meta = corpus.get("meta") if isinstance(corpus.get("meta"), dict) else {}
-        stored_backend = str((meta or {}).get("embedding_backend") or "").strip().lower()
-        if not stored_backend:
-            # Legacy corpora did not persist backend identity. Treat as deterministic
-            # to avoid silently mixing deterministic and provider vectors.
-            stored_backend = "deterministic"
+        # Promotion commits this column with the vectors. The duplicated JSON
+        # metadata can be absent or stale and cannot identify the active space.
+        stored_backend = str(corpus.get("embedding_backend") or "").strip().lower() or "unknown"
         stored_model = str(corpus.get("embedding_model") or "").strip()
         stored_dim = int(corpus.get("embedding_dimensions") or 0)
         stored_provider = str(corpus.get("embedding_provider") or "").strip()

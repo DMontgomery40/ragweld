@@ -195,6 +195,138 @@ async def test_registered_corpus_without_indexable_files_cannot_promote(
         await pg.disconnect()
 
 
+@pytest.mark.parametrize("backend", ["deterministic", "provider"])
+@pytest.mark.parametrize(
+    "identity_state",
+    ["metadata_absent", "metadata_stale", "canonical_missing", "canonical_blank", "backend_changed"],
+)
+async def test_reindex_uses_canonical_embedding_backend(
+    client: AsyncClient, tmp_path: Path, backend: str, identity_state: str
+) -> None:
+    """Protect real promoted vectors using the canonical identity, never duplicated metadata."""
+    corpus_id = f"pytest_embedding_identity_{uuid.uuid4().hex[:8]}"
+    corpus_root = tmp_path / "salinity-calibration"
+    corpus_root.mkdir()
+    (corpus_root / "calibration.md").write_text(
+        "The Aurora salinity sensor is calibrated every fourteen days using "
+        "Halcyon reference brine. The technician records the calibration offset "
+        "in KestrelDB before restarting telemetry collection.\n",
+        encoding="utf-8",
+    )
+    cfg = load_config()
+    cfg.embedding.embedding_backend = backend
+    cfg.embedding.embedding_type = "huggingface"
+    cfg.embedding.embedding_model_local = "BAAI/bge-small-en-v1.5"
+    cfg.embedding.embedding_dim = 384
+    cfg.embedding.embedding_cache_enabled = False
+    cfg.embedding.contextual_chunk_embeddings = "off"
+    cfg.tokenization.strategy = "huggingface"
+    cfg.tokenization.hf_tokenizer_name = cfg.embedding.embedding_model_local
+    cfg.chunking.chunking_strategy = "fixed_chars"
+    cfg.chunking.chunk_size = 1000
+    cfg.chunking.chunk_overlap = 0
+    cfg.indexing.skip_dense = False
+    cfg.indexing.figures.enabled = False
+    cfg.graph_indexing.enabled = False
+    cfg.graph_search.enabled = False
+    cfg.vector_search.enabled = True
+    cfg.sparse_search.enabled = True
+    cfg.semantic_cache.enabled = False
+    pg = PostgresClient(require_env("POSTGRES_DSN"))
+    qdrant = QdrantChunkStore(cfg)
+    try:
+        await pg.connect()
+        created = await client.post(
+            "/api/corpora",
+            json={"corpus_id": corpus_id, "name": corpus_id, "path": str(corpus_root)},
+        )
+        assert created.status_code in (200, 201), created.text
+        await pg.upsert_corpus_config_json(corpus_id, cfg.model_dump(mode="serialization"))
+        config_store._store = None
+        request = {"corpus_id": corpus_id, "repo_path": str(corpus_root), "force_reindex": False}
+        initial = await client.post("/api/index", json=request)
+        assert initial.status_code == 200, initial.text
+        first_result = await _wait_for_index(client, corpus_id)
+        assert first_result["status"] == "complete", first_result
+        await _wait_fence_released(pg, corpus_id)
+        original = await pg.get_generation(corpus_id)
+        assert original is not None and original.qdrant_collection
+        row = await pg.get_corpus(corpus_id)
+        assert row is not None and row["embedding_backend"] == backend, row
+        assert row["embedding_model"] == cfg.embedding.embedding_model_local, row
+        assert row["embedding_dimensions"] == 384, row
+        chunks_before = await pg.list_chunks_for_repo(corpus_id)
+        assert chunks_before
+        dense_before = await qdrant.status(corpus_id, physical=original.qdrant_collection)
+        assert dense_before is not None and dense_before.dense_points == len(chunks_before)
+        stats_before = await pg.get_index_stats(corpus_id)
+
+        other_backend = "provider" if backend == "deterministic" else "deterministic"
+        # This is a persistence-boundary corruption fixture, scoped to the new
+        # corpus. In production, promotion can leave this old JSON key absent or
+        # stale while committing the current backend in its dedicated column.
+        meta_backend = backend
+        if identity_state == "metadata_absent":
+            meta_backend = None
+        elif identity_state == "metadata_stale":
+            meta_backend = other_backend
+        elif identity_state == "backend_changed":
+            cfg.embedding.embedding_backend = other_backend
+            meta_backend = other_backend
+        assert pg._pool is not None
+        async with pg._pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE corpora
+                SET meta = (COALESCE(meta, '{}'::jsonb) - 'embedding_backend')
+                    || CASE WHEN $2::text IS NULL THEN '{}'::jsonb
+                       ELSE jsonb_build_object('embedding_backend', $2::text) END
+                WHERE repo_id = $1
+                """,
+                corpus_id,
+                meta_backend,
+            )
+            if identity_state in {"canonical_missing", "canonical_blank"}:
+                await conn.execute(
+                    "UPDATE corpora SET embedding_backend = $2 WHERE repo_id = $1",
+                    corpus_id,
+                    None if identity_state == "canonical_missing" else " ",
+                )
+        await pg.upsert_corpus_config_json(corpus_id, cfg.model_dump(mode="serialization"))
+        config_store._store = None
+        replacement = await client.post("/api/index", json=request)
+        assert replacement.status_code == 200, replacement.text
+        result = await _wait_for_index(client, corpus_id)
+        await _wait_fence_released(pg, corpus_id)
+        after = await pg.get_generation(corpus_id)
+        assert after is not None
+        if identity_state in {"metadata_absent", "metadata_stale"}:
+            assert result["status"] == "complete", result
+            assert after.run_id != original.run_id
+            assert after.qdrant_collection != original.qdrant_collection
+            promoted = await pg.get_corpus(corpus_id)
+            assert promoted is not None and promoted["embedding_backend"] == backend, promoted
+            dense_after = await qdrant.status(corpus_id, physical=after.qdrant_collection)
+            assert dense_after is not None and dense_after.dense_points == len(chunks_before)
+        else:
+            assert result["status"] == "error", result
+            error = str(result.get("error") or "")
+            stored = "unknown" if identity_state.startswith("canonical_") else backend
+            assert f"backend: stored={stored}, config={cfg.embedding.embedding_backend}" in error
+            assert "force_reindex=true" in error
+            assert after == original, "a refused identity change must not promote a generation"
+            assert await pg.list_chunks_for_repo(corpus_id) == chunks_before
+            assert await pg.get_index_stats(corpus_id) == stats_before
+            dense_after = await qdrant.status(corpus_id, physical=original.qdrant_collection)
+            assert dense_after is not None and dense_after.dense_points == dense_before.dense_points
+    finally:
+        config_store._store = None
+        await client.post(f"/api/index/{corpus_id}/stop")
+        await client.delete(f"/api/index/{corpus_id}")
+        await client.delete(f"/api/corpora/{corpus_id}")
+        await pg.disconnect()
+
+
 @pytest.mark.requires_model_gateway
 async def test_index_search_and_delete_on_promoted_lane(
     client: AsyncClient, tmp_path: Path

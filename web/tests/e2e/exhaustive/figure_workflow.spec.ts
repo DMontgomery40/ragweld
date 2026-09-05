@@ -265,8 +265,11 @@ test('the index estimate prices the figure descriptions before any run starts', 
   await expect(dialog).toBeVisible({ timeout: 60_000 });
   const message = page.getByTestId('confirm-dialog-message');
   await expect(message).toContainText('Index estimate');
-  await expect(message).toContainText('Cost breakdown:');
-  const breakdown = await message.innerText();
+  await expect(page.getByTestId('confirm-dialog-details')).not.toBeVisible();
+  await dialog.getByText('Estimate details', { exact: true }).click();
+  const details = page.getByTestId('confirm-dialog-details');
+  await expect(details).toContainText('Cost breakdown:');
+  const breakdown = await details.innerText();
   // The product emits `Figures ≤ <cost> (~N figures)`, where a sub-cent cost is printed to
   // its real precision (e.g. `$0.000715`, not `$0.00`). The old assertion required exactly
   // two decimals and closed the paren right after the number — it matched neither.

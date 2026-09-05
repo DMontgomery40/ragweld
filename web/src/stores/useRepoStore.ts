@@ -17,6 +17,10 @@ import { describeIndexRunConflict } from '@/utils/indexRunConflict';
 // Re-export for backward compatibility with existing components
 export type Repository = Corpus;
 
+// Registry reads are also called from void mount/event handlers. Carry failures as an explicit
+// result so awaited mutation refreshes can stop without introducing unhandled rejections there.
+type RepoLoadResult = { ok: true } | { ok: false; error: string };
+
 interface RepoStore {
   // State
   repos: Corpus[];
@@ -26,6 +30,12 @@ interface RepoStore {
   switching: boolean;
   /** True after first load attempt (success or failure) - prevents infinite loops */
   initialized: boolean;
+  /**
+   * True after a registry response has been successfully applied, including a successful empty
+   * list. Unlike `initialized`, this stays false through an initial failure and its pending retry,
+   * so consumers never mistake cleared retry errors for resolved global scope.
+   */
+  resolved: boolean;
 
   // Actions
   /**
@@ -34,7 +44,7 @@ interface RepoStore {
    * come back with the deleted corpus still in the list. `loadConfig` has the same guard
    * for pending patches.
    */
-  loadRepos: (options?: { force?: boolean }) => Promise<void>;
+  loadRepos: (options?: { force?: boolean }) => Promise<RepoLoadResult>;
   setActiveRepo: (repoName: string) => Promise<void>;
   refreshActiveRepo: () => Promise<void>;
   getRepoByName: (name: string) => Corpus | undefined;
@@ -60,7 +70,47 @@ const getApiBase = (): string => {
 // corpus scope is settled before config loads (M-129). Sharing the promise makes every
 // caller wait for the same answer. It is not a cache: the entry is dropped as soon as
 // the load settles, so the next call always goes to the server.
-let inFlightRepoLoad: Promise<void> | null = null;
+interface RepoLoadRequest {
+  generation: number;
+  /** Raw request work only. Chaining wrappers must never be stored here or await cycles form. */
+  promise: Promise<RepoLoadResult>;
+}
+
+let inFlightRepoLoad: RepoLoadRequest | null = null;
+// Retain the newest settled result as well: it may settle before a superseded older request.
+// This is not a read cache; only inFlightRepoLoad can be shared by a newly started loadRepos call.
+let latestRepoLoad: RepoLoadRequest | null = null;
+// Only the newest registry request may publish state or canonicalize browser scope. Forced
+// mutation refreshes intentionally supersede an older shared read that may still be pending.
+let repoLoadGeneration = 0;
+
+/**
+ * Wait until the newest request in a supersession chain settles. Mutation callers depend on their
+ * awaited forced refresh having published the winning registry before they inspect it. Shared
+ * non-forced callers need the same transitive guarantee when their raw request is superseded.
+ */
+const waitForWinningRepoLoad = async (initial: RepoLoadRequest): Promise<RepoLoadResult> => {
+  let current = initial;
+  while (true) {
+    const result = await current.promise;
+    const newer = latestRepoLoad;
+    if (!newer || newer.generation <= current.generation) {
+      return result;
+    }
+    current = newer;
+  }
+};
+
+const requireSuccessfulRepoRefresh = (result: RepoLoadResult, completedOperation: string): void => {
+  if (!result.ok) {
+    // The server mutation already happened. Report that fact so the operator does not repeat it,
+    // and leave the winning registry error/state intact until a successful read reconciles it.
+    throw new Error(
+      `${completedOperation}, but the corpus list could not be refreshed. ${result.error}. ` +
+      'Reload the corpus list before continuing.'
+    );
+  }
+};
 
 export const useRepoStore = create<RepoStore>((set, get) => ({
   repos: [],
@@ -69,10 +119,13 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
   error: null,
   switching: false,
   initialized: false,
+  resolved: false,
 
   loadRepos: async (options?: { force?: boolean }) => {
-    if (inFlightRepoLoad && !options?.force) return inFlightRepoLoad;
-    const run = (async () => {
+    if (inFlightRepoLoad && !options?.force) return waitForWinningRepoLoad(inFlightRepoLoad);
+    const generation = ++repoLoadGeneration;
+    // Publish request ownership before notifying synchronous Zustand subscribers below.
+    const run = Promise.resolve().then(async (): Promise<RepoLoadResult> => {
     set({ loading: true, error: null });
     try {
       const apiBase = getApiBase();
@@ -84,6 +137,7 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
       }
 
       const repos: Corpus[] = await reposRes.json();
+      if (generation !== repoLoadGeneration) return { ok: true };
 
       // Determine active corpus from URL, localStorage, or first corpus (and validate it exists)
       const url = new URL(window.location.href);
@@ -105,46 +159,50 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
         resolvedFromStored ||
         String(repos[0]?.corpus_id || repos[0]?.slug || repos[0]?.name || '').trim();
 
-      set({
-        repos,
-        activeRepo,
-        loading: false,
-        error: null,
-        initialized: true
-      });
-
-      // Persist + broadcast
+      // Canonicalize every scope, including no corpus, BEFORE publishing state or
+      // events: subscribers may immediately issue a scoped config request.
       if (activeRepo) {
         localStorage.setItem('tribrid_active_corpus', activeRepo);
-        // Keep URL in sync (canonicalize to ?corpus=<id>)
-        try {
-          const nextUrl = new URL(window.location.href);
-          nextUrl.searchParams.set('corpus', activeRepo);
-          nextUrl.searchParams.delete('repo');
-          window.history.replaceState({}, '', nextUrl.toString());
-        } catch {
-          // ignore
-        }
+      } else {
+        localStorage.removeItem('tribrid_active_corpus');
       }
+      localStorage.removeItem('tribrid_active_repo');
+      try {
+        const nextUrl = new URL(window.location.href);
+        if (activeRepo) nextUrl.searchParams.set('corpus', activeRepo);
+        else nextUrl.searchParams.delete('corpus');
+        nextUrl.searchParams.delete('repo');
+        window.history.replaceState({}, '', nextUrl.toString());
+      } catch {
+        // ignore
+      }
+
+      set({ repos, activeRepo, loading: false, error: null, initialized: true, resolved: true });
       window.dispatchEvent(
         new CustomEvent('tribrid-corpus-loaded', {
           detail: { repos, activeRepo }
         })
       );
+      return { ok: true };
 
     } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to load repositories';
+      if (generation !== repoLoadGeneration) return { ok: false, error: message };
       set({
         loading: false,
-        error: error instanceof Error ? error.message : 'Failed to load repositories',
+        error: message,
         initialized: true  // Mark as initialized even on error to prevent retry loops
       });
+      return { ok: false, error: message };
     }
-    })();
-    inFlightRepoLoad = run;
+    });
+    const request = { generation, promise: run };
+    inFlightRepoLoad = request;
+    latestRepoLoad = request;
     try {
-      await run;
+      return await waitForWinningRepoLoad(request);
     } finally {
-      if (inFlightRepoLoad === run) inFlightRepoLoad = null;
+      if (inFlightRepoLoad === request) inFlightRepoLoad = null;
     }
   },
 
@@ -216,7 +274,9 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
     }
     const created: Corpus = await response.json();
     // Refresh list and set active
-    await get().loadRepos({ force: true });
+    requireSuccessfulRepoRefresh(
+      await get().loadRepos({ force: true }), `Corpus "${created.corpus_id}" was created`
+    );
     await get().setActiveRepo(created.corpus_id);
     return created;
   },
@@ -234,7 +294,9 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
     }
     const updated: Corpus = await response.json();
     // Refresh list to reflect changes
-    await get().loadRepos({ force: true });
+    requireSuccessfulRepoRefresh(
+      await get().loadRepos({ force: true }), `Corpus "${corpusId}" was updated`
+    );
     return updated;
   },
 
@@ -255,7 +317,9 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
     }
 
     // Refresh list after deletion
-    await get().loadRepos({ force: true });
+    requireSuccessfulRepoRefresh(
+      await get().loadRepos({ force: true }), `Corpus "${corpusId}" was deleted`
+    );
     const afterActive = String(get().activeRepo || '').trim();
 
     // If the active corpus changed under us, notify listeners that depend on
@@ -319,7 +383,11 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
       }
     }
 
-    await get().loadRepos({ force: true });
+    requireSuccessfulRepoRefresh(
+      await get().loadRepos({ force: true }),
+      `Deleted ${deleted.length}/${toDelete.length} corpora` +
+        (failed.length ? `; ${failed.length} deletions failed` : '')
+    );
     const afterActive = String(get().activeRepo || '').trim();
     if (beforeActive && afterActive && beforeActive !== afterActive) {
       window.dispatchEvent(

@@ -1,99 +1,510 @@
 {
-  "annotations": { "list": [] },
+  "annotations": {
+    "list": []
+  },
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
   "id": null,
-  "links": [],
+  "links": [
+    {
+      "title": "Today (UTC)",
+      "type": "link",
+      "url": "/d/ragweld-cost-capacity/cost-capacity?from=now/d&to=now&timezone=utc",
+      "includeVars": false,
+      "keepTime": false,
+      "targetBlank": false
+    },
+    {
+      "title": "Last 7 days",
+      "type": "link",
+      "url": "/d/ragweld-cost-capacity/cost-capacity?from=now-7d&to=now&timezone=utc",
+      "includeVars": false,
+      "keepTime": false,
+      "targetBlank": false
+    }
+  ],
   "liveNow": false,
   "panels": [
     {
-      "datasource": { "type": "prometheus", "uid": "mimir" },
-      "fieldConfig": { "defaults": { "unit": "currencyUSD", "decimals": 6, "noValue": "No spend data" } },
-      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 0 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 6,
+          "noValue": "No data"
+        }
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
       "id": 5,
-      "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
-      "targets": [{ "expr": "sum(increase(litellm_spend_metric_total[$__range]))", "instant": true, "refId": "A" }],
-      "title": "Gateway spend — selected range",
-      "description": "Change in LiteLLM's reported spend counter over the selected time range, adjusted for counter resets by Prometheus. Gateway traffic only; this is not a corpus or run billing ledger.",
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(litellm_spend_metric_total[$__range]))",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Gateway spend \u2014 selected range",
+      "description": "Reported gateway spend over the selected range. By default this is midnight UTC to now; historical or custom selections use their actual boundaries. Prometheus increase adjusts counter resets and extrapolates between scrapes; this is not an exact billing ledger.",
       "type": "stat"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "mimir" },
-      "fieldConfig": { "defaults": { "unit": "currencyUSD", "decimals": 6, "noValue": "No spend data" } },
-      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 0 },
+      "id": 8,
+      "type": "stat",
+      "title": "Gateway tokens \u2014 selected range",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "No data"
+        }
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(litellm_total_tokens_metric_total[$__range]))",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "description": "Native total tokens counted once, with counter resets handled before aggregation. Includes input and output; cached and reasoning tokens are subsets, not extra tokens. Scrape-based increases are approximate."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 6,
+          "noValue": "No data"
+        }
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
       "id": 6,
-      "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
-      "targets": [{ "expr": "sum(increase(litellm_spend_metric_total[7d]))", "instant": true, "refId": "A" }],
-      "title": "Gateway spend — last 7 days",
-      "type": "stat"
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(litellm_spend_metric_total[7d]))",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Gateway spend \u2014 7 days to selected end",
+      "type": "stat",
+      "description": "Rolling seven-day counter increase ending at the selected end time, including when viewing history. Missing series are unavailable, not zero spend."
     },
     {
-      "datasource": { "type": "prometheus", "uid": "mimir" },
-      "fieldConfig": { "defaults": { "unit": "reqps" } },
-      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 6 },
+      "id": 9,
+      "type": "stat",
+      "title": "Gateway tokens \u2014 7 days to selected end",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "No data"
+        }
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(litellm_total_tokens_metric_total[7d]))",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "description": "Native total tokens counted once, with counter resets handled before aggregation. Includes input and output; cached and reasoning tokens are subsets, not extra tokens. Scrape-based increases are approximate."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 6,
+          "noValue": "No data"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 6
+      },
+      "id": 7,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (model) (rate(litellm_spend_metric_total[$__rate_interval])) * 3600",
+          "legendFormat": "{{model}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Gateway spend rate by model ($/hour)",
+      "type": "timeseries"
+    },
+    {
+      "id": 10,
+      "type": "bargauge",
+      "title": "Gateway spend by model / lane \u2014 selected range",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 12,
+        "x": 0,
+        "y": 14
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 6,
+          "noValue": "No data",
+          "min": 0
+        }
+      },
+      "options": {
+        "displayMode": "basic",
+        "orientation": "horizontal",
+        "showUnfilled": false,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (model, metadata_lane) (label_replace(increase(litellm_spend_metric_total[$__range]), \"metadata_lane\", \"unattributed\", \"metadata_lane\", \"^(None)?$\"))",
+          "legendFormat": "{{model}} / {{metadata_lane}} / spend",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "description": "Counter-derived spend for each native model/lane pair. Historical or other clients without a lane remain visible as unattributed. Missing series are unavailable; a recorded zero remains zero."
+    },
+    {
+      "id": 11,
+      "type": "bargauge",
+      "title": "Gateway tokens by model / lane \u2014 selected range",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 12,
+        "x": 12,
+        "y": 14
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "No data",
+          "min": 0
+        }
+      },
+      "options": {
+        "displayMode": "basic",
+        "orientation": "horizontal",
+        "showUnfilled": false,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (model, metadata_lane) (label_replace(increase(litellm_input_tokens_metric_total[$__range]), \"metadata_lane\", \"unattributed\", \"metadata_lane\", \"^(None)?$\"))",
+          "legendFormat": "{{model}} / {{metadata_lane}} / input",
+          "instant": true,
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (model, metadata_lane) (label_replace(increase(litellm_output_tokens_metric_total[$__range]), \"metadata_lane\", \"unattributed\", \"metadata_lane\", \"^(None)?$\"))",
+          "legendFormat": "{{model}} / {{metadata_lane}} / output",
+          "instant": true,
+          "refId": "B"
+        },
+        {
+          "expr": "sum by (model, metadata_lane) (label_replace(increase(litellm_total_tokens_metric_total[$__range]), \"metadata_lane\", \"unattributed\", \"metadata_lane\", \"^(None)?$\"))",
+          "legendFormat": "{{model}} / {{metadata_lane}} / total",
+          "instant": true,
+          "refId": "C"
+        }
+      ],
+      "description": "Native model and lane identity. Historical or other clients without a lane remain visible as unattributed; no run/corpus labels are introduced. Input, output and total are separate views of overlapping usage, not additive categories."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        }
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 0,
+        "y": 26
+      },
       "id": 1,
       "options": {
         "colorMode": "value",
         "graphMode": "area",
         "justifyMode": "auto",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "auto"
       },
-      "targets": [{ "expr": "sum(rate(tribrid_search_requests_total[5m]))", "legendFormat": "requests/s" }],
+      "targets": [
+        {
+          "expr": "sum(rate(tribrid_search_requests_total[5m]))",
+          "legendFormat": "requests/s"
+        }
+      ],
       "title": "Traffic Load",
       "type": "stat"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "mimir" },
-      "fieldConfig": { "defaults": { "unit": "short" } },
-      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 6 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 8,
+        "y": 26
+      },
       "id": 2,
       "options": {
         "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "auto"
       },
-      "targets": [{ "expr": "max_over_time(tribrid_chunks_indexed_current[1h])", "legendFormat": "chunks" }],
+      "targets": [
+        {
+          "expr": "max_over_time(tribrid_chunks_indexed_current[1h])",
+          "legendFormat": "chunks"
+        }
+      ],
       "title": "Indexed Footprint",
       "type": "stat"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "mimir" },
-      "fieldConfig": { "defaults": { "unit": "s" } },
-      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 6 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        }
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 16,
+        "y": 26
+      },
       "id": 3,
       "options": {
         "colorMode": "value",
         "graphMode": "area",
         "justifyMode": "auto",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "auto"
       },
-      "targets": [{ "expr": "histogram_quantile(0.95, sum by (le) (rate(tribrid_search_latency_seconds_bucket[5m])))", "legendFormat": "p95" }],
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(tribrid_search_latency_seconds_bucket[5m])))",
+          "legendFormat": "p95"
+        }
+      ],
       "title": "Latency Under Load",
       "type": "stat"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "mimir" },
-      "fieldConfig": { "defaults": { "unit": "currencyUSD", "decimals": 6 } },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 12 },
-      "id": 7,
-      "options": { "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "targets": [{ "expr": "sum by (model) (rate(litellm_spend_metric_total[$__rate_interval])) * 3600", "legendFormat": "{{model}}", "refId": "A" }],
-      "title": "Gateway spend rate by model ($/hour)",
-      "type": "timeseries"
+      "id": 12,
+      "type": "stat",
+      "title": "Native trace export errors \u2014 logged batches",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 32
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "Unavailable / no scoped logs",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "orange"
+          }
+        }
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(count_over_time({compose_project=\"ragweld\", compose_service=\"litellm\"} |~ \"Failed to export (span )?batch|Exception while exporting Span batch\" [$__range])) or (0 * sum(count_over_time({compose_project=\"ragweld\", compose_service=\"litellm\"} [$__range])))",
+          "queryType": "instant",
+          "refId": "A"
+        }
+      ],
+      "description": "Observed native OTLP terminal export-error log lines, counted by batch rather than generation. Retry warnings are excluded. Zero means scoped gateway logs were available with no matching terminal errors in the same range; it does not prove delivery. No scoped gateway logs remains unavailable. Unlogged failures are not measured. Provider request failures are not callback-delivery failures."
     },
     {
-      "gridPos": { "h": 5, "w": 24, "x": 0, "y": 20 },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 38
+      },
       "id": 4,
       "options": {
-        "content": "## Spend coverage\nSpend panels use the existing LiteLLM counters scraped into Mimir. The selected range and rolling seven-day totals include all gateway traffic and account for counter resets. Missing series display no data, not zero.\n\nCalls made directly to providers, including current embedding paths, are outside these totals. Run, corpus and lane attribution still require gateway call correlation; this dashboard does not offer filters that the metrics cannot apply. Per-request reported cost is available in the run trace, with estimates identified separately.",
+        "content": "## Spend and token coverage\nThe default selected range is midnight UTC to now: calendar-day totals, not a rolling 24 hours. Today (UTC) restores that range. Custom and absolute history selections keep their actual boundaries; rolling seven-day panels end at the selected end time.\n\nNative LiteLLM counters are scraped into Mimir. Increase/rate handle resets before aggregation and extrapolate between scrapes, so these are approximate gateway totals, not the exact run billing ledger. Missing or insufficient samples show No data, not zero. A recorded zero remains zero. Input and output make up total tokens; cached and reasoning subsets are not added again.\n\nLane labels begin when native telemetry is enabled. Older series and callers without lane metadata remain unattributed. Only calls actually routed through the gateway contribute; direct provider or local work remains outside this measurement. No run/corpus Prometheus labels or unsupported filters are used. Exact-run reconciliation and unmeasured components remain available in the run accounting API/UI.\n\nThe exporter panel counts native terminal OTLP error log lines from LiteLLM through the existing Loki pipeline. It is a batch diagnostic, not a generation-loss ledger or proof of successful Langfuse delivery. A zero is shown only when scoped gateway logs exist in the same range with no terminal errors. No scoped logs remains unavailable; zero does not prove delivery. Temporary retries that recover are excluded. Pinned LiteLLM proxy request-failure counters lack lane metadata and are not used as callback-delivery signals.",
         "mode": "markdown"
       },
       "title": "Operator Notes",
@@ -103,15 +514,23 @@
   "refresh": "10s",
   "schemaVersion": 38,
   "style": "dark",
-  "tags": ["ragweld", "observability", "cost", "capacity"],
+  "tags": [
+    "ragweld",
+    "observability",
+    "cost",
+    "capacity"
+  ],
   "templating": {
     "list": []
   },
-  "time": { "from": "now-24h", "to": "now" },
+  "time": {
+    "from": "now/d",
+    "to": "now"
+  },
   "timepicker": {},
-  "timezone": "",
+  "timezone": "utc",
   "title": "Cost & Capacity",
   "uid": "ragweld-cost-capacity",
-  "version": 2,
+  "version": 3,
   "weekStart": ""
 }

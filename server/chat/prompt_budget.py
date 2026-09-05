@@ -65,6 +65,34 @@ IMAGE_TOKENS_DEFAULT = 4800  # families without a published hard maximum (heuris
 
 ImageSize = tuple[int, int] | None
 
+# Only ids with an established formula belong here. A family prefix is not
+# evidence that a newly published model preserves its predecessor's image cost.
+OPENAI_IMAGE_CLASSES = {
+    **dict.fromkeys((
+        "openai/gpt-4o-mini", "openai/gpt-4o-mini-2024-07-18",
+    ), "tile_mini"),
+    **dict.fromkeys((
+        "openai/gpt-4-turbo", "openai/gpt-4.1", "openai/gpt-4o",
+        "openai/gpt-4o-2024-05-13", "openai/gpt-4o-2024-08-06", "openai/gpt-4o-2024-11-20",
+        "openai/gpt-5", "openai/gpt-5-codex", "openai/gpt-5-pro",
+        "openai/o1", "openai/o1-pro", "openai/o3", "openai/o3-pro",
+    ), "tile_standard"),
+    **dict.fromkeys((
+        "openai/gpt-4.1-mini", "openai/gpt-4.1-nano", "openai/gpt-5-mini", "openai/gpt-5-nano",
+        "openai/gpt-5.1", "openai/gpt-5.1-codex", "openai/gpt-5.1-codex-max", "openai/gpt-5.1-codex-mini",
+        "openai/gpt-5.2", "openai/gpt-5.2-chat", "openai/gpt-5.2-codex", "openai/gpt-5.2-pro",
+        "openai/gpt-5.3-codex", "openai/gpt-5.4-mini", "openai/gpt-5.4-nano",
+        "openai/o4-mini", "openai/o4-mini-high",
+    ), "patch_1536"),
+    **dict.fromkeys(("openai/gpt-5.4", "openai/gpt-5.4-pro"), "patch_2500"),
+    **dict.fromkeys(("openai/gpt-5.5", "openai/gpt-5.5-pro"), "patch_10000"),
+    **dict.fromkeys((
+        "openai/gpt-5.6-luna", "openai/gpt-5.6-luna-pro",
+        "openai/gpt-5.6-sol", "openai/gpt-5.6-sol-pro",
+        "openai/gpt-5.6-terra", "openai/gpt-5.6-terra-pro",
+    ), "patch_uncapped"),
+}
+
 
 class ImageBoundError(ValueError):
     """No finite per-image token cost can be established for this row/attachment."""
@@ -76,26 +104,7 @@ def openai_image_class(model: str | None) -> str:
     name = str(model or "").strip().lower()
     if name.endswith(":batch"):
         name = name[: -len(":batch")]
-    if "-image" in name or "gpt-chat-latest" in name:
-        return "unbounded"  # image-generation ids and rolling pointers: no published input-image formula
-    if "gpt-4o-mini" in name:
-        return "tile_mini"
-    if name.startswith(("openai/gpt-4o", "openai/gpt-4-turbo", "openai/chatgpt-4o")):
-        return "tile_standard"
-    if name.startswith("openai/gpt-4.1"):
-        return "patch_1536" if ("-mini" in name or "-nano" in name) else "tile_standard"
-    if name.startswith("openai/gpt-5.6"):
-        return "patch_uncapped"
-    if name.startswith("openai/gpt-5.5"):
-        return "patch_10000"
-    if name.startswith("openai/gpt-5.4") and not ("-mini" in name or "-nano" in name):
-        return "patch_2500"
-    if name in ("openai/gpt-5", "openai/gpt-5-codex", "openai/gpt-5-pro") or name.startswith(("openai/o1", "openai/o3")):
-        # Documented tile-based (gpt-5: 70 + 140/tile; o-series: 75 + 150/tile), both under the 85 + 170/tile bound.
-        return "tile_standard"
-    if name.startswith(("openai/gpt-5", "openai/o4")):
-        return "patch_1536"
-    return "unbounded"
+    return OPENAI_IMAGE_CLASSES.get(name, "unbounded")
 
 
 def image_tokens_for_attachment(

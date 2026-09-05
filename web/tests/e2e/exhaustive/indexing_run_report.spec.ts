@@ -42,6 +42,8 @@ test('the run header reports the events the run recorded, not the cap it asked f
   await page.goto(`rag?subtab=indexing&corpus=${encodeURIComponent(corpus.corpusId)}`, {
     waitUntil: 'domcontentloaded',
   });
+  await expect(page.getByTestId('index-run-details')).toHaveJSProperty('open', false);
+  await page.getByTestId('index-run-details').locator('summary').click();
   const count = page.getByTestId('index-run-event-count');
   await expect(count).toBeVisible();
   const text = await count.innerText();

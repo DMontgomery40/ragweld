@@ -82,6 +82,27 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
 
+      # Docling's real PDF tests must not depend on mutable HF main revisions or
+      # model download rate limits during conversion. Cache only verified assets.
+      - name: Restore Docling model artifacts
+        id: docling-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/ragweld-docling-models
+          key: docling-${{ runner.os }}-${{ hashFiles('uv.lock', 'scripts/docling_ci_models.json', 'scripts/prepare_docling_ci.py') }}
+
+      - name: Provision and verify pinned Docling models
+        run: uv run python scripts/prepare_docling_ci.py --artifacts-path "${{ runner.temp }}/ragweld-docling-models"
+
+      # Save after verification, even when a later test fails. Partial downloads
+      # never enter this cache, and every restored file is checked again above.
+      - name: Save verified Docling model artifacts
+        if: steps.docling-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/ragweld-docling-models
+          key: ${{ steps.docling-cache.outputs.cache-primary-key }}
+
       - name: Run linting
         run: uv run ruff check server
 
@@ -101,6 +122,7 @@ jobs:
 
       - name: Run tests
         env:
+          DOCLING_ARTIFACTS_PATH: ${{ runner.temp }}/ragweld-docling-models
           POSTGRES_HOST: localhost
           POSTGRES_PORT: 5432
           POSTGRES_DB: tribrid_test
