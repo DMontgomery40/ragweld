@@ -236,6 +236,7 @@ async def _wait_for_terminal(client: AsyncClient, corpus_id: str) -> dict:
     raise AssertionError("index run did not reach a terminal state")
 
 
+@pytest.mark.requires_model_gateway
 async def test_real_empty_semantic_run_is_refused_then_authenticated_chunk_only_override_is_audited(
     client: AsyncClient,
     tmp_path: Path,

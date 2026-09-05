@@ -96,6 +96,7 @@ pytestmark = [
         ),
     ],
 )
+@pytest.mark.requires_model_gateway
 async def test_semantic_extraction_grounds_edges_and_attributes_in_their_own_passage(
     case: str, text: str, expected_edges: set[tuple[str, str, str]],
 ) -> None:
@@ -323,6 +324,7 @@ async def _wait_for_index(
     raise AssertionError(f"index did not finish within {timeout_s}s: {last}")
 
 
+@pytest.mark.requires_model_gateway
 async def test_semantic_and_code_files_use_scoped_official_writer_contract(
     tmp_path: Path,
 ) -> None:
@@ -602,6 +604,7 @@ async def test_live_writer_keeps_event_loop_responsive_for_ten_thousand_nodes() 
         await asyncio.to_thread(driver.close)
 
 
+@pytest.mark.requires_model_gateway
 async def test_full_index_promotes_the_approved_official_pipeline_generation(
     client: AsyncClient,
     tmp_path: Path,

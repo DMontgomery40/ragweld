@@ -292,3 +292,261 @@ The prospective catalog merge preserves all allowed upstream model/price updates
 and reapplies the already approved execution policy through the canonical
 catalog-trio writer. It retains 431 rows; all 100 model-policy/catalog/refresh
 tests pass. The full final merged-tree gate and publication are next.
+
+### PR review and fresh-install verification
+
+The continuation patch was committed as `cca5019e`, merged with the two catalog
+updates as `9c08c37e`, and published in PR #89:
+<https://github.com/DMontgomery40/ragweld/pull/89>. All 431 allowed upstream model
+rows and their metadata were preserved. The production runtime remains unchanged.
+
+The merged-tree backend run produced 2,407 passes, nine skips and one failure
+in 686.92 seconds. Both NASA proposal regressions passed. Luna dropped a clearly
+confirmed causal relation in the negation/uncertainty extraction case, returning
+only a Chunk. This is retained as a model-quality failure; the assertion was not
+weakened. Sol then passed all four grounding cases, and a combined real-provider
+run passed those four plus all three NASA proposal cases (147.04 seconds). The
+final full suite will use the existing `GRAPH_E2E_KG_MODEL` selector with Sol,
+the model supported by the bounded NASA comparison. This does not establish
+equivalent Luna quality or justify a global model-default change.
+
+Server lint, strict mypy, type/config/contract checks, catalog/gateway lockstep,
+web lint, all 21 web unit tests and the web build passed on the merged snapshot.
+GitHub frontend and docs checks also passed, but backend CI exposed missing
+clean-install dependencies and a genuine control-store deletion bug. CI provides
+Postgres but omitted Qdrant; compose-contract tests also lacked the nonsecret
+repository environment template. Fresh control-mode Postgres creates registry
+tables only, while corpus and staging cleanup unconditionally deleted absent
+chunk tables. The isolated empty-database regression reproduced both failures
+before the repair; full-schema and old-schema-without-FK cases already passed.
+Repairs retain explicit child-first cleanup and inspect only existing allowlisted
+tables in the intended schema. Their final verification is pending.
+
+GitHub Codex review additionally found that migrated corpus-keyed graphs returned
+500 from source navigation. Such graphs now receive a typed reindex-required
+response, and the source panel directs the operator to Indexing. It does not
+guess an unscoped source relationship. Current-generation pagination keeps its
+separate reload behavior. Initial API and browser regressions pass; the complete
+final review/gate remains open before merging or deployment.
+
+The legacy source family passes all eight real-store API tests (4.93 seconds).
+Its browser acceptance exposed a separate default-width dock problem: the fixed
+320px Communities column squeezed entity controls out of reach. The existing
+container measurement now selects one column below 656px. All five source-viewing
+browser scenarios pass (32 seconds), including a real NASA PDF, initial and
+continuation legacy recovery, generation-change reload, and entity selection plus
+Open Indexing at the default 360px dock width without resizing or forced clicks.
+Dock navigation preserves the main page URL. Web lint/build pass after this fix.
+
+The fresh-install repair passes 91 targeted tests. The seven-case final cleanup
+matrix verifies direct and pooled connections use the intended search path,
+preserves similarly named tables in another schema, and retains sibling corpus
+data. The renderer regression now independently covers repository, two retired,
+current and customized extraction prompts. Overlay subprocesses explicitly use
+the current source via `PYTHONPATH`, avoiding a false pass from the installed old
+production checkout. Final complete real-service and clean-CI suites are running.
+
+Sol xhigh approved the legacy-source, initial cleanup, renderer, generated-contract
+and narrow-dock delta, then separately approved the final three-store CI service
+configuration. Evidence: `/private/tmp/astra-review-pr-fixes.out` and
+`/private/tmp/astra-review-ci-services.out` on Mac. CI now provisions pinned
+Qdrant 1.17.1 and Neo4j 5.26.20 with actual APOC/GDS readiness alongside Postgres.
+
+The empty-install audit subsequently found the same absent-table assumption in
+deindexing, reclaim-backlog cleanup and `delete_chunks`. The expanded real-store
+matrix covers five operations across fresh control, full and no-FK schemas,
+including fences, tombstones, repeated counts and sibling isolation. Three new
+RED cases were reproduced; all 17 cleanup/document tests pass after repair.
+That extension is undergoing its own bounded review.
+
+The next real-service full run finished with 2,419 passes, nine skips and two
+failures in 1,180.32 seconds. Sol's full-report proposal passed, but the reuse
+test's first model response contained roughly 4.4 MB of malformed JSON, mostly
+whitespace, and raised an unhandled official `SchemaExtractionError` after a long
+wait. Proposal response limits, deadline and typed error handling remain a real
+blocker; earlier focused Sol passes do not override this failure. The second
+failure is the corpus-reaper parity check: its source-regex view does not represent
+the new inventory loop. Shared cleanup behavior and its category coverage must
+be reconciled rather than weakening that safety contract.
+
+The clean-CI reproduction also requires actual environmental isolation on LXC:
+unset optional service URLs otherwise discover existing local services, and the
+literal NASA source path is present although GitHub lacks it. The final disposable
+run uses only three isolated fixture stores, unused endpoints for absent optional
+services, and a private mount namespace hiding corpus files from that process.
+The host NASA PDF remains present. No test skips were added. Four pytest Flyte
+executions created before this discovery are verified terminal by their own IDs;
+no unrelated executions were cancelled.
+
+### Proposal reliability and final gates
+
+The final proposal reliability slice now has two typed operator limits: a
+60-second default deadline (5–80 allowed) and a 16,384-token output budget
+(256–32,768 allowed). The official extractor makes one attempt; decoded HTTP
+responses are bounded, and malformed, truncated, refused and failed responses
+produce sanitized 502/504 errors. Context changes produce 409 before persistence.
+Output budget participates in approval identity. Existing proposal and approval
+records survive failure. Final context validation is not atomic across filesystem
+configuration and Postgres; index-start fingerprint validation remains authoritative.
+
+All 14 Indexing browser cases pass, including limits through Apply/API/reload,
+readable 502/504 recovery, and held provider responses after corpus/settings
+changes. Five source browser cases also pass. The fixture uses real local HTTP,
+not intercepted Playwright routes. Successful error screenshots are preserved on
+Mac as `/private/tmp/astra-schema-proposal-{502,504}.png`.
+
+The combined source passes server Ruff, mypy (171 files), type synchronization,
+contract export validation, configuration reality (453 leaves), catalog/gateway
+lockstep (431 rows/391 aliases), glossary validation (454 terms), frontend lint,
+21 frontend unit tests and build. GitNexus maps 94 intended files to 372 symbols
+and 144 processes, with critical shared-config/retrieval impact.
+
+The final real-service run completed with 2,473 passes, nine skips and four
+failures in 887.75 seconds. Three were stale policy tests missing the proposer's
+new mandatory budget arguments. The fourth was the NASA reuse test's initial
+provider request reaching the 60-second deadline and returning the intended typed
+504. A fresh attempt with unchanged limits passed in 57 seconds. The full-report
+NASA case and grounding cases passed in the broad run. This is evidence of bounded
+recovery, not a claim that external model requests never time out. Logs on LXC100:
+`/tmp/astra-final-reliability-full.log` and `/tmp/astra-nasa-bounded-retry.log`.
+
+The isolated clean-CI run produced 2,443 passes, 39 skips and four failures in
+510.70 seconds: the same three stale policy calls and a source-default Loki test
+reading the deliberately isolated runtime URL. The 24 cleanup matrix cases,
+actual no-FK API deletion sequence and redaction sweep passed. Sol's final review
+reported no production-code finding in this delta, but blocked two harness gaps:
+redaction corpus provisioning depended on fixture order, and configured broken
+model gateways could be skipped. Reproduced RED cases cover both, plus inconsistent
+strict-mode truth parsing. Focused repairs and another clean-CI gate are underway;
+the PR remains unmerged and production unchanged.
+
+The harness repair passed 106 focused cases, followed by a clean full run of
+2,455 passes and 39 skips in 524.53 seconds. A subsequent review found that the
+redaction fixture seeded only global credentials after corpus creation had
+snapshotted the clean config. Both global and corpus stores are now seeded and
+restored in the ordered lifecycle. Two no-environment-override regressions failed
+before repair; all 17 redaction cases pass, including normal and exceptional exits.
+
+Strict paid acceptance then passed nine graph cases but both NASA proposals again
+hit the 60-second deadline. A controlled comparison held the full 36-chunk sample,
+Sol route and 16,384-token output budget fixed: medium reasoning exceeded an
+80-second model deadline (83.901 seconds including sampling); low reasoning
+completed in 33.745 seconds with 29 node types, 37 relationship types and 108
+patterns. The schema includes alarms, computer programs, anomalies, causes,
+corrective actions and trajectories, with no forbidden document-text properties.
+Evidence: `/tmp/astra-nasa-budget-{comparison,low}.json` on LXC100.
+
+Schema planning now has its own typed `schema_proposal_reasoning_effort`, default
+`low`. Semantic KG extraction retains its separate existing effort. Both effort
+settings participate in approval identity; sampling, 60-second deadline,
+16,384-token output limit and all NASA success/deadline assertions are unchanged.
+All three strict NASA cases pass in 75.04 seconds on this change, including full
+report completion and persisted approval reuse/invalidation. Evidence:
+`/tmp/astra-final-strict-nasa.log`. The UI exposes all five supported efforts;
+real browser/provider checks verify persistence and that KG effort remains medium.
+Final combined browser, CI and bounded review gates are still running.
+
+The final combined proposal snapshot passes 2,480 clean-CI tests with 39 skips in
+524.34 seconds, plus all standard source/contract gates (454 config leaves and
+455 glossary terms). The complete Indexing browser suite passes 16 cases, including
+all effort choices, provider payloads, persistence and stale-reasoning cancellation.
+Sol reported no source finding for the effort change. Its remaining fixture
+finding was unnecessary Neo4j/Qdrant dependency on the baseline redaction sweep.
+The baseline now uses canonical Postgres cleanup for its own never-indexed corpus;
+additional marked cases retain real API-deletion coverage. Absent optional stores,
+the old file skipped the sweep/lifecycle checks; the repair runs 17 cases and skips
+only the two added API-cleanup cases. All-store coverage passes 19. A final focused
+review and GitHub checks remain before merge. Source evidence is supplemented by
+`/tmp/astra-pr89-ci-proposal-final.log`; only this fixture correction and execution
+documentation follow that complete snapshot.
+
+### Remaining native cost work
+
+The recovered D1–D4 choices have a concrete implementation path within the
+operator's existing constraints. Use LiteLLM's native spend logs in a dedicated
+logical database/role on existing Postgres, keep `store_model_in_db=false`, and
+disable prompt storage. Langfuse remains the trace sink; existing run records hold
+derived totals, not a second per-call ledger. The live LiteLLM 1.94 process has no
+`DATABASE_URL`, so durable native spend accounting is not enabled yet.
+
+After the GraphRAG PR is clear, implement shared run/session/lane attribution and
+the index-run slice before the NASA rebuild. Allocate proposal/run identities
+before paid work; propagate context through embeddings, figures and graph calls;
+persist immutable estimates separately from measured totals; reconcile complete,
+failed, cancelled and restarted runs. Creating the logical database needs no
+Postgres restart, but gateway wiring and application changes need controlled
+restarts with indexing idle. Verify one complete small index against native rows
+before NASA.
+
+Replace the remaining direct Cohere and paid cloud-embedding routes with native
+gateway endpoints while preserving provider/model, dimensions and embedding
+identity. Local computation remains local. Then extend the same accounting
+contract to benchmark, evaluation, Promptfoo and synthetic runs; benchmark paid
+retrieval currently precedes allocation of its run ID and is missing from totals.
+
+Native reconciliation must page results, enforce exact session identity despite
+the spend API's substring filter, deduplicate request IDs, and distinguish a
+missing/unpriced charge from measured zero. Existing run aggregates should expose
+pending, complete and incomplete accounting with a valid chunk denominator.
+Historical schema-preview spend cannot be reconstructed without supporting
+records. New provider credentials, services, retention choices or an unavoidable provider
+replacement would require a concrete operator decision; none is currently shown
+necessary for this path. This work remains unimplemented.
+
+An isolated native-ledger fixture now verifies the actual LiteLLM 1.94 behavior
+before implementation: 140 native migrations, seven requests/rows, provider
+reported positive and zero cost, usage-priced calculation, cache hits, failures,
+session substring collisions, delayed writes and restart durability. It confirms
+that an unpriced model can produce success plus zero spend, zero breakdown and
+zero default pricing metadata. Cached responses can retain positive headers and
+breakdowns while their native spend row correctly records zero; classify cache
+first. A successful acknowledged request killed before native queue flush leaves
+no row after restart. Native rows alone therefore cannot prove completeness.
+
+Add aggregate request-dispatch/completion/uncertain counts and a durable census
+state to existing run summaries, not a second per-call ledger. Close the census
+only after every instrumented worker is quiescent and final counts are durable.
+Interrupted or uncensused runs remain incomplete even if ledger rows stop changing.
+The source audit also identified two required lifecycle repairs: shielded Docling
+workers can continue figure calls after cancellation, and reconciling an older
+summary must not make it the latest run merely by changing its modification time.
+Persisted run time and the active generation govern ordering; preserve observed
+chunk denominators on failure/cancellation. Local NASA embeddings and disabled
+figures imply no invented cloud charges for those legs.
+
+Fixture resources were cleaned; production was not changed. Reproduction and
+evidence on Mac: `/private/tmp/astra-ledger-contract-report.md`,
+`/private/tmp/astra-ledger-acceptance.py`, and
+`/private/tmp/astra-ledger-contract-evidence/`.
+
+### Benchmark scope review correction
+
+The fresh Codex review on PR #89 identified that the displayed benchmark run cost
+covered answer generation but excluded potentially billed shared retrieval. The
+wire contract now states `cost_scope: generation`, persisted cost detail names
+that scope, and the browser labels the amount Answer-generation cost with an
+explicit retrieval exclusion. Corpus-scoped full-request traces remain unavailable
+and non-authoritative until retrieval has complete accounting; unscoped generation
+traces retain their measured totals. This is separate from the native whole-run
+accounting work above.
+
+The real HTTP/SDK accounting matrix now covers reported, estimated, failed and
+reasoning-only outcomes with and without corpus scope. All 33 accounting/costing
+tests pass. Contracts regenerated; server lint, mypy and config/contract validation
+pass. The real API/browser saved-cost matrix passed all three fixture kinds,
+preserving amounts and source labels while showing the explicit scope. Frontend
+lint/build and type/banned checks pass. Focused Sol review and the amended GitHub
+checks gate merge.
+
+The benchmark-scope correction received an independent Sol xhigh APPROVE.
+GitHub run 33942453191 on commit 28d0bf84 completed with 2,481 passed, 39 skipped
+and one test failure: an exact Compose JSON snapshot expected explicit
+`bind.create_host_path: false`, while the runner's serializer omitted the false
+key. The source remains explicitly false. The deployment test now checks the
+source requirement separately, retains the rendered mount/owner/health contract,
+and rejects rendered true without depending on false-key serialization.
+No deployment configuration changed for this correction.
+
+The corrected deployment-contract suite passes all 61 tests on LXC100 and
+received a focused independent Sol xhigh APPROVE. Publication still awaits
+fresh GitHub checks; production remains at its previous marker with corpora idle.

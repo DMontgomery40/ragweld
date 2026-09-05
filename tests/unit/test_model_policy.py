@@ -91,7 +91,8 @@ async def test_schema_sdk_refuses_blocked_identity_before_sampling(blocked_field
     with pytest.raises(ValueError, match="GPT-4-class models are blocked"):
         await derive_graph_schema_proposal(**route, corpus_id="nasa-apollo-11", chunks=[],
                                            route_base_url="http://127.0.0.1:1/v1", route_api_key="",
-                                           reasoning_effort="none", input_fingerprint="unused")
+                                           reasoning_effort="none", input_fingerprint="unused",
+                                           timeout_s=30, max_output_tokens=128)
 
 
 def test_figure_sdk_refuses_blocked_route_before_docling_setup() -> None:

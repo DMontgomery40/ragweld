@@ -72,6 +72,8 @@ test('saved benchmarks distinguish reported charges, estimates, and unknown tota
       await page.getByTestId('benchmark-past-runs').getByRole('button', { name: run.prompt }).click();
       const total = page.getByTestId('benchmark-run-cost');
       const costs = page.getByTestId('benchmark-model-cost');
+      await expect(total).toContainText('Answer-generation cost');
+      await expect(total).toContainText('Shared retrieval cost is not included.');
       await expect(costs).toHaveCount(2);
       await expect(costs.nth(0)).toContainText('Gateway reported: $0.0000001234');
       await expect(costs.nth(0)).toContainText('100 input · 20 output tokens');
@@ -88,7 +90,7 @@ test('saved benchmarks distinguish reported charges, estimates, and unknown tota
         await expect(costs.nth(1)).not.toContainText('$0');
         await expect(page.getByRole('table', { name: 'Benchmark results' })).toContainText('reasoning consumed');
         await total.scrollIntoViewIfNeeded();
-        await page.screenshot({ path: '/tmp/astra-benchmark-cost.png', fullPage: false });
+        await page.screenshot({ path: test.info().outputPath('answer-generation-cost.png'), fullPage: false });
       }
       await expect(page.locator('vite-error-overlay')).toHaveCount(0);
     }

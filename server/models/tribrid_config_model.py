@@ -38,6 +38,12 @@ from server.models.graph_sources import (
 from server.models.graph_sources import (
     GraphSourceGenerationChangedResponse as GraphSourceGenerationChangedResponse,
 )
+from server.models.graph_sources import (
+    GraphSourceReindexRequiredDetail as GraphSourceReindexRequiredDetail,
+)
+from server.models.graph_sources import (
+    GraphSourceReindexRequiredResponse as GraphSourceReindexRequiredResponse,
+)
 from server.models.index import ChunkProvenance, IndexStats
 from server.models.runtime_gateway import BenchmarkConfig as BenchmarkConfig
 from server.models.runtime_gateway import ChatModelInfo as ChatModelInfo
@@ -2826,7 +2832,10 @@ class BenchmarkRun(BaseModel):
     started_at_ms: int = Field(default=0, ge=0, description="Run start timestamp in milliseconds since epoch.")
     ended_at_ms: int = Field(default=0, ge=0, description="Run completion timestamp in milliseconds since epoch.")
     results: list[BenchmarkResult] = Field(default_factory=list, description="Per-model benchmark results.")
-    cost_summary: TraceCostSummary | None = Field(default=None, description="Sum of all model-call costs, unavailable if any call lacks accounting; null on older saved runs.")
+    cost_scope: Literal["generation"] = Field(
+        default="generation", description="This run's cost summary covers answer generation only; shared retrieval is excluded."
+    )
+    cost_summary: TraceCostSummary | None = Field(default=None, description="Sum of answer-generation costs only, excluding shared retrieval; unavailable if any generation call lacks accounting; null on older saved runs.")
     retrieval: BenchmarkRetrieval | None = Field(
         default=None,
         description="Grounding used for this run; null on records persisted before retrieval-backed benchmarks.",
@@ -5291,6 +5300,23 @@ class GraphIndexingConfig(BaseModel):
         ge=5,
         le=600,
         description="Timeout (seconds) for semantic KG LLM extraction per chunk",
+    )
+
+    schema_proposal_timeout_s: int = Field(
+        default=60,
+        ge=5,
+        le=80,
+        description="Total seconds allowed for schema proposal sampling and generation, below the public HTTP deadline",
+    )
+    schema_proposal_reasoning_effort: Literal["minimal", "low", "medium", "high", "xhigh"] = Field(
+        default="low",
+        description="Reasoning effort for schema proposals, independent of semantic KG extraction effort",
+    )
+    schema_proposal_max_output_tokens: int = Field(
+        default=16384,
+        ge=256,
+        le=32768,
+        description="Maximum output tokens for one schema proposal; incomplete responses fail without approval",
     )
 
 

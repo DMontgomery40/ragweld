@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import hashlib
 import json
+import math
 import re
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
+import httpx
 from neo4j_graphrag.components.schema import (
     ConstraintType,
     GraphConstraintType,
@@ -18,8 +22,13 @@ from neo4j_graphrag.components.schema import (
     RelationshipType,
     SchemaFromTextExtractor,
 )
+from neo4j_graphrag.exceptions import SchemaExtractionError
 from neo4j_graphrag.generation.prompts import SchemaExtractionTemplate
 from neo4j_graphrag.llm import OpenAILLM
+from neo4j_graphrag.utils.rate_limit import NoOpRateLimitHandler
+from openai.types.chat import ChatCompletion
+from openai.types.completion_usage import CompletionUsage
+from pydantic import ValidationError
 
 from server.gateway_reasoning import reasoning_model_params
 from server.model_policy import ensure_model_allowed
@@ -50,6 +59,55 @@ DOCUMENT_TEXT_PROPERTIES = frozenset(
         "transcript",
     }
 )
+
+# Generous for the supported 32K-token schema budget (including UTF-8 and JSON
+# overhead), but bounded even when an upstream ignores the requested token limit.
+_PROPOSAL_MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+_PROPOSAL_CLEANUP_TIMEOUT_S = 1.0
+
+
+class GraphSchemaProposalError(RuntimeError):
+    """Sanitized proposal failure; retain received accounting outside public text."""
+
+    def __init__(
+        self,
+        code: Literal["graph_schema_generation_failed", "graph_schema_deadline_exceeded"],
+        *,
+        usage: CompletionUsage | None = None,
+        gateway_cost_usd: float | None = None,
+    ) -> None:
+        self.code = code
+        self.usage = usage
+        self.gateway_cost_usd = gateway_cost_usd
+        super().__init__(
+            "Schema proposal exceeded its total time budget."
+            if code == "graph_schema_deadline_exceeded"
+            else "The model gateway did not return a complete, valid schema proposal."
+        )
+
+
+class _ProposalTransport(httpx.AsyncHTTPTransport):
+    """Delegate HTTP to HTTPX, bounding decoded bytes before the SDK parses JSON."""
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        response = await super().handle_async_request(request)
+        try:
+            body = bytearray()
+            async for part in response.aiter_bytes():
+                if len(body) + len(part) > _PROPOSAL_MAX_RESPONSE_BYTES:
+                    raise GraphSchemaProposalError("graph_schema_generation_failed")
+                body.extend(part)
+            headers = httpx.Headers(response.headers)
+            # aiter_bytes has decoded the content; this new buffered response must
+            # not decompress it again or advertise the original compressed length.
+            for name in ("content-encoding", "content-length", "transfer-encoding"):
+                headers.pop(name, None)
+            return httpx.Response(
+                response.status_code, headers=headers, content=bytes(body),
+                extensions=response.extensions, request=request,
+            )
+        finally:
+            await response.aclose()
 
 
 def schema_proposal_prompt() -> SchemaExtractionTemplate:
@@ -293,6 +351,8 @@ async def derive_graph_schema_proposal(
     route_upstream: str,
     reasoning_effort: str,
     input_fingerprint: str,
+    timeout_s: float,
+    max_output_tokens: int,
 ) -> GraphSchemaProposal:
     for identifier in (model_alias, route_model, route_upstream):
         ensure_model_allowed(identifier)
@@ -303,21 +363,72 @@ async def derive_graph_schema_proposal(
         f"## {chunk.file_path} lines {chunk.start_line}-{chunk.end_line}\n{chunk.content[:6000]}"
         for chunk in sample
     )
-    # The proposal deliberately carries the effort but no per-chunk timeout (D9); the
-    # effort travels in the upstream's protocol like every extraction call (D25).
+    if timeout_s <= 0 or max_output_tokens <= 0:
+        raise ValueError("schema proposal requires positive time and output budgets")
+    received: ChatCompletion | None = None
+    gateway_cost_usd: float | None = None
+
+    async def check_completion(response: httpx.Response) -> None:
+        nonlocal received, gateway_cost_usd
+        if response.is_error:
+            return  # Let the official SDK preserve its transport/status exception.
+        try:
+            received = ChatCompletion.model_validate(response.json())
+        except (ValueError, ValidationError) as exc:
+            raise GraphSchemaProposalError("graph_schema_generation_failed") from exc
+        try:
+            raw_cost = response.headers.get("x-litellm-response-cost")
+            cost = float(raw_cost) if raw_cost is not None else None
+            if cost is not None and math.isfinite(cost) and cost >= 0:
+                gateway_cost_usd = cost
+        except ValueError:
+            pass
+        if (
+            len(received.choices) != 1
+            or received.choices[0].finish_reason != "stop"
+            or received.choices[0].message.refusal
+            or not received.choices[0].message.content
+        ):
+            raise GraphSchemaProposalError(
+                "graph_schema_generation_failed", usage=received.usage,
+                gateway_cost_usd=gateway_cost_usd,
+            )
+
     llm = OpenAILLM(
         model_name=route_model,
-        model_params=reasoning_model_params(
-            reasoning_effort=reasoning_effort, route_upstream=route_upstream
-        ),
+        model_params={
+            **reasoning_model_params(reasoning_effort=reasoning_effort, route_upstream=route_upstream),
+            "max_tokens": max_output_tokens,
+        },
+        rate_limit_handler=NoOpRateLimitHandler(),
         api_key=route_api_key,
         base_url=route_base_url,
+        timeout=timeout_s,
+        max_retries=0,
+        http_client=httpx.AsyncClient(
+            transport=_ProposalTransport(), timeout=timeout_s,
+            event_hooks={"response": [check_completion]},
+        ),
     )
-    extracted = await SchemaFromTextExtractor(
-        llm=llm,
-        prompt_template=schema_proposal_prompt(),
-        use_structured_output=True,
-    ).run(text)
+    try:
+        async with asyncio.timeout(timeout_s):
+            extracted = await SchemaFromTextExtractor(
+                llm=llm,
+                prompt_template=schema_proposal_prompt(),
+                use_structured_output=True,
+            ).run(text)
+    except TimeoutError as exc:
+        raise GraphSchemaProposalError("graph_schema_deadline_exceeded") from exc
+    except SchemaExtractionError as exc:
+        raise GraphSchemaProposalError(
+            "graph_schema_generation_failed",
+            usage=received.usage if received else None, gateway_cost_usd=gateway_cost_usd,
+        ) from exc
+    finally:
+        # The API's outer deadline may cancel this call while sampling/generating;
+        # cleanup gets its own short bound and never resumes generation or persistence.
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(llm.aclose(), timeout=_PROPOSAL_CLEANUP_TIMEOUT_S)
     schema = canonical_schema_dict(normalize_domain_schema(extracted))
     validate_domain_schema(schema)
     return GraphSchemaProposal(

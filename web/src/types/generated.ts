@@ -206,7 +206,9 @@ export interface BenchmarkRun {
   ended_at_ms?: number; // default: 0
   /** Per-model benchmark results. */
   results?: BenchmarkResult[];
-  /** Sum of all model-call costs, unavailable if any call lacks accounting; null on older saved runs. */
+  /** This run's cost summary covers answer generation only; shared retrieval is excluded. */
+  cost_scope?: "generation"; // default: "generation"
+  /** Sum of answer-generation costs only, excluding shared retrieval; unavailable if any generation call lacks accounting; null on older saved runs. */
   cost_summary?: TraceCostSummary | null; // default: None
   /** Grounding used for this run; null on records persisted before retrieval-backed benchmarks. */
   retrieval?: BenchmarkRetrieval | null; // default: None
@@ -1231,6 +1233,12 @@ export interface GraphIndexingConfig {
   semantic_kg_llm_model?: string; // default: ""
   /** Timeout (seconds) for semantic KG LLM extraction per chunk */
   semantic_kg_llm_timeout_s?: number; // default: 90
+  /** Total seconds allowed for schema proposal sampling and generation, below the public HTTP deadline */
+  schema_proposal_timeout_s?: number; // default: 60
+  /** Reasoning effort for schema proposals, independent of semantic KG extraction effort */
+  schema_proposal_reasoning_effort?: "minimal" | "low" | "medium" | "high" | "xhigh"; // default: "low"
+  /** Maximum output tokens for one schema proposal; incomplete responses fail without approval */
+  schema_proposal_max_output_tokens?: number; // default: 16384
 }
 
 export interface GraphPromotionOverride {
@@ -1251,6 +1259,14 @@ export interface GraphResolutionTelemetry {
 export interface GraphSchemaPolicyConflictDetail {
   code?: "graph_schema_policy_not_semantic"; // default: "graph_schema_policy_not_semantic"
   policy: "semantic" | "code" | "off" | "excluded";
+  message: string;
+  operator_hint: string;
+}
+
+export interface GraphSchemaProposalFailureDetail {
+  code: "graph_schema_generation_failed" | "graph_schema_deadline_exceeded" | "graph_schema_context_changed";
+  corpus_id: string;
+  model_alias: string;
   message: string;
   operator_hint: string;
 }
@@ -1281,6 +1297,12 @@ export interface GraphSearchConfig {
 export interface GraphSourceGenerationChangedDetail {
   code?: "graph_generation_changed"; // default: "graph_generation_changed"
   message?: string; // default: "The graph generation changed. Reload this entit..."
+}
+
+export interface GraphSourceReindexRequiredDetail {
+  code?: "graph_source_reindex_required"; // default: "graph_source_reindex_required"
+  message?: string; // default: "Source navigation requires a graph rebuilt with..."
+  operator_hint?: string; // default: "Open Indexing, review the graph schema if promp..."
 }
 
 /** Statistics about a repository's knowledge graph. */
@@ -4129,12 +4151,20 @@ export interface GraphSchemaProposal {
   created_at: string;
 }
 
+export interface GraphSchemaProposalFailureResponse {
+  detail: GraphSchemaProposalFailureDetail;
+}
+
 export interface GraphSchemaProposalRequest {
   force_refresh?: boolean;
 }
 
 export interface GraphSourceGenerationChangedResponse {
   detail: GraphSourceGenerationChangedDetail;
+}
+
+export interface GraphSourceReindexRequiredResponse {
+  detail: GraphSourceReindexRequiredDetail;
 }
 
 /** System health status payload for /api/health. */

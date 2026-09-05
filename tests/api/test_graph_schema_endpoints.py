@@ -47,7 +47,7 @@ async def test_schema_fingerprint_invalidates_pre_coverage_prompt_proposals(tmp_
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("changed_context", ["root", "chunking", "reasoning", "tokenization", "parquet_extraction"])
+@pytest.mark.parametrize("changed_context", ["root", "chunking", "reasoning", "proposal_reasoning", "tokenization", "parquet_extraction", "output_budget"])
 async def test_schema_fingerprint_binds_the_actual_proposal_context(tmp_path: Path, changed_context: str) -> None:
     original = tmp_path / "original"
     copied = tmp_path / "copied"
@@ -68,6 +68,10 @@ async def test_schema_fingerprint_binds_the_actual_proposal_context(tmp_path: Pa
         cfg = cfg.model_copy(update={"tokenization": cfg.tokenization.model_copy(update={"lowercase": not cfg.tokenization.lowercase})})
     elif changed_context == "parquet_extraction":
         cfg = cfg.model_copy(update={"indexing": cfg.indexing.model_copy(update={"parquet_extract_max_rows": cfg.indexing.parquet_extract_max_rows + 1})})
+    elif changed_context == "output_budget":
+        cfg = cfg.model_copy(update={"graph_indexing": cfg.graph_indexing.model_copy(update={"schema_proposal_max_output_tokens": 8192})})
+    elif changed_context == "proposal_reasoning":
+        cfg = cfg.model_copy(update={"graph_indexing": cfg.graph_indexing.model_copy(update={"schema_proposal_reasoning_effort": "high"})})
     else:
         effort = "high" if cfg.graph_indexing.semantic_kg_reasoning_effort != "high" else "low"
         cfg = cfg.model_copy(update={"graph_indexing": cfg.graph_indexing.model_copy(update={"semantic_kg_reasoning_effort": effort})})

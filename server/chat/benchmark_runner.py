@@ -175,7 +175,24 @@ async def run_benchmark(
     ]
     results = await asyncio.gather(*tasks) if tasks else []
     cost_summary = aggregate_cost_summaries([result.cost_summary for result in results])
-    set_cost_summary(cost_summary)
+    cost_summary = cost_summary.model_copy(update={
+        "detail": "Answer generation only; shared retrieval is excluded. "
+        + str(cost_summary.detail or "").replace("Run total", "Generation total"),
+    })
+    if retrieval.corpus_id:
+        # Retrieval runs before the generation tasks and does not yet provide
+        # complete accounting for its embedding/reranking calls. Its absence
+        # cannot count as zero in the full request trace, even when every
+        # answer-generation response reports a charge.
+        request_cost = aggregate_cost_summaries([cost_summary, None])
+        set_cost_summary(request_cost.model_copy(update={
+            "detail": (
+                "Full benchmark request cost is unavailable because shared retrieval lacks "
+                "complete accounting. Answer-generation costs are recorded on the benchmark run."
+            ),
+        }))
+    else:
+        set_cost_summary(cost_summary)
 
     ended_at_ms = _now_ms()
     payload = BenchmarkRun(

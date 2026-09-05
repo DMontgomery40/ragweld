@@ -760,6 +760,9 @@ export function GraphSubtab() {
 
   /** Room for a third column? Below this the visualization gets its own row. */
   const wideLayout = layoutWidth === 0 || layoutWidth >= 1080;
+  // A fixed 320px Communities column needs another 320px plus the gap
+  // for usable entity controls. Stack in narrower main panes and docks.
+  const narrowLayout = layoutWidth > 0 && layoutWidth < 656;
 
   const indexProgressPercent = useMemo(() => {
     const raw = Number(activeIndexStatus?.progress ?? 0);
@@ -1221,7 +1224,11 @@ export function GraphSubtab() {
         style={{
           display: 'grid',
           gridTemplateColumns:
-            viewMode === 'table' || !wideLayout ? '320px minmax(0, 1fr)' : '320px minmax(0, 1fr) minmax(0, 1.5fr)',
+            narrowLayout
+              ? 'minmax(0, 1fr)'
+              : viewMode === 'table' || !wideLayout
+                ? '320px minmax(0, 1fr)'
+                : '320px minmax(0, 1fr) minmax(0, 1.5fr)',
           gap: '16px',
           alignItems: 'start',
         }}

@@ -644,17 +644,40 @@ def _build_secret_root(tmp_path: Path, *, include_tunnel: bool) -> Path:
     return secret_root
 
 
-def test_proxmox_renderer_writes_validated_production_defaults_atomically(tmp_path: Path) -> None:
+@pytest.mark.parametrize("prompt_variant", ["repository", "pre_grounding", "pre_redaction", "current", "custom"])
+def test_proxmox_renderer_writes_validated_production_defaults_atomically(
+    tmp_path: Path, prompt_variant: str
+) -> None:
     source_payload = _read_config(SOURCE_CONFIG)
+    retired_prompts = {
+        version: (ROOT / "tests" / "fixtures" / f"semantic_kg_extraction_{version}.txt").read_text()
+        for version in ("pre_grounding", "pre_redaction")
+    }
+    current_prompt = TriBridConfig().system_prompts.semantic_kg_extraction
+    prompts = source_payload["system_prompts"]
+    assert isinstance(prompts, dict)
+    if prompt_variant in retired_prompts:
+        prompts["semantic_kg_extraction"] = retired_prompts[prompt_variant]
+    elif prompt_variant == "current":
+        prompts["semantic_kg_extraction"] = current_prompt
+    elif prompt_variant == "custom":
+        prompts["semantic_kg_extraction"] = "Operator extraction instructions: {schema} {examples} {text}"
+    source_prompt = prompts["semantic_kg_extraction"]
+    source_payload["indexing"]["chunk_size"] = 384
     source_config = TriBridConfig.model_validate(source_payload)
+    source = tmp_path / "source.json"
+    source.write_text(json.dumps(source_payload), encoding="utf-8")
     output = tmp_path / "tribrid_config.production.json"
 
-    result = _run_renderer(source=SOURCE_CONFIG, output=output)
+    result = _run_renderer(source=source, output=output)
 
     assert result.returncode == 0, result.stdout + result.stderr
     payload = _read_config(output)
     validated = TriBridConfig.model_validate(payload)
     expected_payload = copy.deepcopy(source_config.model_dump(mode="json"))
+    expected_payload["system_prompts"]["semantic_kg_extraction"] = (
+        current_prompt if source_prompt in retired_prompts.values() else source_prompt
+    )
     for path, expected in PRODUCTION_DEFAULTS.items():
         _nested_set(expected_payload, path, expected)
     expected = TriBridConfig.model_validate(expected_payload)
@@ -665,7 +688,7 @@ def test_proxmox_renderer_writes_validated_production_defaults_atomically(tmp_pa
     ) + "\n"
     assert validated.model_dump(mode="json") == expected.model_dump(mode="json")
     assert output.stat().st_mode & 0o777 == 0o600
-    assert sorted(path.name for path in tmp_path.iterdir()) == [output.name]
+    assert sorted(path.name for path in tmp_path.iterdir()) == sorted([source.name, output.name])
 
 
 def test_proxmox_render_makes_the_mcp_endpoint_reachable_on_the_public_origin(
@@ -1203,14 +1226,22 @@ def test_proxmox_authelia_session_store_is_private_healthchecked_and_owner_run()
     # starts as root, which would rewrite the bind mount owner and permanently
     # fail the owner-only preflight in start-runtime.sh.
     assert authelia_redis["user"] == "4242:4343"
-    assert authelia_redis["volumes"] == [
-        {
-            "type": "bind",
-            "source": "/etc/ragweld/authelia/redis",
-            "target": "/data",
-            "bind": {"create_host_path": False},
-        }
-    ]
+    volumes = authelia_redis["volumes"]
+    assert len(volumes) == 1
+    volume = volumes[0]
+    assert volume["type"] == "bind"
+    assert volume["source"] == "/etc/ragweld/authelia/redis"
+    assert volume["target"] == "/data"
+    assert not volume.get("read_only", False)
+    # Older compose-go JSON encoders omit false booleans, whereas current
+    # versions retain this explicit opt-out. Enforce the source requirement
+    # independently and reject a rendered true value without snapshotting one
+    # CLI version's representation of false.
+    service_source = _compose_service_blocks(PROXMOX_COMPOSE.read_text())["authelia-redis"]
+    declared = yaml.safe_load(service_source)["authelia-redis"]["volumes"]
+    assert len(declared) == 1
+    assert declared[0]["bind"]["create_host_path"] is False
+    assert volume.get("bind", {}).get("create_host_path", False) is False
     assert authelia_redis["healthcheck"]["test"] == ["CMD-SHELL", "redis-cli ping | grep PONG"]
     assert authelia_redis["healthcheck"]["retries"] == 12
     assert not authelia_redis.get("ports")

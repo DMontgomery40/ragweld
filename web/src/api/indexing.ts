@@ -1,5 +1,5 @@
 import { apiClient, api } from './client';
-import type { IndexEstimate, IndexRequest } from '@/types/generated';
+import type { GraphSchemaProposal, GraphSchemaProposalRequest, IndexEstimate, IndexRequest } from '@/types/generated';
 
 /**
  * An estimate that actually measured something.
@@ -53,6 +53,19 @@ export type EstimateOptions = {
 };
 
 export const indexingApi = {
+  async proposeGraphSchema(
+    corpusId: string,
+    request: GraphSchemaProposalRequest,
+    options: { signal: AbortSignal; timeoutMs: number },
+  ): Promise<GraphSchemaProposal> {
+    const { data } = await apiClient.post<GraphSchemaProposal>(
+      api(`/index/${encodeURIComponent(corpusId)}/graph-schema/proposal`),
+      request,
+      { signal: options.signal, timeout: options.timeoutMs },
+    );
+    return data;
+  },
+
   /**
    * Estimate a corpus, waiting out a cold or under-sampled estimator.
    *

@@ -59,9 +59,20 @@ async def main() -> None:
         elif operation == "advance":
             assert fixture is not None
             await pg.set_generation(fixture["corpus"], build_generation(run_id=uuid4().hex, qdrant_collection=None, graph_repo_id=fixture["graph"]))
+        elif operation == "legacy":
+            assert fixture is not None
+            async with neo._require_driver().session(database=neo.database) as session:
+                await session.run(
+                    "CREATE (:__Entity__ {repo_id: $repo, entity_id: $entity, name: 'Fuel tank', entity_type: 'Tank'})",
+                    repo=fixture["corpus"], entity=fixture["entity"],
+                )
+            await pg.set_generation(fixture["corpus"], build_generation(
+                run_id=f"legacy-{fixture['corpus']}", qdrant_collection=None, graph_repo_id=fixture["corpus"],
+            ))
         elif operation == "delete":
             assert fixture is not None
             await neo.delete_graph(fixture["graph"])
+            await neo.delete_graph(fixture["corpus"])
             async with httpx.AsyncClient(timeout=30) as client:
                 response = await client.delete(f"{api_base}/corpora/{fixture['corpus']}")
                 response.raise_for_status()

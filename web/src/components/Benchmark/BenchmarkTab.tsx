@@ -588,8 +588,9 @@ export default function BenchmarkTab() {
         {runResult ? (
           <>
             <div data-testid="benchmark-run-cost" style={{ padding: 12, border: '1px solid var(--line)', borderRadius: 8 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>Run cost</div>
+              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>Answer-generation cost</div>
               <CostAttribution summary={runResult.cost_summary} showDetail />
+              <div style={{ fontSize: 12, color: 'var(--fg-muted)', marginTop: 6 }}>Shared retrieval cost is not included.</div>
             </div>
             <ResultsTable results={splitResults} />
             {splitResults.length > 0 ? <SplitScreen results={splitResults} /> : null}

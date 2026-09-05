@@ -22,6 +22,8 @@ from server.models.graph_sources import (
     GraphEntitySourcesResponse,
     GraphSourceGenerationChangedDetail,
     GraphSourceGenerationChangedResponse,
+    GraphSourceReindexRequiredDetail,
+    GraphSourceReindexRequiredResponse,
 )
 from server.services.config_store import CorpusNotFoundError
 from server.services.config_store import get_config as load_scoped_config
@@ -141,7 +143,7 @@ async def get_entity_relationships(corpus_id: str, entity_id: EntityIdQuery) -> 
 @router.get(
     "/graph/{corpus_id}/entity/sources",
     response_model=GraphEntitySourcesResponse,
-    responses={409: {"model": GraphSourceGenerationChangedResponse}},
+    responses={409: {"model": GraphSourceGenerationChangedResponse | GraphSourceReindexRequiredResponse}},
 )
 async def get_entity_sources(
     corpus_id: str,
@@ -154,11 +156,16 @@ async def get_entity_sources(
     async with _graph_client(corpus_id, boundary="Graph entity sources API") as scope:
         if scope.graph_repo_id is None or scope.run_id is None:
             raise HTTPException(status_code=404, detail=_entity_missing_detail(entity_id))
-        if run_id is not None and run_id != scope.run_id:
-            raise HTTPException(status_code=409, detail=GraphSourceGenerationChangedDetail().model_dump())
         # A newer manifest may intentionally reuse an older graph resource. Its
         # token fences pagination; the validated graph ID owns the stored run.
-        graph_run_id = require_staging_graph_id(scope.graph_repo_id).rsplit("__", 1)[-1]
+        try:
+            graph_run_id = require_staging_graph_id(scope.graph_repo_id).rsplit("__", 1)[-1]
+        except ValueError as exc:
+            # Migrated manifests can retain a corpus-keyed graph, including
+            # under a newer incremental run. Never guess scope for its mentions.
+            raise HTTPException(status_code=409, detail=GraphSourceReindexRequiredDetail().model_dump()) from exc
+        if run_id is not None and run_id != scope.run_id:
+            raise HTTPException(status_code=409, detail=GraphSourceGenerationChangedDetail().model_dump())
         sources = await scope.neo4j.get_entity_sources(
             scope.graph_repo_id, graph_run_id, entity_id, limit=limit, offset=offset
         )

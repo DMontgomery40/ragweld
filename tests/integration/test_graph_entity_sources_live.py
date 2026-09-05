@@ -23,6 +23,75 @@ from tests.service_requirements import require_env
 pytestmark = [pytest.mark.requires_postgres, pytest.mark.requires_neo4j, pytest.mark.asyncio]
 
 
+@pytest.mark.parametrize("manifest_kind", ["legacy", "reused-legacy", "invalid-staging"])
+async def test_entity_sources_require_reindex_for_unscoped_graphs_then_accept_rebuilt_graph(
+    client: AsyncClient, manifest_kind: str,
+) -> None:
+    corpus = f"pytest_graph_sources_upgrade_{uuid4().hex[:8]}"
+    old_run = f"legacy-{corpus}" if manifest_kind == "legacy" else uuid4().hex
+    old_graph = f"__staging__{corpus}__invalid-run" if manifest_kind == "invalid-staging" else corpus
+    run_id = uuid4().hex
+    graph_repo = f"__staging__{corpus}__{run_id}"
+    path = Path(__file__).resolve().parents[1] / "fixtures" / "acceptance_corpus"
+    created = await client.post("/api/corpora", json={"corpus_id": corpus, "name": corpus, "path": str(path)})
+    assert created.status_code in (200, 201), created.text
+    neo = Neo4jClient(require_env("NEO4J_URI"), require_env("NEO4J_USER"), require_env("NEO4J_PASSWORD"))
+    pg = PostgresClient(require_env("POSTGRES_DSN"))
+    await neo.connect()
+    await pg.connect()
+    try:
+        # Startup migration records the existing corpus-keyed graph verbatim;
+        # incremental writes may then reuse that graph under a newer run token.
+        await pg.set_generation(corpus, build_generation(run_id=old_run, qdrant_collection=None, graph_repo_id=old_graph))
+        async with neo._require_driver().session(database=neo.database) as session:
+            await session.run(
+                "CREATE (e:__Entity__ {repo_id: $repo, entity_id: 'tank', name: 'Fuel tank', entity_type: 'Tank'}) "
+                "CREATE (c:Chunk {repo_id: $repo, chunk_id: 'old-mention', file_path: 'tank.md', "
+                "start_line: 1, end_line: 1, text: 'Unscoped tank mention'}) "
+                "CREATE (e)-[:FROM_CHUNK]->(c)",
+                repo=old_graph,
+            )
+        entity = await client.get(f"/api/graph/{corpus}/entity", params={"entity_id": "tank"})
+        assert entity.status_code == 200, entity.text
+        endpoint = f"/api/graph/{corpus}/entity/sources"
+        for params in (
+            {"entity_id": "tank"},
+            {"entity_id": "tank", "run_id": old_run},
+            {"entity_id": "tank", "run_id": "previous-source-page"},
+        ):
+            response = await client.get(endpoint, params=params)
+            assert response.status_code == 409, response.text
+            detail = response.json()["detail"]
+            assert detail["code"] == "graph_source_reindex_required"
+            assert "rebuild" in detail["operator_hint"].lower()
+            assert "sources" not in response.json()
+
+        # The repair uses actual run-scoped entity/link/chunk records; it does
+        # not reinterpret or return the legacy mention as current evidence.
+        async with neo._require_driver().session(database=neo.database) as session:
+            await session.run(
+                "CREATE (e:__Entity__ {repo_id: $repo, run_id: $run, entity_id: 'tank', name: 'Fuel tank', entity_type: 'Tank'}) "
+                "CREATE (c:Chunk {repo_id: $repo, run_id: $run, chunk_id: 'rebuilt-mention', file_path: 'tank.md', "
+                "start_line: 1, end_line: 1, text: 'Generation-scoped tank mention'}) "
+                "CREATE (e)-[:FROM_CHUNK {repo_id: $repo, run_id: $run}]->(c)",
+                repo=graph_repo, run=run_id,
+            )
+        await pg.set_generation(corpus, build_generation(run_id=run_id, qdrant_collection=None, graph_repo_id=graph_repo))
+        rebuilt = await client.get(endpoint, params={"entity_id": "tank"})
+        assert rebuilt.status_code == 200, rebuilt.text
+        assert rebuilt.json()["run_id"] == run_id
+        assert [source["chunk_id"] for source in rebuilt.json()["sources"]] == ["rebuilt-mention"]
+        stale = await client.get(endpoint, params={"entity_id": "tank", "run_id": old_run})
+        assert stale.status_code == 409
+        assert stale.json()["detail"]["code"] == "graph_generation_changed"
+    finally:
+        for scope in (old_graph, graph_repo):
+            await neo.delete_graph(scope)
+        await neo.disconnect()
+        await pg.disconnect()
+        await client.delete(f"/api/corpora/{corpus}")
+
+
 @asynccontextmanager
 async def _hold_source_query_response(uri: str) -> AsyncIterator[tuple[str, asyncio.Event, asyncio.Event]]:
     """Forward real Bolt traffic, pausing source-query responses for a manifest race.

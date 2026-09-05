@@ -31,3 +31,13 @@ class GraphSourceGenerationChangedDetail(BaseModel):
 
 class GraphSourceGenerationChangedResponse(BaseModel):
     detail: GraphSourceGenerationChangedDetail
+
+
+class GraphSourceReindexRequiredDetail(BaseModel):
+    code: Literal["graph_source_reindex_required"] = "graph_source_reindex_required"
+    message: str = "Source navigation requires a graph rebuilt with generation-scoped source links."
+    operator_hint: str = "Open Indexing, review the graph schema if prompted, and rebuild this corpus."
+
+
+class GraphSourceReindexRequiredResponse(BaseModel):
+    detail: GraphSourceReindexRequiredDetail

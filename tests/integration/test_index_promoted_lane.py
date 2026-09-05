@@ -195,6 +195,7 @@ async def test_registered_corpus_without_indexable_files_cannot_promote(
         await pg.disconnect()
 
 
+@pytest.mark.requires_model_gateway
 async def test_index_search_and_delete_on_promoted_lane(
     client: AsyncClient, tmp_path: Path
 ) -> None:

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { getEntitySources } from '@/api/graph';
-import { toDocumentViewError } from '@/api/documents';
+import { getEntitySources, toGraphSourceError, type GraphSourceError } from '@/api/graph';
 import { formatSourceLocation } from '@/components/Documents/sourceLabels';
+import { useSubtab } from '@/hooks/useSubtab';
 import { useDockStore } from '@/stores/useDockStore';
 import type { GraphEntitySourcesResponse } from '@/types/generated';
 
@@ -9,10 +9,11 @@ import type { GraphEntitySourcesResponse } from '@/types/generated';
 export function GraphEntitySources({ corpusId, entityId }: { corpusId: string; entityId: string }) {
   const [page, setPage] = useState<GraphEntitySourcesResponse | null>(null);
   const [pending, setPending] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<GraphSourceError | null>(null);
   const [retryNonce, setRetryNonce] = useState(0);
   const controller = useRef<AbortController | null>(null);
   const openDocument = useDockStore((state) => state.openDocument);
+  const { setSubtab } = useSubtab<string>({ routePath: '/rag', defaultSubtab: 'graph', ensureInUrl: false });
 
   useEffect(() => {
     const abort = new AbortController();
@@ -22,7 +23,7 @@ export function GraphEntitySources({ corpusId, entityId }: { corpusId: string; e
     setError(null);
     getEntitySources(corpusId, entityId, { signal: abort.signal })
       .then((result) => { if (!abort.signal.aborted) setPage(result); })
-      .catch((reason) => { if (!abort.signal.aborted) setError(toDocumentViewError(reason).message); })
+      .catch((reason) => { if (!abort.signal.aborted) setError(toGraphSourceError(reason)); })
       .finally(() => { if (!abort.signal.aborted) setPending(false); });
     return () => controller.current?.abort();
   }, [corpusId, entityId, retryNonce]);
@@ -40,9 +41,9 @@ export function GraphEntitySources({ corpusId, entityId }: { corpusId: string; e
       if (!abort.signal.aborted) setPage({ ...result, sources: [...page.sources, ...result.sources] });
     } catch (reason) {
       if (!abort.signal.aborted) {
-        const failure = toDocumentViewError(reason);
+        const failure = toGraphSourceError(reason);
         if (failure.status === 409) setPage(null);
-        setError(failure.message);
+        setError(failure);
       }
     } finally {
       if (!abort.signal.aborted) setPending(false);
@@ -72,7 +73,15 @@ export function GraphEntitySources({ corpusId, entityId }: { corpusId: string; e
       ))}
       {pending ? <p role="status">Loading source mentions…</p> : null}
       {error ? (
-        <div><p role="alert">{error}</p><button type="button" onClick={() => setRetryNonce((value) => value + 1)}>Reload sources</button></div>
+        <div>
+          <p role="alert">{error.message}</p>
+          {error.operatorHint ? <p>{error.operatorHint}</p> : null}
+          {error.reindexRequired ? (
+            <button type="button" onClick={() => setSubtab('indexing')}>Open Indexing</button>
+          ) : (
+            <button type="button" onClick={() => setRetryNonce((value) => value + 1)}>Reload sources</button>
+          )}
+        </div>
       ) : null}
       {!pending && !error && page?.sources.length === 0 ? <p>No source chunks were recorded for this entity.</p> : null}
       {page?.next_offset != null ? (

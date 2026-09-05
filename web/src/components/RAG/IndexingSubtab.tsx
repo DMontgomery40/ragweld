@@ -7,7 +7,8 @@
  * - No hardcoded model lists (load from /api/models)
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import axios from 'axios';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   useAPI,
@@ -36,7 +37,9 @@ import { NumberField } from '@/components/ui/NumberField';
 import type {
   ChatModelInfo,
   ChatModelsResponse,
+  GraphIndexingConfig,
   GraphSchemaProposal,
+  GraphSchemaProposalFailureResponse,
   IndexRequest,
   IndexRunEvent,
   IndexRunEventPage,
@@ -195,6 +198,7 @@ function parseSkipClasses(raw: string): string[] {
 }
 
 export function IndexingSubtab() {
+  const schemaProposalReasoningId = useId();
   const { api } = useAPI();
   const { config, flushPendingPatches } = useConfig();
   const { capabilities: runtimeCapabilities } = useRuntimeCapabilities();
@@ -263,7 +267,8 @@ export function IndexingSubtab() {
   const [indexEstimate, setIndexEstimate] = useState<ReadyIndexEstimate | null>(null);
   const [graphSchemaProposal, setGraphSchemaProposal] = useState<GraphSchemaProposal | null>(null);
   const [graphSchemaLoading, setGraphSchemaLoading] = useState(false);
-  const [graphSchemaError, setGraphSchemaError] = useState<string | null>(null);
+  const [graphSchemaError, setGraphSchemaError] = useState<{ message: string; operatorHint: string } | null>(null);
+  const graphSchemaRequestRef = useRef<AbortController | null>(null);
   const [graphOverrideReason, setGraphOverrideReason] = useState('');
   const [estimateLoading, setEstimateLoading] = useState(false);
   const [estimateWarmup, setEstimateWarmup] = useState('');
@@ -380,6 +385,15 @@ export function IndexingSubtab() {
     'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
   >('graph_indexing.semantic_kg_reasoning_effort', 'medium');
   const [semanticKgTimeoutS, setSemanticKgTimeoutS] = useConfigField<number>('graph_indexing.semantic_kg_llm_timeout_s', 90);
+  const [schemaProposalReasoningEffort, setSchemaProposalReasoningEffort] = useConfigField<
+    NonNullable<GraphIndexingConfig['schema_proposal_reasoning_effort']>
+  >('graph_indexing.schema_proposal_reasoning_effort', 'low');
+  const [schemaProposalTimeoutS, setSchemaProposalTimeoutS] = useConfigField<number>(
+    'graph_indexing.schema_proposal_timeout_s', 60,
+  );
+  const [schemaProposalMaxOutputTokens, setSchemaProposalMaxOutputTokens] = useConfigField<number>(
+    'graph_indexing.schema_proposal_max_output_tokens', 16384,
+  );
   const [astContainsWeight, setAstContainsWeight] = useConfigField<number>('graph_indexing.ast_contains_weight', 1);
   const [astInheritsWeight, setAstInheritsWeight] = useConfigField<number>('graph_indexing.ast_inherits_weight', 1);
   const [astImportsWeight, setAstImportsWeight] = useConfigField<number>('graph_indexing.ast_imports_weight', 1);
@@ -551,20 +565,24 @@ export function IndexingSubtab() {
       .join(' + ');
   }, [indexEstimate]);
 
+  // Invalidate displayed and in-flight proposals when their sampling/configuration
+  // context changes. The API independently validates the authoritative fingerprint.
+  const graphSchemaContextKey = JSON.stringify([
+    activeRepo, effectivePath, graphCorpusIsInternal,
+    config?.graph_indexing, config?.chunking, config?.tokenization, config?.indexing,
+  ]);
   useEffect(() => {
+    graphSchemaRequestRef.current?.abort();
+    graphSchemaRequestRef.current = null;
     setIndexEstimate(null);
     setGraphSchemaProposal(null);
     setGraphSchemaError(null);
-  }, [
-    activeRepo,
-    buildCodeGraph,
-    effectivePath,
-    graphIndexingEnabled,
-    semanticKgLlmModel,
-    semanticKgMaxChunks,
-    semanticKgReasoningEffort,
-    semanticKgTimeoutS,
-  ]);
+    setGraphSchemaLoading(false);
+    return () => {
+      graphSchemaRequestRef.current?.abort();
+      graphSchemaRequestRef.current = null;
+    };
+  }, [graphSchemaContextKey]);
 
   useEffect(() => {
     activeRepoRef.current = String(activeRepo || '').trim();
@@ -1072,27 +1090,38 @@ export function IndexingSubtab() {
   const handleGenerateGraphSchema = useCallback(async () => {
     const rid = String(activeRepo || '').trim();
     if (!rid || !semanticGraphActive) return;
+    graphSchemaRequestRef.current?.abort();
+    const controller = new AbortController();
+    graphSchemaRequestRef.current = controller;
     setGraphSchemaLoading(true);
     setGraphSchemaError(null);
     try {
       await flushPendingPatches();
-      const response = await fetch(api(`index/${encodeURIComponent(rid)}/graph-schema/proposal`), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ force_refresh: false }),
-      });
-      if (!response.ok) {
-        const text = await response.text().catch(() => '');
-        throw new Error(text || `Schema proposal failed (${response.status})`);
-      }
-      setGraphSchemaProposal((await response.json()) as GraphSchemaProposal);
+      if (controller.signal.aborted || graphSchemaRequestRef.current !== controller) return;
+      const proposal = await indexingApi.proposeGraphSchema(
+        rid,
+        { force_refresh: false },
+        { signal: controller.signal, timeoutMs: (schemaProposalTimeoutS + 10) * 1000 },
+      );
+      if (controller.signal.aborted || graphSchemaRequestRef.current !== controller) return;
+      setGraphSchemaProposal(proposal);
     } catch (error) {
+      if (controller.signal.aborted || graphSchemaRequestRef.current !== controller) return;
+      const hint = axios.isAxiosError<GraphSchemaProposalFailureResponse>(error)
+        ? error.response?.data?.detail?.operator_hint
+        : undefined;
       setGraphSchemaProposal(null);
-      setGraphSchemaError(errorDetail(error));
+      setGraphSchemaError({
+        message: errorDetail(error),
+        operatorHint: typeof hint === 'string' ? hint : '',
+      });
     } finally {
-      setGraphSchemaLoading(false);
+      if (graphSchemaRequestRef.current === controller) {
+        graphSchemaRequestRef.current = null;
+        setGraphSchemaLoading(false);
+      }
     }
-  }, [activeRepo, api, flushPendingPatches, semanticGraphActive]);
+  }, [activeRepo, flushPendingPatches, schemaProposalTimeoutS, semanticGraphActive]);
 
   const handleStartIndex = useCallback(async (requestedGraphOverrideReason?: string) => {
     const rid = String(activeRepo || '').trim();
@@ -3589,6 +3618,47 @@ export function IndexingSubtab() {
                       gap: 10,
                     }}
                   >
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+                      <div className="input-group">
+                        <label htmlFor={schemaProposalReasoningId}>Proposal reasoning effort <TooltipIcon name="SCHEMA_PROPOSAL_REASONING_EFFORT" /></label>
+                        <select
+                          id={schemaProposalReasoningId}
+                          data-testid="schema-proposal-reasoning-effort"
+                          aria-describedby={`${schemaProposalReasoningId}-help`}
+                          value={schemaProposalReasoningEffort}
+                          onChange={(event) => setSchemaProposalReasoningEffort(event.target.value as typeof schemaProposalReasoningEffort)}
+                        >
+                          {['minimal', 'low', 'medium', 'high', 'xhigh'].map((effort) => (
+                            <option key={effort} value={effort}>{effort}</option>
+                          ))}
+                        </select>
+                        <div id={`${schemaProposalReasoningId}-help`} style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
+                          Higher effort can take longer. KG extraction uses its own reasoning setting.
+                        </div>
+                      </div>
+                      <div className="input-group">
+                        <label>Proposal deadline (seconds) <TooltipIcon name="SCHEMA_PROPOSAL_TIMEOUT_S" /></label>
+                        <NumberField
+                          data-testid="schema-proposal-timeout"
+                          min={5}
+                          max={80}
+                          step={1}
+                          value={schemaProposalTimeoutS}
+                          onCommit={setSchemaProposalTimeoutS}
+                        />
+                      </div>
+                      <div className="input-group">
+                        <label>Proposal output token limit <TooltipIcon name="SCHEMA_PROPOSAL_MAX_OUTPUT_TOKENS" /></label>
+                        <NumberField
+                          data-testid="schema-proposal-max-output-tokens"
+                          min={256}
+                          max={32768}
+                          step={256}
+                          value={schemaProposalMaxOutputTokens}
+                          onCommit={setSchemaProposalMaxOutputTokens}
+                        />
+                      </div>
+                    </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                       <button
                         type="button"
@@ -3619,7 +3689,8 @@ export function IndexingSubtab() {
 
                     {graphSchemaError ? (
                       <div data-testid="graph-schema-error" role="alert" style={{ color: 'var(--err)', fontSize: 12 }}>
-                        {graphSchemaError}
+                        <div>{graphSchemaError.message}</div>
+                        {graphSchemaError.operatorHint ? <div>{graphSchemaError.operatorHint}</div> : null}
                       </div>
                     ) : null}
 

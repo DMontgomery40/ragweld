@@ -50,7 +50,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
-from server.db.postgres import _coerce_jsonb_dict, _delete_corpus_staging_rows
+from server.db.postgres import _coerce_jsonb_dict, _delete_corpus_data_rows
 from server.indexing.generations import STAGING_REPO_PREFIX, IndexRunFence, staging_repo_id
 from server.models.tribrid_config_model import IndexingConfig
 from server.retrieval.qdrant_store import _COLLECTION_PREFIX, corpus_collection_prefix
@@ -193,14 +193,11 @@ async def reap_stale_test_corpora(
     shares a process-wide asyncpg pool keyed by DSN, and a pool opened from the
     session-fixture context binds to the wrong event loop and breaks every live
     test that reuses the cached pool. A one-shot raw connection (the same shape
-    ``probe_postgres`` uses) touches no shared state. The delete cascade mirrors
-    ``PostgresClient.delete_corpus_with_data`` exactly: the shared staging-row
-    sweep (``_delete_corpus_staging_rows``, called with this raw connection, so
-    the dead runs' ``__staging__<corpus>__<run>`` rows go with the corpus), then a
-    Postgres-only, Neo4j-free cascade over every table keyed by ``repo_id``
-    (never ``DELETE /api/corpora``, which needs Neo4j credentials the test
-    process may lack). ``tests/unit/test_corpus_reaper_cascade_parity.py`` pins
-    the two cascades to each other step for step.
+    ``probe_postgres`` uses) touches no shared state. Both this reaper and
+    ``PostgresClient.delete_corpus_with_data`` use the same raw-connection cleanup
+    primitive for staging and exact-id rows, within their own transactions.
+    Fresh control schemas and full/upgraded schemas follow the same ownership
+    inventory. No external store is required for this Postgres cleanup.
     """
     import asyncpg
 
@@ -262,7 +259,8 @@ async def reap_stale_test_corpora(
                     continue
                 freshest_staging = _row_created_at(
                     await conn.fetchval(
-                        "SELECT max(created_at) FROM corpora WHERE starts_with(repo_id, $1);",
+                        "SELECT max(created_at) FROM corpora WHERE starts_with(repo_id, $1) "
+                        "AND position('__' in substr(repo_id, length($1) + 1)) = 0;",
                         staging_repo_id(repo_id, ""),
                     )
                 )
@@ -270,13 +268,7 @@ async def reap_stale_test_corpora(
                     seconds=max_age_seconds
                 ):
                     continue
-                await _delete_corpus_staging_rows(conn, repo_id)
-                await conn.execute("DELETE FROM chunk_summaries_last_build WHERE repo_id = $1;", repo_id)
-                await conn.execute("DELETE FROM chunk_summaries WHERE repo_id = $1;", repo_id)
-                await conn.execute("DELETE FROM documents WHERE repo_id = $1;", repo_id)
-                await conn.execute("DELETE FROM chunks WHERE repo_id = $1;", repo_id)
-                await conn.execute("DELETE FROM corpus_configs WHERE repo_id = $1;", repo_id)
-                await conn.execute("DELETE FROM corpora WHERE repo_id = $1;", repo_id)
+                await _delete_corpus_data_rows(conn, repo_id)
             reaped.append(repo_id)
     finally:
         await conn.close()

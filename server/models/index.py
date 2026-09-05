@@ -165,6 +165,20 @@ class GraphSchemaProposalRequest(BaseModel):
     force_refresh: bool = False
 
 
+class GraphSchemaProposalFailureDetail(BaseModel):
+    code: Literal[
+        "graph_schema_generation_failed", "graph_schema_deadline_exceeded", "graph_schema_context_changed"
+    ]
+    corpus_id: str
+    model_alias: str
+    message: str
+    operator_hint: str
+
+
+class GraphSchemaProposalFailureResponse(BaseModel):
+    detail: GraphSchemaProposalFailureDetail
+
+
 class GraphExtractionTelemetry(BaseModel):
     selected_chunks: int = Field(ge=0)
     attempted_chunks: int = Field(ge=0)
@@ -828,6 +842,8 @@ __all__ = [
     "GraphSchemaPolicyConflictDetail",
     "GraphSchemaPolicyConflictResponse",
     "GraphSchemaProposal",
+    "GraphSchemaProposalFailureDetail",
+    "GraphSchemaProposalFailureResponse",
     "GraphSchemaProposalRequest",
     "GraphSchemaSample",
     "IndexFenceCorruptDetail",

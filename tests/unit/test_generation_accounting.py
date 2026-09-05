@@ -143,7 +143,8 @@ async def test_generation_preserves_reported_cost_and_counts_tokens_once(account
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["usage", "mixed", "failed", "reasoning"])
-async def test_benchmark_persists_each_call_and_aggregates_without_last_writer_winning(accounting_config: TriBridConfig, tmp_path: Path, mode: str) -> None:
+@pytest.mark.parametrize("corpus_scoped", [False, True])
+async def test_benchmark_persists_each_call_and_aggregates_without_last_writer_winning(accounting_config: TriBridConfig, tmp_path: Path, mode: str, corpus_scoped: bool) -> None:
     cfg = accounting_config
     cfg.chat.benchmark.save_results = True
     cfg.chat.benchmark.results_path = str(tmp_path)
@@ -152,13 +153,24 @@ async def test_benchmark_persists_each_call_and_aggregates_without_last_writer_w
     try:
         with accounting_gateway(mode) as base_url, start_request_observation(config=cfg, route_name="benchmark", path="/api/benchmark/run", method="POST") as obs:
             os.environ.update(LITELLM_API_KEY="accounting-key", LITELLM_BASE_URL=base_url)
-            result = await run_benchmark(prompt=QUESTION, models=["openai.gpt-5.6-luna", "openai.gpt-5.4-mini"], config=cfg)
+            result = await run_benchmark(prompt=QUESTION, models=["openai.gpt-5.6-luna", "openai.gpt-5.4-mini"], config=cfg, repo_id="accounting-corpus" if corpus_scoped else None)
             assert obs is not None
             first, second = result.results
             assert first.usage is not None and first.usage["total_tokens"] == 120
             assert first.cost_summary is not None and first.cost_summary.estimated_cost_usd == COST
             aggregate = result.cost_summary
-            assert aggregate is not None and obs.cost_summary == aggregate
+            assert aggregate is not None
+            assert result.cost_scope == "generation"
+            assert "Answer generation only" in str(aggregate.detail)
+            if corpus_scoped:
+                assert obs.cost_summary is not None
+                assert obs.cost_summary.estimated_cost_usd is None
+                assert obs.cost_summary.total_tokens is None
+                assert obs.cost_summary.cost_source == "unavailable"
+                assert not obs.cost_summary.authoritative
+                assert "shared retrieval lacks complete accounting" in str(obs.cost_summary.detail)
+            else:
+                assert obs.cost_summary == aggregate
             if mode == "failed":
                 assert second.error and second.cost_summary is None and second.usage is None
                 assert aggregate.estimated_cost_usd is None and aggregate.cost_source == "unavailable"
@@ -171,6 +183,7 @@ async def test_benchmark_persists_each_call_and_aggregates_without_last_writer_w
                 assert aggregate.cost_source == ("catalog" if mode == "mixed" else "provider")
                 assert bool(second.error) == (mode == "reasoning")
             saved = json.loads((tmp_path / f"{result.run_id}.json").read_text())
+            assert saved["cost_scope"] == "generation"
             assert saved["cost_summary"] == aggregate.model_dump(mode="json")
             assert saved["results"][0]["usage"]["total_tokens"] == 120
     finally:

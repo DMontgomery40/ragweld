@@ -2090,6 +2090,13 @@
             "description": "Optional corpus identifier when benchmarking within a corpus scope.",
             "title": "Corpus Id"
           },
+          "cost_scope": {
+            "const": "generation",
+            "default": "generation",
+            "description": "This run's cost summary covers answer generation only; shared retrieval is excluded.",
+            "title": "Cost Scope",
+            "type": "string"
+          },
           "cost_summary": {
             "anyOf": [
               {
@@ -2099,7 +2106,7 @@
                 "type": "null"
               }
             ],
-            "description": "Sum of all model-call costs, unavailable if any call lacks accounting; null on older saved runs."
+            "description": "Sum of answer-generation costs only, excluding shared retrieval; unavailable if any generation call lacks accounting; null on older saved runs."
           },
           "ended_at_ms": {
             "default": 0,
@@ -8398,6 +8405,35 @@
             "title": "Enabled",
             "type": "boolean"
           },
+          "schema_proposal_max_output_tokens": {
+            "default": 16384,
+            "description": "Maximum output tokens for one schema proposal; incomplete responses fail without approval",
+            "maximum": 32768.0,
+            "minimum": 256.0,
+            "title": "Schema Proposal Max Output Tokens",
+            "type": "integer"
+          },
+          "schema_proposal_reasoning_effort": {
+            "default": "low",
+            "description": "Reasoning effort for schema proposals, independent of semantic KG extraction effort",
+            "enum": [
+              "minimal",
+              "low",
+              "medium",
+              "high",
+              "xhigh"
+            ],
+            "title": "Schema Proposal Reasoning Effort",
+            "type": "string"
+          },
+          "schema_proposal_timeout_s": {
+            "default": 60,
+            "description": "Total seconds allowed for schema proposal sampling and generation, below the public HTTP deadline",
+            "maximum": 80.0,
+            "minimum": 5.0,
+            "title": "Schema Proposal Timeout S",
+            "type": "integer"
+          },
           "semantic_kg_llm_model": {
             "default": "",
             "description": "Optional LiteLLM alias for GraphRAG semantic extraction; empty uses the gateway default",
@@ -8654,6 +8690,56 @@
         "title": "GraphSchemaProposal",
         "type": "object"
       },
+      "GraphSchemaProposalFailureDetail": {
+        "properties": {
+          "code": {
+            "enum": [
+              "graph_schema_generation_failed",
+              "graph_schema_deadline_exceeded",
+              "graph_schema_context_changed"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "corpus_id": {
+            "title": "Corpus Id",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "model_alias": {
+            "title": "Model Alias",
+            "type": "string"
+          },
+          "operator_hint": {
+            "title": "Operator Hint",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "corpus_id",
+          "model_alias",
+          "message",
+          "operator_hint"
+        ],
+        "title": "GraphSchemaProposalFailureDetail",
+        "type": "object"
+      },
+      "GraphSchemaProposalFailureResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/GraphSchemaProposalFailureDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "GraphSchemaProposalFailureResponse",
+        "type": "object"
+      },
       "GraphSchemaProposalRequest": {
         "properties": {
           "force_refresh": {
@@ -8781,6 +8867,40 @@
           "detail"
         ],
         "title": "GraphSourceGenerationChangedResponse",
+        "type": "object"
+      },
+      "GraphSourceReindexRequiredDetail": {
+        "properties": {
+          "code": {
+            "const": "graph_source_reindex_required",
+            "default": "graph_source_reindex_required",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "default": "Source navigation requires a graph rebuilt with generation-scoped source links.",
+            "title": "Message",
+            "type": "string"
+          },
+          "operator_hint": {
+            "default": "Open Indexing, review the graph schema if prompted, and rebuild this corpus.",
+            "title": "Operator Hint",
+            "type": "string"
+          }
+        },
+        "title": "GraphSourceReindexRequiredDetail",
+        "type": "object"
+      },
+      "GraphSourceReindexRequiredResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/GraphSourceReindexRequiredDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "GraphSourceReindexRequiredResponse",
         "type": "object"
       },
       "GraphStats": {
@@ -25959,7 +26079,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/GraphSourceGenerationChangedResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/GraphSourceGenerationChangedResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/GraphSourceReindexRequiredResponse"
+                    }
+                  ],
+                  "title": "Response 409 Get Entity Sources Api Graph  Corpus Id  Entity Sources Get"
                 }
               }
             },
@@ -26730,7 +26858,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/GraphSchemaPolicyConflictResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/GraphSchemaPolicyConflictResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/GraphSchemaProposalFailureResponse"
+                    }
+                  ],
+                  "title": "Response 409 Propose Graph Schema Api Index  Corpus Id  Graph Schema Proposal Post"
                 }
               }
             },
@@ -26745,6 +26881,26 @@
               }
             },
             "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GraphSchemaProposalFailureResponse"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GraphSchemaProposalFailureResponse"
+                }
+              }
+            },
+            "description": "Gateway Timeout"
           }
         },
         "summary": "Propose Graph Schema",

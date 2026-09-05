@@ -90,6 +90,7 @@ from server.indexing.graphrag_pipeline import (
     write_semantic_file_graph,
 )
 from server.indexing.graphrag_schema import (
+    GraphSchemaProposalError,
     derive_graph_schema_proposal,
     schema_proposal_prompt,
     select_schema_chunks,
@@ -114,6 +115,8 @@ from server.models.index import (
     GraphSchemaPolicyConflictDetail,
     GraphSchemaPolicyConflictResponse,
     GraphSchemaProposal,
+    GraphSchemaProposalFailureDetail,
+    GraphSchemaProposalFailureResponse,
     GraphSchemaProposalRequest,
     IndexDeletionIncompleteResponse,
     IndexedDocumentRecord,
@@ -4156,6 +4159,8 @@ async def graph_schema_input_fingerprint(
         "files": await asyncio.to_thread(_inventory),
         "model_alias": _semantic_kg_model_override(cfg),
         "reasoning_effort": cfg.graph_indexing.semantic_kg_reasoning_effort,
+        "schema_proposal_reasoning_effort": cfg.graph_indexing.schema_proposal_reasoning_effort,
+        "max_output_tokens": cfg.graph_indexing.schema_proposal_max_output_tokens,
         "chunking": cfg.chunking.model_dump(mode="json"),
         "tokenization": cfg.tokenization.model_dump(mode="json"),
         "parquet_extraction": cfg.indexing.model_dump(mode="json", include={
@@ -4250,8 +4255,10 @@ async def build_proposal_from_corpus(
         route_base_url=str(route.base_url or "").strip(),
         route_api_key=str(route.api_key or "").strip(),
         route_upstream=gateway_upstream_for_alias(str(route.model or "").strip()),
-        reasoning_effort=str(cfg.graph_indexing.semantic_kg_reasoning_effort),
+        reasoning_effort=str(cfg.graph_indexing.schema_proposal_reasoning_effort),
         input_fingerprint=fingerprint,
+        timeout_s=float(cfg.graph_indexing.schema_proposal_timeout_s),
+        max_output_tokens=int(cfg.graph_indexing.schema_proposal_max_output_tokens),
     )
 
 
@@ -4313,7 +4320,11 @@ def _extract_schema_sample_text_for_path(path: Path, cfg: TriBridConfig) -> str:
 @router.post(
     "/index/{corpus_id}/graph-schema/proposal",
     response_model=GraphSchemaProposal,
-    responses={409: {"model": GraphSchemaPolicyConflictResponse}},
+    responses={
+        409: {"model": GraphSchemaPolicyConflictResponse | GraphSchemaProposalFailureResponse},
+        502: {"model": GraphSchemaProposalFailureResponse},
+        504: {"model": GraphSchemaProposalFailureResponse},
+    },
 )
 async def propose_graph_schema(
     corpus_id: str, request: GraphSchemaProposalRequest
@@ -4337,7 +4348,51 @@ async def propose_graph_schema(
         if existing and not request.force_refresh and proposal_matches(existing, fingerprint, cfg):
             return existing
         try:
-            proposal = await build_proposal_from_corpus(corpus, cfg, fingerprint=fingerprint)
+            async with asyncio.timeout(cfg.graph_indexing.schema_proposal_timeout_s):
+                proposal = await build_proposal_from_corpus(corpus, cfg, fingerprint=fingerprint)
+                # Generation can outlive a settings/path change. Recheck before any
+                # write. This is not a transaction across config files and Postgres;
+                # start_index still validates the current fingerprint before use.
+                current_corpus, current_cfg = await load_corpus_and_scoped_config(corpus_id)
+                current_meta = current_corpus.get("meta") or {}
+                current_policy = resolve_graph_policy(
+                    internal=bool(current_meta.get("system_kind")),
+                    enabled=bool(current_cfg.graph_indexing.enabled),
+                    build_code_graph=bool(current_cfg.graph_indexing.build_code_graph),
+                )
+                if (
+                    current_policy != "semantic"
+                    or await graph_schema_input_fingerprint(current_corpus, current_cfg) != fingerprint
+                ):
+                    changed_detail = GraphSchemaProposalFailureDetail(
+                        code="graph_schema_context_changed", corpus_id=corpus_id,
+                        model_alias=proposal.model_alias,
+                        message="Corpus sources or schema proposal settings changed during generation.",
+                        operator_hint="Generate a new proposal for the current corpus and settings.",
+                    )
+                    raise HTTPException(status_code=409, detail=changed_detail.model_dump(mode="json"))
+        except (TimeoutError, GraphSchemaProposalError) as exc:
+            timed_out = isinstance(exc, TimeoutError) or exc.code == "graph_schema_deadline_exceeded"
+            failure_detail = GraphSchemaProposalFailureDetail(
+                code="graph_schema_deadline_exceeded" if timed_out else "graph_schema_generation_failed",
+                corpus_id=corpus_id, model_alias=_semantic_kg_model_override(cfg),
+                message=(
+                    "Schema proposal exceeded its total time budget."
+                    if timed_out else "The model gateway did not return a complete, valid schema proposal."
+                ),
+                operator_hint=(
+                    "Review the proposal time and output budgets and gateway status before generating again. "
+                    "Any existing proposal and approval were preserved."
+                ),
+            )
+            if isinstance(exc, GraphSchemaProposalError):
+                logger.warning(
+                    "Schema proposal failed for corpus %s (%s); usage=%s gateway_cost_usd=%s",
+                    corpus_id, exc.code,
+                    exc.usage.model_dump(mode="json") if exc.usage else None,
+                    exc.gateway_cost_usd,
+                )
+            raise HTTPException(status_code=504 if timed_out else 502, detail=failure_detail.model_dump(mode="json")) from exc
         except ValueError as exc:
             # The proposer answered, but the domain rules rejected the shape (no node
             # types, no relationships, a forbidden label ...). That is a review outcome

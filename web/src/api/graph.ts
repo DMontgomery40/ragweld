@@ -1,5 +1,17 @@
+import axios from 'axios';
 import { apiClient } from '@/api/client';
-import type { GraphEntitySourcesResponse } from '@/types/generated';
+import { toDocumentViewError, type DocumentViewError } from '@/api/documents';
+import type { GraphEntitySourcesResponse, GraphSourceReindexRequiredResponse } from '@/types/generated';
+
+/** Local source-panel recovery state derived from the typed API failure. */
+export type GraphSourceError = DocumentViewError & { reindexRequired: boolean };
+
+export function toGraphSourceError(reason: unknown): GraphSourceError {
+  const reindexRequired = axios.isAxiosError<GraphSourceReindexRequiredResponse>(reason)
+    && reason.response?.status === 409
+    && reason.response.data?.detail?.code === 'graph_source_reindex_required';
+  return { ...toDocumentViewError(reason), reindexRequired };
+}
 
 export async function getEntitySources(
   corpusId: string,

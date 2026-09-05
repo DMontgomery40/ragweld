@@ -5,7 +5,7 @@ import { API_BASE, activateCorpusInBrowser } from './corpus_fixture';
 
 const CORPUS = 'nasa-apollo-11';
 
-function sourceFixture(operation: 'create' | 'advance' | 'delete', fixture?: Record<string, string>): string {
+function sourceFixture(operation: 'create' | 'advance' | 'legacy' | 'delete', fixture?: Record<string, string>): string {
   return execFileSync(process.env.RAGWELD_TEST_PYTHON || '.venv/bin/python', [
     'web/tests/e2e/exhaustive/graph_sources_fixture.py', operation, API_BASE,
     ...(fixture ? [JSON.stringify(fixture)] : []),
@@ -62,6 +62,54 @@ test('Graph Explorer opens the actual entity mention in the document viewer', as
   await expect(page.getByTestId('graph-entity-sources')).toHaveCount(1);
   await expect(page.getByTestId('graph-relationships-table')).toContainText('Edge-specific evidence not recorded');
 });
+
+for (const { phase, docked } of [
+  { phase: 'initial', docked: false },
+  { phase: 'continuation', docked: false },
+  { phase: 'initial', docked: true },
+] as const) {
+  test(`legacy source navigation offers the indexing repair during ${phase} lookup${docked ? ' in the dock' : ''}`, async ({ page, baseURL }, testInfo) => {
+    const fixture = JSON.parse(sourceFixture('create')) as Record<string, string>;
+    try {
+      if (phase === 'initial') sourceFixture('legacy', fixture);
+      await activateCorpusInBrowser(page, fixture.corpus);
+      await Promise.all([
+        page.waitForResponse((response) => new URL(response.url()).pathname === `/api/graph/${fixture.corpus}/subgraph`),
+        page.goto(new URL(`rag?subtab=graph&corpus=${fixture.corpus}`, baseURL).toString()),
+      ]);
+      if (docked) {
+        await page.getByTestId('dock-current').click();
+        await page.goto(new URL(`start?corpus=${fixture.corpus}`, baseURL).toString());
+        await expect.poll(async () => (await page.getByTestId('dock-native').boundingBox())!.width).toBe(360);
+      }
+      const mainUrl = page.url();
+      const surface = docked ? page.getByTestId('dock-native') : page;
+      await surface.getByTestId(`graph-entity-${fixture.entity}`).click();
+      const mentions = surface.getByTestId('graph-entity-sources');
+      if (phase === 'continuation') {
+        await expect(mentions.getByTestId('graph-source-open')).toHaveCount(25);
+        sourceFixture('legacy', fixture);
+        await mentions.getByRole('button', { name: 'Load more sources' }).click();
+      }
+      await expect(mentions.getByRole('alert')).toContainText('graph rebuilt');
+      await expect(mentions).toContainText('review the graph schema if prompted');
+      await expect(mentions.getByTestId('graph-source-open')).toHaveCount(0);
+      await expect(mentions.getByRole('button', { name: 'Reload sources' })).toHaveCount(0);
+      await expect(mentions.getByRole('button', { name: 'Load more sources' })).toHaveCount(0);
+      await page.screenshot({ path: testInfo.outputPath('legacy-source-repair.png') });
+      await mentions.getByRole('button', { name: 'Open Indexing' }).click();
+      if (docked) {
+        expect(page.url()).toBe(mainUrl);
+        await expect(page.getByTestId('dock-title')).toContainText('RAG — Indexing');
+      } else {
+        await expect(page).toHaveURL(new RegExp(`subtab=indexing&corpus=${fixture.corpus}`));
+      }
+      await expect(surface.getByTestId('force-reindex-toggle')).toBeVisible();
+    } finally {
+      sourceFixture('delete', fixture);
+    }
+  });
+}
 
 test('a changed manifest removes stale source actions until the operator reloads', async ({ page, baseURL }) => {
   const fixture = JSON.parse(sourceFixture('create')) as Record<string, string>;
