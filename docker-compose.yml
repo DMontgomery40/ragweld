@@ -258,7 +258,10 @@ services:
       - LITELLM_BASE_URL=http://litellm:4000/v1
       - LITELLM_API_KEY=${LITELLM_API_KEY:-sk-ragweld-local}
       - VLLM_BASE_URL=http://host.docker.internal:58080/v1
+      - OPENAI_API_KEY=
       - OPENROUTER_API_KEY=
+      - ANTHROPIC_API_KEY=
+      - GOOGLE_API_KEY=
     env_file:
       - .env
     extra_hosts:

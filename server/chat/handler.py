@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import time
+import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import datetime
@@ -36,6 +37,7 @@ from server.models.tribrid_config_model import (
     WebGroundingMetadata,
 )
 from server.observability.costing import usage_total_tokens
+from server.observability.run_census import RunIdentity
 from server.retrieval.cache import CacheMode, SemanticCacheService
 from server.services.conversation_store import Conversation, get_conversation_store
 from server.services.rag import FusionProtocol
@@ -285,6 +287,7 @@ async def _fusion_search_with_cache(
     top_k: int | None,
     cache_mode: str | CacheMode,
     cache_namespace: str,
+    billing_session_id: str,
 ) -> list[ChunkMatch]:
     return await fusion.search(
         corpus_ids,
@@ -296,6 +299,7 @@ async def _fusion_search_with_cache(
         top_k=top_k,
         cache_mode=_normalize_cache_mode(cache_mode),
         cache_namespace=str(cache_namespace or "search"),
+        billing_session_id=billing_session_id,
     )
 
 
@@ -305,8 +309,10 @@ async def chat_once(
     config: TriBridConfig,
     fusion: FusionProtocol,
     conversation: Conversation,
+    billing_session_id: str | None = None,
 ) -> ChatOnceResult:
     """Non-streaming chat handler."""
+    billing_session_id = billing_session_id or str(uuid.uuid4())
 
     corpus_ids = resolve_sources(request.sources)
     request_cache_mode = _normalize_cache_mode(request.cache_mode)
@@ -333,6 +339,7 @@ async def chat_once(
             top_k=request.top_k,
             cache_mode=request_cache_mode,
             cache_namespace="chat_retrieval",
+            billing_session_id=billing_session_id,
         )
         rag_debug = getattr(fusion, "last_debug", None) or {}
 
@@ -368,6 +375,7 @@ async def chat_once(
                     top_k=top_k,
                     cache_mode=request_cache_mode,
                     cache_namespace="chat_recall_retrieval",
+                    billing_session_id=billing_session_id,
                 )
                 recall_debug = getattr(fusion, "last_debug", None) or {}
                 if ovr.recency_weight is not None:
@@ -447,7 +455,9 @@ async def chat_once(
     temperature = (
         float(config.chat.temperature_no_retrieval) if not corpus_ids else float(config.chat.temperature)
     )
-    cache_service = SemanticCacheService(config)
+    cache_service = SemanticCacheService(
+        config, identity=RunIdentity(billing_session_id, corpus_ids[0] if corpus_ids else "global", "cache_embeddings"),
+    )
     cache_scope_key = SemanticCacheService.scope_key(corpus_ids or ["direct_chat"])
     cache_allowed = not request.web_enabled and not (
         bool(request.images) and config.semantic_cache.bypass_if_images
@@ -682,6 +692,7 @@ async def chat_stream(
             top_k=request.top_k,
             cache_mode=request_cache_mode,
             cache_namespace="chat_retrieval",
+            billing_session_id=run_id,
         )
         rag_debug = getattr(fusion, "last_debug", None) or {}
 
@@ -716,6 +727,7 @@ async def chat_stream(
                     top_k=top_k,
                     cache_mode=request_cache_mode,
                     cache_namespace="chat_recall_retrieval",
+                    billing_session_id=run_id,
                 )
                 recall_debug = getattr(fusion, "last_debug", None) or {}
                 if ovr.recency_weight is not None:
@@ -797,7 +809,9 @@ async def chat_stream(
     temperature = (
         float(config.chat.temperature_no_retrieval) if not corpus_ids else float(config.chat.temperature)
     )
-    cache_service = SemanticCacheService(config)
+    cache_service = SemanticCacheService(
+        config, identity=RunIdentity(run_id, corpus_ids[0] if corpus_ids else "global", "cache_embeddings"),
+    )
     cache_scope_key = SemanticCacheService.scope_key(corpus_ids or ["direct_chat"])
     cache_allowed = not request.web_enabled and not (
         bool(request.images) and config.semantic_cache.bypass_if_images

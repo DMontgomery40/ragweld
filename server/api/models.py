@@ -18,6 +18,7 @@ from server.gateway_catalog import (
     LITELLM_CONFIG_PATH as _DEFAULT_LITELLM_CONFIG_PATH,
 )
 from server.gateway_catalog import (
+    OPENAI_EMBEDDING_MODELS,
     OPENROUTER_BASE_URL,
     GatewayCatalogError,
     gateway_alias_for_openrouter_id,
@@ -278,18 +279,32 @@ async def upsert_model(payload: ModelCatalogUpsertRequest) -> ModelCatalogUpsert
 
         existing_components = _normalized_components((existing_entry or {}).get("components"))
         components = _family_components(payload.family, existing_components)
-        base_url = (payload.base_url or "").strip() or str((existing_entry or {}).get("base_url") or "").strip()
-        if not base_url:
-            base_url = _provider_existing_base_url(catalog, provider) or ""
-        if not base_url:
-            # Prefer a provider-default URL for newly added models.
-            base_url = _provider_default_base_url(provider) or ""
+        route_fields = gateway_fields
+        native_embedding = components == ["EMB"] and provider == "openai" and model in OPENAI_EMBEDDING_MODELS
+        if native_embedding:
+            if (payload.base_url or "").strip():
+                raise HTTPException(status_code=422, detail="Native embedding routes do not accept a provider URL override")
+            # Native EMB and OpenRouter GEN rows can share the provider label.
+            # Their routing contracts must never inherit each other's base URL.
+            base_url = ""
+            route_fields = {"gateway_alias": f"openai.{model}", "gateway_upstream": f"openai/{model}"}
+        else:
+            base_url = (payload.base_url or "").strip() or str((existing_entry or {}).get("base_url") or "").strip()
+            if not base_url:
+                base_url = _provider_existing_base_url(catalog, provider) or ""
+            if not base_url:
+                # Prefer a provider-default URL for newly added models.
+                base_url = _provider_default_base_url(provider) or ""
 
         merged: dict[str, Any] = dict(existing_entry or {})
+        # The request's family selects capability/pricing validation. The
+        # catalog family names the model lineage, so updates preserve it and
+        # new rows derive it from the provider's model slug.
+        model_family = str((existing_entry or {}).get("family") or "").strip() or model.rsplit("/", 1)[-1]
         merged.update(
             {
                 "provider": provider,
-                "family": payload.family if payload.family != "misc" else str((existing_entry or {}).get("family") or "misc"),
+                "family": model_family,
                 "model": model,
                 "components": components,
                 "unit": payload.unit,
@@ -307,7 +322,7 @@ async def upsert_model(payload: ModelCatalogUpsertRequest) -> ModelCatalogUpsert
             merged["base_url"] = base_url
         else:
             merged.pop("base_url", None)
-        merged.update(gateway_fields)
+        merged.update(route_fields)
 
         # Drop nulls so the serialized catalog remains compact and consistent.
         merged = {k: v for k, v in merged.items() if v is not None}

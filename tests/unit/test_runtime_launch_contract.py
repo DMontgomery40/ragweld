@@ -164,6 +164,46 @@ def test_start_check_defaults_backend_bind_to_loopback(tmp_path: Path) -> None:
     assert "--host 127.0.0.1 --port 58112" in output
 
 
+@pytest.mark.parametrize("credential_source", ["inherited", "dotenv"])
+def test_host_launcher_discards_gateway_provider_keys_before_app_launch(tmp_path: Path, credential_source: str) -> None:
+    repo = _materialize_start_sh_repo(tmp_path)
+    provider_keys = ("OPENAI_API_KEY", "OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY")
+    env = {key: "synthetic-upstream-credential" if credential_source == "inherited" else "" for key in provider_keys}
+    env["LITELLM_API_KEY"] = "synthetic-gateway-client"
+    if credential_source == "dotenv":
+        (repo / ".env").write_text(
+            "".join(f"{key}=synthetic-upstream-credential\n" for key in provider_keys), encoding="utf-8",
+        )
+        # No inherited export may shadow the file values being exercised.
+        prelude = "unset " + " ".join(provider_keys) + "; "
+    else:
+        prelude = ""
+    result = _run(
+        "bash", "-c",
+        prelude + "source ./start.sh --check --no-docker --no-backend --no-frontend --no-local-model; "
+        "for key in " + " ".join(provider_keys) + '; do [[ -z "${!key:-}" ]] || exit 91; done; '
+        '[[ "$LITELLM_API_KEY" == synthetic-gateway-client ]]',
+        env=env, cwd=repo,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_direct_app_import_discards_inherited_gateway_provider_keys() -> None:
+    provider_keys = ("OPENAI_API_KEY", "OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY")
+    result = _run(
+        sys.executable, "-c",
+        "import os; import server.main; "
+        f"assert all(key not in os.environ for key in {provider_keys!r}); "
+        "assert os.environ['LITELLM_API_KEY'] == 'synthetic-gateway-client'",
+        env={
+            **{key: "synthetic-upstream-credential" for key in provider_keys},
+            "LITELLM_API_KEY": "synthetic-gateway-client",
+            "RAGWELD_LOAD_DOTENV": "0", "RAGWELD_DISABLE_PROFILING": "1",
+        },
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_start_check_honors_server_host_override_for_backend_bind(tmp_path: Path) -> None:
     repo = _materialize_start_sh_repo(tmp_path)
     result = _run(
@@ -726,7 +766,8 @@ def test_generation_gateway_topology_is_pinned_local_and_has_no_paid_fallback() 
     assert api["depends_on"]["litellm"]["condition"] == "service_healthy"
     assert api["environment"]["LITELLM_BASE_URL"] == "http://litellm:4000/v1"
     assert api["environment"]["VLLM_BASE_URL"] == "http://host.docker.internal:58080/v1"
-    assert api["environment"]["OPENROUTER_API_KEY"] == ""
+    for key in ("OPENAI_API_KEY", "OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY"):
+        assert api["environment"][key] == ""
 
     config_mount = _volume_for_target(litellm, "/app/config.yaml")
     assert config_mount["read_only"] is True
@@ -744,18 +785,25 @@ def test_generation_gateway_topology_is_pinned_local_and_has_no_paid_fallback() 
         "num_retries": 0,
         "max_retries": 0,
     }
-    routed = gateway["model_list"][1:]
+    routed = [row for row in gateway["model_list"] if row["litellm_params"]["model"].startswith("openrouter/")]
     assert len(routed) >= 300
     assert all(row["litellm_params"]["model"].startswith("openrouter/") for row in routed)
     assert all(row["litellm_params"]["api_key"] == "os.environ/OPENROUTER_API_KEY" for row in routed)
     assert all("api_base" not in row["litellm_params"] for row in routed)
+    embedded = [row for row in gateway["model_list"] if row.get("model_info", {}).get("mode") == "embedding"]
+    assert {row["model_name"] for row in embedded} == {
+        "openai.text-embedding-3-small", "openai.text-embedding-3-large",
+    }
+    assert all(row["litellm_params"]["api_key"] == "os.environ/OPENAI_API_KEY" for row in embedded)
+    assert all("api_base" not in row["litellm_params"] for row in embedded)
+    assert len(gateway["model_list"]) == len(routed) + len(embedded) + 1
     assert all(
         row["litellm_params"]["num_retries"] == row["litellm_params"]["max_retries"] == 0
         for row in gateway["model_list"]
     )
     assert "ragweld-openrouter-smoke" not in {row["model_name"] for row in gateway["model_list"]}
 
-    assert "unset OPENROUTER_API_KEY ANTHROPIC_API_KEY GOOGLE_API_KEY" in launcher
+    assert "unset OPENAI_API_KEY OPENROUTER_API_KEY ANTHROPIC_API_KEY GOOGLE_API_KEY" in launcher
     assert "colima start --profile ragweld --vm-type vz --cpu 6 --memory 16" in launcher
     assert gateway["litellm_settings"]["num_retries"] == 0
     assert gateway["litellm_settings"].get("fallbacks", []) == []

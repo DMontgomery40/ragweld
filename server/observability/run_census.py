@@ -12,7 +12,10 @@ from typing import Literal
 import httpx
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
-Lane = Literal["embedding", "semantic_kg", "figure_description", "schema_proposal"]
+Lane = Literal[
+    "embedding", "semantic_kg", "figure_description", "schema_proposal",
+    "index_embeddings", "retrieval_embeddings", "cache_embeddings",
+]
 Outcome = Literal["completed", "failed", "uncertain"]
 
 
@@ -27,8 +30,25 @@ class RunIdentity:
             raise ValueError("Invalid session identity")
         if not 1 <= len(self.corpus_id) <= 256:
             raise ValueError("Invalid corpus identity")
-        if self.lane not in {"embedding", "semantic_kg", "figure_description", "schema_proposal"}:
+        if self.lane not in {"embedding", "semantic_kg", "figure_description", "schema_proposal",
+                            "index_embeddings", "retrieval_embeddings", "cache_embeddings"}:
             raise ValueError("Unsupported cost lane")
+
+
+def native_request_headers(identity: RunIdentity) -> dict[str, str]:
+    """Native request correlation, independent of tracing or durable census coverage."""
+    metadata = json.dumps(
+        {"run_id": identity.session_id, "corpus_id": identity.corpus_id, "lane": identity.lane},
+        separators=(",", ":"), sort_keys=True,
+    )
+    return {
+        "x-litellm-session-id": identity.session_id,
+        # Native trace-id takes precedence over session-id; both name this operation.
+        "x-litellm-trace-id": identity.session_id,
+        "x-litellm-spend-logs-metadata": metadata,
+        "langfuse_session_id": identity.session_id,
+        "langfuse_trace_metadata": metadata,
+    }
 
 
 @dataclass(frozen=True)
@@ -224,24 +244,7 @@ class RunCensusScope:
     def apply_headers(self, request: httpx.Request) -> None:
         if "traceparent" not in request.headers:
             request.headers.update(self._trace_headers)
-        request.headers["x-litellm-session-id"] = self.identity.session_id
-        # LiteLLM gives this header precedence over session-id. Preserve standard
-        # W3C traceparent, but a competing native trace id must not steal this run.
-        request.headers["x-litellm-trace-id"] = self.identity.session_id
-        metadata = json.dumps(
-            {
-                "run_id": self.identity.session_id,
-                "corpus_id": self.identity.corpus_id,
-                "lane": self.identity.lane,
-            },
-            separators=(",", ":"),
-            sort_keys=True,
-        )
-        request.headers["x-litellm-spend-logs-metadata"] = metadata
-        # Native spend correlation and Langfuse session grouping are different
-        # pinned LiteLLM contracts. W3C traceparent joins the actual spans.
-        request.headers["langfuse_session_id"] = self.identity.session_id
-        request.headers["langfuse_trace_metadata"] = metadata
+        request.headers.update(native_request_headers(self.identity))
 
 
 class ProducerLease:

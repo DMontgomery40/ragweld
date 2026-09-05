@@ -34,6 +34,7 @@ from server.chat.source_router import resolve_sources
 from server.db.postgres import PostgresClient
 from server.gateway_catalog import gateway_rows_by_alias_cached
 from server.indexing.embedder import Embedder, configure_postgres_embedding_cache_backend
+from server.indexing.embedding_gateway import embedding_gateway_for_config
 from server.models.chat import ChatRequest, ChatResponse, Message
 from server.models.tribrid_config_model import (
     ChatModelInfo,
@@ -49,6 +50,7 @@ from server.models.tribrid_config_model import (
     TriBridConfig,
     WebGroundingMetadata,
 )
+from server.observability.run_census import RunIdentity
 from server.observability.runtime import (
     apply_default_links,
     current_header_values,
@@ -250,6 +252,7 @@ async def chat(request: ChatRequest, response: Response) -> ChatResponse:
                 config=config,
                 fusion=fusion,
                 conversation=conv,
+                billing_session_id=run_id,
             )
             response_text = chat_result.text
             sources = chat_result.sources
@@ -379,13 +382,16 @@ async def chat(request: ChatRequest, response: Response) -> ChatResponse:
                 and config.chat.recall.auto_index
                 and (config.chat.recall.default_corpus_id in set(corpus_ids))
             ):
+                recall_gateway = embedding_gateway_for_config(
+                    config, identity=RunIdentity(run_id, config.chat.recall.default_corpus_id, "index_embeddings"),
+                )
                 async def _do_index() -> None:
                     delay = int(config.chat.recall.index_delay_seconds or 0)
                     if delay > 0:
                         await asyncio.sleep(delay)
                     pg = PostgresClient(config.indexing.postgres_url)
                     await pg.connect()
-                    embedder = Embedder(config.embedding)
+                    embedder = Embedder(config.embedding, gateway=recall_gateway)
                     configure_postgres_embedding_cache_backend(embedder, pg)
                     try:
                         await index_recall_conversation(
@@ -604,13 +610,16 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                 and config.chat.recall.auto_index
                 and (config.chat.recall.default_corpus_id in set(corpus_ids))
             ):
+                recall_gateway = embedding_gateway_for_config(
+                    config, identity=RunIdentity(run_id, config.chat.recall.default_corpus_id, "index_embeddings"),
+                )
                 async def _do_index() -> None:
                     delay = int(config.chat.recall.index_delay_seconds or 0)
                     if delay > 0:
                         await asyncio.sleep(delay)
                     pg = PostgresClient(config.indexing.postgres_url)
                     await pg.connect()
-                    embedder = Embedder(config.embedding)
+                    embedder = Embedder(config.embedding, gateway=recall_gateway)
                     configure_postgres_embedding_cache_backend(embedder, pg)
                     try:
                         await index_recall_conversation(
@@ -851,7 +860,7 @@ async def list_chat_models(
         raise HTTPException(status_code=503, detail=str(error)) from error
 
     try:
-        catalog_by_alias = await asyncio.to_thread(gateway_rows_by_alias_cached)
+        catalog_by_alias = await asyncio.to_thread(gateway_rows_by_alias_cached, capability=None)
     except (OSError, ValueError) as error:
         raise HTTPException(status_code=503, detail=f"generation catalog unavailable: {error}") from error
 
@@ -867,6 +876,8 @@ async def list_chat_models(
             # catalog does not know is drift (stale container config or a
             # hand edit) and is never published as a selectable route.
             unknown_aliases.append(model_id)
+            continue
+        if catalog_row.capability != "GEN":
             continue
         models.append(
             ChatModelInfo(
@@ -947,7 +958,11 @@ async def recall_index(request: RecallIndexRequest) -> RecallIndexResponse:
 
     pg = PostgresClient(cfg.indexing.postgres_url)
     await pg.connect()
-    embedder = Embedder(cfg.embedding)
+    embedder = Embedder(
+        cfg.embedding, gateway=embedding_gateway_for_config(
+            cfg, identity=RunIdentity(str(uuid.uuid4()), cfg.chat.recall.default_corpus_id, "index_embeddings"),
+        ),
+    )
     configure_postgres_embedding_cache_backend(embedder, pg)
     try:
         n = await index_recall_conversation(

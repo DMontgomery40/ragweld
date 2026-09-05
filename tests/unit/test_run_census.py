@@ -360,21 +360,30 @@ async def test_async_sdk_retries_count_each_outbound_attempt(accounting, gateway
 def test_sync_incomplete_responses_are_uncertain(accounting, gateway, mode):
     scope, store = accounting
     base, received, _, release = gateway
-    with httpx.Client(transport=CensusTransport(scope), timeout=0.1) as client:
+    path = {"abandoned": "/stream", "timeout": "/held"}.get(mode, f"/{mode}")
+    timeout = httpx.Timeout(
+        connect=5,
+        read=0.1 if mode == "timeout" else 5,
+        write=5,
+        pool=5,
+    )
+    with httpx.Client(transport=CensusTransport(scope), timeout=timeout) as client:
         if mode in {"partial", "disconnect"}:
             with pytest.raises(httpx.RemoteProtocolError):
-                client.post(base + "/" + mode)
+                client.post(base + path)
         elif mode == "timeout":
             with pytest.raises(httpx.ReadTimeout):
-                client.post(base + "/held")
+                client.post(base + path)
         else:
-            with client.stream("POST", base + "/stream") as response:
+            with client.stream("POST", base + path) as response:
                 iterator = response.iter_bytes()
                 assert next(iterator) == b"first"
                 assert scope.snapshot().inflight == 1
             release.set()
     scope.finish_owner()
     assert len(received) == 1
+    assert received[0][0] == path
+    assert received[0][2].started_requests == received[0][2].inflight == 1
     assert_closed(scope, store, started=1, uncertain=1)
 
 
@@ -383,21 +392,30 @@ def test_sync_incomplete_responses_are_uncertain(accounting, gateway, mode):
 async def test_async_incomplete_responses_are_uncertain(accounting, gateway, mode):
     scope, store = accounting
     base, received, _, release = gateway
-    async with httpx.AsyncClient(transport=CensusAsyncTransport(scope), timeout=0.1) as client:
+    path = {"abandoned": "/stream", "timeout": "/held"}.get(mode, f"/{mode}")
+    timeout = httpx.Timeout(
+        connect=5,
+        read=0.1 if mode == "timeout" else 5,
+        write=5,
+        pool=5,
+    )
+    async with httpx.AsyncClient(transport=CensusAsyncTransport(scope), timeout=timeout) as client:
         if mode in {"partial", "disconnect"}:
             with pytest.raises(httpx.RemoteProtocolError):
-                await client.post(base + "/" + mode)
+                await client.post(base + path)
         elif mode == "timeout":
             with pytest.raises(httpx.ReadTimeout):
-                await client.post(base + "/held")
+                await client.post(base + path)
         else:
-            async with client.stream("POST", base + "/stream") as response:
+            async with client.stream("POST", base + path) as response:
                 iterator = response.aiter_bytes()
                 assert await anext(iterator) == b"first"
                 assert scope.snapshot().inflight == 1
             release.set()
     scope.finish_owner()
     assert len(received) == 1
+    assert received[0][0] == path
+    assert received[0][2].started_requests == received[0][2].inflight == 1
     assert_closed(scope, store, started=1, uncertain=1)
 
 

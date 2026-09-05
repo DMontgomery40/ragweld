@@ -46,7 +46,7 @@ async def test_secrets_check_reflects_process_env(client: AsyncClient) -> None:
         bad = await client.get("/api/secrets/check?keys=TRIBRID_TEST_SECRET_PRESENT")
         assert bad.status_code == 400
 
-        for gateway_owned_key in ("OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY"):
+        for gateway_owned_key in ("OPENAI_API_KEY", "OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY"):
             rejected = await client.get(f"/api/secrets/check?keys={gateway_owned_key}")
             assert rejected.status_code == 400
     finally:
@@ -85,3 +85,17 @@ def test_load_dotenv_file_loads_without_override(tmp_path: Path) -> None:
         assert os.environ.get(key) == "existing"
     finally:
         os.environ.pop(key, None)
+
+
+@pytest.mark.parametrize("key", ["OPENAI_API_KEY", "OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY"])
+def test_dotenv_never_imports_gateway_provider_credentials(tmp_path: Path, key: str) -> None:
+    old_key = os.environ.pop(key, None)
+    dotenv = tmp_path / ".env"
+    dotenv.write_text(f"{key}=synthetic-upstream-credential\n", encoding="utf-8")
+    try:
+        assert _load_dotenv_file(dotenv) is True
+        assert key not in os.environ
+    finally:
+        os.environ.pop(key, None)
+        if old_key is not None:
+            os.environ[key] = old_key

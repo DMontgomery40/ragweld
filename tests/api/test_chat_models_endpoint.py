@@ -31,6 +31,8 @@ class _ModelsHandler(BaseHTTPRequestHandler):
                 "data": [
                     {"id": "ragweld-local"},
                     {"id": "openai.gpt-5.4-mini"},
+                    {"id": "openai.text-embedding-3-small"},
+                    {"id": "openai.text-embedding-3-large"},
                     {"id": "hand-added-alias-not-in-catalog"},
                 ]
             }

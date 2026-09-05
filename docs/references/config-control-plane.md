@@ -72,4 +72,21 @@ OSS-composition branch.
 - `GET /api/secrets/check` now uses the registry-backed secret list rather than
   a hardcoded allowlist.
 - The workbench dependency panel is the operator-facing place to confirm whether
-  required credentials are present.
+  required app credentials are present.
+
+OpenAI embeddings and generation authenticate to LiteLLM using the app's
+`LITELLM_API_KEY`; Compose supplies that credential to the gateway as
+`LITELLM_MASTER_KEY`. Upstream keys such as `OPENAI_API_KEY` belong only in the
+gateway's private `infra/litellm.env`, outside the app registry and browser secret
+controls. See [gateway credentials](generation-gateway-catalog.md#gateway-credentials)
+for the Proxmox file mapping and required gateway recreation after an env change.
+
+For an app-side presence check on LXC100:
+
+```bash
+curl -sS "http://127.0.0.1:58012/api/secrets/check?keys=LITELLM_API_KEY" | jq .
+```
+
+This returns presence only, never a credential value or proof that the gateway
+accepts the key. Requesting `OPENAI_API_KEY` here returns an unsupported-secret
+error; it cannot check the gateway's upstream key or establish provider readiness.

@@ -20,6 +20,7 @@ from server.gateway_catalog import (
     gateway_alias_for_openrouter_id,
     gateway_rows,
     gateway_rows_by_alias,
+    gateway_rows_by_alias_cached,
     gateway_rows_snapshot,
     gateway_upstream_for_alias,
     load_catalog,
@@ -186,6 +187,70 @@ def test_gateway_rows_expose_catalog_metadata_for_discovery_join() -> None:
     assert rows[LOCAL_GATEWAY_ALIAS].supports_vision is False
 
 
+def _embedding_row(model: str = "text-embedding-3-small", **updates: Any) -> dict[str, Any]:
+    return {
+        "provider": "openai", "family": model, "model": model, "components": ["EMB"],
+        "dimensions": 1536 if model.endswith("small") else 3072,
+        "gateway_alias": f"openai.{model}", "gateway_upstream": f"openai/{model}",
+        "embed_per_1k": 0.00002, **updates,
+    }
+
+
+@pytest.mark.parametrize("model,capacity", [("text-embedding-3-small", 1536), ("text-embedding-3-large", 3072)])
+@pytest.mark.parametrize("invalid", ["below_minimum", "shortened", "below_capacity", "above_capacity", "other_model"])
+def test_native_embedding_capacity_is_truthful_at_every_catalog_boundary(
+    tmp_path: Path, model: str, capacity: int, invalid: str,
+) -> None:
+    dimensions = {"below_minimum": 1, "shortened": 128, "below_capacity": capacity - 1,
+                  "above_capacity": capacity + 1, "other_model": 3072 if capacity == 1536 else 1536}[invalid]
+    catalog = {"models": [_local_row(), _embedding_row(model, dimensions=dimensions)]}
+    for read in (gateway_rows, build_litellm_config):
+        with pytest.raises(GatewayCatalogError, match="capacity"):
+            read(catalog)
+    canonical = tmp_path / "models.json"
+    mirror = tmp_path / "web-models.json"
+    config = tmp_path / "litellm-config.yaml"
+    for path in (canonical, mirror, config):
+        path.write_text("unchanged\n")
+    with pytest.raises(GatewayCatalogError, match="capacity"):
+        write_catalog_trio(catalog, canonical_path=canonical, mirror_path=mirror, litellm_config_path=config)
+    assert all(path.read_text() == "unchanged\n" for path in (canonical, mirror, config))
+
+
+def test_embedding_routes_render_natively_but_generation_views_exclude_them(tmp_path: Path) -> None:
+    catalog = {"models": [_local_row(), _openrouter_row("openai/gpt-5.4-mini"), _embedding_row()]}
+    rows = gateway_rows(catalog)
+    embedding = next(row for row in rows if row.capability == "EMB")
+    assert embedding.model == "text-embedding-3-small"
+    assert embedding.dimensions == 1536
+    assert embedding.alias == "openai.text-embedding-3-small"
+    rendered = next(row for row in build_model_list(catalog) if row["model_name"] == embedding.alias)
+    assert rendered == {
+        "model_name": embedding.alias,
+        "litellm_params": {"model": "openai/text-embedding-3-small", "num_retries": 0,
+                           "max_retries": 0, "api_key": "os.environ/OPENAI_API_KEY"},
+        "model_info": {"mode": "embedding"},
+    }
+    target = tmp_path / "models.json"
+    target.write_text(json.dumps(catalog))
+    warm_gateway_catalog(target)
+    assert embedding.alias not in gateway_rows_snapshot(target)
+    assert embedding.alias not in gateway_rows_by_alias_cached(target)
+    assert set(gateway_rows_snapshot(target, capability="EMB")) == {embedding.alias}
+    assert len(gateway_rows_by_alias_cached(target, capability=None)) == 3
+
+
+@pytest.mark.parametrize("updates", [
+    {"provider": "cohere"}, {"model": "text-embedding-ada-002"},
+    {"gateway_upstream": "openrouter/openai/text-embedding-3-small"},
+    {"gateway_alias": "openai.other-embedding"}, {"dimensions": None},
+    {"components": ["GEN", "EMB"]}, {"base_url": "https://unrelated.example/v1"},
+])
+def test_embedding_catalog_rejects_ambiguous_or_changed_provider_identity(updates: dict[str, Any]) -> None:
+    with pytest.raises(GatewayCatalogError):
+        gateway_rows({"models": [_local_row(), _embedding_row(**updates)]})
+
+
 def _direct_gen_row() -> dict[str, Any]:
     return {
         "provider": "openai",
@@ -208,7 +273,7 @@ def _direct_gen_row() -> dict[str, Any]:
         ([_local_row(), _openrouter_row("openai/gpt-5.4-mini", gateway_alias=LOCAL_GATEWAY_ALIAS)], "duplicate"),
         ([_local_row(), _openrouter_row("openai/gpt-5.4-mini", gateway_alias="openai/gpt-5.4-mini")], "invalid gateway_alias"),
         ([_local_row(), _openrouter_row("openai/gpt-5.4-mini", gateway_upstream=None)], "both be set"),
-        ([_local_row(), _openrouter_row("openai/gpt-5.4-mini", components=["EMB"])], "only valid on GEN"),
+        ([_local_row(), _openrouter_row("openai/gpt-5.4-mini", components=["EMB"])], "OpenAI embedding"),
         ([_local_row(base_url=None)], "requires base_url"),
         ([_local_row(), _direct_gen_row()], "must be gateway-served"),
         ([_local_row(), _openrouter_row("openai/gpt-5.4-mini", gateway_alias="anthropic.claude")], "does not match the model id"),
@@ -320,12 +385,16 @@ def test_checked_in_catalog_serves_the_openrouter_route_set_through_the_gateway(
     assert rows[0].upstream == "openai/ragweld-local"
     openrouter = [row for row in rows if row.upstream.startswith("openrouter/")]
     assert len(openrouter) >= 300
-    assert len(openrouter) == len(rows) - 1
+    embeddings = [row for row in rows if row.capability == "EMB"]
+    assert {row.alias for row in embeddings} == {
+        "openai.text-embedding-3-small", "openai.text-embedding-3-large",
+    }
+    assert len(openrouter) == len(rows) - 1 - len(embeddings)
     assert "openai.gpt-5.4-mini" in by_alias
     assert by_alias["openai.gpt-5.4-mini"].upstream == "openrouter/openai/gpt-5.4-mini"
     assert all(row.alias == row.alias.lower() for row in rows)
     assert not any(row.provider == "openrouter" for row in rows), "meta-routers are not fixed models"
-    assert all(row.context and row.context > 0 for row in rows)
+    assert all(row.context and row.context > 0 for row in rows if row.capability == "GEN")
     assert all(row.model == row.upstream.removeprefix("openrouter/") for row in openrouter)
     assert all(row.provider == row.model.split("/", 1)[0] for row in openrouter)
     assert not any(alias.startswith("~") for alias in by_alias)

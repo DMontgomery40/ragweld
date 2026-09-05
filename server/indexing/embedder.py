@@ -11,6 +11,7 @@ from functools import lru_cache
 from typing import Any
 
 from server.db.postgres import PostgresClient
+from server.indexing.embedding_gateway import EmbeddingGateway, EmbeddingGatewayError
 from server.indexing.tokenizer import TextTokenizer
 from server.models.index import Chunk
 from server.models.tribrid_config_model import EmbeddingConfig, TokenizationConfig
@@ -26,8 +27,12 @@ class Embedder:
     tests and local dev without external dependencies.
     """
 
-    def __init__(self, config: EmbeddingConfig, tokenization: TokenizationConfig | None = None):
+    def __init__(
+        self, config: EmbeddingConfig, tokenization: TokenizationConfig | None = None,
+        *, gateway: EmbeddingGateway | None = None,
+    ):
         self.config = config
+        self._gateway = gateway
         self.tokenization = tokenization or TokenizationConfig()
         self._tokenizer = TextTokenizer(self.tokenization)
         # Deterministic embeddings must match the configured dimensionality so that
@@ -175,41 +180,15 @@ class Embedder:
     # ---------------------------------------------------------------------
 
     async def _embed_openai(self, texts: list[str]) -> list[list[float]]:
-        from openai import AsyncOpenAI
-
-        model = str(getattr(self.config, "embedding_model", "") or "").strip()
-        if not model:
-            raise RuntimeError("embedding_model is required for OpenAI embeddings")
-
-        timeout_s = float(getattr(self.config, "embedding_timeout", 30) or 30)
-        retries = int(getattr(self.config, "embedding_retry_max", 3) or 3)
-
-        client = AsyncOpenAI()
-        last_err: Exception | None = None
-        for attempt in range(max(1, retries)):
-            try:
-                resp = await client.embeddings.create(
-                    model=model,
-                    input=texts,
-                    timeout=timeout_s,
-                )
-                data = getattr(resp, "data", None) or []
-                vecs: list[list[float]] = []
-                for item in data:
-                    emb = getattr(item, "embedding", None)
-                    if not isinstance(emb, list):
-                        raise RuntimeError("OpenAI embeddings response missing embedding vectors")
-                    vecs.append([float(x) for x in emb])
-                for v in vecs:
-                    if len(v) != self.dim:
-                        raise RuntimeError(f"Embedding dimension mismatch ({len(v)} != {self.dim}). Reindex after updating embedding_dim.")
-                return vecs
-            except Exception as e:
-                last_err = e
-                if attempt + 1 >= max(1, retries):
-                    break
-                await asyncio.sleep(min(2.0, 0.25 * (2**attempt)))
-        raise RuntimeError(f"OpenAI embeddings failed: {last_err}")
+        if self._gateway is None:
+            raise EmbeddingGatewayError("Cloud embeddings require an explicit LiteLLM route and billing identity")
+        return await self._gateway.embed(
+            texts, model=self.config.effective_model, dimensions=self.dim,
+            timeout_s=float(self.config.embedding_timeout),
+            # Preserve the existing total-attempt interpretation; SDK and native
+            # retries are disabled so they cannot multiply this bounded budget.
+            max_attempts=int(self.config.embedding_retry_max),
+        )
 
     @staticmethod
     @lru_cache(maxsize=8)

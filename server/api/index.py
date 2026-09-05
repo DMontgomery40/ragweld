@@ -45,6 +45,7 @@ from server.graph.communities import detect_leiden_communities
 from server.indexing.accounting import IndexAccountingOwner, reconcile_run_costs
 from server.indexing.chunker import Chunker
 from server.indexing.embedder import Embedder, configure_postgres_embedding_cache_backend
+from server.indexing.embedding_gateway import embedding_gateway_for_config
 from server.indexing.estimate import (
     ParquetBounds,
     sample_corpus,
@@ -165,7 +166,7 @@ from server.observability.metrics import (
     INDEX_STAGE_LATENCY_SECONDS,
     INDEX_TOKENS_TOTAL,
 )
-from server.observability.run_census import ProducerLease, RunCensusScope
+from server.observability.run_census import ProducerLease, RunCensusScope, RunIdentity
 from server.reranker.artifacts import resolve_project_path
 from server.retrieval.qdrant_store import QdrantChunkStore
 from server.services.config_store import CorpusNotFoundError
@@ -1874,7 +1875,13 @@ async def _run_index(
         int(cfg.indexing.index_max_file_size_mb) * 1024 * 1024,
     )
     skip_dense = cfg.indexing.skip_dense
-    embedder = None if skip_dense else Embedder(cfg.embedding, cfg.tokenization)
+    embedder = None if skip_dense else Embedder(
+        cfg.embedding, cfg.tokenization,
+        gateway=embedding_gateway_for_config(
+            cfg, identity=RunIdentity(run_id, repo_id, "index_embeddings"),
+            census_scope=accounting.scopes.get("index_embeddings") if accounting is not None else None,
+        ),
+    )
     postgres = PostgresClient(cfg.indexing.postgres_url)
     await postgres.connect()
     active_corpus = await postgres.get_corpus(repo_id)
@@ -3468,8 +3475,14 @@ async def _background_index_job(
         if graph_policy == "semantic":
             models["semantic_kg"] = _semantic_kg_model_override(cfg)
         if not cfg.indexing.skip_dense and cfg.embedding.embedding_backend == "provider" and _looks_cloud_provider(cfg.embedding.embedding_type):
-            models["embedding"] = cfg.embedding.effective_model
-            coverage_notes.append("Direct provider embeddings are outside native gateway accounting.")
+            embedding_gateway = embedding_gateway_for_config(
+                cfg, identity=RunIdentity(run_id, repo_id, "index_embeddings"),
+            )
+            if embedding_gateway is not None:
+                models["index_embeddings"] = embedding_gateway.alias
+            else:
+                models["embedding"] = cfg.embedding.effective_model
+                coverage_notes.append("This embedding provider is outside native gateway accounting.")
         if cfg.indexing.figures.enabled and cfg.indexing.figures.describe:
             models["figure_description"] = cfg.indexing.figures.vision_model
         accounting = IndexAccountingOwner(

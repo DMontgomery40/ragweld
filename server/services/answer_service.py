@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+import uuid
 from collections.abc import AsyncIterator
 from typing import Any, cast
 
@@ -14,6 +15,7 @@ from server.chat.provider_router import select_provider_route
 from server.dependency_errors import is_required_dependency_unavailable
 from server.models.retrieval import ChunkMatch
 from server.models.tribrid_config_model import ChatDebugInfo, ChatProviderInfo, TriBridConfig
+from server.observability.run_census import RunIdentity
 from server.retrieval.cache import CacheMode, SemanticCacheService
 from server.retrieval.errors import (
     AnswerRetrievalFailedError,
@@ -65,6 +67,7 @@ async def _fusion_search_with_cache(
     top_k: int | None,
     cache_mode: str | CacheMode,
     cache_namespace: str,
+    billing_session_id: str | None = None,
 ) -> list[ChunkMatch]:
     return await fusion.search(
         [str(corpus_id)],
@@ -76,6 +79,7 @@ async def _fusion_search_with_cache(
         top_k=top_k,
         cache_mode=_normalize_cache_mode(cache_mode),
         cache_namespace=str(cache_namespace or "search"),
+        billing_session_id=billing_session_id,
     )
 
 
@@ -90,6 +94,7 @@ async def retrieve_best_effort(
     include_graph: bool = True,
     top_k: int | None = None,
     cache_mode: str | CacheMode = "default",
+    billing_session_id: str | None = None,
 ) -> tuple[list[ChunkMatch], dict[str, Any]]:
     if not query.strip() or not str(corpus_id or "").strip():
         return ([], {"retrieval_error": "Missing query or corpus_id"})
@@ -110,6 +115,7 @@ async def retrieve_best_effort(
             top_k=top_k,
             cache_mode=cache_mode,
             cache_namespace="answer_retrieval",
+            billing_session_id=billing_session_id,
         )
     except (RetrievalContractMismatchError, RequiredRetrievalLegError, RerankerFailedError):
         raise
@@ -134,7 +140,9 @@ async def answer_best_effort(
     system_prompt_override: str | None = None,
     model_override: str = "",
     cache_mode: str | CacheMode = "default",
+    billing_session_id: str | None = None,
 ) -> tuple[str, list[ChunkMatch], ChatProviderInfo | None, ChatDebugInfo]:
+    billing_session_id = billing_session_id or str(uuid.uuid4())
     normalized_cache_mode = _normalize_cache_mode(cache_mode)
     chunks, _ = await retrieve_best_effort(
         query=query,
@@ -146,6 +154,7 @@ async def answer_best_effort(
         include_graph=include_graph,
         top_k=top_k,
         cache_mode=normalized_cache_mode,
+        billing_session_id=billing_session_id,
     )
 
     provider_info: ChatProviderInfo | None = None
@@ -173,7 +182,9 @@ async def answer_best_effort(
     except Exception:
         resolved_route = None
 
-    cache_service = SemanticCacheService(config)
+    cache_service = SemanticCacheService(
+        config, identity=RunIdentity(billing_session_id, corpus_id or "global", "cache_embeddings"),
+    )
     cache_scope_key = SemanticCacheService.scope_key([corpus_id])
     cache_request_fingerprint = SemanticCacheService.fingerprint(
         {
@@ -339,11 +350,13 @@ async def stream_answer_best_effort(
     system_prompt_override: str | None = None,
     model_override: str = "",
     cache_mode: str | CacheMode = "default",
+    billing_session_id: str | None = None,
     prefetched_chunks: list[ChunkMatch] | None = None,
     conversation_id: str | None = None,
     run_id: str | None = None,
     started_at_ms: int | None = None,
 ) -> AsyncIterator[str]:
+    billing_session_id = billing_session_id or run_id or str(uuid.uuid4())
     normalized_cache_mode = _normalize_cache_mode(cache_mode)
     if prefetched_chunks is not None:
         chunks = list(prefetched_chunks)
@@ -358,6 +371,7 @@ async def stream_answer_best_effort(
             include_graph=include_graph,
             top_k=top_k,
             cache_mode=normalized_cache_mode,
+            billing_session_id=billing_session_id,
         )
 
     provider_info: ChatProviderInfo | None = None
@@ -391,7 +405,9 @@ async def stream_answer_best_effort(
     except Exception:
         resolved_route = None
 
-    cache_service = SemanticCacheService(config)
+    cache_service = SemanticCacheService(
+        config, identity=RunIdentity(billing_session_id, corpus_id or "global", "cache_embeddings"),
+    )
     cache_scope_key = SemanticCacheService.scope_key([corpus_id])
     cache_request_fingerprint = SemanticCacheService.fingerprint(
         {

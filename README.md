@@ -229,29 +229,30 @@ Each search method compensates for the others' weaknesses. The result: **dramati
 
 ## Performance
 
-ragweld measures real pipeline latency and throughput via **Prometheus + Grafana** (see dashboards `tribrid-overview` and `tribrid-rag-metrics`). For reproducible local benchmarking (index + search), use the built-in benchmark runner.
+ragweld measures pipeline latency and throughput via **Prometheus + Grafana** (see dashboards `tribrid-overview` and `tribrid-rag-metrics`). The benchmark runner measures complete HTTP search requests against a running Ragweld API, including application processing and network time. Warmup requests are excluded from measured latency and throughput.
 
 ### Reproducible benchmark (index + search)
 
 Prereqs:
 
 ```bash
-docker compose up -d postgres neo4j
-# If using the docker-compose defaults:
-export NEO4J_PASSWORD=password
+# Run on LXC100 against the already running API and a registered corpus.
+uv run python -m scripts.benchmark_perf \
+  --api-base-url http://127.0.0.1:58012 \
+  --corpus-id ragweld --skip-index --iterations 5 --warmup 1 \
+  --query 'How does the indexing run fence prevent concurrent replacement?' \
+  --out-json /var/tmp/ragweld-benchmark.json
 ```
 
-Run:
+To include indexing, omit `--skip-index`. The server uses the registered corpus path unless `--corpus-path` supplies another path on that server. Indexing uses the normal run fence, validation and promotion lifecycle. `--force-reindex` permits changed embedding settings; semantic graph indexing also requires `--approved-graph-schema-hash` with the exact reviewed schema hash.
 
-```bash
-uv run scripts/benchmark_perf.py --corpus-id ragweld --corpus-path . --force-reindex --iterations 5 --warmup 1
-```
+The runner prints Markdown and writes JSON when `--out-json` is supplied. `--request-timeout` bounds each HTTP request (default 60 seconds); `--index-timeout` bounds waiting for the accepted run (default 3,600 seconds). A failed, cancelled or unfinished index produces no success report. A wait timeout leaves the server-owned job running, so inspect that corpus's run before starting another benchmark.
 
-This prints **Markdown + JSON** summary you can paste into docs/PRs.
+`--out-json` replaces the selected report: after input validation, the runner removes the previous report before making API requests and publishes a complete JSON file only on success. A failed rerun therefore leaves no stale metrics at that path. Concurrent invocations using the same output path are rejected without changing the active writer's report.
 
 ### Latest benchmark (local dev run)
 
-Generated on `2026-02-01` with the command above (vector+sparse+graph enabled, `final_k=10`).
+Historical internal-pipeline measurement from `2026-02-01` (vector+sparse+graph enabled, `final_k=10`); these values are not directly comparable to the current HTTP benchmark.
 
 | Operation | Performance | Notes |
 |---|---:|---|
@@ -281,7 +282,7 @@ Treat the mainline status section above as the architecture truth for modernizat
 - Docker & Docker Compose
 - Python 3.11+ with [uv](https://github.com/astral-sh/uv)
 - Node.js 18+
-- API keys for your preferred embedding provider (OpenAI, Voyage, etc.)
+- Provider credentials for the configured cloud workflows; OpenAI embedding credentials belong to LiteLLM
 
 ### 1. Clone and Configure
 
@@ -291,17 +292,37 @@ cd ragweld
 cp .env.example .env
 ```
 
-Edit `.env` with your API keys:
+The app's `.env` configures its gateway connection with `LITELLM_BASE_URL` and
+`LITELLM_API_KEY`. OpenAI embeddings and generation call LiteLLM; their upstream
+provider credentials belong in the gateway's private `infra/litellm.env`.
+
+For a new install without an existing gateway environment file:
+
 ```bash
-OPENAI_API_KEY=sk-...
-# or
-VOYAGE_API_KEY=pa-...
+cp infra/litellm.env.example infra/litellm.env
+chmod 600 infra/litellm.env
 ```
+
+Edit that private file to replace `OPENAI_API_KEY=disabled` when enabling OpenAI
+embeddings. Preserve existing gateway settings and Langfuse credentials when
+updating an installation. Do not put `OPENAI_API_KEY` in the app's `.env` or
+export it into the app process. Compose passes the app's `LITELLM_API_KEY` to
+the gateway as `LITELLM_MASTER_KEY`; this gateway client credential is separate
+from the upstream OpenAI key.
+
+On the Proxmox deployment, `.env` points to `/etc/ragweld/runtime.env` and
+`infra/litellm.env` points to `/etc/ragweld/litellm.env`. Update the existing
+owner-only files on LXC100 instead of replacing those symlinks. After changing
+the gateway environment, reconcile/recreate the `litellm` service through the
+deployment's Compose configuration during an idle interval. Restarting only the
+API does not reload the gateway environment. See
+[gateway credentials](docs/references/generation-gateway-catalog.md#gateway-credentials)
+and [Proxmox activation](docs/references/native-run-accounting.md#proxmox-activation).
 
 ### 2. Start Infrastructure
 
 ```bash
-docker compose up -d postgres neo4j
+docker compose --project-name ragweld up -d postgres neo4j qdrant litellm
 ```
 
 By default, Docker volumes are stored alongside the repo. To store DB data **outside** the repo (recommended for real corpora),
@@ -317,6 +338,7 @@ This starts:
 - **PostgreSQL** for corpus control/state rows and caches (port 5432)
 - **Qdrant** vector store for dense + sparse chunk vectors (port 56333)
 - **Neo4j** graph database (ports 7474, 7687)
+- **LiteLLM** gateway for generation and OpenAI embeddings (loopback port 54000)
 
 ### 2a. Start The Observability Overlay For This Branch
 
@@ -350,6 +372,9 @@ uv run uvicorn server.main:app --reload --port 58012
 Notes:
 - The backend will **auto-load** repo-root `.env` on startup (dev convenience).
 - If you change `.env` while the backend is running, you must **restart** the backend for changes to take effect.
+- `GET /api/secrets/check?keys=LITELLM_API_KEY` checks only whether the app's
+  gateway credential is present. It does not validate the key or inspect
+  `OPENAI_API_KEY` in LiteLLM; upstream provider keys are outside this endpoint.
 
 API available at http://localhost:58012
 OpenAPI docs at http://localhost:58012/docs

@@ -66,6 +66,33 @@ Beyond fused tri-brid retrieval (vector + sparse + graph), ragweld includes broa
   - **UI**: `http://127.0.0.1:55173/web`
   - **API**: `http://127.0.0.1:58012/api`
 
+## Gateway credentials and setup (critical for accuracy)
+
+- OpenAI embeddings and generation use LiteLLM. `OPENAI_API_KEY` belongs only
+  in the gateway's private `infra/litellm.env`, initialized from
+  `infra/litellm.env.example` for a new install; `disabled` is not a working key.
+  Never instruct operators to put it in the app's root `.env` or export it into
+  the app process. Preserve existing gateway and Langfuse settings when editing.
+- The app receives `LITELLM_BASE_URL` and `LITELLM_API_KEY` from its environment.
+  Compose maps the latter to the native gateway's `LITELLM_MASTER_KEY`. Explain
+  gateway client/server authentication separately from upstream provider keys.
+- On the Proxmox deployment, `.env` links to `/etc/ragweld/runtime.env` and
+  `infra/litellm.env` links to `/etc/ragweld/litellm.env`. Preserve these existing
+  owner-only files and symlinks. Runtime work happens on LXC100 in `/opt/ragweld`;
+  the Mac checkout is source only. Gateway env changes require Compose
+  reconciliation/recreation of `litellm` with the deployment's overlays and
+  private environment during an idle interval. An API-only restart or a plain
+  container restart does not load new container env values.
+- Correct the secret-check examples in `security.md` and `manual/quickstart.md`
+  to use `/api/secrets/check?keys=LITELLM_API_KEY` (with the current API port in
+  absolute URLs). This endpoint reports app secret presence only, never values,
+  authentication success, or upstream-provider readiness. `OPENAI_API_KEY` and
+  other gateway-owned provider keys are not registered app secret checks.
+- In setup/security environment tables, distinguish gateway-only upstream keys
+  from app credentials. Do not show real secrets or initiate paid calls as a
+  key-presence check. Derive any further supported secret examples from
+  `server/config_control_plane.py` rather than old generated prose.
+
 ## MkDocs Material formatting (mandatory)
 
 Plain markdown without Material features is unacceptable. Use these heavily:

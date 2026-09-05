@@ -2077,15 +2077,15 @@ class ModelCatalogEntry(BaseModel):
     gateway_alias: str | None = Field(
         default=None,
         description=(
-            "LiteLLM gateway alias that serves this generation row. Set only on GEN rows that are rendered "
-            "into infra/litellm-config.yaml; selectable as litellm:<gateway_alias>."
+            "LiteLLM gateway alias for a GEN or supported native EMB row rendered into infra/litellm-config.yaml. "
+            "GEN aliases are selectable as litellm:<gateway_alias>; EMB aliases retain the configured embedding model identity."
         ),
     )
     gateway_upstream: str | None = Field(
         default=None,
         description=(
             "LiteLLM litellm_params.model for gateway_alias (for example openrouter/openai/gpt-5.4-mini "
-            "or openai/ragweld-local for the vLLM serving path)."
+            "openai/ragweld-local for the vLLM serving path, or openai/text-embedding-3-small for native embeddings)."
         ),
     )
     supports_vision: bool = Field(

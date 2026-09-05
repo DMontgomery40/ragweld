@@ -535,15 +535,6 @@ _LOCKED_INTEGRATION_CONTRACTS: tuple[ConfigIntegrationContract, ...] = (
 
 _SECRET_REQUIREMENTS: tuple[SecretRequirement, ...] = (
     SecretRequirement(
-        id="openai_api_key",
-        env_var="OPENAI_API_KEY",
-        label="OpenAI API Key",
-        description="OpenAI access for the preserved provider-backed embedding boundary.",
-        integrations=["tribrid_retrieval"],
-        optional=True,
-        ui_surface="retrieval",
-    ),
-    SecretRequirement(
         id="litellm_api_key",
         env_var="LITELLM_API_KEY",
         label="LiteLLM API Key",
