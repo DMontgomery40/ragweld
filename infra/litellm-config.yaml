@@ -2359,12 +2359,6 @@ model_list:
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
-- model_name: z-ai.glm-5.2.free
-  litellm_params:
-    model: openrouter/z-ai/glm-5.2:free
-    num_retries: 0
-    max_retries: 0
-    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: z-ai.glm-5.3
   litellm_params:
     model: openrouter/z-ai/glm-5.3
