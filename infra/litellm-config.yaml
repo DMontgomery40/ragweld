@@ -909,12 +909,6 @@ model_list:
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
-- model_name: minimax.minimax-m2.7.free
-  litellm_params:
-    model: openrouter/minimax/minimax-m2.7:free
-    num_retries: 0
-    max_retries: 0
-    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: minimax.minimax-m3
   litellm_params:
     model: openrouter/minimax/minimax-m3
@@ -924,12 +918,6 @@ model_list:
 - model_name: minimax.minimax-m3.batch
   litellm_params:
     model: openrouter/minimax/minimax-m3:batch
-    num_retries: 0
-    max_retries: 0
-    api_key: os.environ/OPENROUTER_API_KEY
-- model_name: minimax.minimax-m3.free
-  litellm_params:
-    model: openrouter/minimax/minimax-m3:free
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
