@@ -399,6 +399,12 @@ model_list:
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
+- model_name: deepseek.deepseek-v4-flash-vision-exp.batch
+  litellm_params:
+    model: openrouter/deepseek/deepseek-v4-flash-vision-exp:batch
+    num_retries: 0
+    max_retries: 0
+    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: deepseek.deepseek-v4-pro
   litellm_params:
     model: openrouter/deepseek/deepseek-v4-pro
@@ -705,9 +711,9 @@ model_list:
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
-- model_name: inception.mercury-2.5-preview
+- model_name: inception.mercury-2.5
   litellm_params:
-    model: openrouter/inception/mercury-2.5-preview
+    model: openrouter/inception/mercury-2.5
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
@@ -1101,15 +1107,15 @@ model_list:
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
-- model_name: nex-agi.nex-n2-mini
+- model_name: nex-agi.nex-n2.5-mini.free
   litellm_params:
-    model: openrouter/nex-agi/nex-n2-mini
+    model: openrouter/nex-agi/nex-n2.5-mini:free
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
-- model_name: nex-agi.nex-n2-pro
+- model_name: nex-agi.nex-n2.5-pro.free
   litellm_params:
-    model: openrouter/nex-agi/nex-n2-pro
+    model: openrouter/nex-agi/nex-n2.5-pro:free
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
@@ -2347,6 +2353,12 @@ model_list:
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
+- model_name: z-ai.glm-5.2.batch
+  litellm_params:
+    model: openrouter/z-ai/glm-5.2:batch
+    num_retries: 0
+    max_retries: 0
+    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: z-ai.glm-5.3
   litellm_params:
     model: openrouter/z-ai/glm-5.3
@@ -2362,6 +2374,12 @@ model_list:
 - model_name: z-ai.glm-5.3-flash.batch
   litellm_params:
     model: openrouter/z-ai/glm-5.3-flash:batch
+    num_retries: 0
+    max_retries: 0
+    api_key: os.environ/OPENROUTER_API_KEY
+- model_name: z-ai.glm-5.3.batch
+  litellm_params:
+    model: openrouter/z-ai/glm-5.3:batch
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
