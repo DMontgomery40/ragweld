@@ -1,6 +1,6 @@
 {
   "currency": "USD",
-  "last_updated": "2026-09-09",
+  "last_updated": "2026-09-10",
   "sources": [
     "https://openai.com/api/pricing/ (2026-02-07)",
     "https://www.anthropic.com/pricing (2026-02-07)",
@@ -10,7 +10,7 @@
     "https://mistral.ai/pricing (2025-11-29)",
     "https://api-docs.deepseek.com/quick_start/pricing (2025-11-29)",
     "https://jina.ai/embeddings/ (2025-11-29)",
-    "https://openrouter.ai/api/v1/models (2026-09-09)"
+    "https://openrouter.ai/api/v1/models (2026-09-10)"
   ],
   "models": [
     {
@@ -1163,8 +1163,8 @@
       ],
       "unit": "1k_tokens",
       "context": 163840,
-      "input_per_1k": 0.00032,
-      "output_per_1k": 0.00089,
+      "input_per_1k": 0.0002574,
+      "output_per_1k": 0.0010287,
       "base_url": "https://openrouter.ai/api/v1",
       "display_name": "DeepSeek: DeepSeek V3",
       "gateway_alias": "deepseek.deepseek-chat",
@@ -1490,6 +1490,27 @@
       "gateway_alias": "deepseek.deepseek-v4-pro-0813.batch",
       "gateway_upstream": "openrouter/deepseek/deepseek-v4-pro-0813:batch",
       "supports_vision": false,
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
+    },
+    {
+      "provider": "deepseek",
+      "family": "deepseek-v4.1-flash",
+      "model": "deepseek/deepseek-v4.1-flash",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 1048576,
+      "input_per_1k": 0.00015,
+      "output_per_1k": 0.0006,
+      "base_url": "https://openrouter.ai/api/v1",
+      "display_name": "DeepSeek: DeepSeek V4.1 Flash",
+      "gateway_alias": "deepseek.deepseek-v4.1-flash",
+      "gateway_upstream": "openrouter/deepseek/deepseek-v4.1-flash",
+      "supports_vision": true,
+      "notes": "[auto-refresh] pricing_tiered=true",
       "selection_roles": [],
       "selection_status": "catalog_only",
       "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
@@ -3380,8 +3401,8 @@
       ],
       "unit": "1k_tokens",
       "context": 204800,
-      "input_per_1k": 0.00027,
-      "output_per_1k": 0.00108,
+      "input_per_1k": 0.0003,
+      "output_per_1k": 0.0012,
       "base_url": "https://openrouter.ai/api/v1",
       "display_name": "MiniMax: MiniMax M2.5",
       "gateway_alias": "minimax.minimax-m2.5",
@@ -3488,6 +3509,26 @@
     },
     {
       "provider": "mistralai",
+      "family": "codestral-2508:batch",
+      "model": "mistralai/codestral-2508:batch",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 256000,
+      "input_per_1k": 0.00015,
+      "output_per_1k": 0.00045,
+      "base_url": "https://openrouter.ai/api/v1",
+      "display_name": "Mistral: Codestral 2508 (batch)",
+      "gateway_alias": "mistralai.codestral-2508.batch",
+      "gateway_upstream": "openrouter/mistralai/codestral-2508:batch",
+      "supports_vision": false,
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
+    },
+    {
+      "provider": "mistralai",
       "family": "devstral-2512",
       "model": "mistralai/devstral-2512",
       "components": [
@@ -3568,6 +3609,26 @@
     },
     {
       "provider": "mistralai",
+      "family": "ministral-8b-2512:batch",
+      "model": "mistralai/ministral-8b-2512:batch",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 262144,
+      "input_per_1k": 7.5e-05,
+      "output_per_1k": 7.5e-05,
+      "base_url": "https://openrouter.ai/api/v1",
+      "display_name": "Mistral: Ministral 3 8B 2512 (batch)",
+      "gateway_alias": "mistralai.ministral-8b-2512.batch",
+      "gateway_upstream": "openrouter/mistralai/ministral-8b-2512:batch",
+      "supports_vision": true,
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
+    },
+    {
+      "provider": "mistralai",
       "family": "mistral-large",
       "model": "mistralai/mistral-large",
       "components": [
@@ -3621,6 +3682,26 @@
       "display_name": "Mistral: Mistral Large 3 2512",
       "gateway_alias": "mistralai.mistral-large-2512",
       "gateway_upstream": "openrouter/mistralai/mistral-large-2512",
+      "supports_vision": true,
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
+    },
+    {
+      "provider": "mistralai",
+      "family": "mistral-large-2512:batch",
+      "model": "mistralai/mistral-large-2512:batch",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 262144,
+      "input_per_1k": 0.00025,
+      "output_per_1k": 0.00075,
+      "base_url": "https://openrouter.ai/api/v1",
+      "display_name": "Mistral: Mistral Large 3 2512 (batch)",
+      "gateway_alias": "mistralai.mistral-large-2512.batch",
+      "gateway_upstream": "openrouter/mistralai/mistral-large-2512:batch",
       "supports_vision": true,
       "selection_roles": [],
       "selection_status": "catalog_only",
@@ -3708,6 +3789,26 @@
     },
     {
       "provider": "mistralai",
+      "family": "mistral-medium-3.1:batch",
+      "model": "mistralai/mistral-medium-3.1:batch",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 131072,
+      "input_per_1k": 0.0002,
+      "output_per_1k": 0.001,
+      "base_url": "https://openrouter.ai/api/v1",
+      "display_name": "Mistral: Mistral Medium 3.1 (batch)",
+      "gateway_alias": "mistralai.mistral-medium-3.1.batch",
+      "gateway_upstream": "openrouter/mistralai/mistral-medium-3.1:batch",
+      "supports_vision": true,
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
+    },
+    {
+      "provider": "mistralai",
       "family": "mistral-nemo",
       "model": "mistralai/mistral-nemo",
       "components": [
@@ -3781,6 +3882,26 @@
       "display_name": "Mistral: Mistral Small 4",
       "gateway_alias": "mistralai.mistral-small-2603",
       "gateway_upstream": "openrouter/mistralai/mistral-small-2603",
+      "supports_vision": true,
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
+    },
+    {
+      "provider": "mistralai",
+      "family": "mistral-small-2603:batch",
+      "model": "mistralai/mistral-small-2603:batch",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 262144,
+      "input_per_1k": 7.5e-05,
+      "output_per_1k": 0.0003,
+      "base_url": "https://openrouter.ai/api/v1",
+      "display_name": "Mistral: Mistral Small 4 (batch)",
+      "gateway_alias": "mistralai.mistral-small-2603.batch",
+      "gateway_upstream": "openrouter/mistralai/mistral-small-2603:batch",
       "supports_vision": true,
       "selection_roles": [],
       "selection_status": "catalog_only",
@@ -4098,7 +4219,7 @@
       "display_name": "Nex AGI: Nex-N2.5-Mini (free)",
       "gateway_alias": "nex-agi.nex-n2.5-mini.free",
       "gateway_upstream": "openrouter/nex-agi/nex-n2.5-mini:free",
-      "supports_vision": false,
+      "supports_vision": true,
       "selection_roles": [],
       "selection_status": "catalog_only",
       "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
@@ -4178,26 +4299,6 @@
       "display_name": "Nous: Hermes 4 405B",
       "gateway_alias": "nousresearch.hermes-4-405b",
       "gateway_upstream": "openrouter/nousresearch/hermes-4-405b",
-      "supports_vision": false,
-      "selection_roles": [],
-      "selection_status": "catalog_only",
-      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
-    },
-    {
-      "provider": "nousresearch",
-      "family": "hermes-4-70b",
-      "model": "nousresearch/hermes-4-70b",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 131072,
-      "input_per_1k": 0.00013,
-      "output_per_1k": 0.0004,
-      "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "Nous: Hermes 4 70B",
-      "gateway_alias": "nousresearch.hermes-4-70b",
-      "gateway_upstream": "openrouter/nousresearch/hermes-4-70b",
       "supports_vision": false,
       "selection_roles": [],
       "selection_status": "catalog_only",
@@ -6800,8 +6901,8 @@
       ],
       "unit": "1k_tokens",
       "context": 262144,
-      "input_per_1k": 0.00029,
-      "output_per_1k": 0.0024,
+      "input_per_1k": 0.00026,
+      "output_per_1k": 0.00208,
       "base_url": "https://openrouter.ai/api/v1",
       "display_name": "Qwen: Qwen3.5-122B-A10B",
       "gateway_alias": "qwen.qwen3.5-122b-a10b",
@@ -8468,8 +8569,8 @@
       ],
       "unit": "1k_tokens",
       "context": 1048576,
-      "input_per_1k": 0.000966,
-      "output_per_1k": 0.003036,
+      "input_per_1k": 0.0004875,
+      "output_per_1k": 0.00156,
       "base_url": "https://openrouter.ai/api/v1",
       "display_name": "Z.ai: GLM 5.2",
       "gateway_alias": "z-ai.glm-5.2",
@@ -8528,8 +8629,8 @@
       ],
       "unit": "1k_tokens",
       "context": 1310720,
-      "input_per_1k": 7.5e-05,
-      "output_per_1k": 0.00025,
+      "input_per_1k": 0.00015,
+      "output_per_1k": 0.0005,
       "base_url": "https://openrouter.ai/api/v1",
       "display_name": "Z.ai: GLM 5.3 Flash",
       "gateway_alias": "z-ai.glm-5.3-flash",

@@ -423,6 +423,12 @@ model_list:
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
+- model_name: deepseek.deepseek-v4.1-flash
+  litellm_params:
+    model: openrouter/deepseek/deepseek-v4.1-flash
+    num_retries: 0
+    max_retries: 0
+    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: dots-studio.dots-3-note-preview.free
   litellm_params:
     model: openrouter/dots-studio/dots-3-note-preview:free
@@ -933,6 +939,12 @@ model_list:
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
+- model_name: mistralai.codestral-2508.batch
+  litellm_params:
+    model: openrouter/mistralai/codestral-2508:batch
+    num_retries: 0
+    max_retries: 0
+    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: mistralai.devstral-2512
   litellm_params:
     model: openrouter/mistralai/devstral-2512
@@ -957,6 +969,12 @@ model_list:
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
+- model_name: mistralai.ministral-8b-2512.batch
+  litellm_params:
+    model: openrouter/mistralai/ministral-8b-2512:batch
+    num_retries: 0
+    max_retries: 0
+    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: mistralai.mistral-large
   litellm_params:
     model: openrouter/mistralai/mistral-large
@@ -972,6 +990,12 @@ model_list:
 - model_name: mistralai.mistral-large-2512
   litellm_params:
     model: openrouter/mistralai/mistral-large-2512
+    num_retries: 0
+    max_retries: 0
+    api_key: os.environ/OPENROUTER_API_KEY
+- model_name: mistralai.mistral-large-2512.batch
+  litellm_params:
+    model: openrouter/mistralai/mistral-large-2512:batch
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
@@ -999,6 +1023,12 @@ model_list:
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
+- model_name: mistralai.mistral-medium-3.1.batch
+  litellm_params:
+    model: openrouter/mistralai/mistral-medium-3.1:batch
+    num_retries: 0
+    max_retries: 0
+    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: mistralai.mistral-nemo
   litellm_params:
     model: openrouter/mistralai/mistral-nemo
@@ -1020,6 +1050,12 @@ model_list:
 - model_name: mistralai.mistral-small-2603
   litellm_params:
     model: openrouter/mistralai/mistral-small-2603
+    num_retries: 0
+    max_retries: 0
+    api_key: os.environ/OPENROUTER_API_KEY
+- model_name: mistralai.mistral-small-2603.batch
+  litellm_params:
+    model: openrouter/mistralai/mistral-small-2603:batch
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
@@ -1134,12 +1170,6 @@ model_list:
 - model_name: nousresearch.hermes-4-405b
   litellm_params:
     model: openrouter/nousresearch/hermes-4-405b
-    num_retries: 0
-    max_retries: 0
-    api_key: os.environ/OPENROUTER_API_KEY
-- model_name: nousresearch.hermes-4-70b
-  litellm_params:
-    model: openrouter/nousresearch/hermes-4-70b
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
