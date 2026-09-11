@@ -747,6 +747,18 @@ model_list:
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
+- model_name: inclusionai.ling-3.0-flash-vl
+  litellm_params:
+    model: openrouter/inclusionai/ling-3.0-flash-vl
+    num_retries: 0
+    max_retries: 0
+    api_key: os.environ/OPENROUTER_API_KEY
+- model_name: inclusionai.ling-3.0-flash-vl.free
+  litellm_params:
+    model: openrouter/inclusionai/ling-3.0-flash-vl:free
+    num_retries: 0
+    max_retries: 0
+    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: kwaipilot.kat-coder-pro-v2
   litellm_params:
     model: openrouter/kwaipilot/kat-coder-pro-v2
@@ -2101,9 +2113,21 @@ model_list:
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
+- model_name: sakana.fugu-max
+  litellm_params:
+    model: openrouter/sakana/fugu-max
+    num_retries: 0
+    max_retries: 0
+    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: sakana.fugu-ultra
   litellm_params:
     model: openrouter/sakana/fugu-ultra
+    num_retries: 0
+    max_retries: 0
+    api_key: os.environ/OPENROUTER_API_KEY
+- model_name: sakana.fugu-ultra-v2
+  litellm_params:
+    model: openrouter/sakana/fugu-ultra-v2
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
