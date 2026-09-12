@@ -759,6 +759,18 @@ model_list:
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
+- model_name: inference-net.schematron-v2-small
+  litellm_params:
+    model: openrouter/inference-net/schematron-v2-small
+    num_retries: 0
+    max_retries: 0
+    api_key: os.environ/OPENROUTER_API_KEY
+- model_name: inference-net.schematron-v2-turbo
+  litellm_params:
+    model: openrouter/inference-net/schematron-v2-turbo
+    num_retries: 0
+    max_retries: 0
+    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: kwaipilot.kat-coder-pro-v2
   litellm_params:
     model: openrouter/kwaipilot/kat-coder-pro-v2
