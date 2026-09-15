@@ -477,12 +477,6 @@ model_list:
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
-- model_name: google.gemini-2.5-pro-preview-05-06
-  litellm_params:
-    model: openrouter/google/gemini-2.5-pro-preview-05-06
-    num_retries: 0
-    max_retries: 0
-    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.gemini-2.5-pro.batch
   litellm_params:
     model: openrouter/google/gemini-2.5-pro:batch
@@ -2422,6 +2416,12 @@ model_list:
 - model_name: z-ai.glm-5.2.batch
   litellm_params:
     model: openrouter/z-ai/glm-5.2:batch
+    num_retries: 0
+    max_retries: 0
+    api_key: os.environ/OPENROUTER_API_KEY
+- model_name: z-ai.glm-5.2.free
+  litellm_params:
+    model: openrouter/z-ai/glm-5.2:free
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
