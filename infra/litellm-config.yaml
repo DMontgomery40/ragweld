@@ -663,12 +663,6 @@ model_list:
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
-- model_name: google.gemma-4-31b-it.batch
-  litellm_params:
-    model: openrouter/google/gemma-4-31b-it:batch
-    num_retries: 0
-    max_retries: 0
-    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.gemma-4-31b-it.free
   litellm_params:
     model: openrouter/google/gemma-4-31b-it:free
@@ -1623,12 +1617,6 @@ model_list:
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
-- model_name: openai.gpt-oss-20b.batch
-  litellm_params:
-    model: openrouter/openai/gpt-oss-20b:batch
-    num_retries: 0
-    max_retries: 0
-    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-oss-safeguard-20b
   litellm_params:
     model: openrouter/openai/gpt-oss-safeguard-20b
@@ -2242,12 +2230,6 @@ model_list:
 - model_name: thinkingmachines.inkling-small
   litellm_params:
     model: openrouter/thinkingmachines/inkling-small
-    num_retries: 0
-    max_retries: 0
-    api_key: os.environ/OPENROUTER_API_KEY
-- model_name: thinkingmachines.inkling-small.batch
-  litellm_params:
-    model: openrouter/thinkingmachines/inkling-small:batch
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY

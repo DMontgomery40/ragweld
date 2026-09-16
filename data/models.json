@@ -1,6 +1,6 @@
 {
   "currency": "USD",
-  "last_updated": "2026-09-15",
+  "last_updated": "2026-09-16",
   "sources": [
     "https://openai.com/api/pricing/ (2026-02-07)",
     "https://www.anthropic.com/pricing (2026-02-07)",
@@ -10,7 +10,7 @@
     "https://mistral.ai/pricing (2025-11-29)",
     "https://api-docs.deepseek.com/quick_start/pricing (2025-11-29)",
     "https://jina.ai/embeddings/ (2025-11-29)",
-    "https://openrouter.ai/api/v1/models (2026-09-15)"
+    "https://openrouter.ai/api/v1/models (2026-09-16)"
   ],
   "models": [
     {
@@ -585,7 +585,7 @@
       "input_per_1k": 0.005,
       "output_per_1k": 0.025,
       "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "Claude Opus 5",
+      "display_name": "Anthropic: Claude Opus 5",
       "gateway_alias": "anthropic.claude-opus-5",
       "gateway_upstream": "openrouter/anthropic/claude-opus-5",
       "supports_vision": true,
@@ -605,7 +605,7 @@
       "input_per_1k": 0.0025,
       "output_per_1k": 0.0125,
       "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "Claude Opus 5 (batch)",
+      "display_name": "Anthropic: Claude Opus 5 (batch)",
       "gateway_alias": "anthropic.claude-opus-5.batch",
       "gateway_upstream": "openrouter/anthropic/claude-opus-5:batch",
       "supports_vision": true,
@@ -2318,26 +2318,6 @@
     },
     {
       "provider": "google",
-      "family": "gemma-4-31b-it:batch",
-      "model": "google/gemma-4-31b-it:batch",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 262144,
-      "input_per_1k": 0.00039,
-      "output_per_1k": 0.00097,
-      "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "Google: Gemma 4 31B (batch)",
-      "gateway_alias": "google.gemma-4-31b-it.batch",
-      "gateway_upstream": "openrouter/google/gemma-4-31b-it:batch",
-      "supports_vision": true,
-      "selection_roles": [],
-      "selection_status": "catalog_only",
-      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
-    },
-    {
-      "provider": "google",
       "family": "gemma-4-31b-it:free",
       "model": "google/gemma-4-31b-it:free",
       "components": [
@@ -2405,8 +2385,8 @@
       ],
       "unit": "1k_tokens",
       "context": 8192,
-      "input_per_1k": 6e-05,
-      "output_per_1k": 6e-05,
+      "input_per_1k": 8e-05,
+      "output_per_1k": 0.00011,
       "base_url": "https://openrouter.ai/api/v1",
       "display_name": "MythoMax 13B",
       "gateway_alias": "gryphe.mythomax-l2-13b",
@@ -3380,7 +3360,7 @@
       ],
       "unit": "1k_tokens",
       "context": 1000000,
-      "input_per_1k": 0.00055,
+      "input_per_1k": 0.0004,
       "output_per_1k": 0.0022,
       "base_url": "https://openrouter.ai/api/v1",
       "display_name": "MiniMax: MiniMax M1",
@@ -3995,8 +3975,8 @@
       ],
       "unit": "1k_tokens",
       "context": 256000,
-      "input_per_1k": 7.5e-05,
-      "output_per_1k": 0.0002,
+      "input_per_1k": 9.375e-05,
+      "output_per_1k": 0.00025,
       "base_url": "https://openrouter.ai/api/v1",
       "display_name": "Mistral: Mistral Small 3.2 24B",
       "gateway_alias": "mistralai.mistral-small-3.2-24b-instruct",
@@ -4172,8 +4152,8 @@
       ],
       "unit": "1k_tokens",
       "context": 262144,
-      "input_per_1k": 0.00071,
-      "output_per_1k": 0.0035,
+      "input_per_1k": 0.0007062,
+      "output_per_1k": 0.00321,
       "base_url": "https://openrouter.ai/api/v1",
       "display_name": "MoonshotAI: Kimi K2.7 Code",
       "gateway_alias": "moonshotai.kimi-k2.7-code",
@@ -4452,8 +4432,8 @@
       ],
       "unit": "1k_tokens",
       "context": 262144,
-      "input_per_1k": 0.0006,
-      "output_per_1k": 0.0024,
+      "input_per_1k": 0.000625,
+      "output_per_1k": 0.003125,
       "base_url": "https://openrouter.ai/api/v1",
       "display_name": "NVIDIA: Nemotron 3 Ultra",
       "gateway_alias": "nvidia.nemotron-3-ultra-550b-a55b",
@@ -5829,26 +5809,6 @@
     },
     {
       "provider": "openai",
-      "family": "gpt-oss-20b:batch",
-      "model": "openai/gpt-oss-20b:batch",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 131072,
-      "input_per_1k": 5e-05,
-      "output_per_1k": 0.0002,
-      "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "OpenAI: gpt-oss-20b (batch)",
-      "gateway_alias": "openai.gpt-oss-20b.batch",
-      "gateway_upstream": "openrouter/openai/gpt-oss-20b:batch",
-      "supports_vision": false,
-      "selection_roles": [],
-      "selection_status": "catalog_only",
-      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
-    },
-    {
-      "provider": "openai",
       "family": "gpt-oss-safeguard-20b",
       "model": "openai/gpt-oss-safeguard-20b",
       "components": [
@@ -6860,8 +6820,8 @@
       ],
       "unit": "1k_tokens",
       "context": 262144,
-      "input_per_1k": 0.00015,
-      "output_per_1k": 0.0006,
+      "input_per_1k": 0.00013,
+      "output_per_1k": 0.00052,
       "base_url": "https://openrouter.ai/api/v1",
       "display_name": "Qwen: Qwen3 VL 30B A3B Instruct",
       "gateway_alias": "qwen.qwen3-vl-30b-a3b-instruct",
@@ -7924,26 +7884,6 @@
     },
     {
       "provider": "thinkingmachines",
-      "family": "inkling-small:batch",
-      "model": "thinkingmachines/inkling-small:batch",
-      "components": [
-        "GEN"
-      ],
-      "unit": "1k_tokens",
-      "context": 524288,
-      "input_per_1k": 0.0005,
-      "output_per_1k": 0.0012,
-      "base_url": "https://openrouter.ai/api/v1",
-      "display_name": "Thinking Machines: Inkling Small (batch)",
-      "gateway_alias": "thinkingmachines.inkling-small.batch",
-      "gateway_upstream": "openrouter/thinkingmachines/inkling-small:batch",
-      "supports_vision": true,
-      "selection_roles": [],
-      "selection_status": "catalog_only",
-      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
-    },
-    {
-      "provider": "thinkingmachines",
       "family": "inkling-small:free",
       "model": "thinkingmachines/inkling-small:free",
       "components": [
@@ -8749,8 +8689,8 @@
       ],
       "unit": "1k_tokens",
       "context": 1310720,
-      "input_per_1k": 0.00015,
-      "output_per_1k": 0.0005,
+      "input_per_1k": 9e-05,
+      "output_per_1k": 0.0003,
       "base_url": "https://openrouter.ai/api/v1",
       "display_name": "Z.ai: GLM 5.3 Flash",
       "gateway_alias": "z-ai.glm-5.3-flash",
