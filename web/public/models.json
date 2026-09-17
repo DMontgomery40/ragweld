@@ -1,6 +1,6 @@
 {
   "currency": "USD",
-  "last_updated": "2026-09-16",
+  "last_updated": "2026-09-17",
   "sources": [
     "https://openai.com/api/pricing/ (2026-02-07)",
     "https://www.anthropic.com/pricing (2026-02-07)",
@@ -10,7 +10,7 @@
     "https://mistral.ai/pricing (2025-11-29)",
     "https://api-docs.deepseek.com/quick_start/pricing (2025-11-29)",
     "https://jina.ai/embeddings/ (2025-11-29)",
-    "https://openrouter.ai/api/v1/models (2026-09-16)"
+    "https://openrouter.ai/api/v1/models (2026-09-17)"
   ],
   "models": [
     {
@@ -1343,8 +1343,8 @@
       ],
       "unit": "1k_tokens",
       "context": 1048576,
-      "input_per_1k": 8.8606e-05,
-      "output_per_1k": 0.000177212,
+      "input_per_1k": 7e-05,
+      "output_per_1k": 0.00014,
       "base_url": "https://openrouter.ai/api/v1",
       "display_name": "DeepSeek: DeepSeek V4 Flash 0423",
       "gateway_alias": "deepseek.deepseek-v4-flash",
@@ -1463,8 +1463,8 @@
       ],
       "unit": "1k_tokens",
       "context": 1048576,
-      "input_per_1k": 0.0009834,
-      "output_per_1k": 0.0029502,
+      "input_per_1k": 0.00065868,
+      "output_per_1k": 0.00197604,
       "base_url": "https://openrouter.ai/api/v1",
       "display_name": "DeepSeek: DeepSeek V4 Pro 0813",
       "gateway_alias": "deepseek.deepseek-v4-pro-0813",
@@ -3000,8 +3000,8 @@
       ],
       "unit": "1k_tokens",
       "context": 131072,
-      "input_per_1k": 0.00035,
-      "output_per_1k": 0.0015,
+      "input_per_1k": 0.0003,
+      "output_per_1k": 0.0011,
       "base_url": "https://openrouter.ai/api/v1",
       "display_name": "Meta: Muse Glimmer 30B",
       "gateway_alias": "meta.muse-glimmer-30b",
@@ -4172,8 +4172,8 @@
       ],
       "unit": "1k_tokens",
       "context": 1048576,
-      "input_per_1k": 0.002648138063,
-      "output_per_1k": 0.01328272425,
+      "input_per_1k": 0.003,
+      "output_per_1k": 0.015,
       "base_url": "https://openrouter.ai/api/v1",
       "display_name": "MoonshotAI: Kimi K3",
       "gateway_alias": "moonshotai.kimi-k3",
@@ -4352,8 +4352,8 @@
       ],
       "unit": "1k_tokens",
       "context": 262144,
-      "input_per_1k": 5e-05,
-      "output_per_1k": 0.0002,
+      "input_per_1k": 6e-05,
+      "output_per_1k": 0.00024,
       "base_url": "https://openrouter.ai/api/v1",
       "display_name": "NVIDIA: Nemotron 3 Nano 30B A3B",
       "gateway_alias": "nvidia.nemotron-3-nano-30b-a3b",
@@ -7597,6 +7597,26 @@
       "gateway_alias": "sao10k.l3.3-euryale-70b",
       "gateway_upstream": "openrouter/sao10k/l3.3-euryale-70b",
       "supports_vision": false,
+      "selection_roles": [],
+      "selection_status": "catalog_only",
+      "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."
+    },
+    {
+      "provider": "stealth",
+      "family": "union-alpha",
+      "model": "stealth/union-alpha",
+      "components": [
+        "GEN"
+      ],
+      "unit": "1k_tokens",
+      "context": 262144,
+      "input_per_1k": 0.0,
+      "output_per_1k": 0.0,
+      "base_url": "https://openrouter.ai/api/v1",
+      "display_name": "Union Alpha",
+      "gateway_alias": "stealth.union-alpha",
+      "gateway_upstream": "openrouter/stealth/union-alpha",
+      "supports_vision": true,
       "selection_roles": [],
       "selection_status": "catalog_only",
       "selection_reason": "Generation provider rows are pricing/candidate metadata; runtime selection comes from authenticated LiteLLM aliases."

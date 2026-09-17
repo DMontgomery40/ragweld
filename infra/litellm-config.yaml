@@ -2149,6 +2149,12 @@ model_list:
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
+- model_name: stealth.union-alpha
+  litellm_params:
+    model: openrouter/stealth/union-alpha
+    num_retries: 0
+    max_retries: 0
+    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: stepfun.step-3.5-flash
   litellm_params:
     model: openrouter/stepfun/step-3.5-flash
