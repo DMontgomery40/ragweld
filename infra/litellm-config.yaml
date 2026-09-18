@@ -393,6 +393,12 @@ model_list:
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
+- model_name: deepseek.deepseek-v4-flash-0731.free
+  litellm_params:
+    model: openrouter/deepseek/deepseek-v4-flash-0731:free
+    num_retries: 0
+    max_retries: 0
+    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: deepseek.deepseek-v4-flash-vision-exp
   litellm_params:
     model: openrouter/deepseek/deepseek-v4-flash-vision-exp
@@ -996,12 +1002,6 @@ model_list:
 - model_name: mistralai.mistral-large-2407
   litellm_params:
     model: openrouter/mistralai/mistral-large-2407
-    num_retries: 0
-    max_retries: 0
-    api_key: os.environ/OPENROUTER_API_KEY
-- model_name: mistralai.mistral-large-2512
-  litellm_params:
-    model: openrouter/mistralai/mistral-large-2512
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
@@ -2071,6 +2071,12 @@ model_list:
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
+- model_name: qwen.qwen3.8-27b.free
+  litellm_params:
+    model: openrouter/qwen/qwen3.8-27b:free
+    num_retries: 0
+    max_retries: 0
+    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3.8-flash
   litellm_params:
     model: openrouter/qwen/qwen3.8-flash
@@ -2146,12 +2152,6 @@ model_list:
 - model_name: sao10k.l3.3-euryale-70b
   litellm_params:
     model: openrouter/sao10k/l3.3-euryale-70b
-    num_retries: 0
-    max_retries: 0
-    api_key: os.environ/OPENROUTER_API_KEY
-- model_name: stealth.union-alpha
-  litellm_params:
-    model: openrouter/stealth/union-alpha
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
@@ -2254,6 +2254,12 @@ model_list:
 - model_name: thinkingmachines.inkling.free
   litellm_params:
     model: openrouter/thinkingmachines/inkling:free
+    num_retries: 0
+    max_retries: 0
+    api_key: os.environ/OPENROUTER_API_KEY
+- model_name: unbiased.pareto
+  litellm_params:
+    model: openrouter/unbiased/pareto
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
