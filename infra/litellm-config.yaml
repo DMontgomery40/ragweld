@@ -1765,6 +1765,12 @@ model_list:
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
+- model_name: prism-ml.ternary-bonsai-2-27b
+  litellm_params:
+    model: openrouter/prism-ml/ternary-bonsai-2-27b
+    num_retries: 0
+    max_retries: 0
+    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen-2.5-72b-instruct
   litellm_params:
     model: openrouter/qwen/qwen-2.5-72b-instruct
@@ -2434,6 +2440,12 @@ model_list:
 - model_name: z-ai.glm-5.3-flash.batch
   litellm_params:
     model: openrouter/z-ai/glm-5.3-flash:batch
+    num_retries: 0
+    max_retries: 0
+    api_key: os.environ/OPENROUTER_API_KEY
+- model_name: z-ai.glm-5.3-flashx
+  litellm_params:
+    model: openrouter/z-ai/glm-5.3-flashx
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
