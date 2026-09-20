@@ -393,12 +393,6 @@ model_list:
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
-- model_name: deepseek.deepseek-v4-flash-0731.free
-  litellm_params:
-    model: openrouter/deepseek/deepseek-v4-flash-0731:free
-    num_retries: 0
-    max_retries: 0
-    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: deepseek.deepseek-v4-flash-vision-exp
   litellm_params:
     model: openrouter/deepseek/deepseek-v4-flash-vision-exp
