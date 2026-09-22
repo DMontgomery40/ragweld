@@ -111,12 +111,6 @@ model_list:
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
-- model_name: anthropic.claude-opus-4
-  litellm_params:
-    model: openrouter/anthropic/claude-opus-4
-    num_retries: 0
-    max_retries: 0
-    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: anthropic.claude-opus-4.1
   litellm_params:
     model: openrouter/anthropic/claude-opus-4.1
@@ -759,12 +753,6 @@ model_list:
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
-- model_name: kwaipilot.kat-coder-pro-v2
-  litellm_params:
-    model: openrouter/kwaipilot/kat-coder-pro-v2
-    num_retries: 0
-    max_retries: 0
-    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: kwaipilot.kat-coder-pro-v2.5
   litellm_params:
     model: openrouter/kwaipilot/kat-coder-pro-v2.5
@@ -936,12 +924,6 @@ model_list:
 - model_name: minimax.minimax-m3
   litellm_params:
     model: openrouter/minimax/minimax-m3
-    num_retries: 0
-    max_retries: 0
-    api_key: os.environ/OPENROUTER_API_KEY
-- model_name: minimax.minimax-m3.batch
-  litellm_params:
-    model: openrouter/minimax/minimax-m3:batch
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
@@ -1131,12 +1113,6 @@ model_list:
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
-- model_name: moonshotai.kimi-k3.batch
-  litellm_params:
-    model: openrouter/moonshotai/kimi-k3:batch
-    num_retries: 0
-    max_retries: 0
-    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: morph.morph-v3-fast
   litellm_params:
     model: openrouter/morph/morph-v3-fast
@@ -1149,9 +1125,21 @@ model_list:
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
+- model_name: nex-agi.nex-n2.5-mini
+  litellm_params:
+    model: openrouter/nex-agi/nex-n2.5-mini
+    num_retries: 0
+    max_retries: 0
+    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: nex-agi.nex-n2.5-mini.free
   litellm_params:
     model: openrouter/nex-agi/nex-n2.5-mini:free
+    num_retries: 0
+    max_retries: 0
+    api_key: os.environ/OPENROUTER_API_KEY
+- model_name: nex-agi.nex-n2.5-pro
+  litellm_params:
+    model: openrouter/nex-agi/nex-n2.5-pro
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
@@ -1599,12 +1587,6 @@ model_list:
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
-- model_name: openai.gpt-oss-120b.batch
-  litellm_params:
-    model: openrouter/openai/gpt-oss-120b:batch
-    num_retries: 0
-    max_retries: 0
-    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: openai.gpt-oss-20b
   litellm_params:
     model: openrouter/openai/gpt-oss-20b
@@ -1981,12 +1963,6 @@ model_list:
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
-- model_name: qwen.qwen3.5-9b.batch
-  litellm_params:
-    model: openrouter/qwen/qwen3.5-9b:batch
-    num_retries: 0
-    max_retries: 0
-    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3.5-flash-02-23
   litellm_params:
     model: openrouter/qwen/qwen3.5-flash-02-23
@@ -2056,12 +2032,6 @@ model_list:
 - model_name: qwen.qwen3.8-2.4t-a95b
   litellm_params:
     model: openrouter/qwen/qwen3.8-2.4t-a95b
-    num_retries: 0
-    max_retries: 0
-    api_key: os.environ/OPENROUTER_API_KEY
-- model_name: qwen.qwen3.8-2.4t-a95b.batch
-  litellm_params:
-    model: openrouter/qwen/qwen3.8-2.4t-a95b:batch
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
@@ -2245,12 +2215,6 @@ model_list:
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
-- model_name: thinkingmachines.inkling.batch
-  litellm_params:
-    model: openrouter/thinkingmachines/inkling:batch
-    num_retries: 0
-    max_retries: 0
-    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: thinkingmachines.inkling.free
   litellm_params:
     model: openrouter/thinkingmachines/inkling:free
@@ -2323,6 +2287,12 @@ model_list:
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
+- model_name: x-ai.grok-4.7
+  litellm_params:
+    model: openrouter/x-ai/grok-4.7
+    num_retries: 0
+    max_retries: 0
+    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: x-ai.grok-build-0.1
   litellm_params:
     model: openrouter/x-ai/grok-build-0.1
@@ -2338,6 +2308,24 @@ model_list:
 - model_name: xiaomi.mimo-v2.5-pro
   litellm_params:
     model: openrouter/xiaomi/mimo-v2.5-pro
+    num_retries: 0
+    max_retries: 0
+    api_key: os.environ/OPENROUTER_API_KEY
+- model_name: xiaomi.mimo-v2.6-flash
+  litellm_params:
+    model: openrouter/xiaomi/mimo-v2.6-flash
+    num_retries: 0
+    max_retries: 0
+    api_key: os.environ/OPENROUTER_API_KEY
+- model_name: xiaomi.mimo-v2.6-pro
+  litellm_params:
+    model: openrouter/xiaomi/mimo-v2.6-pro
+    num_retries: 0
+    max_retries: 0
+    api_key: os.environ/OPENROUTER_API_KEY
+- model_name: xiaomi.mimo-v2.6-pro-ultraspeed
+  litellm_params:
+    model: openrouter/xiaomi/mimo-v2.6-pro-ultraspeed
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
