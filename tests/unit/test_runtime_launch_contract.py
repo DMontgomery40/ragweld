@@ -711,6 +711,20 @@ def test_prometheus_forwards_to_mimir_and_routes_alerts_to_alertmanager() -> Non
     assert Path(rules_mount["source"]).resolve() == (ROOT / "infra" / "prometheus-rules.yml").resolve()
 
 
+def test_every_paging_rule_links_a_provisioned_dashboard() -> None:
+    import yaml
+
+    rules = yaml.safe_load((ROOT / "infra" / "prometheus-rules.yml").read_text(encoding="utf-8"))
+    dashboards_dir = ROOT / "infra" / "grafana" / "provisioning" / "dashboards"
+    provisioned = {json.loads(path.read_text(encoding="utf-8"))["uid"] for path in dashboards_dir.glob("*.json")}
+    paging = [rule for group in rules["groups"] for rule in group["rules"] if "alert" in rule and rule["alert"] != "RagweldWatchdog"]
+    assert paging
+    missing = [rule["alert"] for rule in paging if not str(rule["annotations"].get("dashboard", "")).startswith("/d/")]
+    assert not missing, f"rules without a dashboard link: {missing}"
+    unknown = {rule["alert"]: rule["annotations"]["dashboard"] for rule in paging if rule["annotations"]["dashboard"].removeprefix("/d/") not in provisioned}
+    assert not unknown, f"dashboard links to uids Grafana does not provision: {unknown}"
+
+
 def _receivers_in(route: dict[str, Any]) -> Iterator[str]:
     if route.get("receiver"):
         yield str(route["receiver"])
@@ -722,8 +736,13 @@ def test_alertmanager_routes_to_discord_from_a_secret_file_and_parks_the_watchdo
     import yaml
 
     source = (ROOT / "infra" / "alertmanager.yml").read_text(encoding="utf-8")
-    # Webhook URLs are secrets: only file references may live in the repo.
-    assert not re.search(r"https?://", source)
+    # Webhook URLs are secrets: only file references may live in the repo. The one URL
+    # allowed is the public Grafana root the Discord message links dashboards on, and it
+    # must be the root Grafana itself is served at.
+    grafana_root = _compose_config("docker-compose.yml", "infra/docker-compose.observability.yml", PROXMOX_PRODUCTION_COMPOSE)[
+        "services"
+    ]["grafana"]["environment"]["GF_SERVER_ROOT_URL"]
+    assert set(re.findall(r"https?://[^\s'\"/{]+", source)) == {grafana_root}
     payload = yaml.safe_load(source)
     route = payload["route"]
     assert route["receiver"] == "discord"
@@ -733,9 +752,14 @@ def test_alertmanager_routes_to_discord_from_a_secret_file_and_parks_the_watchdo
     )
     receivers = {receiver["name"]: receiver for receiver in payload["receivers"]}
     assert set(receivers["null"]) == {"name"}
-    assert receivers["discord"]["discord_configs"] == [
-        {"webhook_url_file": "/etc/ragweld/alertmanager-discord-webhook", "send_resolved": True}
-    ]
+    [discord] = receivers["discord"]["discord_configs"]
+    assert discord["webhook_url_file"] == "/etc/ragweld/alertmanager-discord-webhook"
+    assert discord["send_resolved"] is True
+    # The message links each rule's dashboard on the public Grafana, never the
+    # Prometheus generatorURL (a container hostname no reader can open).
+    assert f"({grafana_root}{{{{ . }}}})" in discord["message"]
+    assert "{{ with .Annotations.dashboard }}" in discord["message"]
+    assert "GeneratorURL" not in discord["message"] and "GeneratorURL" not in discord["title"]
     # Slack is ready but never routed until the operator switches it on.
     assert receivers["slack"]["slack_configs"] == [
         {"api_url_file": "/etc/ragweld/alertmanager-slack-webhook", "send_resolved": True}
@@ -812,6 +836,7 @@ def test_alert_rules_fire_on_real_problems_and_never_on_the_disabled_local_lane(
                         {
                             "exp_labels": {"severity": "warning", "job": "vllm", "instance": "host.docker.internal:58080"},
                             "exp_annotations": {
+                                "dashboard": "/d/ragweld-oncall-overview",
                                 "summary": "Local model server is not being scraped",
                                 "description": "The local-model lane is running on this host but its vllm-metal server has been unreachable for 5 minutes. Local generation requests fail until it is restarted.",
                             },
@@ -846,6 +871,7 @@ def test_alert_rules_fire_on_real_problems_and_never_on_the_disabled_local_lane(
                         {
                             "exp_labels": {"severity": "warning"},
                             "exp_annotations": {
+                                "dashboard": "/d/ragweld-gateway-serving",
                                 "summary": "More than 20% of gateway requests are failing",
                                 "description": "Over the last 10 minutes more than 20% of LiteLLM proxy requests (at least 5 requests) returned a failure to the client. Check the Gateway & Serving dashboard (deployment failures by exception) and the provider's status.",
                             },
@@ -876,6 +902,7 @@ def test_alert_rules_fire_on_real_problems_and_never_on_the_disabled_local_lane(
                         {
                             "exp_labels": {"severity": "warning", "requested_model": "z-ai.glm-5.3-flash"},
                             "exp_annotations": {
+                                "dashboard": "/d/ragweld-gateway-serving",
                                 "summary": "Gateway time to first token p95 above 30 s for z-ai.glm-5.3-flash",
                                 "description": "The p95 time to the first streamed chunk for z-ai.glm-5.3-flash has been above 30 seconds over 15 minutes (at least 3 streamed requests). Users see a stalled answer. Check the provider and consider another model.",
                             },
@@ -903,6 +930,7 @@ def test_alert_rules_fire_on_real_problems_and_never_on_the_disabled_local_lane(
                         {
                             "exp_labels": {"severity": "warning", "hashed_api_key": "k"},
                             "exp_annotations": {
+                                "dashboard": "/d/ragweld-cost-capacity",
                                 "summary": "Gateway API key budget almost spent",
                                 "description": "A LiteLLM API key has less than $5 of budget left (3.00). Requests fail once it reaches zero.",
                             },
@@ -916,6 +944,7 @@ def test_alert_rules_fire_on_real_problems_and_never_on_the_disabled_local_lane(
                         {
                             "exp_labels": {"severity": "warning", "mode": "cloud"},
                             "exp_annotations": {
+                                "dashboard": "/d/ragweld-retrieval-indexing-graph",
                                 "summary": "Reranker (cloud) is failing",
                                 "description": "The cloud reranker raised errors in the last 15 minutes; affected searches return un-reranked results.",
                             },
@@ -929,6 +958,7 @@ def test_alert_rules_fire_on_real_problems_and_never_on_the_disabled_local_lane(
                         {
                             "exp_labels": {"severity": "warning"},
                             "exp_annotations": {
+                                "dashboard": "/d/ragweld-retrieval-indexing-graph",
                                 "summary": "An indexing run failed",
                                 "description": "At least one indexing run ended in error in the last 30 minutes. Open the corpus's index run history for the failing stage.",
                             },
@@ -971,6 +1001,7 @@ def test_alert_rules_fire_on_real_problems_and_never_on_the_disabled_local_lane(
                         {
                             "exp_labels": {"severity": "warning", "job": "laya", "instance": "laya:8000"},
                             "exp_annotations": {
+                                "dashboard": "/d/ragweld-gateway-serving",
                                 "summary": "Laya (local System One) is down while Ragweld is using it",
                                 "description": "system_one.provider=laya requests were sent in the last 30 minutes, but the Laya container has not answered a scrape for 5 minutes. System One decisions fail until it is back.",
                             },
@@ -996,6 +1027,7 @@ def test_alert_rules_fire_on_real_problems_and_never_on_the_disabled_local_lane(
                         {
                             "exp_labels": {"severity": "warning"},
                             "exp_annotations": {
+                                "dashboard": "/d/ragweld-chat",
                                 "summary": "More than 10% of chat requests are failing",
                                 "description": "Over the last 10 minutes more than 10% of chat requests (at least 5) ended in a retrieval error, gateway error or timeout. Check the Chat dashboard (requests by outcome) and the API logs.",
                             },
@@ -1049,6 +1081,7 @@ def test_alert_rules_fire_on_real_problems_and_never_on_the_disabled_local_lane(
                         {
                             "exp_labels": {"severity": "warning", "model": "m1"},
                             "exp_annotations": {
+                                "dashboard": "/d/ragweld-chat",
                                 "summary": "Chat time to first text p95 above 60 s for m1",
                                 "description": "The p95 time from sending a chat to its first answer text on m1 has been above 60 seconds over 15 minutes (at least 3 answers). Users wait a minute or more before any answer appears. Check the provider and the Chat dashboard.",
                             },
@@ -1074,6 +1107,7 @@ def test_alert_rules_fire_on_real_problems_and_never_on_the_disabled_local_lane(
                         {
                             "exp_labels": {"severity": "warning", "surface": "chat"},
                             "exp_annotations": {
+                                "dashboard": "/d/ragweld-chat",
                                 "summary": "Most chat thumbs votes in the last hour are thumbs-down",
                                 "description": "More than half of the chat thumbs votes in the last hour (at least 5 votes) were thumbs-down. Review recent answers and their feedback.",
                             },

@@ -1,3 +1,6 @@
+# Every rule that pages carries a `dashboard` annotation: the Grafana path
+# (/d/<uid>) of the dashboard to open first. The Discord message template in
+# infra/alertmanager.yml turns it into a link.
 groups:
   - name: ragweld-pipeline
     rules:
@@ -23,6 +26,7 @@ groups:
         labels:
           severity: critical
         annotations:
+          dashboard: /d/ragweld-oncall-overview
           summary: Ragweld API is not being scraped
           description: The host FastAPI process has been down for 2 minutes.
 
@@ -32,6 +36,7 @@ groups:
         labels:
           severity: critical
         annotations:
+          dashboard: /d/ragweld-oncall-overview
           summary: LiteLLM gateway is not being scraped
           description: The generation gateway has been down for 2 minutes.
 
@@ -44,6 +49,7 @@ groups:
         labels:
           severity: warning
         annotations:
+          dashboard: /d/ragweld-oncall-overview
           summary: Local model server is not being scraped
           description: >-
             The local-model lane is running on this host but its vllm-metal
@@ -61,6 +67,7 @@ groups:
         labels:
           severity: warning
         annotations:
+          dashboard: /d/ragweld-gateway-serving
           summary: Laya (local System One) is down while Ragweld is using it
           description: >-
             system_one.provider=laya requests were sent in the last 30 minutes,
@@ -73,6 +80,7 @@ groups:
         labels:
           severity: critical
         annotations:
+          dashboard: /d/ragweld-oncall-overview
           summary: Postgres exporter is not being scraped
           description: The Postgres metrics exporter has been down for 2 minutes.
 
@@ -94,6 +102,7 @@ groups:
         labels:
           severity: warning
         annotations:
+          dashboard: /d/ragweld-gateway-serving
           summary: More than 20% of gateway requests are failing
           description: >-
             Over the last 10 minutes more than 20% of LiteLLM proxy requests
@@ -111,6 +120,7 @@ groups:
         labels:
           severity: warning
         annotations:
+          dashboard: /d/ragweld-gateway-serving
           summary: 'Gateway time to first token p95 above 30 s for {{ $labels.requested_model }}'
           description: >-
             The p95 time to the first streamed chunk for {{ $labels.requested_model }}
@@ -124,6 +134,7 @@ groups:
         labels:
           severity: warning
         annotations:
+          dashboard: /d/ragweld-cost-capacity
           summary: Gateway API key budget almost spent
           description: >-
             A LiteLLM API key has less than $5 of budget left
@@ -136,6 +147,7 @@ groups:
         labels:
           severity: warning
         annotations:
+          dashboard: /d/ragweld-retrieval-indexing-graph
           summary: Retrieval requests are failing
           description: >-
             At least one tri-brid retrieval (search, chat, benchmark or MCP)
@@ -147,6 +159,7 @@ groups:
         labels:
           severity: warning
         annotations:
+          dashboard: /d/ragweld-retrieval-indexing-graph
           summary: 'Retrieval stage {{ $labels.stage }} is failing'
           description: >-
             The {{ $labels.stage }} stage raised errors in the last 10 minutes.
@@ -157,6 +170,7 @@ groups:
         labels:
           severity: warning
         annotations:
+          dashboard: /d/ragweld-retrieval-indexing-graph
           summary: 'Reranker ({{ $labels.mode }}) is failing'
           description: >-
             The {{ $labels.mode }} reranker raised errors in the last 15 minutes;
@@ -169,6 +183,7 @@ groups:
         labels:
           severity: warning
         annotations:
+          dashboard: /d/ragweld-retrieval-indexing-graph
           summary: An indexing run failed
           description: >-
             At least one indexing run ended in error in the last 30 minutes.
@@ -191,6 +206,7 @@ groups:
         labels:
           severity: warning
         annotations:
+          dashboard: /d/ragweld-chat
           summary: More than 10% of chat requests are failing
           description: >-
             Over the last 10 minutes more than 10% of chat requests (at least 5)
@@ -207,6 +223,7 @@ groups:
         labels:
           severity: warning
         annotations:
+          dashboard: /d/ragweld-chat
           summary: 'Chat time to first text p95 above 60 s for {{ $labels.model }}'
           description: >-
             The p95 time from sending a chat to its first answer text on
@@ -226,6 +243,7 @@ groups:
         labels:
           severity: warning
         annotations:
+          dashboard: /d/ragweld-chat
           summary: 'Most {{ $labels.surface }} thumbs votes in the last hour are thumbs-down'
           description: >-
             More than half of the {{ $labels.surface }} thumbs votes in the last

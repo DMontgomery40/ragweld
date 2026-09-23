@@ -23,10 +23,23 @@ route:
 
 receivers:
   - name: 'null'
+  # The default Discord message ends in a "Source:" link built from Prometheus's
+  # container hostname, which no reader can open. This message instead links the
+  # dashboard each rule names in its `dashboard` annotation (infra/prometheus-rules.yml)
+  # on the public Grafana (GF_SERVER_ROOT_URL in deploy/proxmox/docker-compose.yml).
   - name: 'discord'
     discord_configs:
       - webhook_url_file: /etc/ragweld/alertmanager-discord-webhook
         send_resolved: true
+        title: '{{ if eq .Status "firing" }}FIRING{{ else }}RESOLVED{{ end }}: {{ .CommonLabels.alertname }}{{ with .CommonLabels.severity }} ({{ . }}){{ end }}{{ if gt (len .Alerts) 1 }}, {{ len .Alerts }} alerts{{ end }}'
+        message: |-
+          {{ range .Alerts -}}
+          **{{ .Annotations.summary }}**
+          {{ .Annotations.description }}
+          {{ range .Labels.SortedPairs }}{{ if and (ne .Name "alertname") (ne .Name "severity") }}`{{ .Name }}={{ .Value }}` {{ end }}{{ end }}
+          Started <t:{{ .StartsAt.Unix }}:R>{{ if eq .Status "resolved" }}, resolved <t:{{ .EndsAt.Unix }}:R>{{ end }}{{ with .Annotations.dashboard }} · [Open dashboard](https://ragweld-grafana.dtmont.com{{ . }}){{ end }}
+
+          {{ end -}}
   # Slack, ready but NOT routed. To switch it on: put the incoming-webhook URL in
   # /etc/ragweld/alertmanager-slack-webhook (0600, runtime user), add its read-only
   # mount beside the Discord one in deploy/proxmox/docker-compose.yml, then set
