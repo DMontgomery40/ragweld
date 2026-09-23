@@ -66,7 +66,7 @@
     {
       "datasource": { "type": "prometheus", "uid": "mimir" },
       "description": "Chat generation cost in the selected range, from each request's cost summary. Requests whose cost is unavailable add 0.",
-      "fieldConfig": { "defaults": { "unit": "currencyUSD", "decimals": 2, "noValue": "No data: no chat requests since the API began emitting chat metrics" } },
+      "fieldConfig": { "defaults": { "unit": "currencyUSD", "decimals": 4, "noValue": "No data: no chat requests since the API began emitting chat metrics" } },
       "gridPos": { "h": 5, "w": 6, "x": 18, "y": 0 },
       "id": 4,
       "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },

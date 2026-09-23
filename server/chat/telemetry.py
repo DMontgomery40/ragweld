@@ -100,13 +100,13 @@ class ChatRunTelemetry:
     generation_error: BaseException | None = None
     outcome: RunOutcome | None = None
 
-    def __post_init__(self) -> None:
-        prime_chat_series(self.model)
-
     def bind_model(self, model: str) -> None:
-        """Label the request with its alias once the config resolves it."""
+        """Label the request with its alias once the config resolves it. Only resolved
+        aliases are primed: `unresolved` requests never reach the gateway, and zero series
+        for it would put a permanent empty row on every per-model panel."""
         self.model = model
-        prime_chat_series(model)
+        if model != UNRESOLVED_MODEL_LABEL:
+            prime_chat_series(model)
 
     def begin_generation(self) -> None:
         """Retrieval and prompt assembly are done; from here a failure is the generation lane's

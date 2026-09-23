@@ -155,6 +155,17 @@ def test_a_request_creates_every_series_of_its_alias_at_zero_before_it_finishes(
     }, moved
     assert after[("requests", "gateway_error")] == 1.0
 
+    # `unresolved` requests never reach the gateway, so nothing but priming could create a
+    # cost series for it; binding it must not, or every per-model panel grows an empty row.
+    ChatRunTelemetry(model=UNRESOLVED_MODEL_LABEL).bind_model(UNRESOLVED_MODEL_LABEL)
+    for source in cost_sources:
+        assert (
+            REGISTRY.get_sample_value(
+                "tribrid_chat_cost_usd_total", {"model": UNRESOLVED_MODEL_LABEL, "cost_source": source}
+            )
+            is None
+        ), source
+
 
 def test_feedback_route_accepts_exactly_the_contract_signals() -> None:
     """The route validates against the same tuple the counter is labelled with."""
