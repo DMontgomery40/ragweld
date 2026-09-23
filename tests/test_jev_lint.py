@@ -84,8 +84,36 @@ class JevLintTests(unittest.TestCase):
         self.git("commit", "-qm", "change")
         self.write("src/a.py", "import json\n")
         names = self.lint.select_files(self.root, self.policy, base=base)
-        batches = self.lint.build_batches(self.root, names, self.policy, snapshot="HEAD")
+        batches = self.lint.build_batches(self.root, names, self.policy, snapshot="HEAD", base=base)
         self.assertEqual(batches[0]["files"][0]["content"], "import redis\n")
+
+    def test_committed_scope_sends_only_changed_hunks_with_bounded_context(self):
+        original = "".join(f"line {number}\n" for number in range(1, 201))
+        self.write("src/a.py", original)
+        self.git("add", ".")
+        self.git("commit", "-qm", "base")
+        base = self.git("rev-parse", "HEAD").strip()
+        changed = original.replace("line 100\n", "import redis  # changed line\n")
+        self.write("src/a.py", changed)
+        self.git("add", ".")
+        self.git("commit", "-qm", "change")
+
+        batches = self.lint.build_batches(
+            self.root,
+            ["src/a.py"],
+            self.policy,
+            snapshot="HEAD",
+            base=base,
+            context_lines=2,
+        )
+
+        chunks = [source for batch in batches for source in batch["files"]]
+        self.assertEqual(len(chunks), 1)
+        self.assertEqual(chunks[0]["line"], 98)
+        self.assertIn("line 98\n", chunks[0]["content"])
+        self.assertIn("import redis  # changed line\n", chunks[0]["content"])
+        self.assertIn("line 102\n", chunks[0]["content"])
+        self.assertNotIn("line 1\n", chunks[0]["content"])
 
     def test_cloud_key_is_never_selected_for_custom_endpoint(self):
         for url in ["http://127.0.0.1:8080", "https://other.example", "https://api.typesafe.ai:8443", "https://api.typesafe.ai.evil.example"]:

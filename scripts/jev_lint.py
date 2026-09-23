@@ -11,6 +11,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import shlex
 import subprocess
 import sys
@@ -86,7 +87,49 @@ def select_files(root, policy, paths=None, base=None, staged=False, all_files=Fa
     return selected
 
 
-def build_batches(root, files, policy, staged=False, max_chars=24000, max_batches=32, snapshot=None):
+def changed_sections(root, base, name, context_lines=20):
+    """Return new-side changed hunks as ``(start_line, content)`` tuples."""
+    diff = git(
+        root,
+        "diff",
+        f"--unified={context_lines}",
+        "--no-ext-diff",
+        "--no-color",
+        base,
+        "HEAD",
+        "--",
+        name,
+    )
+    sections = []
+    start = None
+    lines = []
+    for raw in diff.splitlines(keepends=True):
+        if raw.startswith("@@ "):
+            if start is not None:
+                sections.append((start, "".join(lines)))
+            match = re.search(r"\+(\d+)(?:,\d+)?", raw)
+            if match is None:
+                raise LintError(f"Could not parse changed hunk for {name}")
+            start = int(match.group(1))
+            lines = []
+        elif start is not None and raw.startswith((" ", "+")) and not raw.startswith("+++"):
+            lines.append(raw[1:])
+    if start is not None:
+        sections.append((start, "".join(lines)))
+    return [(line, content) for line, content in sections if content]
+
+
+def build_batches(
+    root,
+    files,
+    policy,
+    staged=False,
+    max_chars=24000,
+    max_batches=32,
+    snapshot=None,
+    base=None,
+    context_lines=20,
+):
     if max_chars < 2000 or max_batches < 1:
         raise LintError("Invalid request budget")
     batches, current = [], {"context": policy.get("context", ""), "files": []}
@@ -104,24 +147,26 @@ def build_batches(root, files, policy, staged=False, max_chars=24000, max_batche
                 json.loads(source)
             except ValueError as exc:
                 raise LintError(f"{name}: invalid JSON ({exc.msg})") from exc
-        offset, line = 0, 1
-        while offset < len(source):
-            size = min(len(source) - offset, max_chars // 2)
-            while True:
-                chunk = {"path": name, "line": line, "offset": offset, "content": source[offset:offset + size]}
-                candidate = {"context": current["context"], "files": current["files"] + [chunk]}
-                if len(json.dumps(candidate, ensure_ascii=False)) <= max_chars:
-                    break
-                if current["files"]:
-                    batches.append(current)
-                    current = {"context": current["context"], "files": []}
-                else:
-                    size //= 2
-                    if not size:
-                        raise LintError("Policy context exceeds the request budget")
-            current = candidate
-            offset += size
-            line += chunk["content"].count("\n")
+        sections = changed_sections(root, base, name, context_lines) if base else [(1, source)]
+        for section_line, section in sections:
+            offset, line = 0, section_line
+            while offset < len(section):
+                size = min(len(section) - offset, max_chars // 2)
+                while True:
+                    chunk = {"path": name, "line": line, "offset": offset, "content": section[offset:offset + size]}
+                    candidate = {"context": current["context"], "files": current["files"] + [chunk]}
+                    if len(json.dumps(candidate, ensure_ascii=False)) <= max_chars:
+                        break
+                    if current["files"]:
+                        batches.append(current)
+                        current = {"context": current["context"], "files": []}
+                    else:
+                        size //= 2
+                        if not size:
+                            raise LintError("Policy context exceeds the request budget")
+                current = candidate
+                offset += size
+                line += chunk["content"].count("\n")
     if current["files"]:
         batches.append(current)
     if len(batches) > max_batches:
@@ -243,7 +288,15 @@ def main(argv=None):
         if not 0 <= review < violation <= 1 or args.max_seconds <= 0:
             raise LintError("Invalid thresholds or time budget")
         files = select_files(root, policy, args.paths, args.base, args.staged, args.all_files)
-        batches = build_batches(root, files, policy, staged=args.staged, max_batches=args.max_requests, snapshot="HEAD" if args.base else None)
+        batches = build_batches(
+            root,
+            files,
+            policy,
+            staged=args.staged,
+            max_batches=args.max_requests,
+            snapshot="HEAD" if args.base else None,
+            base=args.base,
+        )
         plan = [(batch, *build_questions(batch, policy)) for batch in batches]
         plan = [(b, q, loc) for b, q, loc in plan if q]
         result = {"status": "planned" if args.dry_run else "pass", "files": files, "batches": len(plan), "requests": 0, "cached": 0, "findings": []}
