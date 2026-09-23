@@ -923,6 +923,8 @@ def test_proxmox_production_model_defaults_are_current_and_routable() -> None:
     assert "gpt-5.4" not in renderer_source
     assert "gpt-5.4" not in rollout_source
     assert "terra" not in renderer_source.lower()
+    assert "openai.gpt-5.6-terra" not in rollout_source
+    assert "openai.gpt-6-sol" in rollout_source
     assert model_defaults == {
         "anthropic.claude-sonnet-5",
         "openai.gpt-6-sol",

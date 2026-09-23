@@ -377,7 +377,10 @@ def _refresh_litellm_reranker_rows(
     ]
     if not luna_candidates:
         return preserved
-    latest_luna = max(luna_candidates, key=lambda feed: _version_tuple(feed.model_id))
+    latest_luna = max(
+        luna_candidates,
+        key=lambda feed: _openai_frontier_version(feed.model_id) or (),
+    )
     alias = gateway_alias_for_openrouter_id(latest_luna.model_id)
     family = latest_luna.model_id.split("/", 1)[1]
 
