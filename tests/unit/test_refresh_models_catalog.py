@@ -28,6 +28,58 @@ def test_refresh_removes_the_entire_blocked_family_and_keeps_unrelated_fours() -
     assert set(normalized) == set(allowed)
 
 
+def test_refresh_keeps_only_the_latest_openai_gpt_generation() -> None:
+    feed = [
+        _feed_row("openai/gpt-5.6-sol"),
+        _feed_row("openai/gpt-5.6-terra"),
+        _feed_row("openai/gpt-5.6-luna:batch"),
+        _feed_row("openai/gpt-6-astra"),
+        _feed_row("openai/gpt-6-sol"),
+        _feed_row("openai/gpt-6-luna:batch"),
+        _feed_row("openai/gpt-5.4-image-2"),
+        _feed_row("openai/gpt-oss-120b"),
+    ]
+
+    stats = RefreshStats()
+    normalized = normalize_openrouter_rows(feed, stats)
+
+    assert set(normalized) == {
+        "openai/gpt-6-astra",
+        "openai/gpt-6-sol",
+        "openai/gpt-6-luna:batch",
+        "openai/gpt-5.4-image-2",
+        "openai/gpt-oss-120b",
+    }
+    assert stats.skipped_superseded == 3
+
+
+def test_refresh_keeps_only_the_latest_anthropic_version_per_family() -> None:
+    feed = [
+        _feed_row("anthropic/claude-opus-4.8"),
+        _feed_row("anthropic/claude-opus-5"),
+        _feed_row("anthropic/claude-opus-5.5"),
+        _feed_row("anthropic/claude-opus-5.5:batch"),
+        _feed_row("anthropic/claude-fable-5"),
+        _feed_row("anthropic/claude-fable-5.1"),
+        _feed_row("anthropic/claude-sonnet-4.6"),
+        _feed_row("anthropic/claude-sonnet-5"),
+        _feed_row("anthropic/claude-3-haiku"),
+        _feed_row("anthropic/claude-haiku-4.5"),
+    ]
+
+    stats = RefreshStats()
+    normalized = normalize_openrouter_rows(feed, stats)
+
+    assert set(normalized) == {
+        "anthropic/claude-opus-5.5",
+        "anthropic/claude-opus-5.5:batch",
+        "anthropic/claude-fable-5.1",
+        "anthropic/claude-sonnet-5",
+        "anthropic/claude-haiku-4.5",
+    }
+    assert stats.skipped_superseded == 5
+
+
 def _feed_row(
     model_id: str,
     *,
@@ -140,6 +192,7 @@ def test_normalize_keeps_every_text_route_including_variants_and_counts_every_sk
         + stats.skipped_non_text
         + stats.skipped_missing_context
         + stats.skipped_invalid_alias
+        + stats.skipped_superseded
     )
     assert accounted == 10, "every feed row is either normalized or counted as a skip"
 
