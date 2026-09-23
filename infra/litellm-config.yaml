@@ -27,6 +27,18 @@ model_list:
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
+- model_name: aion-labs.aion-3.5
+  litellm_params:
+    model: openrouter/aion-labs/aion-3.5
+    num_retries: 0
+    max_retries: 0
+    api_key: os.environ/OPENROUTER_API_KEY
+- model_name: aion-labs.aion-3.5-mini
+  litellm_params:
+    model: openrouter/aion-labs/aion-3.5-mini
+    num_retries: 0
+    max_retries: 0
+    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: aion-labs.aion-rp-llama-3.1-8b
   litellm_params:
     model: openrouter/aion-labs/aion-rp-llama-3.1-8b
@@ -741,12 +753,6 @@ model_list:
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
-- model_name: inclusionai.ling-3.0-flash-vl.free
-  litellm_params:
-    model: openrouter/inclusionai/ling-3.0-flash-vl:free
-    num_retries: 0
-    max_retries: 0
-    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: inference-net.schematron-v2-small
   litellm_params:
     model: openrouter/inference-net/schematron-v2-small
@@ -936,12 +942,6 @@ model_list:
 - model_name: mistralai.codestral-2508.batch
   litellm_params:
     model: openrouter/mistralai/codestral-2508:batch
-    num_retries: 0
-    max_retries: 0
-    api_key: os.environ/OPENROUTER_API_KEY
-- model_name: mistralai.devstral-2512
-  litellm_params:
-    model: openrouter/mistralai/devstral-2512
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
@@ -2119,6 +2119,12 @@ model_list:
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
+- model_name: qwen.qwen3.8-max-prime
+  litellm_params:
+    model: openrouter/qwen/qwen3.8-max-prime
+    num_retries: 0
+    max_retries: 0
+    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: qwen.qwen3.8-omni-flash
   litellm_params:
     model: openrouter/qwen/qwen3.8-omni-flash
@@ -2188,6 +2194,12 @@ model_list:
 - model_name: sao10k.l3.3-euryale-70b
   litellm_params:
     model: openrouter/sao10k/l3.3-euryale-70b
+    num_retries: 0
+    max_retries: 0
+    api_key: os.environ/OPENROUTER_API_KEY
+- model_name: stealth.space-bunny-alpha
+  litellm_params:
+    model: openrouter/stealth/space-bunny-alpha
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
