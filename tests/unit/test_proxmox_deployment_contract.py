@@ -112,7 +112,7 @@ PRODUCTION_DEFAULTS = {
     ("synthetic", "generator", "max_tokens"): 16000,
     ("chat", "max_tokens"): 16000,
     ("chat", "litellm", "default_model"): "z-ai.glm-5.3-flash",
-    ("chat", "multimodal", "vision_model_override"): "openai.gpt-6-sol",
+    ("chat", "multimodal", "vision_model_override"): "anthropic.claude-sonnet-5",
     ("chat", "vllm", "enabled"): False,
     ("embedding", "embedding_backend"): "provider",
     ("embedding", "embedding_type"): "huggingface",
@@ -923,7 +923,11 @@ def test_proxmox_production_model_defaults_are_current_and_routable() -> None:
     assert "gpt-5.4" not in renderer_source
     assert "gpt-5.4" not in rollout_source
     assert "terra" not in renderer_source.lower()
-    assert model_defaults == {"openai.gpt-6-sol", "z-ai.glm-5.3-flash"}
+    assert model_defaults == {
+        "anthropic.claude-sonnet-5",
+        "openai.gpt-6-sol",
+        "z-ai.glm-5.3-flash",
+    }
     assert model_defaults <= routable_aliases
 
 

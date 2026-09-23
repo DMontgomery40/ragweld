@@ -364,6 +364,48 @@ def _catalog_without_last_updated(catalog: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _refresh_litellm_reranker_rows(
+    preserved: list[dict[str, Any]],
+    feed_models: dict[str, FeedModel],
+) -> list[dict[str, Any]]:
+    """Keep the manual listwise reranker route on the retained Luna generation."""
+
+    luna_candidates = [
+        feed
+        for model_id, feed in feed_models.items()
+        if re.fullmatch(r"openai/gpt-[0-9]+(?:\.[0-9]+)*-luna", model_id)
+    ]
+    if not luna_candidates:
+        return preserved
+    latest_luna = max(luna_candidates, key=lambda feed: _version_tuple(feed.model_id))
+    alias = gateway_alias_for_openrouter_id(latest_luna.model_id)
+    family = latest_luna.model_id.split("/", 1)[1]
+
+    refreshed: list[dict[str, Any]] = []
+    for original in preserved:
+        row = copy.deepcopy(original)
+        if str(row.get("provider") or "").lower() == "litellm" and _components(row) == {"RERANK"}:
+            row.update(
+                family=family,
+                model=alias,
+                context=latest_luna.context,
+                display_name=f"LiteLLM gateway: {latest_luna.display_name} (listwise rerank)",
+                notes=(
+                    f"Listwise reranking through the LiteLLM gateway alias {alias}: one request per query "
+                    "carrying the top-N candidate snippets; scores 0-10 in candidate order. "
+                    "Billed at the alias' token prices."
+                ),
+            )
+            if latest_luna.has_full_pricing:
+                row["input_per_1k"] = latest_luna.input_per_1k
+                row["output_per_1k"] = latest_luna.output_per_1k
+            else:
+                row.pop("input_per_1k", None)
+                row.pop("output_per_1k", None)
+        refreshed.append(row)
+    return refreshed
+
+
 def build_refreshed_catalog(
     catalog: dict[str, Any],
     feed_rows: list[dict[str, Any]],
@@ -376,7 +418,10 @@ def build_refreshed_catalog(
     feed_models = normalize_openrouter_rows(feed_rows, stats)
 
     existing_rows = _catalog_models(catalog)
-    preserved = [row for row in existing_rows if _preserved_row(row)]
+    preserved = _refresh_litellm_reranker_rows(
+        [row for row in existing_rows if _preserved_row(row)],
+        feed_models,
+    )
     replaced = [row for row in existing_rows if not _preserved_row(row)]
     previous_ids = {str(row.get("model") or "") for row in replaced if _is_openrouter_gateway_row(row)}
     stats.previous_gateway_rows = len(previous_ids)

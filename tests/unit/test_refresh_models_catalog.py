@@ -329,6 +329,48 @@ def test_refresh_replaces_provider_direct_generation_rows_and_preserves_embeddin
     assert repeated == merged
 
 
+def test_refresh_migrates_the_preserved_litellm_reranker_to_latest_luna_pricing() -> None:
+    catalog = {
+        "currency": "USD",
+        "sources": [],
+        "models": [
+            _local_row(),
+            {
+                "provider": "litellm",
+                "family": "gpt-5.6-luna",
+                "model": "openai.gpt-5.6-luna",
+                "components": ["RERANK"],
+                "unit": "1k_tokens",
+                "context": 1_050_000,
+                "input_per_1k": 0.0002,
+                "output_per_1k": 0.0012,
+                "display_name": "Retired Luna reranker",
+                "selection_roles": ["reranker_cloud"],
+                "selection_status": "runtime_selectable",
+            },
+        ],
+    }
+
+    merged, stats, changed = build_refreshed_catalog(
+        catalog,
+        [
+            _feed_row("openai/gpt-5.6-luna", prompt="0.0000002", completion="0.0000012"),
+            _feed_row("openai/gpt-6-luna", prompt="0.0000001", completion="0.0000005"),
+        ],
+        as_of_date="2026-09-23",
+    )
+
+    reranker = _find(merged, "openai.gpt-6-luna")
+    assert reranker["provider"] == "litellm"
+    assert reranker["family"] == "gpt-6-luna"
+    assert reranker["context"] == 128000
+    assert reranker["input_per_1k"] == 0.0001
+    assert reranker["output_per_1k"] == 0.0005
+    assert "openai.gpt-6-luna" in reranker["notes"]
+    assert stats.preserved_rows == 2
+    assert changed is True
+
+
 def test_refresh_removes_routes_that_left_the_feed_and_is_idempotent() -> None:
     base = {"currency": "USD", "sources": [], "models": [_local_row(), _embedding_row()]}
     first, _stats, changed_first = build_refreshed_catalog(

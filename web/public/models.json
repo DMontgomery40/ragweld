@@ -2483,17 +2483,17 @@
     },
     {
       "provider": "litellm",
-      "family": "gpt-5.6-luna",
-      "model": "openai.gpt-5.6-luna",
+      "family": "gpt-6-luna",
+      "model": "openai.gpt-6-luna",
       "components": [
         "RERANK"
       ],
       "unit": "1k_tokens",
       "context": 1050000,
-      "input_per_1k": 0.0002,
-      "output_per_1k": 0.0012,
-      "display_name": "LiteLLM gateway: OpenAI: GPT-5.6 Luna (listwise rerank)",
-      "notes": "Listwise reranking through the LiteLLM gateway alias openai.gpt-5.6-luna: one request per query carrying the top-N candidate snippets; scores 0-10 in candidate order. Billed at the alias' token prices.",
+      "input_per_1k": 0.0001,
+      "output_per_1k": 0.0005,
+      "display_name": "LiteLLM gateway: OpenAI: GPT-6 Luna (listwise rerank)",
+      "notes": "Listwise reranking through the LiteLLM gateway alias openai.gpt-6-luna: one request per query carrying the top-N candidate snippets; scores 0-10 in candidate order. Billed at the alias' token prices.",
       "selection_roles": [
         "reranker_cloud"
       ],

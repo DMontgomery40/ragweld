@@ -104,7 +104,7 @@ async def test_chat_models_publish_only_catalog_backed_aliases(client: AsyncClie
 
     assert paid["catalog_provider"] == "openai"
     assert paid["catalog_model"] == "openai/gpt-6-luna"
-    assert paid["display_name"] == "OpenAI: GPT-5.4 Mini"
+    assert paid["display_name"] == "OpenAI: GPT-6 Luna"
     assert paid["context"] and paid["context"] > 0
     assert paid["input_per_1k"] and paid["input_per_1k"] > 0
     assert paid["output_per_1k"] and paid["output_per_1k"] > 0

@@ -32,7 +32,7 @@ def test_promptfoo_grader_uses_the_judge_budget_not_the_chat_budget() -> None:
     cfg = TriBridConfig()
     cfg.chat.max_tokens = 512
     cfg.evaluation.judge_max_tokens = 3000
-    cfg.evaluation.promptfoo_grader_model = "openai.gpt-6-astra"
+    cfg.evaluation.promptfoo_grader_model = "openai.gpt-6-luna"
     previous = os.environ.get("LITELLM_API_KEY")
     os.environ["LITELLM_API_KEY"] = "sk-ragweld-local"
     try:
@@ -63,7 +63,7 @@ def test_evaluation_substrate_fields_round_trip_through_the_flat_config() -> Non
     cfg.evaluation.ragas_enabled = True
     cfg.evaluation.ragas_judge_model = "openai.gpt-6-luna"
     cfg.evaluation.ragas_metrics = ["faithfulness"]
-    cfg.evaluation.promptfoo_grader_model = "openai.gpt-6-luna"
+    cfg.evaluation.promptfoo_grader_model = "openai.gpt-6-astra"
     cfg.evaluation.ragas_judge_timeout_s = 120
 
     flat = cfg.to_flat_dict()
