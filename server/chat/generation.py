@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 import json
 import urllib.parse
-from collections.abc import AsyncIterator, Callable, Mapping
+from collections.abc import AsyncGenerator, Callable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from opentelemetry.trace import Span, set_span_in_context
@@ -49,6 +49,21 @@ class GenerationResult:
     debug_trace_id: str | None = None
     web_grounding: WebGroundingMetadata | None = None
     finish_reason: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ChatStreamDelta:
+    """One item of a streamed gateway completion.
+
+    ``request`` carries no content: the prompt passed the window guard and the request is
+    about to leave, so a caller can tell its client that generation has started while a
+    refusal before that point is still a refusal, not a half-started stream. ``reasoning``
+    is the model's own reasoning (LiteLLM's ``delta.reasoning_content``), produced only when
+    asked for and never part of the answer; ``text`` is answer content.
+    """
+
+    kind: Literal["request", "reasoning", "text"]
+    content: str = ""
 
 
 class GatewayContentMissingError(RuntimeError):
@@ -478,11 +493,18 @@ async def stream_chat_text(
     timeout_s: float = 120.0,
     on_provider_response_id: Callable[[str], None] | None = None,
     on_usage: Callable[[dict[str, Any]], None] | None = None,
+    on_cost_summary: Callable[[TraceCostSummary], None] | None = None,
     on_debug_trace_id: Callable[[str], None] | None = None,
     on_web_grounding: Callable[[WebGroundingMetadata], None] | None = None,
     web_config: ChatWebConfig | None = None,
-) -> AsyncIterator[str]:
-    """Stream OpenAI Chat Completions deltas through LiteLLM."""
+    include_reasoning: bool = False,
+) -> AsyncGenerator[ChatStreamDelta, None]:
+    """Stream OpenAI Chat Completions deltas through LiteLLM.
+
+    Yields one ``request`` item once the prompt passed the window guard, then ``text``
+    deltas, and ``reasoning`` deltas only when ``include_reasoning`` is set. Reasoning never
+    counts as content: a stream that reasons and answers nothing is still a failed generation.
+    """
 
     ensure_model_allowed(route.model)
     prompt = _prompt_with_context(
@@ -520,6 +542,7 @@ async def stream_chat_text(
     captured_trace_id: str | None = None
     captured_annotations: list[Any] = []
     captured_finish_reason: str | None = None
+    yield ChatStreamDelta(kind="request")
     # Detached: this block stays open across the `yield content` below, so it can be entered
     # by the endpoint coroutine priming the stream and left by the response's own task.
     with stage_span_detached(
@@ -584,10 +607,15 @@ async def stream_chat_text(
                         delta = choices[0].get("delta")
                         if isinstance(delta, dict) and isinstance(delta.get("annotations"), list):
                             captured_annotations.extend(delta["annotations"])
+                        # LiteLLM normalises every provider's reasoning into `reasoning_content`;
+                        # the raw `reasoning` / `reasoning_details` copies carry the same text.
+                        reasoning = delta.get("reasoning_content") if isinstance(delta, dict) else None
+                        if include_reasoning and isinstance(reasoning, str) and reasoning:
+                            yield ChatStreamDelta(kind="reasoning", content=reasoning)
                         content = delta.get("content") if isinstance(delta, dict) else None
                         if isinstance(content, str) and content:
                             streamed_text += content
-                            yield content
+                            yield ChatStreamDelta(kind="text", content=content)
             except httpx.HTTPStatusError as error:
                 _raise_status(error)
                 raise AssertionError("unreachable") from error
@@ -603,6 +631,8 @@ async def stream_chat_text(
             provider="LiteLLM", model=route.model, usage=captured_usage, provider_cost_usd=captured_cost_usd
         )
         set_cost_summary(cost)
+        if on_cost_summary is not None:
+            on_cost_summary(cost)
 
         if not streamed_text:
             raise GatewayContentMissingError(

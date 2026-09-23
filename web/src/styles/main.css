@@ -632,6 +632,49 @@
             line-height: 1.5;
         }
 
+        /* Resizable feature panels. Every major panel can be dragged taller or shorter from its
+           bottom-right corner: the shared panel class, plus `data-resizable="<key>"` on the few
+           feature containers that have no shared class. The key is what the panel's height is
+           remembered under (utils/resizablePanels.ts). :where() keeps this at zero specificity,
+           so a panel's own overflow, height or min-height still wins. A scroll container loses
+           a flex item's automatic minimum height, so a panel in a column-flex pane (every
+           subtab) would be squeezed below its content; flex-shrink: 0 keeps it at its content
+           or dragged height.
+           Inside the narrow Dock (a native docked page, or an iframe-docked page whose embed
+           root says it is docked) only KEYED panels are resizable: an un-keyed .settings-section
+           there keeps its normal flow, because overflow: auto at dock width turned every wide
+           row into a sideways-scrolling panel (docked Glossary, System Status, Storage,
+           Infrastructure Docker). */
+        :where(.settings-section:not(:where(.dock-native, .app-embed-root[data-docked="true"]) *), [data-resizable]) {
+            resize: vertical;
+            overflow: auto;
+            min-height: 48px;
+            flex-shrink: 0;
+        }
+
+        /* The grip is the browser's own corner resizer, painted as two diagonal bars that sit
+           inside a 10-12px rounded corner and read at 1x: decorative ink at >= 3:1 on every
+           panel surface, brighter under the pointer. */
+        :where(.settings-section, [data-resizable])::-webkit-resizer {
+            background: linear-gradient(135deg, transparent 0 30%, var(--fg-muted) 30% 42%, transparent 42% 52%, var(--fg-muted) 52% 64%, transparent 64%);
+        }
+
+        :where(.settings-section, [data-resizable]):hover::-webkit-resizer {
+            background: linear-gradient(135deg, transparent 0 30%, var(--link) 30% 42%, transparent 42% 52%, var(--link) 52% 64%, transparent 64%);
+        }
+
+        /* A folded panel (Routing Trace, collapsible sections; the component sets
+           data-collapsed) gives up the height it was dragged to and has nothing to resize;
+           unfolding it brings that height back. The drag writes an inline height, which is why
+           this one needs !important. The component says it is folded because a :has selector,
+           here or anywhere in the styles, re-matches on every DOM mutation, and a streaming
+           chat mutates the DOM on every token. */
+        :where(.settings-section, [data-resizable])[data-collapsed="true"] {
+            height: auto !important;
+            min-height: 0;
+            resize: none;
+        }
+
         .input-row {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -921,63 +964,35 @@
             height: 0;
         }
 
-        /* Chat workbench (GUI-050): ChatTab sizes the workbench to the pane; Expand gives it
-           the whole pane, and the bottom-edge handle trades height with Routing Trace. */
-        .chat-workbench-frame {
+        /* Chat Workbench: a comfortable default height the operator drags taller or shorter like
+           any other panel (the resizable-panel rule); the conversation fills whatever height the
+           panel has. flex-basis 0 sizes the workbench from the panel, not its own inline height. */
+        .chat-workbench {
             display: flex;
             flex-direction: column;
-            flex: 0 0 auto;
+            height: clamp(520px, 68vh, 900px);
+            min-height: 420px;
         }
 
-        /* The Apply footer sits outside the scroller, so the scroller's 60px bottom padding is
-           an empty band under the chat composer; Chat owns its bottom edge. */
-        .content-scroll:has(> #tab-chat) {
+        .chat-workbench > [data-react-chat] {
+            flex: 1 1 0;
+            min-height: 0;
+        }
+
+        /* The Apply footer sits outside the scroller, so the scroller's 60px bottom padding is a
+           dead band under the chat pane; Chat owns its bottom edge. (App sets data-route: a :has
+           selector here re-matched on every DOM mutation of a streaming chat.) */
+        .content-scroll[data-route="chat"] {
             padding-bottom: 0;
         }
 
-        /* The workbench owns the pane's bottom edge (the Apply footer is outside the scroller),
-           so the generic 48px bottom scroll-padding would only put the resize handle and the
-           composer's lower row inside the "not visible" band: focusing them made Chromium
-           centre-scroll the pane ~600px. Resizing must also move the edge, not the view, so
-           scroll anchoring is off here. */
+        /* The composer's lower row can sit near the pane's bottom edge (the Apply footer is
+           outside the scroller), and the generic 48px bottom scroll-padding put it inside the
+           "not visible" band: focusing it made Chromium centre-scroll the pane ~600px. Resizing
+           must also move the edge, not the view, so scroll anchoring is off here. */
         .tab-content#tab-chat {
             scroll-padding-bottom: 0;
             overflow-anchor: none;
-        }
-
-        #tab-chat-ui.chat-ui--expanded {
-            padding: 8px 12px;
-        }
-
-        .chat-resize-handle {
-            height: 16px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: row-resize;
-            touch-action: none;
-            border-radius: 8px;
-            outline: none;
-        }
-
-        .chat-resize-handle::before {
-            content: '';
-            width: 56px;
-            height: 4px;
-            border-radius: 2px;
-            background: var(--fg-muted);
-            transition: width var(--timing-fast, 120ms) ease, background var(--timing-fast, 120ms) ease;
-        }
-
-        .chat-resize-handle:hover::before,
-        .chat-resize-handle.is-dragging::before,
-        .chat-resize-handle:focus-visible::before {
-            width: 96px;
-            background: var(--accent);
-        }
-
-        .chat-resize-handle:focus-visible {
-            box-shadow: 0 0 0 2px var(--accent);
         }
 
         .sidepanel-shell {

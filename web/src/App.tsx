@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useHealthStore } from '@/stores';
 
 // Navigation components
@@ -22,6 +22,7 @@ import { SubtabErrorFallback } from '@/components/ui/SubtabErrorFallback';
 import { useAppInit, useApplyButton, useTheme } from '@/hooks';
 import { GlobalSearch } from '@/components/Search/GlobalSearch';
 import { UiHelpers } from '@/utils/uiHelpers';
+import { installLayoutShiftObserver } from '@/observability/rum';
 import { CorpusRegistry } from '@/components/ui/CorpusRegistry';
 import { useRepoStore } from '@/stores/useRepoStore';
 
@@ -39,8 +40,15 @@ function App() {
   // that feeds it so the top bar reflects live health without the pill being open.
   const checkHealth = useHealthStore((s) => s.checkHealth);
   const navigate = useNavigate();
+  // The pane's route, for the few layout rules that belong to one tab (styles key off it).
+  const paneRoute = useLocation().pathname.split('/')[1] || undefined;
   // Embedding belongs to this document, even when an in-frame link omits shell flags.
   const [isEmbed] = useState(() => new URLSearchParams(window.location.search).get('embed') === '1');
+  // An embedded page inside the Dock's frame (styles scope dock-only rules to it).
+  const [isDockedEmbed] = useState(() => new URLSearchParams(window.location.search).get('dock') === '1');
+
+  // RUM: sampled layout shifts, charged to the `data-region` that moved.
+  useEffect(() => installLayoutShiftObserver(), []);
 
   // Initialize hooks
   const { isInitialized, initError } = useAppInit();
@@ -157,7 +165,7 @@ function App() {
 
   if (isEmbed) {
     return (
-      <div className="app-embed-root">
+      <div className="app-embed-root" data-docked={isDockedEmbed ? 'true' : undefined}>
         <EmbeddedDockNavigation />
         <DocumentTitle />
         <div className="app-embed-scroll">
@@ -186,7 +194,7 @@ function App() {
       <DocumentTitle />
       <CorpusParamGuard />
       {/* Topbar */}
-      <div className="topbar">
+      <div className="topbar" data-region="topbar">
         <button 
           className={`mobile-nav-toggle ${mobileNavOpen ? 'active' : ''}`} 
           id="mobile-nav-toggle" 
@@ -266,7 +274,7 @@ function App() {
       {/* Main Layout - 3-column grid: sidebar | main | sidepanel */}
       <div className="layout">
         {/* Left sidebar (TabBar) */}
-        <aside className={`sidebar ${mobileNavOpen ? 'mobile-open' : ''}`}>
+        <aside className={`sidebar ${mobileNavOpen ? 'mobile-open' : ''}`} data-region="sidebar">
           <ErrorBoundary
             context="tab-bar"
             fallback={({ error, reset }) => (
@@ -291,7 +299,7 @@ function App() {
           <Breadcrumbs />
           <div className="content">
             {/* Scrollable content wrapper - paddingBottom reserves space above action-buttons */}
-            <div className="content-scroll">
+            <div className="content-scroll" data-route={paneRoute}>
               {/* Routes - All tab routing */}
               <ErrorBoundary
                 context="tab-router"
@@ -388,6 +396,7 @@ function App() {
         <div
           className="sidepanel sidepanel-shell"
           id="sidepanel"
+          data-region="dock"
         >
           <ErrorBoundary
             context="dock-panel"

@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 
 from server.chat.generation import (
+    ChatStreamDelta,
     GatewayContentMissingError,
     generate_chat_text,
     stream_chat_text,
@@ -44,7 +45,7 @@ async def test_gateway_dispatch_parents_native_generation_and_preserves_trace_li
             kwargs = dict(route=route, system_prompt="System", user_message="Hello", images=[], temperature=0.0, max_tokens=32, context_chunks=[])
             async def execute():
                 if streaming:
-                    return "".join([part async for part in stream_chat_text(**kwargs)])
+                    return "".join([part.content async for part in stream_chat_text(**kwargs) if part.kind == "text"])
                 return (await generate_chat_text(**kwargs)).text
             if fails:
                 with pytest.raises(RuntimeError, match="HTTP 503"):
@@ -102,7 +103,11 @@ class _GatewayHandler(BaseHTTPRequestHandler):
         if self.headers.get("Authorization") == f"Bearer {REASONING_ONLY_KEY}":
             if payload.get("stream"):
                 chunks = [
-                    {"id": "resp-reasoning-only-stream", "choices": [{"delta": {"reasoning": "..."}}]},
+                    # LiteLLM's shape: the normalised `reasoning_content` plus the upstream's raw copy.
+                    {
+                        "id": "resp-reasoning-only-stream",
+                        "choices": [{"delta": {"reasoning_content": "Weighing the reranking candidates", "reasoning": "Weighing the reranking candidates", "content": ""}}],
+                    },
                     {
                         "id": "resp-reasoning-only-stream",
                         "choices": [{"delta": {}, "finish_reason": "length"}],
@@ -151,6 +156,22 @@ class _GatewayHandler(BaseHTTPRequestHandler):
             return
         if payload.get("stream"):
             chunks = [
+                # A reasoning model's first chunk as LiteLLM relays it from OpenRouter: the same
+                # reasoning text three times (normalised, raw, details) and an empty content.
+                {
+                    "id": "resp-stream",
+                    "choices": [
+                        {
+                            "delta": {
+                                "reasoning_content": "The user asks about the October 2017 flights.",
+                                "reasoning": "The user asks about the October 2017 flights.",
+                                "reasoning_details": [{"type": "reasoning.text", "text": "The user asks about the October 2017 flights."}],
+                                "content": "",
+                                "role": "assistant",
+                            }
+                        }
+                    ],
+                },
                 {"id": "resp-stream", "choices": [{"delta": {"content": "Hello"}}]},
                 {"id": "resp-stream", "choices": [{"delta": {"content": " gateway"}}]},
                 {"id": "resp-stream", "choices": [], "usage": {"prompt_tokens": 4, "completion_tokens": 2}},
@@ -289,12 +310,48 @@ async def test_stream_emits_deltas_usage_id_and_trace() -> None:
             )
         ]
 
-    assert deltas == ["Hello", " gateway"]
+    # Reasoning is not asked for, so it is not produced; `request` precedes any content.
+    assert deltas == [
+        ChatStreamDelta(kind="request"),
+        ChatStreamDelta(kind="text", content="Hello"),
+        ChatStreamDelta(kind="text", content=" gateway"),
+    ]
     assert provider_ids == ["resp-stream"]
     assert usages == [{"prompt_tokens": 4, "completion_tokens": 2}]
     assert traces == ["trace-stream"]
     assert len(_GatewayHandler.requests) == 1
     assert _GatewayHandler.requests[0]["payload"]["stream_options"] == {"include_usage": True}
+
+
+@pytest.mark.asyncio
+async def test_stream_yields_reasoning_once_and_only_when_asked() -> None:
+    """With ``include_reasoning`` the model's reasoning comes through as its own delta kind,
+    read from LiteLLM's normalised field only (the raw copies would triple it), and it never
+    becomes answer text. The request itself is the same either way: the transport only
+    decides what to relay."""
+    with _gateway_server() as base_url:
+        deltas = [
+            delta
+            async for delta in stream_chat_text(
+                route=_route(base_url),
+                system_prompt="System",
+                user_message="Which flights did Jeffrey Epstein arrange for Barry Cohen in October 2017?",
+                images=[],
+                temperature=0,
+                max_tokens=8,
+                context_chunks=[],
+                include_reasoning=True,
+            )
+        ]
+
+    assert deltas == [
+        ChatStreamDelta(kind="request"),
+        ChatStreamDelta(kind="reasoning", content="The user asks about the October 2017 flights."),
+        ChatStreamDelta(kind="text", content="Hello"),
+        ChatStreamDelta(kind="text", content=" gateway"),
+    ]
+    payload = _GatewayHandler.requests[0]["payload"]
+    assert "reasoning" not in payload and "reasoning_effort" not in payload
 
 
 @pytest.mark.asyncio
@@ -387,14 +444,16 @@ async def test_a_billed_reasoning_only_reply_is_costed_before_the_typed_error() 
 
 
 @pytest.mark.asyncio
-async def test_a_billed_reasoning_only_stream_is_costed_before_the_typed_error() -> None:
+@pytest.mark.parametrize("include_reasoning", [False, True])
+async def test_a_billed_reasoning_only_stream_is_costed_before_the_typed_error(include_reasoning: bool) -> None:
     """The streaming transport bills the same way and now fails the same way.
 
     A stream that carried usage but never a content delta used to raise a bare RuntimeError
     with the tokens dropped on the floor: no cost summary, no usage on the error. It now raises
     the same typed ``GatewayContentMissingError`` the non-streaming transport does, after the
     cost summary is on the trace. The message is unchanged, so
-    ``classify_generation_failure`` still reads it as a gateway failure.
+    ``classify_generation_failure`` still reads it as a gateway failure. Relaying the
+    reasoning does not change that: reasoning is never content.
     """
     config = TriBridConfig()
     config.tracing.tracing_enabled = True
@@ -406,26 +465,27 @@ async def test_a_billed_reasoning_only_stream_is_costed_before_the_typed_error()
             config=config, route_name="chat.stream", path="/api/chat/stream", method="POST"
         ) as observation:
             assert observation is not None, "tracing is off in this config; the test is vacuous"
+            seen: list[ChatStreamDelta] = []
             with pytest.raises(GatewayContentMissingError) as raised:
-                _ = [
-                    delta
-                    async for delta in stream_chat_text(
-                        route=_route(
-                            base_url, model="openai.gpt-5.6-luna", api_key=REASONING_ONLY_KEY
-                        ),
-                        system_prompt="You are a retrieval reranker.",
-                        user_message=(
-                            "Which plane management company did Barry Cohen consider switching "
-                            "to from Jet Aviation?"
-                        ),
-                        images=[],
-                        temperature=0,
-                        max_tokens=64,
-                        context_chunks=[],
-                    )
-                ]
+                async for delta in stream_chat_text(
+                    route=_route(
+                        base_url, model="openai.gpt-5.6-luna", api_key=REASONING_ONLY_KEY
+                    ),
+                    system_prompt="You are a retrieval reranker.",
+                    user_message=(
+                        "Which plane management company did Barry Cohen consider switching "
+                        "to from Jet Aviation?"
+                    ),
+                    images=[],
+                    temperature=0,
+                    max_tokens=64,
+                    context_chunks=[],
+                    include_reasoning=include_reasoning,
+                ):
+                    seen.append(delta)
             cost = current_trace_payload_fields()["cost_summary"]
 
+    assert [d.kind for d in seen] == (["request", "reasoning"] if include_reasoning else ["request"])
     error = raised.value
     assert str(error) == "LiteLLM stream produced no content"
     assert error.finish_reason == "length"
@@ -491,7 +551,7 @@ async def test_image_bearing_requests_do_not_stall_the_event_loop() -> None:
                     assert result.text == "Hello gateway"
                 else:
                     deltas = [
-                        delta
+                        delta.content
                         async for delta in stream_chat_text(
                             route=_route(base_url, model="openai.gpt-5.6-luna"),
                             system_prompt="Describe the attached plane-management documents.",
@@ -502,6 +562,7 @@ async def test_image_bearing_requests_do_not_stall_the_event_loop() -> None:
                             context_text="",
                             context_chunks=[],
                         )
+                        if delta.kind == "text"
                     ]
                     assert "".join(deltas) == "Hello gateway"
         finally:

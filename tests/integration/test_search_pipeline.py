@@ -79,6 +79,7 @@ def test_search_response() -> None:
     ]
 
     response = SearchResponse(
+        event_id="9f0c4d1e-search-run",
         query="test query",
         matches=matches,
         fusion_method="rrf",

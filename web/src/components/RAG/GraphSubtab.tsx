@@ -10,6 +10,7 @@ import { NumberField } from '@/components/ui/NumberField';
 import { useRepoStore } from '@/stores/useRepoStore';
 import { DEFAULT_ENTITY_LIMIT, ENTITY_LIMIT_CHOICES } from '@/stores/useGraphStore';
 import type { Community, Entity, IndexStatus, Relationship } from '@/types/generated';
+import { rememberPanelHeight } from '@/utils/resizablePanels';
 
 /** Node with computed degree for importance labeling */
 type NodeWithDegree = Entity & { __degree?: number };
@@ -281,6 +282,16 @@ export function GraphSubtab() {
   const fgRef = useRef<any>(null);
   const fullscreenFgRef = useRef<any>(null);
   const vizCanvasRef = useRef<HTMLDivElement | null>(null);
+  // The canvas host is a resizable panel (styles/main.css) that remembers its dragged height;
+  // the ResizeObserver below re-sizes the graph to whatever height it has.
+  const vizCanvasHostRef = useCallback((el: HTMLDivElement | null) => {
+    vizCanvasRef.current = el;
+    const forget = rememberPanelHeight(el);
+    return () => {
+      forget?.();
+      vizCanvasRef.current = null;
+    };
+  }, []);
   const layoutRef = useRef<HTMLDivElement | null>(null);
   const [layoutWidth, setLayoutWidth] = useState(0);
   const fullscreenCanvasRef = useRef<HTMLDivElement | null>(null);
@@ -1741,7 +1752,7 @@ export function GraphSubtab() {
             </div>
 
             <div
-              ref={vizCanvasRef}
+              ref={vizCanvasHostRef}
               style={{
                 marginTop: '12px',
                 height: '520px',
@@ -1750,6 +1761,7 @@ export function GraphSubtab() {
                 borderRadius: '10px',
                 overflow: 'hidden',
               }}
+              data-resizable="rag-graph-canvas"
               data-testid="graph-viz-canvas"
             >
               {/* Inspired by Neumann’s force-graph UI (MIT). */}

@@ -1,5 +1,16 @@
 import type React from 'react';
-import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  createContext,
+  Fragment,
+  memo,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useLocation, useNavigate, useNavigationType } from 'react-router-dom';
 import {
   AssistantRuntimeProvider,
@@ -31,18 +42,24 @@ import {
   loadChatSessionsFromStorage,
   persistChatSessions as persistChatSessionsToStorage,
   reconcileInterruptedMessages,
-  setMessageCustom,
   upsertChatSession,
 } from '@/components/Chat/chatSessions';
 import type { RagweldMessageCustom } from '@/components/Chat/chatSessions';
 import {
-  ChatRequestFailedError,
-  ChatStreamEventError,
-  type ChatFailedRun,
-  sendRagweldChat,
-  toAbortReason,
-} from '@/components/Chat/chatTransport';
+  CHAT_WAITING_TIP_CATEGORY_LABELS,
+  CHAT_WAITING_TIPS,
+  shuffleTips,
+  tipDurationMs,
+  type ChatWaitingTip,
+} from '@/components/Chat/chatWaitingTips';
+import { chatStream, useLiveTurnContent, useRunningAssistantId } from '@/components/Chat/chatStream';
 import { EmbeddingMismatchWarning } from '@/components/ui/EmbeddingMismatchWarning';
+import {
+  DOCK_SURFACE_SELECTOR,
+  finishConversationSwitch,
+  reportComposerReady,
+  startConversationSwitch,
+} from '@/observability/rum';
 import { NumberField } from '@/components/ui/NumberField';
 import { confirmDialog } from '@/components/ui/confirmDialog';
 import { useAPI, useConfig, useConfigField, useEmbeddingStatus } from '@/hooks';
@@ -54,10 +71,10 @@ import type {
   ChatModelsResponse,
   ChatMultimodalConfig,
   ChunkMatch,
+  FeedbackRequest,
   ImageAttachment,
   RecallIntensity,
   RecallPlan,
-  RerankDebugInfo,
   TriBridConfig,
 } from '@/types/generated';
 import type {
@@ -68,14 +85,10 @@ import type {
   ThreadUserMessage,
 } from '@assistant-ui/react';
 
-const CHAT_REQUEST_ABORT_TIMEOUT = 'timeout';
-// A user pressing Stop. Unlike 'superseded'/'session_change'/'unmount', a Stop (and a
-// timeout) has no successor turn that owns the UI, so its catch handler must finalize the
-// in-flight assistant message even though resetTransientChatState already bumped the request
-// token (leaving it 'running' forever was M-93/B-07).
-const CHAT_REQUEST_ABORT_USER_CANCEL = 'user_cancel';
 const DEFAULT_CHAT_REQUEST_TIMEOUT_MS = 600_000;
 const MAX_CHAT_SESSIONS = 50;
+/** Within this many px of the bottom, the reader is "at the bottom" and the stream is followed. */
+const FOLLOW_SLACK_PX = 24;
 
 const WELCOME_PROMPTS = [
   'What are the main topics covered in this corpus?',
@@ -83,20 +96,15 @@ const WELCOME_PROMPTS = [
   'What kinds of questions can I ask about this corpus?',
 ];
 
-function emitRunComplete(runId?: string, startedAtMs?: number, endedAtMs?: number): void {
-  try {
-    window.dispatchEvent(
-      new CustomEvent('tribrid:chat:run-complete', {
-        detail: {
-          run_id: runId,
-          started_at_ms: startedAtMs,
-          ended_at_ms: endedAtMs,
-        },
-      }),
-    );
-  } catch {
-    // ignore event dispatch failures
-  }
+/** The chunk ids an answer cited, in citation order, each once. */
+function citedChunkIds(message: ThreadMessage): string[] {
+  const sources = getMessageCustom(message).sources ?? [];
+  return [...new Set(sources.map((source) => String(source.chunk_id || '').trim()).filter(Boolean))];
+}
+
+/** Which pane a chat element is in: the Dock (right rail) or the main pane. */
+function surfaceOf(element: Element | null): 'main' | 'dock' {
+  return element?.closest(DOCK_SURFACE_SELECTOR) ? 'dock' : 'main';
 }
 
 type ChatComposerProps = {
@@ -125,6 +133,13 @@ const ChatComposer = memo(function ChatComposer({ blockedReason, multimodal, onC
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // RUM: the first frame in this page load with a usable composer on screen.
+  useEffect(() => {
+    if (blockedReason) return;
+    const frame = requestAnimationFrame(() => reportComposerReady(surfaceOf(textareaRef.current)));
+    return () => cancelAnimationFrame(frame);
+  }, [blockedReason]);
 
   const canSend = draft.trim().length > 0 && !sending && !blockedReason;
   const visionEnabled = Boolean(multimodal?.vision_enabled ?? true);
@@ -425,18 +440,23 @@ const ChatComposer = memo(function ChatComposer({ blockedReason, multimodal, onC
   );
 });
 
-type AssistantThreadMessageProps = {
+/** What every message needs from its ChatInterface. Delivered through context so the message
+ * list's render function (and every finished message) stays referentially stable while an
+ * answer streams: only the streaming message re-renders per frame. */
+type ChatMessageContextValue = {
   messageFeedback: Record<string, { type: string; rating?: number }>;
+  onCitationOpen: (message: ThreadMessage, source: ChunkMatch) => void;
   onCopy: (content: string) => void;
   onRetry: (messageId: string) => void;
-  onSendFeedback: (message: ThreadMessage, signal: string) => void;
+  onSendFeedback: (message: ThreadMessage, signal: 'thumbsup' | 'thumbsdown') => void;
   onViewTraceAndLogs: (message: ThreadMessage) => void;
-  renderAssistantContent: (content: string) => React.ReactNode;
   showCitations: boolean;
   showConfidence: boolean;
   showDebugFooter: boolean;
   showRecallGateSignals: boolean;
 };
+
+const ChatMessageContext = createContext<ChatMessageContextValue | null>(null);
 
 /** Live elapsed counter shown while an assistant answer is streaming. The drive's 92.7 s wait
  * showed only a static "Streaming" with no elapsed time and no sign of progress (B-24/M-97);
@@ -456,26 +476,163 @@ const StreamingElapsed = memo(function StreamingElapsed({ startedAtMs }: { start
   );
 });
 
+/** One rotating tip at a time, in a shuffled order that reshuffles after a full pass. */
+const WaitingTip = memo(function WaitingTip() {
+  const orderRef = useRef<ChatWaitingTip[]>([]);
+  const indexRef = useRef(0);
+  const nextTip = useCallback((): ChatWaitingTip => {
+    if (indexRef.current >= orderRef.current.length) {
+      orderRef.current = shuffleTips(CHAT_WAITING_TIPS);
+      indexRef.current = 0;
+    }
+    const tip = orderRef.current[indexRef.current];
+    indexRef.current += 1;
+    return tip;
+  }, []);
+  const [tip, setTip] = useState<ChatWaitingTip>(() => nextTip());
+  useEffect(() => {
+    const id = window.setTimeout(() => setTip(nextTip()), tipDurationMs(tip.tip));
+    return () => window.clearTimeout(id);
+  }, [nextTip, tip]);
+  return (
+    <div
+      data-testid="chat-waiting-tip"
+      style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid var(--line)' }}
+    >
+      <div
+        data-testid="chat-waiting-tip-category"
+        style={{
+          fontSize: '11.5px',
+          fontWeight: 700,
+          letterSpacing: '0.04em',
+          textTransform: 'uppercase',
+          color: 'var(--link)',
+          marginBottom: '4px',
+        }}
+      >
+        Tip · {CHAT_WAITING_TIP_CATEGORY_LABELS[tip.category]}
+      </div>
+      <div data-testid="chat-waiting-tip-text" style={{ fontSize: '14px', lineHeight: 1.55, color: 'var(--fg)' }}>
+        {tip.tip}
+      </div>
+    </div>
+  );
+});
+
+/** Where an answer is while nothing of it is on screen yet: retrieval, then the model. */
+function AnswerWaitPanel({
+  stage,
+  sourcesCount,
+  showTips,
+}: {
+  stage: 'searching' | 'generating';
+  sourcesCount?: number;
+  showTips: boolean;
+}) {
+  const label =
+    stage === 'generating'
+      ? `Generating answer…${typeof sourcesCount === 'number' && sourcesCount > 0 ? ` · ${sourcesCount} source${sourcesCount === 1 ? '' : 's'}` : ''}`
+      : 'Searching…';
+  return (
+    <div
+      data-testid="chat-answer-wait"
+      data-stage={stage}
+      style={{
+        marginBottom: '10px',
+        padding: '12px 14px',
+        borderRadius: '12px',
+        border: '1px solid var(--line)',
+        background: 'var(--bg-elev2)',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <span
+          aria-hidden="true"
+          style={{
+            width: '9px',
+            height: '9px',
+            borderRadius: '50%',
+            background: 'var(--accent)',
+            animation: 'pulse 1.5s ease-in-out infinite',
+            flex: '0 0 auto',
+          }}
+        />
+        <span data-testid="chat-answer-stage" style={{ fontSize: '14px', fontWeight: 650, color: 'var(--fg)' }}>
+          {label}
+        </span>
+      </div>
+      {showTips ? <WaitingTip /> : null}
+    </div>
+  );
+}
+
+/** The model's reasoning, streamed while it works. Open while it thinks, folded once (and only
+ * once) when the answer starts, then the operator's to open or close. */
+function ThinkingPanel({ thinking, answering, running }: { thinking: string; answering: boolean; running: boolean }) {
+  const [open, setOpen] = useState(!answering);
+  const foldedRef = useRef(answering);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (answering && !foldedRef.current) {
+      foldedRef.current = true;
+      setOpen(false);
+    }
+  }, [answering]);
+  useEffect(() => {
+    // Follow the newest reasoning while it streams.
+    const body = bodyRef.current;
+    if (body && open && running && !answering) body.scrollTop = body.scrollHeight;
+  }, [answering, open, running, thinking]);
+  const thinkingNow = running && !answering;
+  return (
+    <details
+      data-testid="chat-thinking-panel"
+      open={open}
+      onToggle={(event) => setOpen((event.currentTarget as HTMLDetailsElement).open)}
+      style={{
+        marginBottom: '10px',
+        borderRadius: '12px',
+        border: '1px solid var(--line)',
+        borderLeft: '3px solid var(--accent)',
+        background: 'var(--bg-elev2)',
+      }}
+    >
+      <summary
+        data-testid="chat-thinking-summary"
+        style={{
+          cursor: 'pointer',
+          padding: '10px 14px',
+          fontSize: '13px',
+          fontWeight: 700,
+          color: 'var(--link)',
+        }}
+      >
+        {thinkingNow ? 'Thinking…' : 'Model reasoning'}
+      </summary>
+      <div
+        ref={bodyRef}
+        data-testid="chat-thinking-content"
+        style={{
+          padding: '0 14px 12px',
+          maxHeight: '260px',
+          overflowY: 'auto',
+          fontSize: '14px',
+          lineHeight: 1.55,
+          color: 'var(--fg)',
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+        }}
+      >
+        {thinking}
+      </div>
+    </details>
+  );
+}
+
 function formatConfidence(value?: number | null): string | null {
   if (value === undefined || value === null || Number.isNaN(value)) return null;
   const percent = value <= 1 ? value * 100 : value;
   return `${percent.toFixed(1)}%`;
-}
-
-/** The identity a failed send shares with a successful one, taken from the stream's `done`
- * event: the run the trace store recorded plus the request's trace headers. Feedback and the
- * Trace button key off the same fields, so a failed answer can be traced like any other. */
-function failedRunCustom(run: ChatFailedRun | null): Partial<RagweldMessageCustom> {
-  if (!run) return {};
-  return {
-    correlationId: run.headers.correlationId,
-    endedAtMs: run.endedAtMs,
-    eventId: run.runId,
-    rootSpanId: run.headers.rootSpanId,
-    runId: run.runId,
-    startedAtMs: run.startedAtMs,
-    traceId: run.headers.traceId,
-  };
 }
 
 function StructuredErrorCard({
@@ -590,14 +747,32 @@ function StructuredErrorCard({
   );
 }
 
-function AssistantThreadMessage(props: AssistantThreadMessageProps) {
-  const message = useAuiState((state) => state.message) as ThreadMessage;
+/** One message of the thread. Memoized with no props: it re-renders only when its own stored
+ * message changes, when the ChatInterface's message context changes, or - for the one answer
+ * that is streaming - when the stream controller publishes a frame of it. */
+const AssistantThreadMessage = memo(function AssistantThreadMessage() {
+  const props = useContext(ChatMessageContext) as ChatMessageContextValue;
+  const stored = useAuiState((state) => state.message) as ThreadMessage;
+  const storedStatus = (stored as ThreadAssistantMessage).status as MessageStatus | undefined;
+  const live = useLiveTurnContent(stored.role === 'assistant' && storedStatus?.type === 'running' ? stored.id : null);
+  // A turn that settled before this view reloaded the stored thread shows its final message.
+  const message = (live?.final ?? stored) as ThreadMessage;
+  const streamed = live && !live.final ? live : null;
   const custom = getMessageCustom(message);
-  const text = getMessageText(message);
+  const text = streamed ? streamed.text : getMessageText(message);
+  const thinking = streamed ? streamed.thinking : custom.thinking;
   const images = getMessageImages(message);
   const providerName = String(custom.debug?.provider?.provider_name || custom.providerMeta?.backend || '').trim();
   const messageStatus = (message as ThreadAssistantMessage).status as MessageStatus | undefined;
   const isAssistantError = message.role === 'assistant' && messageStatus?.type === 'incomplete';
+  const isAssistantRunning = message.role === 'assistant' && messageStatus?.type === 'running';
+  // Rating needs a finished answer the server recorded: never while it streams, never on a
+  // failed, stopped or interrupted one (there is no answer to rate), never without a run id.
+  const canRate =
+    message.role === 'assistant' &&
+    messageStatus?.type === 'complete' &&
+    !custom.structuredError &&
+    Boolean(custom.runId || custom.eventId);
   const sources = Array.isArray(custom.sources) ? custom.sources : [];
   const legacyCitations = Array.isArray(custom.legacyCitations) ? custom.legacyCitations : [];
   const webGrounding = custom.webGrounding;
@@ -686,7 +861,17 @@ function AssistantThreadMessage(props: AssistantThreadMessageProps) {
 
         {message.role === 'assistant' ? (
           <>
-            {props.renderAssistantContent(text)}
+            {isAssistantRunning && !text ? (
+              <AnswerWaitPanel
+                stage={(streamed ? streamed.waitStage : custom.waitStage) ?? 'searching'}
+                sourcesCount={streamed ? streamed.waitSourcesCount : custom.waitSourcesCount}
+                showTips={!thinking}
+              />
+            ) : null}
+            {thinking ? (
+              <ThinkingPanel thinking={thinking} answering={Boolean(text)} running={isAssistantRunning} />
+            ) : null}
+            <AssistantMarkdown content={text} streaming={isAssistantRunning} />
             {custom.structuredError ? (
               <StructuredErrorCard error={custom.structuredError} runId={custom.runId || custom.eventId} />
             ) : isAssistantError ? (
@@ -781,6 +966,7 @@ function AssistantThreadMessage(props: AssistantThreadMessageProps) {
               legacyCitations={legacyCitations}
               webCitations={webCitations}
               attachedImageCount={custom.attachedImageCount ?? 0}
+              onOpenCitation={canRate ? (source) => props.onCitationOpen(message, source) : undefined}
             />
           )}
 
@@ -830,7 +1016,7 @@ function AssistantThreadMessage(props: AssistantThreadMessageProps) {
             ) : null}
           </div>
 
-          {message.role === 'assistant' ? (
+          {canRate ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginLeft: 'auto' }}>
               {props.messageFeedback[message.id] ? (
                 <span style={{ color: 'var(--ok)', fontWeight: 700 }}>Feedback saved</span>
@@ -899,7 +1085,144 @@ function AssistantThreadMessage(props: AssistantThreadMessageProps) {
       </div>
     </MessagePrimitive.Root>
   );
+});
+
+/** Stable, so assistant-ui's memoized per-index message wrappers never re-render the thread. */
+const THREAD_MESSAGE_COMPONENTS = { Message: AssistantThreadMessage };
+
+/** The newest assistant message in a message list (its start is where "latest" lands). */
+function newestAssistant(viewport: HTMLElement): HTMLElement | null {
+  const answers = viewport.querySelectorAll<HTMLElement>('[data-role="assistant"]');
+  return answers.length ? answers[answers.length - 1] : null;
 }
+
+/** Offset of `element`'s top edge from the top of the scrolled `viewport`. */
+function topWithin(viewport: HTMLElement, element: HTMLElement): number {
+  return element.getBoundingClientRect().top - viewport.getBoundingClientRect().top;
+}
+
+/**
+ * Follow a streaming answer only while the reader is at the bottom of the list.
+ *
+ * Scrolling up (the scroll position decreases away from the bottom) stops following; coming back
+ * to the bottom resumes it. The stream is followed from a ResizeObserver on the list content, so it
+ * runs after layout and before paint, only while an answer streams: the sources, feedback and debug
+ * footer a finished answer adds below the reader never move the view.
+ */
+function useStreamFollow(
+  viewportRef: React.RefObject<HTMLElement | null>,
+  contentRef: React.RefObject<HTMLElement | null>,
+  streaming: boolean,
+): { followFromHere: () => void } {
+  const followRef = useRef(true);
+  const streamingRef = useRef(streaming);
+  useLayoutEffect(() => {
+    streamingRef.current = streaming;
+  }, [streaming]);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    const content = contentRef.current;
+    if (!viewport || !content) return;
+    let lastTop = viewport.scrollTop;
+    const onScroll = () => {
+      const atBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= FOLLOW_SLACK_PX;
+      if (atBottom) followRef.current = true;
+      else if (viewport.scrollTop < lastTop - 1) followRef.current = false;
+      lastTop = viewport.scrollTop;
+    };
+    viewport.addEventListener('scroll', onScroll, { passive: true });
+    const observer = new ResizeObserver(() => {
+      if (!streamingRef.current || !followRef.current) return;
+      viewport.scrollTop = viewport.scrollHeight;
+      lastTop = viewport.scrollTop;
+    });
+    observer.observe(content);
+    return () => {
+      viewport.removeEventListener('scroll', onScroll);
+      observer.disconnect();
+    };
+  }, [contentRef, viewportRef]);
+
+  const followFromHere = useCallback(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    followRef.current = true;
+    viewport.scrollTop = viewport.scrollHeight;
+  }, [viewportRef]);
+
+  return { followFromHere };
+}
+
+/** "Jump to latest": opens the newest answer at its START, shown while that start is off screen. */
+const JumpToLatestButton = memo(function JumpToLatestButton({
+  viewportRef,
+  contentRef,
+}: {
+  viewportRef: React.RefObject<HTMLElement | null>;
+  contentRef: React.RefObject<HTMLElement | null>;
+}) {
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    const content = contentRef.current;
+    if (!viewport || !content) return;
+    let frame = 0;
+    const measure = () => {
+      frame = 0;
+      const target = newestAssistant(viewport);
+      if (!target) {
+        setVisible(false);
+        return;
+      }
+      const top = topWithin(viewport, target);
+      setVisible(top < -8 || top > viewport.clientHeight - 48);
+    };
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(measure);
+    };
+    viewport.addEventListener('scroll', schedule, { passive: true });
+    const observer = new ResizeObserver(schedule);
+    observer.observe(content);
+    observer.observe(viewport);
+    schedule();
+    return () => {
+      if (frame) cancelAnimationFrame(frame);
+      viewport.removeEventListener('scroll', schedule);
+      observer.disconnect();
+    };
+  }, [contentRef, viewportRef]);
+
+  const jump = useCallback(() => {
+    const viewport = viewportRef.current;
+    const target = viewport ? newestAssistant(viewport) : null;
+    if (!viewport || !target) return;
+    viewport.scrollTo({ top: viewport.scrollTop + topWithin(viewport, target) - 12, behavior: 'smooth' });
+  }, [viewportRef]);
+
+  if (!visible) return null;
+  return (
+    <button
+      type="button"
+      data-testid="chat-jump-to-latest"
+      onClick={jump}
+      style={{
+        pointerEvents: 'auto',
+        borderRadius: '999px',
+        border: '1px solid var(--line)',
+        background: 'var(--bg-elev1)',
+        color: 'var(--fg)',
+        padding: '8px 12px',
+        fontSize: '12px',
+        fontWeight: 600,
+        cursor: 'pointer',
+        boxShadow: '0 12px 30px rgba(0,0,0,0.18)',
+      }}
+    >
+      Jump to latest
+    </button>
+  );
+});
 
 const ThreadWelcome = memo(function ThreadWelcome({ onPromptSelect }: { onPromptSelect: (prompt: string) => void }) {
   return (
@@ -939,14 +1262,9 @@ const ThreadWelcome = memo(function ThreadWelcome({ onPromptSelect }: { onPrompt
 export type ChatInterfaceProps = {
   /** DOM id of the workbench root; unique per surface (main pane and Dock can both show Chat). */
   workbenchId: string;
-  /** Workbench height in CSS px, sized by the Chat tab to the pane it lives in. */
-  height: number;
-  /** Whether the operator gave the conversation the whole pane (Routing Trace out of the way). */
-  expanded: boolean;
-  onToggleExpanded: () => void;
 };
 
-export function ChatInterface({ workbenchId, height, expanded, onToggleExpanded }: ChatInterfaceProps) {
+export function ChatInterface({ workbenchId }: ChatInterfaceProps) {
   const { api } = useAPI();
   const { config } = useConfig();
   const { showToast } = useUIHelpers();
@@ -967,7 +1285,10 @@ export function ChatInterface({ workbenchId, height, expanded, onToggleExpanded 
   const [webEnabled, setWebEnabled] = useState(false);
   const [recallIntensity, setRecallIntensity] = useState<RecallIntensity | null>(null);
   const [chatModels, setChatModels] = useState<ChatModelInfo[]>([]);
-  const [sending, setSending] = useState(false);
+  // The answer in flight for THIS conversation, owned by the page's stream controller: it keeps
+  // streaming while this view is unmounted, and both views (tab and Dock) see the same one.
+  const runningAssistantId = useRunningAssistantId(conversationId);
+  const sending = runningAssistantId !== null;
   const [lastMatches, setLastMatches] = useState<ChunkMatch[]>([]);
   const [lastLatencyMs, setLastLatencyMs] = useState<number | null>(null);
   const [lastRecallPlan, setLastRecallPlan] = useState<RecallPlan | null>(null);
@@ -1029,19 +1350,19 @@ export function ChatInterface({ workbenchId, height, expanded, onToggleExpanded 
   const modelOverrideRef = useRef(modelOverride);
   const activeSourcesRef = useRef(activeSources);
   const topKOverrideRef = useRef(topKOverride);
-  const requestAbortControllerRef = useRef<AbortController | null>(null);
-  const activeRequestTokenRef = useRef(0);
   const sessionsLoadedRef = useRef(false);
   // False until the first load off storage. Only that initial hydration reconciles abandoned
-  // 'running' messages (M-93); a mirror-triggered reload while another instance streams must
-  // NOT, or it would flip the live stream to "interrupted" in the docked copy.
+  // 'running' messages (M-93), and never one the stream controller is still streaming: a view
+  // that mounts mid-answer (back on the Chat tab, or the Dock opening) must show it streaming.
   const hydratedRef = useRef(false);
-  const sendingRef = useRef(false);
-  /** A mirror event that arrived while this instance was streaming, replayed when it ends. */
-  const pendingReloadRef = useRef(false);
+  const sendingRef = useRef(sending);
   /** Distinguishes this instance's own writes from the other instance's (tab vs dock). */
   const instanceIdRef = useRef(`chat-${Math.random().toString(36).slice(2)}`);
+  const workbenchRef = useRef<HTMLDivElement | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
+  const messagesContentRef = useRef<HTMLDivElement | null>(null);
+  /** Set by a send; the commit that shows the new turn brings it into view and follows it. */
+  const landOnSendRef = useRef(false);
 
   useEffect(() => { messagesRef.current = messages; }, [messages]);
   useEffect(() => { conversationIdRef.current = conversationId; }, [conversationId]);
@@ -1050,21 +1371,43 @@ export function ChatInterface({ workbenchId, height, expanded, onToggleExpanded 
   useEffect(() => { topKOverrideRef.current = topKOverride; }, [topKOverride]);
   useEffect(() => { sendingRef.current = sending; }, [sending]);
 
-  const isRequestTokenActive = useCallback((token: number) => activeRequestTokenRef.current === token, []);
+  const { followFromHere } = useStreamFollow(messagesContainerRef, messagesContentRef, sending);
 
-  const resetTransientChatState = useCallback((reason: string = 'aborted') => {
-    const controller = requestAbortControllerRef.current;
-    if (controller) {
-      try {
-        controller.abort(reason);
-      } catch {
-        // ignore abort races
-      }
-    }
-    requestAbortControllerRef.current = null;
-    activeRequestTokenRef.current += 1;
-    setSending(false);
-  }, []);
+  // A send lands the new question and the incoming answer in view, and follows from there.
+  useLayoutEffect(() => {
+    if (!landOnSendRef.current) return;
+    landOnSendRef.current = false;
+    followFromHere();
+  }, [followFromHere, messages]);
+
+  // RUM: a conversation switch ends when the switched-to thread has painted.
+  useEffect(() => {
+    const frame = requestAnimationFrame(() =>
+      finishConversationSwitch(instanceIdRef.current, surfaceOf(workbenchRef.current)),
+    );
+    return () => cancelAnimationFrame(frame);
+  }, [conversationId]);
+
+  // What the status bar shows follows this conversation's answers as they land, including ones
+  // that finish while the operator is elsewhere in the app.
+  useEffect(
+    () =>
+      chatStream.onSettled((event) => {
+        if (event.clientConversationId !== conversationIdRef.current) return;
+        if (event.conversationId !== event.clientConversationId) {
+          conversationIdRef.current = event.conversationId;
+          setConversationId(event.conversationId);
+        }
+        const result = event.result;
+        if (event.outcome !== 'ok' || !result) return;
+        setLastMatches(result.sources);
+        if (typeof result.startedAtMs === 'number' && typeof result.endedAtMs === 'number') {
+          setLastLatencyMs(Math.max(0, result.endedAtMs - result.startedAtMs));
+        }
+        setLastRecallPlan(result.debug?.recall_plan ?? null);
+      }),
+    [],
+  );
 
   const persistSessions = useCallback((sessions: ReturnType<typeof createChatSession>[], activeId: string) => {
     try {
@@ -1104,42 +1447,14 @@ export function ChatInterface({ workbenchId, height, expanded, onToggleExpanded 
     [chatHistoryMax, persistSessions],
   );
 
-  const renameConversation = useCallback(
-    (nextConversationId: string, nextMessages: ThreadMessage[]) => {
-      const currentId = conversationIdRef.current;
-      if (!nextConversationId || nextConversationId === currentId) {
-        saveChatHistory(nextMessages);
-        return;
-      }
-
-      setChatSessions((prev) => {
-        const renamed = prev.map((session) => {
-          if (String(session.conversation_id || '').trim() !== currentId) return session;
-          return {
-            ...session,
-            conversation_id: nextConversationId,
-            updated_at: Date.now(),
-            messages: nextMessages,
-          };
-        });
-        persistSessions(renamed, nextConversationId);
-        return renamed;
-      });
-      conversationIdRef.current = nextConversationId;
-      setConversationId(nextConversationId);
-      setMessages(nextMessages);
-    },
-    [persistSessions, saveChatHistory],
-  );
-
   const activateSession = useCallback(
     (session: ReturnType<typeof createChatSession>) => {
       const nextConversationId = String(session.conversation_id || '').trim() || createConversationId();
       // Reloading the SAME conversation is a mirror of the docked instance, not a session
-      // change: it must not abort a request, clear the status bar, or silently drop the
-      // operator's per-conversation Top-K. Only an actual switch resets those.
+      // change: it must not clear the status bar or silently drop the operator's
+      // per-conversation Top-K. Only an actual switch resets those. A switch never stops an
+      // answer in flight: the stream controller lands it in its own conversation.
       const sameConversation = nextConversationId === conversationIdRef.current;
-      if (!sameConversation) resetTransientChatState('session_change');
       conversationIdRef.current = nextConversationId;
       setConversationId(nextConversationId);
       const restoredMessages = clampChatHistory(
@@ -1165,7 +1480,7 @@ export function ChatInterface({ workbenchId, height, expanded, onToggleExpanded 
         setLastRecallPlan(null);
       }
     },
-    [chatHistoryMax, resetTransientChatState],
+    [chatHistoryMax],
   );
 
   const loadChatHistory = useCallback(() => {
@@ -1173,14 +1488,14 @@ export function ChatInterface({ workbenchId, height, expanded, onToggleExpanded 
       const loaded = loadChatSessionsFromStorage(localStorage, chatHistoryMax);
       const { removeLegacyHistory } = loaded;
       let { sessions, activeSession } = loaded;
-      // Only the very first hydration cleans abandoned streams (a reload or an un-finalized
-      // Stop left them 'running'). A later reload is a mirror of another instance that may be
-      // actively streaming; leave its 'running' message alone.
+      // Only the very first hydration cleans abandoned streams (a page reload left them
+      // 'running'), and never an answer the stream controller is still streaming. A later
+      // reload is a mirror of another instance; leave its 'running' message alone.
       if (!hydratedRef.current) {
         hydratedRef.current = true;
         const activeId = String(activeSession.conversation_id || '').trim();
         sessions = sessions.map((session) => {
-          const { messages, changed } = reconcileInterruptedMessages(session.messages);
+          const { messages, changed } = reconcileInterruptedMessages(session.messages, chatStream.isRunning);
           return changed ? { ...session, messages } : session;
         });
         activeSession = sessions.find((s) => String(s.conversation_id || '').trim() === activeId) || sessions[0] || activeSession;
@@ -1209,61 +1524,24 @@ export function ChatInterface({ workbenchId, height, expanded, onToggleExpanded 
   }, [initialized, loadRepos]);
 
   // The chat tab and the docked chat are two instances over one stored thread. Each reloads
-  // when the OTHER writes, so the docked copy mirrors the live conversation instead of
-  // showing a third, independent state (M-03/B-39). An instance with an answer in flight is
-  // never disturbed, and it ignores the echo of its own writes.
+  // when the OTHER writes (or the stream controller lands an answer), so the docked copy
+  // mirrors the live conversation instead of showing a third, independent state (M-03/B-39).
+  // It ignores the echo of its own writes. Reloading mid-answer is safe: the answer's text lives
+  // in the stream controller, not in this view's message list.
   useEffect(() => {
     const onThreadsChanged = (event: Event) => {
       const writerId = (event as CustomEvent<{ writerId?: string }>).detail?.writerId;
       if (writerId && writerId === instanceIdRef.current) return;
-      if (sendingRef.current) {
-        // Deferred, not dropped. Discarding it left this instance stale for good, and its
-        // post-send saveChatHistory would then persist that stale state over whatever the
-        // other instance wrote.
-        pendingReloadRef.current = true;
-        return;
-      }
       loadChatHistory();
     };
     window.addEventListener(CHAT_SESSIONS_CHANGED_EVENT, onThreadsChanged);
     return () => window.removeEventListener(CHAT_SESSIONS_CHANGED_EVENT, onThreadsChanged);
   }, [loadChatHistory]);
 
-  // Drain a mirror event that arrived mid-stream once the answer has landed.
+  // Initial load, and a reload when the loader's inputs change.
   useEffect(() => {
-    if (sending) return;
-    if (!pendingReloadRef.current) return;
-    pendingReloadRef.current = false;
-    loadChatHistory();
-  }, [loadChatHistory, sending]);
-
-  // Initial load, and a reload when the loader's inputs change - but NEVER mid-send. This used
-  // to also live in the unmount effect below, whose cleanup then aborted and nulled the
-  // in-flight request every time `loadChatHistory`'s identity changed (config settling churned
-  // it through activateSession -> a since-deleted trace callback keyed on chat_show_trace). A
-  // send in flight when that happened lost its abort controller, so a later Stop had nothing
-  // to abort and the answer stayed "Streaming" forever (M-93). Reloading history over a live
-  // answer would also drop its accumulation, so this defers while sending, exactly like the
-  // mirror listener.
-  useEffect(() => {
-    if (sendingRef.current) return;
     loadChatHistory();
   }, [loadChatHistory]);
-
-  // Abort any in-flight request only on a real unmount, never on a dependency change.
-  useEffect(() => {
-    return () => {
-      const controller = requestAbortControllerRef.current;
-      if (controller) {
-        try {
-          controller.abort('unmount');
-        } catch {
-          // ignore
-        }
-      }
-      requestAbortControllerRef.current = null;
-    };
-  }, []);
 
   // Default sources for a new thread: the configured defaults (recall memory)
   // plus the app's active corpus, so a first question goes to the corpus the
@@ -1450,52 +1728,32 @@ export function ChatInterface({ workbenchId, height, expanded, onToggleExpanded 
         ? 'Retrieval/index contract mismatch detected. Re-index or restore indexing config before sending.'
         : null;
 
-  const maybeToastRerankOutcome = useCallback(
-    (rerank: RerankDebugInfo | null | undefined) => {
-      if (!rerank || !rerank.enabled) return;
-      const mode = String(rerank.mode || 'rerank').trim() || 'rerank';
-      const skipped = String(rerank.skipped_reason || '').trim();
-      const errMsg = String(rerank.error_message || '').trim();
-      const errRaw = String(rerank.error || '').trim();
-      const traceId = String(rerank.debug_trace_id || '').trim();
-
-      if (rerank.ok === false) {
-        const message = errMsg || errRaw || 'Unknown error';
-        showToast(`Rerank failed (${mode}): ${message}${traceId ? ` (trace ${traceId})` : ''}`, 'error');
-        return;
-      }
-
-      if (!rerank.applied && skipped) {
-        if (skipped.toLowerCase() === 'no_candidates' || skipped.toLowerCase() === 'empty_query') return;
-        showToast(`Rerank skipped (${mode}): ${skipped}`, 'info');
-      }
-    },
-    [showToast],
-  );
+  // Feedback is scoped explicitly, not through withCorpusScope: its fallback to the URL /
+  // localStorage corpus is exactly the defect (M-02). A conversation with no RAG corpus (recall
+  // only) is genuinely unscoped, and the endpoint's global feedback log is correct.
+  const feedbackPath = conversationCorpusId
+    ? `feedback?corpus_id=${encodeURIComponent(conversationCorpusId)}`
+    : 'feedback';
 
   const sendFeedback = useCallback(
-    async (eventId: string | undefined, messageId: string, signal: string) => {
-      const normalizedSignal = String(signal || '').trim();
+    async (message: ThreadMessage, signal: 'thumbsup' | 'thumbsdown') => {
+      const custom = getMessageCustom(message);
+      const eventId = custom.eventId ?? custom.runId;
+      if (!eventId) {
+        showToast('Feedback not available yet (missing run_id).', 'error');
+        return;
+      }
       try {
-        const body: Record<string, unknown> = {
+        const body: FeedbackRequest = {
           context: 'chat',
+          event_id: eventId,
+          signal,
+          surface: 'chat',
+          // The chunks the rated answer cited: what the rating is evidence about.
+          chunk_ids: citedChunkIds(message),
           timestamp: new Date().toISOString(),
         };
-        if (eventId) {
-          body.event_id = eventId;
-          body.signal = normalizedSignal;
-        } else {
-          showToast('Feedback not available yet (missing run_id).', 'error');
-          return;
-        }
-
-        // Explicit scoping, not withCorpusScope: its fallback to the URL / localStorage
-        // corpus is exactly the defect (M-02). A conversation with no RAG corpus (recall
-        // only) is genuinely unscoped, and the endpoint's global feedback log is correct.
-        const scopedFeedbackPath = conversationCorpusId
-          ? `feedback?corpus_id=${encodeURIComponent(conversationCorpusId)}`
-          : 'feedback';
-        const response = await fetch(api(scopedFeedbackPath), {
+        const response = await fetch(api(feedbackPath), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
@@ -1508,7 +1766,7 @@ export function ChatInterface({ workbenchId, height, expanded, onToggleExpanded 
 
         setMessageFeedback((prev) => ({
           ...prev,
-          [messageId]: { type: normalizedSignal },
+          [message.id]: { type: signal },
         }));
         showToast('Feedback recorded.', 'success');
       } catch (error) {
@@ -1516,38 +1774,37 @@ export function ChatInterface({ workbenchId, height, expanded, onToggleExpanded 
         showToast('Feedback failed (network error).', 'error');
       }
     },
-    [api, conversationCorpusId, showToast],
+    [api, feedbackPath, showToast],
   );
 
-  const updateAssistantMessage = useCallback(
-    (
-      assistantId: string,
-      updater: (message: ThreadAssistantMessage) => ThreadAssistantMessage,
-    ): ThreadMessage[] => {
-      const nextMessages = clampChatHistory(
-        messagesRef.current.map((message) => {
-          if (message.id !== assistantId || message.role !== 'assistant') return message;
-          return updater(message as ThreadAssistantMessage);
-        }),
-        chatHistoryMax,
-      );
-      setMessages(nextMessages);
-      messagesRef.current = nextMessages;
-      return nextMessages;
+  // Opening a citation is an implicit relevance signal on that chunk for the rated answer's run.
+  // Silent on purpose: it neither toasts nor takes the place of an explicit Helpful/Not helpful.
+  const sendCitationClick = useCallback(
+    (message: ThreadMessage, source: ChunkMatch) => {
+      const custom = getMessageCustom(message);
+      const eventId = custom.eventId ?? custom.runId;
+      const chunkId = String(source.chunk_id || '').trim();
+      if (!eventId || !chunkId) return;
+      const body: FeedbackRequest = {
+        context: 'chat',
+        doc_id: chunkId,
+        event_id: eventId,
+        signal: 'click',
+        surface: 'chat',
+        chunk_ids: citedChunkIds(message),
+        timestamp: new Date().toISOString(),
+      };
+      void fetch(api(feedbackPath), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }).catch((error) => console.warn('[ChatInterface] citation click signal failed:', error));
     },
-    [chatHistoryMax],
+    [api, feedbackPath],
   );
-
-  const buildAssistantStatus = useCallback((type: 'complete' | 'error' | 'running', errorText?: string): MessageStatus => {
-    if (type === 'running') return { type: 'running' };
-    if (type === 'error') {
-      return { type: 'incomplete', reason: 'error', error: errorText || 'Chat failed' };
-    }
-    return { type: 'complete', reason: 'stop' };
-  }, []);
 
   const runUserTurn = useCallback(
-    async (userMessage: ThreadUserMessage) => {
+    (userMessage: ThreadUserMessage) => {
       if (chatBlockedReason) {
         showToast(chatBlockedReason, 'error');
         return;
@@ -1556,198 +1813,53 @@ export function ChatInterface({ workbenchId, height, expanded, onToggleExpanded 
       const recallIntensityOverride = recallIntensity;
       if (recallIntensityOverride !== null) setRecallIntensity(null);
 
-      resetTransientChatState('superseded');
-      const requestToken = activeRequestTokenRef.current + 1;
-      activeRequestTokenRef.current = requestToken;
-
+      const turnConversationId = String(conversationIdRef.current || '').trim() || createConversationId();
       const requestSources = (activeSourcesRef.current || activeSources || defaultChatSources()) as ActiveSources;
-      const assistantId = `assistant-${Date.now()}`;
-      const assistantMessage = createAssistantThreadMessage({
-        id: assistantId,
+      const assistant = createAssistantThreadMessage({
+        id: `assistant-${Date.now()}`,
         createdAt: new Date(),
-        status: buildAssistantStatus('running'),
+        status: { type: 'running' },
+        custom: { waitStage: 'searching' },
       });
-      const nextMessages = clampChatHistory([...messagesRef.current, userMessage, assistantMessage], chatHistoryMax);
+      const nextMessages = clampChatHistory([...messagesRef.current, userMessage, assistant], chatHistoryMax);
       messagesRef.current = nextMessages;
-      saveChatHistory(nextMessages);
-      setSending(true);
+      landOnSendRef.current = true;
+      saveChatHistory(nextMessages, { conversationId: turnConversationId });
 
-      const abortController = new AbortController();
-      requestAbortControllerRef.current = abortController;
-      const timeoutId = window.setTimeout(() => {
-        try {
-          abortController.abort(CHAT_REQUEST_ABORT_TIMEOUT);
-        } catch {
-          // ignore abort races
-        }
-      }, chatRequestTimeoutMs);
-
-      let accumulated = '';
-      try {
-        const result = await sendRagweldChat({
+      // The page's stream controller owns the request from here: it outlives this view, and it
+      // alone writes the settled answer into the stored thread.
+      chatStream.start({
+        conversationId: turnConversationId,
+        assistant,
+        userMessage,
+        request: {
           api,
-          conversationId: conversationIdRef.current,
           includeGraph,
           includeSparse,
           includeVector,
-          message: userMessage,
           modelOverride: modelOverrideRef.current,
-          onTextDelta: (delta) => {
-            if (!isRequestTokenActive(requestToken)) return;
-            accumulated += delta;
-            updateAssistantMessage(assistantId, (message) =>
-              setMessageCustom(
-                {
-                  ...message,
-                  content: accumulated ? [{ type: 'text', text: accumulated }] : [],
-                  status: buildAssistantStatus('running'),
-                },
-                getMessageCustom(message),
-              ),
-            );
-          },
           recallIntensityOverride,
           requestSources,
-          signal: abortController.signal,
-          streamPreferred: true,
           topK: topKOverrideRef.current,
           webEnabled,
-        });
-
-        if (!isRequestTokenActive(requestToken)) return;
-
-        const attachedImageCount = getMessageImages(userMessage).length;
-        const custom = {
-          attachedImageCount: attachedImageCount > 0 ? attachedImageCount : undefined,
-          confidence: typeof result.debug?.confidence === 'number' ? result.debug.confidence : undefined,
-          correlationId: result.headers.correlationId,
-          debug: result.debug,
-          endedAtMs: result.endedAtMs,
-          eventId: result.runId,
-          providerResponseId: result.providerResponseId ?? null,
-          rootSpanId: result.headers.rootSpanId,
-          runId: result.runId,
-          sources: result.sources,
-          startedAtMs: result.startedAtMs,
-          traceId: result.headers.traceId,
-          webGrounding: result.webGrounding,
-        };
-
-        const finalMessages = updateAssistantMessage(assistantId, (message) =>
-          setMessageCustom(
-            {
-              ...message,
-              content: result.text ? [{ type: 'text', text: result.text }] : [],
-              status: buildAssistantStatus('complete'),
-            },
-            custom,
-          ),
-        );
-
-        renameConversation(result.conversationId, finalMessages);
-        saveChatHistory(finalMessages, { conversationId: result.conversationId });
-        setLastMatches(result.sources);
-        if (typeof result.startedAtMs === 'number' && typeof result.endedAtMs === 'number') {
-          setLastLatencyMs(Math.max(0, result.endedAtMs - result.startedAtMs));
-        }
-        setLastRecallPlan(result.debug?.recall_plan ?? null);
-        maybeToastRerankOutcome(result.debug?.rerank);
-        emitRunComplete(result.runId, result.startedAtMs, result.endedAtMs);
-      } catch (error) {
-        const abortReason = toAbortReason(error, abortController.signal);
-        // A user Stop ('user_cancel') or a timeout must finalize THIS assistant message even
-        // though resetTransientChatState already bumped the request token — there is no
-        // successor turn, and the early token guard is what left the bubble 'running' forever
-        // (M-93). A 'superseded'/'session_change'/'unmount' abort, and any non-abort error,
-        // keep the guard: a newer turn or view owns the UI and must not be clobbered.
-        const userInitiatedAbort =
-          abortReason === CHAT_REQUEST_ABORT_TIMEOUT || abortReason === CHAT_REQUEST_ABORT_USER_CANCEL;
-        if (!userInitiatedAbort && !isRequestTokenActive(requestToken)) return;
-
-        if (abortReason) {
-          const message = abortReason === CHAT_REQUEST_ABORT_TIMEOUT
-            ? 'Error: Chat timed out before completion.'
-            : 'Error: Chat request was cancelled.';
-          const abortedMessages = updateAssistantMessage(assistantId, (assistant) =>
-            setMessageCustom(
-              {
-                ...assistant,
-                content: [{ type: 'text', text: message }],
-                status: buildAssistantStatus('error', message),
-              },
-              getMessageCustom(assistant),
-            ),
-          );
-          saveChatHistory(abortedMessages);
-          if (abortReason === CHAT_REQUEST_ABORT_TIMEOUT) showToast('Chat timed out before completion.', 'error');
-          return;
-        }
-
-        console.error('[ChatInterface] Failed to send message:', error);
-        // A failure the stream reported after the server had started a run carries that run;
-        // it is published exactly like a success so the Routing Trace panel follows it.
-        const failedRun =
-          error instanceof ChatRequestFailedError || error instanceof ChatStreamEventError ? error.run : null;
-        if (error instanceof ChatRequestFailedError && error.detail) {
-          // Typed pre-generation failure: render a structured error card, not prose.
-          const structured = { ...error.detail, http_status: error.status };
-          const summary = error.detail.message || error.detail.code;
-          const failedMessages = updateAssistantMessage(assistantId, (assistant) =>
-            setMessageCustom(
-              {
-                ...assistant,
-                content: [],
-                status: buildAssistantStatus('error', summary),
-              },
-              { ...getMessageCustom(assistant), ...failedRunCustom(failedRun), structuredError: structured },
-            ),
-          );
-          saveChatHistory(failedMessages);
-          if (failedRun) emitRunComplete(failedRun.runId, failedRun.startedAtMs, failedRun.endedAtMs);
-          showToast(summary, 'error');
-          return;
-        }
-        const errorMessage = `Error: ${error instanceof Error ? error.message : 'Failed to get response'}`;
-        const failedMessages = updateAssistantMessage(assistantId, (assistant) =>
-          setMessageCustom(
-            {
-              ...assistant,
-              content: [{ type: 'text', text: errorMessage }],
-              status: buildAssistantStatus('error', errorMessage),
-            },
-            { ...getMessageCustom(assistant), ...failedRunCustom(failedRun) },
-          ),
-        );
-        saveChatHistory(failedMessages);
-        if (failedRun) emitRunComplete(failedRun.runId, failedRun.startedAtMs, failedRun.endedAtMs);
-        showToast(error instanceof Error ? error.message : 'Failed to get response', 'error');
-      } finally {
-        window.clearTimeout(timeoutId);
-        if (requestAbortControllerRef.current === abortController) {
-          requestAbortControllerRef.current = null;
-        }
-        if (!isRequestTokenActive(requestToken)) return;
-        setSending(false);
-      }
+        },
+        timeoutMs: chatRequestTimeoutMs,
+        chatHistoryMax,
+        maxSessions: MAX_CHAT_SESSIONS,
+      });
     },
     [
       activeSources,
       api,
-      buildAssistantStatus,
       chatBlockedReason,
       chatHistoryMax,
       chatRequestTimeoutMs,
       includeGraph,
       includeSparse,
       includeVector,
-      isRequestTokenActive,
-      maybeToastRerankOutcome,
       recallIntensity,
-      renameConversation,
-      resetTransientChatState,
       saveChatHistory,
       showToast,
-      updateAssistantMessage,
       webEnabled,
     ],
   );
@@ -1766,7 +1878,7 @@ export function ChatInterface({ workbenchId, height, expanded, onToggleExpanded 
         attachments: [],
         metadata: { custom: message.metadata?.custom ?? {} },
       };
-      await runUserTurn(normalized);
+      runUserTurn(normalized);
     },
     [runUserTurn],
   );
@@ -1777,7 +1889,7 @@ export function ChatInterface({ workbenchId, height, expanded, onToggleExpanded 
     isRunning: sending,
     messages,
     onCancel: async () => {
-      resetTransientChatState(CHAT_REQUEST_ABORT_USER_CANCEL);
+      chatStream.cancel(conversationIdRef.current, 'user_cancel');
     },
     onNew: handleAssistantUiAppend,
     suggestions: WELCOME_PROMPTS.map((prompt) => ({ prompt })),
@@ -1792,7 +1904,7 @@ export function ChatInterface({ workbenchId, height, expanded, onToggleExpanded 
         })),
       },
     },
-  }), [chatSessions, conversationId, handleAssistantUiAppend, messages, resetTransientChatState, sending]);
+  }), [chatSessions, conversationId, handleAssistantUiAppend, messages, sending]);
   const runtime = useExternalStoreRuntime(runtimeStore);
 
   const handleSend = useCallback(
@@ -1801,7 +1913,7 @@ export function ChatInterface({ workbenchId, height, expanded, onToggleExpanded 
         text,
         images,
       });
-      void runUserTurn(userMessage);
+      runUserTurn(userMessage);
     },
     [runUserTurn],
   );
@@ -1811,6 +1923,13 @@ export function ChatInterface({ workbenchId, height, expanded, onToggleExpanded 
   // (runUserTurn re-appends it), so the thread does not accumulate a duplicate question (B-07).
   // Any images survive only while they are still in the message content (a reload strips them),
   // which is the honest limit of a text-first retry.
+  // Through a ref, so the message context (and with it every message) does not change when the
+  // send callback does.
+  const runUserTurnRef = useRef(runUserTurn);
+  useEffect(() => {
+    runUserTurnRef.current = runUserTurn;
+  }, [runUserTurn]);
+
   const handleRetry = useCallback(
     (assistantId: string) => {
       if (sendingRef.current) return;
@@ -1835,9 +1954,9 @@ export function ChatInterface({ workbenchId, height, expanded, onToggleExpanded 
       messagesRef.current = trimmed;
       setMessages(trimmed);
       saveChatHistory(trimmed);
-      void runUserTurn(replayUser);
+      runUserTurnRef.current(replayUser);
     },
-    [runUserTurn, saveChatHistory],
+    [saveChatHistory],
   );
 
   const handleCleanupUnindexed = useCallback(async () => {
@@ -1854,6 +1973,7 @@ export function ChatInterface({ workbenchId, height, expanded, onToggleExpanded 
   }, [activeSources, deleteUnindexedCorpora]);
 
   const handleNewChat = useCallback(() => {
+    startConversationSwitch('new', instanceIdRef.current);
     const session = createChatSession({
       title: 'New chat',
       messages: [],
@@ -1944,6 +2064,9 @@ export function ChatInterface({ workbenchId, height, expanded, onToggleExpanded 
       return;
     }
 
+    // An answer still streaming into the deleted conversation has nowhere to land: stop it.
+    chatStream.cancel(activeId, 'deleted');
+    startConversationSwitch('delete', instanceIdRef.current);
     let remaining = chatSessions.filter((session) => String(session.conversation_id || '').trim() !== activeId);
     remaining.sort((a, b) => Number(b.updated_at || 0) - Number(a.updated_at || 0));
     if (remaining.length === 0) {
@@ -1967,6 +2090,9 @@ export function ChatInterface({ workbenchId, height, expanded, onToggleExpanded 
 
   const handleSelectSession = useCallback(
     (session: ReturnType<typeof createChatSession>) => {
+      if (String(session.conversation_id || '').trim() !== conversationIdRef.current) {
+        startConversationSwitch('select', instanceIdRef.current);
+      }
       persistSessions(chatSessions, String(session.conversation_id || '').trim());
       activateSession(session);
     },
@@ -2029,17 +2155,47 @@ export function ChatInterface({ workbenchId, height, expanded, onToggleExpanded 
     }
   }, []);
 
+  const handleCancel = useCallback(() => {
+    chatStream.cancel(conversationIdRef.current, 'user_cancel');
+  }, []);
+
+  const handleWelcomePrompt = useCallback((prompt: string) => handleSend(prompt, []), [handleSend]);
+
+  const messageContext = useMemo<ChatMessageContextValue>(
+    () => ({
+      messageFeedback,
+      onCitationOpen: sendCitationClick,
+      onCopy: handleCopy,
+      onRetry: handleRetry,
+      onSendFeedback: (message, signal) => void sendFeedback(message, signal),
+      onViewTraceAndLogs: handleViewTraceAndLogs,
+      showCitations: chatShowCitations,
+      showConfidence: chatShowConfidence,
+      showDebugFooter: chatShowDebugFooter,
+      showRecallGateSignals: recallGateShowSignals,
+    }),
+    [
+      chatShowCitations,
+      chatShowConfidence,
+      chatShowDebugFooter,
+      handleCopy,
+      handleRetry,
+      handleViewTraceAndLogs,
+      messageFeedback,
+      recallGateShowSignals,
+      sendCitationClick,
+      sendFeedback,
+    ],
+  );
+
   return (
     <div
       id={workbenchId}
+      ref={workbenchRef}
       data-react-chat="true"
-      data-expanded={expanded ? 'true' : 'false'}
       style={{
         display: 'flex',
         flexDirection: 'column',
-        // The Chat tab sizes the workbench to the pane it lives in (main pane or Dock) and
-        // never below its floor, so the message list, not a fixed clamp, takes the room.
-        height: `${height}px`,
         boxSizing: 'border-box',
         border: '1px solid var(--line)',
         borderRadius: '18px',
@@ -2178,26 +2334,6 @@ export function ChatInterface({ workbenchId, height, expanded, onToggleExpanded 
           >
             Settings
           </button>
-
-          <button
-            type="button"
-            data-testid="chat-expand"
-            aria-pressed={expanded}
-            aria-controls={workbenchId}
-            onClick={onToggleExpanded}
-            style={{
-              background: expanded ? 'var(--accent)' : 'var(--bg-elev2)',
-              color: expanded ? 'var(--accent-contrast)' : 'var(--fg)',
-              border: `1px solid ${expanded ? 'var(--accent)' : 'var(--line)'}`,
-              padding: '8px 12px',
-              borderRadius: '12px',
-              fontSize: '12px',
-              fontWeight: 700,
-              cursor: 'pointer',
-            }}
-          >
-            {expanded ? 'Collapse' : 'Expand'}
-          </button>
         </div>
 
         {activeRepoOutsideSources ? (
@@ -2307,93 +2443,68 @@ export function ChatInterface({ workbenchId, height, expanded, onToggleExpanded 
 
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
           <AssistantRuntimeProvider runtime={runtime}>
-            <ThreadPrimitive.Root
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                flex: 1,
-                minHeight: 0,
-                minWidth: 0,
-              }}
-            >
-              <ThreadPrimitive.Viewport
-                ref={messagesContainerRef}
+            <ChatMessageContext.Provider value={messageContext}>
+              <ThreadPrimitive.Root
                 style={{
+                  display: 'flex',
+                  flexDirection: 'column',
                   flex: 1,
-                  overflowY: 'auto',
-                  // A wide code block or an unbreakable string used to grow the whole list
-                  // sideways at 1024px (M-97). Clip here; wide code scrolls inside its own
-                  // container (AssistantMarkdown) rather than the message list.
-                  overflowX: 'hidden',
-                  padding: '18px',
                   minHeight: 0,
                   minWidth: 0,
-                  // Message controls (citation buttons, thumbs) scrolled flush to this
-                  // viewport's edges land under the sticky "Jump to latest" footer or the
-                  // composer/status-bar seam; scroll padding keeps scroll-into-view targets
-                  // clear of both without force-clicks.
-                  scrollPaddingTop: '18px',
-                  scrollPaddingBottom: '64px',
                 }}
               >
-                <AuiIf condition={(state) => state.thread.isEmpty}>
-                  <ThreadWelcome onPromptSelect={(prompt) => handleSend(prompt, [])} />
-                </AuiIf>
-
-                <ThreadPrimitive.Messages>
-                  {() => (
-                    <AssistantThreadMessage
-                      messageFeedback={messageFeedback}
-                      onCopy={handleCopy}
-                      onRetry={handleRetry}
-                      onSendFeedback={(message, signal) => {
-                        const custom = getMessageCustom(message);
-                        void sendFeedback(custom.eventId ?? custom.runId, message.id, signal);
-                      }}
-                      onViewTraceAndLogs={handleViewTraceAndLogs}
-                      renderAssistantContent={(content) => <AssistantMarkdown content={content} />}
-                      showCitations={chatShowCitations}
-                      showConfidence={chatShowConfidence}
-                      showDebugFooter={chatShowDebugFooter}
-                      showRecallGateSignals={recallGateShowSignals}
-                    />
-                  )}
-                </ThreadPrimitive.Messages>
-
-                <ThreadPrimitive.ViewportFooter
+                <ThreadPrimitive.Viewport
+                  ref={messagesContainerRef}
+                  data-region="chat-messages"
+                  // Scrolling is owned here (useStreamFollow): follow a streaming answer only from
+                  // the bottom, and never move the view when a finished answer adds its footer.
+                  autoScroll={false}
+                  scrollToBottomOnRunStart={false}
                   style={{
-                    position: 'sticky',
-                    bottom: 0,
-                    display: 'flex',
-                    justifyContent: 'center',
-                    padding: '8px 0 0 0',
-                    pointerEvents: 'none',
+                    flex: 1,
+                    overflowY: 'auto',
+                    // A wide code block or an unbreakable string used to grow the whole list
+                    // sideways at 1024px (M-97). Clip here; wide code scrolls inside its own
+                    // container (AssistantMarkdown) rather than the message list.
+                    overflowX: 'hidden',
+                    padding: '18px',
+                    minHeight: 0,
+                    minWidth: 0,
+                    // Message controls (citation buttons, thumbs) scrolled flush to this
+                    // viewport's edges land under the sticky "Jump to latest" footer or the
+                    // composer/status-bar seam; scroll padding keeps scroll-into-view targets
+                    // clear of both without force-clicks.
+                    scrollPaddingTop: '18px',
+                    scrollPaddingBottom: '64px',
                   }}
                 >
-                  <ThreadPrimitive.ScrollToBottom asChild>
-                    <button
-                      type="button"
-                      style={{
-                        pointerEvents: 'auto',
-                        borderRadius: '999px',
-                        border: '1px solid var(--line)',
-                        background: 'var(--bg-elev1)',
-                        color: 'var(--fg)',
-                        padding: '8px 12px',
-                        fontSize: '11px',
-                        cursor: 'pointer',
-                        boxShadow: '0 12px 30px rgba(0,0,0,0.18)',
-                      }}
-                    >
-                      Jump to latest
-                    </button>
-                  </ThreadPrimitive.ScrollToBottom>
-                </ThreadPrimitive.ViewportFooter>
-              </ThreadPrimitive.Viewport>
-            </ThreadPrimitive.Root>
+                  <div ref={messagesContentRef}>
+                    <AuiIf condition={(state) => state.thread.isEmpty}>
+                      <ThreadWelcome onPromptSelect={handleWelcomePrompt} />
+                    </AuiIf>
+
+                    <ThreadPrimitive.Messages components={THREAD_MESSAGE_COMPONENTS} />
+                  </div>
+
+                  <ThreadPrimitive.ViewportFooter
+                    style={{
+                      position: 'sticky',
+                      bottom: 0,
+                      display: 'flex',
+                      justifyContent: 'center',
+                      padding: '8px 0 0 0',
+                      pointerEvents: 'none',
+                    }}
+                  >
+                    <JumpToLatestButton viewportRef={messagesContainerRef} contentRef={messagesContentRef} />
+                  </ThreadPrimitive.ViewportFooter>
+                </ThreadPrimitive.Viewport>
+              </ThreadPrimitive.Root>
+            </ChatMessageContext.Provider>
           </AssistantRuntimeProvider>
 
           <div
+            data-region="chat-composer"
             style={{
               padding: '12px 16px',
               borderTop: '1px solid var(--line)',
@@ -2405,7 +2516,7 @@ export function ChatInterface({ workbenchId, height, expanded, onToggleExpanded 
             <ChatComposer
               blockedReason={chatBlockedReason}
               multimodal={multimodalCfg}
-              onCancel={() => resetTransientChatState(CHAT_REQUEST_ABORT_USER_CANCEL)}
+              onCancel={handleCancel}
               onSend={handleSend}
               sending={sending}
             />

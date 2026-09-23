@@ -9,7 +9,7 @@ from typing import Literal
 from server.chat.gateway_runtime import resolve_litellm_api_key, resolve_litellm_base_url
 from server.gateway_catalog import gateway_rows_snapshot
 from server.model_policy import ensure_model_allowed
-from server.models.tribrid_config_model import TriBridConfig
+from server.models.tribrid_config_model import ChatRequest, TriBridConfig
 
 _GATEWAY_ALIAS = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _REMOVED_PREFIXES = {"local", "openrouter", "ragweld", "openai", "anthropic", "ollama", "mlx"}
@@ -41,6 +41,30 @@ def _resolve_gateway_alias(raw_override: str, default_alias: str) -> str:
     if not _GATEWAY_ALIAS.fullmatch(alias):
         raise RuntimeError("Generation model_override must be a LiteLLM gateway alias")
     return alias
+
+
+def effective_model_override(*, request: ChatRequest, config: TriBridConfig) -> str:
+    """The override a chat request routes with: the picker's, unless the message carries
+    images and `chat.multimodal.vision_model_override` forces the vision alias."""
+    override = (request.model_override or "").strip()
+    if request.images:
+        vision_override = str(config.chat.multimodal.vision_model_override or "").strip()
+        if vision_override:
+            override = vision_override
+    return override
+
+
+def catalog_alias_or_none(*, config: TriBridConfig, model_override: str = "") -> str | None:
+    """The catalog-backed gateway alias `model_override` (or the default) names, else None.
+
+    Resolution only (no key, no base URL): the bounded `model` label of the chat metrics,
+    which must never carry a raw, client-chosen override.
+    """
+    try:
+        alias = _resolve_gateway_alias(model_override, config.chat.litellm.default_model)
+    except RuntimeError:
+        return None
+    return alias if alias in gateway_rows_snapshot() else None
 
 
 def select_provider_route(*, config: TriBridConfig, model_override: str = "") -> ProviderRoute:

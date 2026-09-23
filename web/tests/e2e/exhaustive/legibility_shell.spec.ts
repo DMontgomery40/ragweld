@@ -17,6 +17,8 @@ import { readFileSync } from 'node:fs';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { API_BASE, activateCorpusInBrowser } from './corpus_fixture';
 import { assertPrivateNativeConfig, privateNativeChildEnv, type NativeFixtureConfig } from './native_cost_fixture';
+import { dragPanelCorner, overflowingPanels, panelHeight, resizerGripContrast, type PanelOverflow } from './panel_resize';
+import { UI_SURFACES } from './suite_config';
 
 type ShellGeom = {
   innerH: number;
@@ -405,6 +407,128 @@ for (const width of [900, 901, 1024, 1025, 1200, 1201, 1366]) {
       await page.mouse.move(x - 24, y, { steps: 5 });
       await page.mouse.up();
       await expect.poll(async () => (await rail.boundingBox())!.width).toBeGreaterThan(initial + 15);
+    });
+  });
+}
+
+// Resizable feature panels: ONE global rule (`.settings-section, [data-resizable]` in
+// web/src/styles/main.css) makes every major panel draggable from its bottom-right corner, and
+// utils/resizablePanels.ts remembers a keyed panel's height per viewer. The operator asked for
+// panels that slide in and out like the Dock, not a per-feature control. A representative
+// panel from Chat, Eval and RAG is driven with a real corner drag (no style written by the
+// test) and must come back at the dragged height after a reload.
+const REPRESENTATIVE_PANELS: Array<{
+  label: string;
+  path: string;
+  panel: string;
+  ready: string;
+  corpus?: string;
+  /** A folding panel: the control that folds it, and a selector that matches only while unfolded. */
+  fold?: { toggle: string; unfolded: string };
+}> = [
+  { label: 'Chat Workbench', path: 'chat', panel: '.main-content [data-resizable="chat-workbench"]', ready: '.main-content #chat-input' },
+  {
+    label: 'Routing Trace',
+    path: 'chat',
+    panel: '.main-content [data-resizable="chat-routing-trace"]',
+    ready: '.main-content #chat-trace',
+    fold: { toggle: '.main-content #chat-trace > summary', unfolded: '.main-content #chat-trace[open]' },
+  },
+  {
+    label: 'Eval run settings',
+    path: 'eval?subtab=analysis',
+    panel: '.main-content [data-resizable="eval_run_settings"]',
+    ready: '.main-content [data-resizable="eval_run_settings"]',
+    fold: {
+      toggle: '.main-content [data-resizable="eval_run_settings"] > button[aria-expanded]',
+      unfolded: '.main-content [data-resizable="eval_run_settings"] > button[aria-expanded="true"]',
+    },
+  },
+  {
+    label: 'RAG graph explorer',
+    path: 'rag?subtab=graph&corpus=ragweld_code',
+    corpus: 'ragweld_code',
+    panel: '.main-content [data-resizable="rag-graph-canvas"]',
+    ready: '.main-content [data-testid="graph-viz-canvas"] canvas',
+  },
+];
+
+test.describe('major panels resize from one global rule', () => {
+  test.use({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
+
+  for (const spec of REPRESENTATIVE_PANELS) {
+    test(`${spec.label}: a corner drag resizes it and the height survives a reload`, async ({ page, baseURL }) => {
+      const open = async () => {
+        await page.waitForSelector(spec.ready, { timeout: 90_000 });
+        if (spec.fold && (await page.locator(spec.fold.unfolded).count()) === 0) await page.locator(spec.fold.toggle).click();
+        if (spec.fold) await expect(page.locator(spec.fold.unfolded)).toHaveCount(1);
+        await page.waitForTimeout(800);
+      };
+      if (spec.corpus) await activateCorpusInBrowser(page, spec.corpus);
+      await page.goto(new URL(spec.path, baseURL).toString(), { waitUntil: 'domcontentloaded' });
+      await open();
+      const panel = page.locator(spec.panel);
+      await expect(panel).toBeVisible();
+      expect(await panel.evaluate((el) => getComputedStyle(el).resize), `${spec.label} is not resizable`).toBe('vertical');
+      // The grip reads at 1x: decorative ink at >= 3:1 against the panel beside it.
+      expect(await resizerGripContrast(page, panel), `${spec.label}: the resize grip is not legible`).toBeGreaterThanOrEqual(3);
+
+      const shrink = await dragPanelCorner(page, panel, -120);
+      expect(Math.abs(shrink.to - (shrink.from - 120)), `${spec.label}: ${JSON.stringify(shrink)} after a 120px shrink`).toBeLessThanOrEqual(4);
+      const grow = await dragPanelCorner(page, panel, 60);
+      expect(Math.abs(grow.to - (grow.from + 60)), `${spec.label}: ${JSON.stringify(grow)} after a 60px grow`).toBeLessThanOrEqual(4);
+      const dragged = grow.to;
+
+      if (spec.label === 'RAG graph explorer') {
+        // The graph follows its panel: the ResizeObserver re-sizes the force-graph canvas.
+        await expect
+          .poll(() => panel.evaluate((el) => Math.abs((el.querySelector('canvas') as HTMLCanvasElement).clientHeight - el.clientHeight)))
+          .toBeLessThanOrEqual(2);
+      }
+
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await open();
+      expect(Math.abs((await panelHeight(panel)) - dragged), `${spec.label} forgot its height`).toBeLessThanOrEqual(2);
+
+      if (spec.fold) {
+        // Folded, a panel gives up the dragged height and has nothing to resize; unfolded, it
+        // gets the height back.
+        await page.locator(spec.fold.toggle).click();
+        await expect(page.locator(spec.fold.unfolded)).toHaveCount(0);
+        expect(await panelHeight(panel), `${spec.label} kept its dragged height while folded`).toBeLessThan(dragged - 40);
+        expect(await panel.evaluate((el) => getComputedStyle(el).resize)).toBe('none');
+        await page.locator(spec.fold.toggle).click();
+        await expect(page.locator(spec.fold.unfolded)).toHaveCount(1);
+        expect(Math.abs((await panelHeight(panel)) - dragged)).toBeLessThanOrEqual(2);
+      }
+    });
+  }
+});
+
+// `overflow: auto` from the global rule must never hide content: at their default size, no
+// resizable panel on any surface may grow an inner scrollbar (content that used to show, now
+// behind a scroll). Every surface of the exhaustive suite, at both operator desktops.
+for (const vp of [
+  { width: 1440, height: 900 },
+  { width: 1920, height: 1200 },
+]) {
+  test.describe(`resizable panels at ${vp.width}x${vp.height}`, () => {
+    test.use({ viewport: vp, deviceScaleFactor: 1 });
+
+    test('no panel clips its content at its default size', async ({ page, baseURL }) => {
+      test.setTimeout(15 * 60 * 1000);
+      const clipped: Array<{ surface: string } & PanelOverflow> = [];
+      let panelsSeen = 0;
+      for (const surface of UI_SURFACES) {
+        const path = `${surface.route.replace(/^\//, '')}${surface.subtab ? `?subtab=${surface.subtab}` : ''}`;
+        await page.goto(new URL(path, baseURL).toString(), { waitUntil: 'domcontentloaded' });
+        await page.waitForSelector('.topbar', { timeout: 90_000 });
+        await page.waitForTimeout(1500);
+        panelsSeen += await page.locator('.main-content :is(.settings-section, [data-resizable])').count();
+        for (const hit of await overflowingPanels(page, '.main-content')) clipped.push({ surface: surface.label, ...hit });
+      }
+      expect(panelsSeen, 'no resizable panel was found on any surface').toBeGreaterThan(10);
+      expect(clipped, JSON.stringify(clipped, null, 2)).toEqual([]);
     });
   });
 }

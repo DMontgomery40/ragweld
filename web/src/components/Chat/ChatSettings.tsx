@@ -77,6 +77,7 @@ export function ChatSettings() {
 
   // UI
   const [chatStreamingEnabled, setChatStreamingEnabled] = useConfigField<boolean>('ui.chat_streaming_enabled', true);
+  const [chatIncludeThinking, setChatIncludeThinking] = useConfigField<boolean>('ui.chat_stream_include_thinking', true);
 
   const panel = (() => {
     switch (activeTab) {
@@ -563,6 +564,28 @@ export function ChatSettings() {
                   </span>
                 </label>
                 <p className="small">Streams tokens as they’re generated (recommended).</p>
+              </div>
+            </div>
+            <div className="input-row">
+              <div className="input-group">
+                <label className="toggle">
+                  <input
+                    type="checkbox"
+                    data-testid="chat-settings-include-thinking"
+                    checked={chatIncludeThinking}
+                    onChange={(e) => setChatIncludeThinking(e.target.checked)}
+                  />
+                  <span className="toggle-track" aria-hidden="true">
+                    <span className="toggle-thumb"></span>
+                  </span>
+                  <span className="toggle-label">
+                    Show model thinking <TooltipIcon name="CHAT_STREAM_INCLUDE_THINKING" />
+                  </span>
+                </label>
+                <p className="small">
+                  Shows a reasoning model’s thinking in the answer while it works. When off, or for models
+                  that don’t share their reasoning, tips show while you wait.
+                </p>
               </div>
             </div>
           </div>

@@ -47,7 +47,15 @@ type RagweldStreamTerminal = {
   webGrounding: WebGroundingMetadata;
 };
 
-type SendRagweldChatArgs = {
+/** The `status` event of /api/chat/stream: the stage the request reached and how many sources
+ * retrieval handed the model. The SSE events are not a generated wire contract (none of the
+ * stream's event kinds are), so this is read field by field like `text` and `done`. */
+export type ChatStreamStatus = {
+  stage: 'generating';
+  sourcesCount: number;
+};
+
+export type SendRagweldChatArgs = {
   api: (path: string) => string;
   conversationId: string;
   includeGraph: boolean;
@@ -55,7 +63,12 @@ type SendRagweldChatArgs = {
   includeVector: boolean;
   message: ThreadUserMessage;
   modelOverride: string;
+  /** The server finished retrieval and the prompt was accepted; the model is working. */
+  onStatus?: (status: ChatStreamStatus) => void;
   onTextDelta?: (delta: string) => void;
+  /** The model's reasoning, streamed only when ui.chat_stream_include_thinking is on. It is
+   * never part of the answer text. */
+  onThinkingDelta?: (delta: string) => void;
   recallIntensityOverride: RecallIntensity | null;
   requestSources: ActiveSources;
   signal: AbortSignal;
@@ -158,6 +171,33 @@ function readTraceHeaders(response: Response): RagweldTraceHeaders {
   };
 }
 
+// What a proxy's own error page means, by status. Cloudflare answers 52x itself (524: the
+// origin sent no response within ~100 s); Caddy answers 502/504 when the API is unreachable.
+const PROXY_ERROR_PAGE_MESSAGES: Record<number, string> = {
+  502: 'The proxy could not get a response from the server (502)',
+  503: 'The server is unavailable behind the proxy (503)',
+  504: 'The request timed out at the proxy (504)',
+  520: 'The proxy received an invalid response from the server (520)',
+  521: 'The server refused the proxy connection (521)',
+  522: 'The proxy timed out connecting to the server (522)',
+  523: 'The proxy could not reach the server (523)',
+  524: 'The request timed out at the proxy (524)',
+  525: 'The proxy could not complete a TLS handshake with the server (525)',
+  526: 'The proxy rejected the server certificate (526)',
+};
+
+/** A short message for an error response whose body is not JSON. An HTML body is a proxy's
+ * error page (Cloudflare, Caddy), never the API's own answer, so its markup is never shown:
+ * it is named by status. Plain text from the API keeps its first 500 characters. */
+export function describeNonJsonErrorBody(status: number, contentType: string, body: string): string {
+  const text = String(body || '').trim();
+  const isHtml = /\btext\/html\b/i.test(contentType) || /^<(?:!doctype|html|head|body)\b/i.test(text);
+  if (isHtml) {
+    return PROXY_ERROR_PAGE_MESSAGES[status] ?? `The proxy returned an error page (HTTP ${status})`;
+  }
+  return text.slice(0, 500);
+}
+
 async function toChatRequestFailedError(resp: Response, fallback: string): Promise<ChatRequestFailedError> {
   try {
     const contentType = resp.headers.get('content-type') || '';
@@ -175,7 +215,11 @@ async function toChatRequestFailedError(resp: Response, fallback: string): Promi
       return new ChatRequestFailedError(JSON.stringify(body).slice(0, 500), resp.status, null);
     }
     const text = await resp.text();
-    return new ChatRequestFailedError((text || '').trim().slice(0, 500) || fallback, resp.status, null);
+    return new ChatRequestFailedError(
+      describeNonJsonErrorBody(resp.status, contentType, text) || fallback,
+      resp.status,
+      null,
+    );
   } catch {
     return new ChatRequestFailedError(fallback, resp.status, null);
   }
@@ -327,6 +371,17 @@ async function runStreamingChat(args: SendRagweldChatArgs): Promise<RagweldChatR
 
     const parsed = JSON.parse(data) as Record<string, unknown>;
     switch (parsed.type) {
+      case 'status': {
+        if (parsed.stage !== 'generating') return;
+        const sourcesCount = typeof parsed.sources_count === 'number' ? parsed.sources_count : 0;
+        args.onStatus?.({ stage: 'generating', sourcesCount });
+        return;
+      }
+      case 'thinking': {
+        const delta = typeof parsed.content === 'string' ? parsed.content : '';
+        if (delta) args.onThinkingDelta?.(delta);
+        return;
+      }
       case 'text': {
         const delta = typeof parsed.content === 'string' ? parsed.content : '';
         if (!delta) return;

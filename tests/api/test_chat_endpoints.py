@@ -13,6 +13,8 @@ from tests.api.fake_gateway import (
     completion_gateway,
     empty_stream_gateway,
     gateway_env,
+    reasoning_gateway,
+    reasoning_gateway_requests,
     slow_delta_gateway,
     slow_delta_requests,
 )
@@ -370,6 +372,41 @@ class TestChatEndpointWithMockedLLM:
             assert len(data["sources"]) >= 1
             assert "src/main.py" in {s["file_path"] for s in data["sources"]}
 
+@pytest.mark.asyncio
+async def test_closing_the_keepalive_pump_cancels_the_pending_gateway_read() -> None:
+    """The keepalive pump advances the gateway stream in a task of its own. A client that
+    leaves while the model is silent must still reach that pending read as a cancellation,
+    at once, as a direct cancellation did before the pump existed; nothing is left reading."""
+    from contextlib import aclosing
+
+    from server.chat.handler import with_idle_ticks
+
+    silent = asyncio.Event()
+    outcome: list[str] = []
+
+    async def silent_model():
+        try:
+            yield "Jet Aviation"
+            await silent.wait()
+            yield "never produced"
+        except asyncio.CancelledError:
+            outcome.append("cancelled")
+            raise
+        finally:
+            outcome.append("closed")
+
+    received: list[str | None] = []
+    async with aclosing(with_idle_ticks(silent_model(), interval_s=0.05)) as events:
+        async for item in events:
+            received.append(item)
+            if item is None:
+                break  # the client goes away during the silence
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert received == ["Jet Aviation", None]
+    assert outcome == ["cancelled", "closed"]
+
+
 class TestStreamEndpoint:
     """Tests for streaming chat endpoint."""
 
@@ -403,6 +440,165 @@ class TestStreamEndpoint:
                 assert "".join(e.get("content", "") for e in events if e.get("type") == "text").startswith("The plane")
             finally:
                 set_config(None)
+
+    @staticmethod
+    def _reasoning_config(*, include_thinking: bool, base_url: str) -> TriBridConfig:
+        cfg = TriBridConfig()
+        cfg.chat.litellm.enabled = True
+        cfg.chat.litellm.default_model = "openai.gpt-5.6-luna"
+        cfg.chat.litellm.base_url = base_url
+        cfg.chat.recall.enabled = False
+        cfg.semantic_cache.enabled = False  # every request must reach the (fake) model
+        cfg.ui.chat_stream_include_thinking = include_thinking
+        return cfg
+
+    @pytest.mark.asyncio
+    async def test_stream_relays_thinking_before_the_answer_and_never_persists_it(self, chat_client: AsyncClient):
+        """With `ui.chat_stream_include_thinking` on, the model's reasoning streams as
+        `thinking` events after `status` and before the answer's `text`; the durable exchange
+        holds the answer alone, and the request asked the model for nothing extra."""
+        question = "Which plane management company did Barry Cohen consider switching to?"
+        conversation_id = f"stream-thinking-{uuid.uuid4().hex[:8]}"
+        with reasoning_gateway() as base_url, gateway_env(base_url):
+            set_config(self._reasoning_config(include_thinking=True, base_url=base_url))
+            try:
+                response = await chat_client.post(
+                    "/api/chat/stream",
+                    json={"message": question, "sources": {"corpus_ids": []}, "conversation_id": conversation_id},
+                )
+            finally:
+                set_config(None)
+
+        assert response.status_code == 200
+        events = [json.loads(line[len("data: ") :]) for line in response.text.splitlines() if line.startswith("data: ")]
+        kinds = [str(e.get("type")) for e in events]
+        assert kinds[0] == "status", kinds
+        assert events[0]["stage"] == "generating" and events[0]["sources_count"] == 0
+        assert kinds.index("thinking") < kinds.index("text") and kinds[-1] == "done", kinds
+        assert "error" not in kinds, kinds
+        thinking = "".join(e["content"] for e in events if e["type"] == "thinking")
+        answer = "".join(e["content"] for e in events if e["type"] == "text")
+        assert thinking == "The user asks which company managed Barry Cohen's plane."
+        assert answer == "Jet Aviation managed the plane."
+
+        messages = get_conversation_store().get_messages(conversation_id)
+        assert [(m.role, m.content) for m in messages] == [("user", question), ("assistant", answer)]
+        request = reasoning_gateway_requests()[0]
+        assert "reasoning" not in request and "reasoning_effort" not in request
+
+    @pytest.mark.asyncio
+    async def test_stream_without_thinking_relays_no_reasoning(self, chat_client: AsyncClient):
+        """With the setting off the reasoning stays at the gateway: `status`, then the answer."""
+        question = "Which plane management company did Barry Cohen consider switching to?"
+        conversation_id = f"stream-no-thinking-{uuid.uuid4().hex[:8]}"
+        with reasoning_gateway() as base_url, gateway_env(base_url):
+            set_config(self._reasoning_config(include_thinking=False, base_url=base_url))
+            try:
+                response = await chat_client.post(
+                    "/api/chat/stream",
+                    json={"message": question, "sources": {"corpus_ids": []}, "conversation_id": conversation_id},
+                )
+            finally:
+                set_config(None)
+
+        assert response.status_code == 200
+        events = [json.loads(line[len("data: ") :]) for line in response.text.splitlines() if line.startswith("data: ")]
+        kinds = [str(e.get("type")) for e in events]
+        assert kinds[0] == "status" and kinds[-1] == "done", kinds
+        assert "thinking" not in kinds, kinds
+        assert "Barry Cohen's plane" not in response.text
+        messages = get_conversation_store().get_messages(conversation_id)
+        assert [m.content for m in messages][1:] == ["Jet Aviation managed the plane."]
+
+    @pytest.mark.asyncio
+    async def test_stream_that_only_reasons_is_a_failed_generation_even_with_thinking_on(self, chat_client: AsyncClient):
+        """Relayed reasoning is not an answer: a model that reasons and never answers ends in
+        the typed `error` event, and nothing of the exchange is persisted."""
+        question = "Which plane management company did Barry Cohen consider switching to?"
+        conversation_id = f"stream-reasoning-only-{uuid.uuid4().hex[:8]}"
+        with reasoning_gateway(answer=()) as base_url, gateway_env(base_url):
+            set_config(self._reasoning_config(include_thinking=True, base_url=base_url))
+            try:
+                response = await chat_client.post(
+                    "/api/chat/stream",
+                    json={"message": question, "sources": {"corpus_ids": []}, "conversation_id": conversation_id},
+                )
+            finally:
+                set_config(None)
+
+        assert response.status_code == 200
+        events = [json.loads(line[len("data: ") :]) for line in response.text.splitlines() if line.startswith("data: ")]
+        kinds = [str(e.get("type")) for e in events]
+        assert kinds[0] == "status" and "thinking" in kinds and "text" not in kinds, kinds
+        assert kinds[-2:] == ["error", "done"], kinds
+        assert events[-1]["llm_used"] is False
+        assert get_conversation_store().get_messages(conversation_id) == []
+
+    @pytest.mark.asyncio
+    async def test_stream_answers_headers_at_once_and_keeps_alive_while_the_model_reasons(self, tmp_path: Path):
+        """The 524 class: a reasoning model thinks for longer than a proxy waits. The headers
+        and the `status` event go out as soon as retrieval is done and the prompt is accepted
+        (they used to wait for the first answer token), and while the client sees nothing an
+        SSE comment goes out at the keepalive interval, even though hidden reasoning chunks
+        keep arriving from the gateway (with thinking off they are not relayed, so they do
+        not count as traffic). The exchange commits exactly as before.
+
+        Observed over a real socket on a uvicorn subprocess: the ASGI transport buffers the
+        whole body, so it cannot show when anything arrived."""
+        import time
+
+        import httpx
+
+        from server.chat.handler import SSE_KEEPALIVE_INTERVAL_S
+
+        question = "Which plane management company did Barry Cohen consider switching to?"
+        conversation_id = f"stream-keepalive-{uuid.uuid4().hex[:8]}"
+        reasoning_seconds = SSE_KEEPALIVE_INTERVAL_S + 3.0
+        with reasoning_gateway(reasoning_seconds=reasoning_seconds) as base_url, gateway_env(base_url):
+            cfg = load_config()
+            cfg.chat.litellm.enabled = True
+            cfg.chat.litellm.base_url = base_url
+            cfg.chat.litellm.default_model = "openai.gpt-5.6-luna"
+            cfg.chat.recall.enabled = False
+            cfg.semantic_cache.enabled = False
+            cfg.ui.chat_stream_include_thinking = False
+            config_path = tmp_path / "tribrid_config.json"
+            config_path.write_text(json.dumps(cfg.model_dump(mode="serialization")), encoding="utf-8")
+            with live_app_subprocess(
+                config_path=config_path,
+                env={"LITELLM_BASE_URL": base_url, "LITELLM_API_KEY": "pytest-fake-gateway-key"},
+            ) as live_url:
+                async with httpx.AsyncClient(base_url=live_url, timeout=120.0) as client:
+                    started = time.monotonic()
+                    lines: list[tuple[float, str]] = []
+                    async with client.stream(
+                        "POST",
+                        "/api/chat/stream",
+                        json={"message": question, "sources": {"corpus_ids": []}, "conversation_id": conversation_id},
+                    ) as response:
+                        headers_after = time.monotonic() - started
+                        assert response.status_code == 200
+                        async for line in response.aiter_lines():
+                            if line.strip():
+                                lines.append((time.monotonic() - started, line))
+                    history = await client.get(f"/api/chat/history/{conversation_id}")
+
+        assert headers_after < reasoning_seconds / 2, f"headers waited {headers_after:.1f}s for the model"
+        data = [(at, json.loads(line[len("data: ") :])) for at, line in lines if line.startswith("data: ")]
+        assert data[0][1]["type"] == "status" and data[0][1]["stage"] == "generating", data[:2]
+        assert data[0][0] < reasoning_seconds / 2
+        first_text_at = next(at for at, event in data if event["type"] == "text")
+        keepalives = [at for at, line in lines if line == ": keepalive"]
+        assert keepalives, [line for _, line in lines]
+        assert keepalives[0] < first_text_at
+        assert keepalives[0] >= SSE_KEEPALIVE_INTERVAL_S - 1.0
+        kinds = [event["type"] for _, event in data]
+        assert "thinking" not in kinds and kinds[-1] == "done", kinds
+        assert history.status_code == 200, history.text
+        assert [(m["role"], m["content"]) for m in history.json()] == [
+            ("user", question),
+            ("assistant", "Jet Aviation managed the plane."),
+        ]
 
     @pytest.mark.asyncio
     async def test_stream_with_no_provider_output_persists_no_exchange(self, chat_client: AsyncClient):
@@ -693,6 +889,207 @@ class TestStreamEndpoint:
             await pg.delete_corpus(corpus_id)
         except Exception:
             pass
+
+
+_LUNA = "openai.gpt-5.6-luna"
+_BARRY_COHEN_QUESTION = "Which plane management company did Barry Cohen consider switching to?"
+
+
+def _sample(name: str, labels: dict[str, str]) -> float:
+    from prometheus_client import REGISTRY
+
+    return float(REGISTRY.get_sample_value(name, labels) or 0.0)
+
+
+def _chat_metrics(model: str) -> dict[str, float]:
+    """Every chat-contract sample for one alias, read off the process registry."""
+    out: dict[str, float] = {}
+    for outcome in ("ok", "retrieval_error", "gateway_error", "timeout", "cancelled", "client_disconnect"):
+        out[f"requests.{outcome}"] = _sample("tribrid_chat_requests_total", {"model": model, "outcome": outcome})
+        out[f"duration.{outcome}"] = _sample("tribrid_chat_duration_seconds_count", {"model": model, "outcome": outcome})
+    for name in ("time_to_first_event", "time_to_first_text"):
+        for suffix in ("count", "sum"):
+            out[f"{name}.{suffix}"] = _sample(f"tribrid_chat_{name}_seconds_{suffix}", {"model": model})
+        for le in ("1.0", "4.0"):
+            out[f"{name}.le{le}"] = _sample(f"tribrid_chat_{name}_seconds_bucket", {"model": model, "le": le})
+    for kind in ("input", "output", "reasoning"):
+        out[f"tokens.{kind}"] = _sample("tribrid_chat_tokens_total", {"model": model, "kind": kind})
+    for source in ("provider", "catalog", "unavailable"):
+        out[f"cost.{source}"] = _sample("tribrid_chat_cost_usd_total", {"model": model, "cost_source": source})
+    return out
+
+
+def _delta(before: dict[str, float], after: dict[str, float]) -> dict[str, float]:
+    return {key: after[key] - before[key] for key in after if after[key] != before[key]}
+
+
+class TestChatMetrics:
+    """The chat metric contract, emitted by the real chat path against a real local gateway
+    and read back off the process's Prometheus registry (deltas, so other tests don't matter)."""
+
+    @staticmethod
+    def _config(base_url: str) -> TriBridConfig:
+        cfg = TriBridConfig()
+        cfg.chat.litellm.enabled = True
+        cfg.chat.litellm.default_model = _LUNA
+        cfg.chat.litellm.base_url = base_url
+        cfg.chat.recall.enabled = False
+        cfg.semantic_cache.enabled = False  # every request must reach the (fake) model
+        cfg.ui.chat_stream_include_thinking = False
+        return cfg
+
+    @pytest.mark.asyncio
+    async def test_answered_stream_counts_ok_with_usage_cost_and_a_later_first_text(self, chat_client: AsyncClient):
+        """A reasoning model thinks ~1.5 s before its first answer token: `status` goes out at
+        once, so time-to-first-event is small and time-to-first-text carries the thinking.
+        Usage and the gateway-reported cost land on the counters by alias."""
+        usage = {
+            "prompt_tokens": 812,
+            "completion_tokens": 240,
+            "total_tokens": 1052,
+            "completion_tokens_details": {"reasoning_tokens": 180},
+            "cost": 0.00321,
+        }
+        before = _chat_metrics(_LUNA)
+        with reasoning_gateway(reasoning_seconds=1.5, usage=usage) as base_url, gateway_env(base_url):
+            set_config(self._config(base_url))
+            try:
+                response = await chat_client.post(
+                    "/api/chat/stream", json={"message": _BARRY_COHEN_QUESTION, "sources": {"corpus_ids": []}}
+                )
+            finally:
+                set_config(None)
+        assert response.status_code == 200
+        assert '"type": "done"' in response.text and '"type": "error"' not in response.text
+        delta = _delta(before, _chat_metrics(_LUNA))
+
+        ttfe = delta.pop("time_to_first_event.sum")
+        ttft = delta.pop("time_to_first_text.sum")
+        cost = delta.pop("cost.provider")
+        assert delta == {
+            "requests.ok": 1.0,
+            "duration.ok": 1.0,
+            "time_to_first_event.count": 1.0,
+            "time_to_first_event.le1.0": 1.0,
+            "time_to_first_event.le4.0": 1.0,
+            "time_to_first_text.count": 1.0,
+            "time_to_first_text.le4.0": 1.0,
+            "tokens.input": 812.0,
+            "tokens.output": 240.0,
+            "tokens.reasoning": 180.0,
+        }, delta
+        assert ttft - ttfe >= 1.2, (ttfe, ttft)
+        assert cost == pytest.approx(0.00321)
+
+    @pytest.mark.asyncio
+    async def test_stream_whose_gateway_answers_nothing_counts_gateway_error(self, chat_client: AsyncClient):
+        """The status event went out (first event observed), no answer text ever did."""
+        before = _chat_metrics(_LUNA)
+        with empty_stream_gateway() as base_url, gateway_env(base_url):
+            set_config(self._config(base_url))
+            try:
+                response = await chat_client.post(
+                    "/api/chat/stream", json={"message": _BARRY_COHEN_QUESTION, "sources": {"corpus_ids": []}}
+                )
+            finally:
+                set_config(None)
+        assert response.status_code == 200 and '"type": "error"' in response.text
+        delta = _delta(before, _chat_metrics(_LUNA))
+
+        assert delta["requests.gateway_error"] == 1.0 and delta["duration.gateway_error"] == 1.0
+        assert delta["time_to_first_event.count"] == 1.0
+        assert "time_to_first_text.count" not in delta
+        assert "requests.ok" not in delta
+
+    @pytest.mark.asyncio
+    async def test_client_that_leaves_mid_answer_counts_client_disconnect(self, chat_client: AsyncClient):
+        """Driven in-process through the ASGI protocol: after the first answer delta the
+        client reports `http.disconnect`, as a closed socket does under uvicorn."""
+        from server.main import app
+        from tests.api.live_server import post_stream_then_disconnect
+
+        before = _chat_metrics(_LUNA)
+        with slow_delta_gateway(delay_seconds=0.5) as base_url, gateway_env(base_url):
+            set_config(self._config(base_url))
+            try:
+                chunks = await post_stream_then_disconnect(
+                    app,
+                    "/api/chat/stream",
+                    {"message": _BARRY_COHEN_QUESTION, "sources": {"corpus_ids": []}},
+                    disconnect_when=lambda chunk: b'"type": "text"' in chunk,
+                )
+            finally:
+                set_config(None)
+        body = b"".join(chunks)
+        assert b'"type": "text"' in body and b'"type": "done"' not in body
+        delta = _delta(before, _chat_metrics(_LUNA))
+
+        assert delta["requests.client_disconnect"] == 1.0 and delta["duration.client_disconnect"] == 1.0
+        assert delta["time_to_first_text.count"] == 1.0
+        assert "requests.ok" not in delta and "requests.cancelled" not in delta
+
+    @pytest.mark.asyncio
+    async def test_non_stream_chat_counts_its_outcome_and_catalog_cost_without_sse_timings(
+        self, chat_client: AsyncClient
+    ):
+        from server.observability.costing import build_trace_cost_summary
+
+        before = _chat_metrics(_LUNA)
+        with completion_gateway("Barry Cohen weighed moving plane management to Jet Aviation in 2017.") as base_url, gateway_env(base_url):
+            set_config(self._config(base_url))
+            try:
+                response = await chat_client.post(
+                    "/api/chat", json={"message": _BARRY_COHEN_QUESTION, "sources": {"corpus_ids": []}}
+                )
+            finally:
+                set_config(None)
+        assert response.status_code == 200, response.text
+        delta = _delta(before, _chat_metrics(_LUNA))
+        expected = build_trace_cost_summary(
+            provider="LiteLLM",
+            model=_LUNA,
+            usage={"prompt_tokens": 20, "completion_tokens": 9, "total_tokens": 29},
+            provider_cost_usd=None,
+        )
+
+        assert delta["requests.ok"] == 1.0 and delta["duration.ok"] == 1.0
+        assert delta["tokens.input"] == 20.0 and delta["tokens.output"] == 9.0
+        assert expected.cost_source == "catalog"
+        assert delta["cost.catalog"] == pytest.approx(float(expected.estimated_cost_usd or 0.0))
+        assert not any(key.startswith("time_to_first") for key in delta), delta
+
+    @pytest.mark.asyncio
+    async def test_a_stalled_gateway_is_a_timeout_only_once_generation_began(self, chat_client: AsyncClient):
+        """The stream timeout (`ui.chat_stream_timeout` is the transport's httpx timeout) as the
+        transport really raises it, from a real stalled upstream."""
+        from server.chat.generation import stream_chat_text
+        from server.chat.provider_router import ProviderRoute
+        from server.chat.telemetry import ChatRunTelemetry
+        from tests.api.fake_gateway import stalled_gateway
+
+        with stalled_gateway(stall_seconds=3.0) as base_url:
+            route = ProviderRoute(
+                kind="litellm", provider_name="LiteLLM", base_url=base_url, model=_LUNA, api_key="pytest-fake-gateway-key"
+            )
+            with pytest.raises(RuntimeError) as caught:
+                async for _ in stream_chat_text(
+                    route=route,
+                    system_prompt="Answer from the flight records.",
+                    user_message=_BARRY_COHEN_QUESTION,
+                    images=[],
+                    temperature=0.0,
+                    max_tokens=64,
+                    context_chunks=[],
+                    timeout_s=0.5,
+                ):
+                    pass
+
+        generating = ChatRunTelemetry(model=_LUNA)
+        generating.begin_generation()
+        assert generating.classify(caught.value) == "timeout"
+        assert ChatRunTelemetry(model=_LUNA).classify(caught.value) == "retrieval_error"
+        assert generating.classify(RuntimeError("LiteLLM stream produced no content")) == "gateway_error"
+        assert generating.classify(asyncio.CancelledError()) == "client_disconnect"
 
 
 class TestChatCitationsRealPipeline:

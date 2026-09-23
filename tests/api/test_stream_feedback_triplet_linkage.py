@@ -8,6 +8,7 @@ import pytest
 from server.api.chat import set_config, set_fusion
 from server.models.retrieval import ChunkMatch
 from server.models.tribrid_config_model import FusionConfig
+from tests.api.fake_gateway import completion_gateway, gateway_env
 
 pytestmark = pytest.mark.requires_postgres
 
@@ -109,11 +110,14 @@ async def test_stream_chat_feedback_mining_linkage(client, tmp_path: Path) -> No
             "stream": True,
         }
 
+        # Only an answered run can be rated (a failed or aborted run gets a typed 409), so the
+        # chat is served by a real local OpenAI-compatible gateway rather than no gateway at all.
         sse_body = ""
-        async with client.stream("POST", "/api/chat/stream", json=payload) as resp:
-            assert resp.status_code == 200
-            async for chunk in resp.aiter_text():
-                sse_body += chunk
+        with completion_gateway() as base_url, gateway_env(base_url):
+            async with client.stream("POST", "/api/chat/stream", json=payload) as resp:
+                assert resp.status_code == 200
+                async for chunk in resp.aiter_text():
+                    sse_body += chunk
 
         done: dict[str, object] | None = None
         for block in sse_body.split("\n\n"):

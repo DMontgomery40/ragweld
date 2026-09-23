@@ -200,13 +200,14 @@ async def search(request: SearchRequest, response: Response) -> SearchResponse:
 
         try:
             if getattr(cfg.tracing, "tracing_enabled", True):
-                from server.observability.query_log import append_query_log
+                from server.observability.query_log import append_query_log, query_record_candidates
 
                 await append_query_log(
                     cfg,
                     entry={
-                        "event_id": str(uuid.uuid4()),
+                        "event_id": run_id,
                         "kind": "search",
+                        "outcome": "ok",
                         "corpus_id": request.repo_id,
                         "query": request.query,
                         "reranker_mode": str(cfg.reranking.reranker_mode or ""),
@@ -215,7 +216,9 @@ async def search(request: SearchRequest, response: Response) -> SearchResponse:
                         "rerank_skipped_reason": (fusion.last_debug or {}).get("rerank_skipped_reason"),
                         "rerank_error": (fusion.last_debug or {}).get("rerank_error"),
                         "rerank_candidates_reranked": int((fusion.last_debug or {}).get("rerank_candidates_reranked") or 0),
+                        # The triplet miner's input (server/training/triplet_miner.py reads top_paths).
                         "top_paths": [m.file_path for m in matches[:5]],
+                        "candidates": query_record_candidates(matches),
                     },
                 )
         except Exception:
@@ -231,6 +234,7 @@ async def search(request: SearchRequest, response: Response) -> SearchResponse:
             await trace_store.end(run_id, ended_at_ms=int(time.time() * 1000))
 
         return SearchResponse(
+            event_id=run_id,
             query=request.query,
             matches=matches,
             fusion_method=cfg.fusion.method,

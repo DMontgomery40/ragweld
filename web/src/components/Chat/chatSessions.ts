@@ -38,6 +38,14 @@ export type RagweldMessageCustom = {
   traceId?: string | null;
   correlationId?: string | null;
   webGrounding?: WebGroundingMetadata;
+  /** While the answer is being prepared: retrieval still running ('searching'), or the model
+   * working ('generating', from the stream's `status` event). View state only; never stored. */
+  waitStage?: 'searching' | 'generating';
+  /** Sources retrieval handed the model, from the `status` event. View state only. */
+  waitSourcesCount?: number;
+  /** The model's reasoning for this answer, from the stream's `thinking` events. Shown in the
+   * bubble for this session only: reasoning is not part of the answer and never stored. */
+  thinking?: string;
 };
 
 export type ChatSession = {
@@ -258,9 +266,14 @@ export const INTERRUPTED_STREAM_MESSAGE = 'Generation was interrupted before it 
  *
  * Pure and total: returns the same array reference when nothing was running, so callers can
  * cheaply skip a persist/broadcast when `changed` is false.
+ *
+ * `isLive` names the answers the chat stream controller is still streaming in this page: a view
+ * that mounts mid-answer (the operator came back to the Chat tab, or opened the Dock) must show
+ * that answer streaming, not reconcile it away.
  */
 export function reconcileInterruptedMessages(
   messages: ThreadMessage[],
+  isLive: (assistantId: string) => boolean = () => false,
 ): { messages: ThreadMessage[]; changed: boolean } {
   if (!Array.isArray(messages) || messages.length === 0) return { messages: messages || [], changed: false };
   let changed = false;
@@ -268,6 +281,7 @@ export function reconcileInterruptedMessages(
     if (message.role !== 'assistant') return message;
     const status = (message as ThreadAssistantMessage).status as MessageStatus | undefined;
     if (status?.type !== 'running') return message;
+    if (isLive(message.id)) return message;
     changed = true;
     return {
       ...message,
@@ -296,9 +310,14 @@ export function coerceChatSessionsState(raw: unknown): ChatSessionsState | null 
 function serializeMessage(message: ThreadMessage): StoredThreadMessage {
   const custom = getMessageCustom(message);
   const content = (message.content || []).filter((part) => part.type !== 'image');
+  // Reasoning and the waiting stage are view state of the live session: stored history holds
+  // the answer, never the model's reasoning.
   const nextCustom: RagweldMessageCustom = {
     ...custom,
   };
+  delete nextCustom.thinking;
+  delete nextCustom.waitStage;
+  delete nextCustom.waitSourcesCount;
   const imageCount = getMessageImages(message).length;
   if (imageCount > 0) {
     nextCustom.imagesStripped = true;

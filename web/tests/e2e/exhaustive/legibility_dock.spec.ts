@@ -8,6 +8,7 @@
 // is silently clipped. Measured at deviceScaleFactor 1. Driven against the real
 // app + API, no interception.
 import { expect, test } from '@playwright/test';
+import { dragPanelCorner, panelHeight } from './panel_resize';
 
 test.use({ viewport: { width: 1366, height: 768 }, deviceScaleFactor: 1 });
 
@@ -170,6 +171,22 @@ test('the docked glossary wraps or scrolls -- no line is clipped mid-word', asyn
     clips,
     `docked content clipped horizontally with no scrollable ancestor: ${JSON.stringify(clips)}`,
   ).toEqual([]);
+
+  // Reachable is not enough: an un-keyed panel inside the Dock must not BE the sideways
+  // scroller either. The global resizable-panel rule (overflow: auto) used to make every
+  // docked .settings-section scroll sideways at dock width; only keyed panels resize there.
+  const sideways = await page.evaluate(() =>
+    Array.from(document.querySelectorAll('[data-testid=dock-native] .settings-section:not([data-resizable])')).map((n) => {
+      const el = n as HTMLElement;
+      const style = getComputedStyle(el);
+      return { resize: style.resize, overflowX: style.overflowX, extra: el.scrollWidth - el.clientWidth, text: (el.textContent || '').trim().slice(0, 40) };
+    }),
+  );
+  expect(sideways.length, 'the docked glossary rendered no panels').toBeGreaterThan(0);
+  for (const panel of sideways) {
+    expect(panel.resize, JSON.stringify(panel)).toBe('none');
+    expect(['auto', 'scroll'].includes(panel.overflowX) && panel.extra > 4, `a docked panel scrolls sideways: ${JSON.stringify(panel)}`).toBe(false);
+  }
 });
 
 // Get Started must stay legible when it is the DOCKED pane, not just the main
@@ -358,11 +375,11 @@ test('the docked chat composer keeps Attach and Send on one line', async ({ page
   );
 });
 
-// GUI-050 in the Dock: the docked chat workbench is sized to the dock's own scroll pane, not
-// to the window. The old clamp(560px, 70vh, 760px) height ignored the pane it lived in, so the
-// docked message list was a fixed strip under a pile of wrapped toolbar rows. The docked chat
-// keeps its own Expand choice (a dock-scoped key), so expanding it never changes the main pane.
-test('the docked chat workbench fills the dock pane and expands on its own', async ({ page, baseURL }) => {
+// GUI-050 in the Dock: the docked chat workbench is a resizable panel like the main one. It
+// opens at the same comfortable default (not pinned to the dock pane), the operator drags its
+// corner to resize it, and it remembers its height under a dock-scoped key, so resizing the
+// docked chat never changes the main pane's (and the other way round).
+test('the docked chat workbench resizes on its own and remembers a dock-only height', async ({ page, baseURL }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto(new URL('dashboard?subtab=glossary', baseURL).toString(), { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('.layout', { timeout: 20000 });
@@ -374,54 +391,40 @@ test('the docked chat workbench fills the dock pane and expands on its own', asy
   });
   await page.waitForTimeout(500);
 
-  const measure = () =>
-    dockNative.evaluate((root) => {
-      const chat = root.querySelector('[data-react-chat="true"]') as HTMLElement;
-      const scrollport = chat.closest('.tab-content') as HTMLElement;
-      const sp = scrollport.getBoundingClientRect();
-      const wb = chat.getBoundingClientRect();
-      const trace = root.querySelector('#chat-trace') as HTMLDetailsElement | null;
+  const docked = dockNative.locator('[data-resizable="chat-workbench"]');
+  const geom = () =>
+    docked.evaluate((panel) => {
+      const chat = panel.querySelector('[data-react-chat="true"]') as HTMLElement;
+      const scrollport = panel.closest('.tab-content') as HTMLElement;
       return {
-        scrollportBottom: Math.round(sp.top + scrollport.clientHeight),
-        workbenchBottom: Math.round(wb.bottom),
-        workbenchH: Math.round(wb.height),
-        traceTop: trace && trace.offsetParent ? Math.round(trace.getBoundingClientRect().top) : null,
+        innerH: window.innerHeight,
+        panelH: Math.round(panel.getBoundingClientRect().height),
+        panelClientH: panel.clientHeight,
+        workbenchH: Math.round(chat.getBoundingClientRect().height),
+        dockPaneH: scrollport.clientHeight,
+        resize: getComputedStyle(panel).resize,
       };
     });
 
-  const docked = await measure();
-  expect(docked.workbenchBottom, `docked workbench stops short of the dock pane: ${JSON.stringify(docked)}`).toBeGreaterThanOrEqual(
-    docked.scrollportBottom - 40,
-  );
-  expect(docked.workbenchBottom, `docked workbench runs past the dock pane: ${JSON.stringify(docked)}`).toBeLessThanOrEqual(
-    docked.scrollportBottom + 1,
-  );
+  const start = await geom();
+  const detail = JSON.stringify(start);
+  expect(start.resize, detail).toBe('vertical');
+  const expected = Math.min(900, Math.max(520, Math.round(0.68 * start.innerH)));
+  expect(Math.abs(start.panelH - expected), `docked default height: ${detail}`).toBeLessThanOrEqual(2);
+  expect(Math.abs(start.panelClientH - start.workbenchH), `docked workbench does not fill its panel: ${detail}`).toBeLessThanOrEqual(1);
 
-  const expand = dockNative.getByTestId('chat-expand');
-  await expect(expand).toBeVisible();
-  await expect(expand).toHaveAttribute('aria-pressed', 'false');
-  await expand.click();
-  await expect(expand).toHaveAttribute('aria-pressed', 'true');
-  const expanded = await measure();
-  expect(expanded.workbenchH, JSON.stringify({ docked, expanded })).toBeGreaterThanOrEqual(docked.workbenchH);
-  if (expanded.traceTop !== null) {
-    expect(expanded.traceTop, JSON.stringify(expanded)).toBeGreaterThanOrEqual(expanded.scrollportBottom);
-  }
+  const shorter = (await dragPanelCorner(page, docked, -150)).to;
+  expect(Math.abs(shorter - (start.panelH - 150)), JSON.stringify({ start, shorter })).toBeLessThanOrEqual(4);
+  const after = await geom();
+  expect(Math.abs(after.panelClientH - after.workbenchH), JSON.stringify(after)).toBeLessThanOrEqual(1);
 
-  // The main pane's own choice is untouched by the docked one.
+  // The main pane's workbench is untouched by the docked one, and the docked one keeps its
+  // own height when both are mounted at once.
   await page.goto(new URL('chat', baseURL).toString(), { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('.main-content #chat-input', { timeout: 90_000 });
-  await expect(page.locator('.main-content').getByTestId('chat-expand')).toHaveAttribute('aria-pressed', 'false');
-
-  // Both surfaces mounted at once: each Expand control names its own workbench.
   await expect(page.locator('[data-react-chat="true"]')).toHaveCount(2);
-  const wiring = await page.evaluate(() =>
-    Array.from(document.querySelectorAll('[data-testid="chat-expand"]')).map((button) => {
-      const target = document.getElementById(button.getAttribute('aria-controls') || '');
-      return { id: button.getAttribute('aria-controls'), ownsButton: Boolean(target && target.contains(button)) };
-    }),
-  );
-  expect(wiring, JSON.stringify(wiring)).toHaveLength(2);
-  expect(new Set(wiring.map((w) => w.id)).size, JSON.stringify(wiring)).toBe(2);
-  for (const w of wiring) expect(w.ownsButton, JSON.stringify(wiring)).toBe(true);
+  await page.waitForTimeout(500);
+  const main = page.locator('.main-content [data-resizable="chat-workbench"]');
+  expect(Math.abs((await panelHeight(main)) - expected), 'the docked resize leaked into the main pane').toBeLessThanOrEqual(2);
+  expect(Math.abs((await panelHeight(docked)) - shorter), 'the docked height was not remembered').toBeLessThanOrEqual(2);
 });
