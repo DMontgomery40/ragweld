@@ -11,6 +11,7 @@ import { CorpusParamGuard, DocumentTitle } from './components/Navigation/RouteGu
 
 // Right panel (Dock / Settings)
 import { DockPanel } from './components/Dock/DockPanel';
+import { EmbeddedDockNavigation } from './components/Dock/EmbeddedDockNavigation';
 
 // UI Components
 import { EmbeddingMismatchWarning } from './components/ui/EmbeddingMismatchWarning';
@@ -38,7 +39,8 @@ function App() {
   // that feeds it so the top bar reflects live health without the pill being open.
   const checkHealth = useHealthStore((s) => s.checkHealth);
   const navigate = useNavigate();
-  const isEmbed = new URLSearchParams(window.location.search).get('embed') === '1';
+  // Embedding belongs to this document, even when an in-frame link omits shell flags.
+  const [isEmbed] = useState(() => new URLSearchParams(window.location.search).get('embed') === '1');
 
   // Initialize hooks
   const { isInitialized, initError } = useAppInit();
@@ -156,6 +158,7 @@ function App() {
   if (isEmbed) {
     return (
       <div className="app-embed-root">
+        <EmbeddedDockNavigation />
         <DocumentTitle />
         <div className="app-embed-scroll">
           <ErrorBoundary

@@ -911,19 +911,6 @@ const ThreadWelcome = memo(function ThreadWelcome({ onPromptSelect }: { onPrompt
         marginBottom: '10px',
       }}
     >
-      <div style={{ maxWidth: '620px' }}>
-        <div style={{ fontSize: '11px', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--accent-text)' }}>
-          assistant-ui rebuild
-        </div>
-        <h2 style={{ margin: '8px 0 10px 0', fontSize: '26px', lineHeight: 1.1 }}>
-          Chat stays grounded in recall, sources, and session continuity.
-        </h2>
-        <p style={{ margin: 0, fontSize: '14px', color: 'var(--fg-muted)', lineHeight: 1.6 }}>
-          This surface now runs on assistant-ui while keeping ragweld&apos;s corpus controls, recall gate,
-          citations, and trace-linked metadata.
-        </p>
-      </div>
-
       <div style={{ display: 'grid', gap: '10px', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
         {WELCOME_PROMPTS.map((prompt, index) => (
           <button
@@ -2064,9 +2051,6 @@ export function ChatInterface() {
           <h3 style={{ margin: '0 0 4px 0', fontSize: '14px', fontWeight: 700 }}>
             Chat Workbench
           </h3>
-          <p style={{ margin: 0, fontSize: '11px', color: 'var(--fg-muted)' }}>
-            assistant-ui runtime with ragweld recall and source grounding
-          </p>
         </div>
 
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center', flex: '1 1 auto', minWidth: 0 }}>
@@ -2424,7 +2408,7 @@ export function ChatInterface() {
             </div>
 
             <div style={{ fontSize: '11px', color: 'var(--fg-muted)' }}>
-              Press Ctrl+Enter to send. Final message metadata keeps citations, recall decisions, run IDs, and trace headers.
+              Press Ctrl+Enter to send.
             </div>
           </div>
         </div>

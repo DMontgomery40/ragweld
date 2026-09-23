@@ -14,40 +14,101 @@ test.use({ viewport: { width: 1366, height: 768 }, deviceScaleFactor: 1 });
 for (const route of [
   { label: 'Dashboard', path: 'dashboard', tabs: [{ id: 'glossary', title: 'Glossary' }, { id: 'system', title: 'System Status' }] },
   { label: 'RAG', path: 'rag', tabs: [{ id: 'retrieval', title: 'Retrieval' }, { id: 'reranker', title: 'Reranker' }] },
+  { label: 'Eval Analysis', path: 'eval', iframe: true, tabs: [{ id: 'analysis', title: 'Analysis' }, { id: 'trace', title: 'Trace Viewer' }] },
+  { label: 'Infrastructure', path: 'infrastructure', iframe: true, tabs: [{ id: 'services', title: 'Services' }, { id: 'paths', title: 'Paths & Stores' }] },
 ]) {
   test(`dock chooser and subtab navigation stay in sync for ${route.label}`, async ({ page, baseURL }) => {
     await page.goto(new URL('start', baseURL).toString(), { waitUntil: 'domcontentloaded' });
     await expect(page.getByTestId('dock-choose')).toBeVisible();
     const mainUrl = page.url();
-    const dock = page.getByTestId('dock-native');
+    const dock = route.iframe ? page.frameLocator('[data-testid="dock-iframe"]') : page.getByTestId('dock-native');
+
+    const content = (root: typeof dock | typeof page, id: string) => route.path === 'eval'
+      ? (id === 'analysis' ? root.getByRole('heading', { name: '🔬 Eval Analysis' }) : root.getByText('Latest Trace', { exact: true }))
+      : root.locator(`#tab-${route.path}-${id}`);
 
     for (const tab of [...route.tabs, route.tabs[0]]) {
       await page.getByTestId('dock-choose').click();
       const picker = page.getByRole('dialog', { name: 'Choose something to dock' });
-      await picker.getByRole('combobox').fill(`${route.label} ${tab.title}`);
+      await picker.getByRole('combobox').fill(`/${route.path} ${tab.title}`);
       await picker.getByRole('option').filter({ hasText: tab.title }).first().click();
       await expect(page.getByTestId('dock-title')).toContainText(`${route.label} — ${tab.title}`);
-      await expect(dock.locator(`.subtab-btn[data-subtab="${tab.id}"]`)).toHaveClass(/active/);
-      await expect(dock.locator(`#tab-${route.path}-${tab.id}`)).toBeVisible();
+      await expect(content(dock, tab.id)).toBeVisible();
       expect(page.url(), 'choosing a dock target must leave the main pane in place').toBe(mainUrl);
     }
 
     // A subtab click is also navigation: title, persisted target and visible content must agree.
     const next = route.tabs[1];
-    await dock.locator(`.subtab-btn[data-subtab="${next.id}"]`).click();
+    const frameStartedAt = route.iframe ? await dock.locator('body').evaluate(() => performance.timeOrigin) : null;
+    const nextButton = route.path === 'eval'
+      ? dock.getByRole('button', { name: /Trace Viewer/ })
+      : dock.locator(`.subtab-btn[data-subtab="${next.id}"]`);
+    await nextButton.click();
     await expect(page.getByTestId('dock-title')).toContainText(`${route.label} — ${next.title}`);
-    await expect(dock.locator(`.subtab-btn[data-subtab="${next.id}"]`)).toHaveClass(/active/);
-    await expect(dock.locator(`#tab-${route.path}-${next.id}`)).toBeVisible();
+    await expect(content(dock, next.id)).toBeVisible();
+    if (route.iframe) {
+      expect(await dock.locator('body').evaluate(() => performance.timeOrigin), 'reporting navigation must not reload the frame').toBe(frameStartedAt);
+    }
     expect(page.url()).toBe(mainUrl);
     await page.reload({ waitUntil: 'domcontentloaded' });
     await expect(page.getByTestId('dock-title')).toContainText(`${route.label} — ${next.title}`);
-    await expect(dock.locator(`.subtab-btn[data-subtab="${next.id}"]`)).toHaveClass(/active/);
-    await expect(dock.locator(`#tab-${route.path}-${next.id}`)).toBeVisible();
+    await expect(content(dock, next.id)).toBeVisible();
     await page.getByTestId('dock-swap').click();
     await expect(page).toHaveURL(new RegExp(`subtab=${next.id}`));
+    expect(new URL(page.url()).searchParams.has('embed')).toBe(false);
+    expect(new URL(page.url()).searchParams.has('dock')).toBe(false);
+    await expect(page.getByTestId('dock-title')).toContainText('Get Started');
+    await expect(content(page, next.id)).toBeVisible();
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(content(page, next.id)).toBeVisible();
     await expect(page.getByTestId('dock-title')).toContainText('Get Started');
   });
 }
+
+test('an embedded prompt link keeps its workspace and query context through Swap', async ({ page, baseURL }) => {
+  await page.goto(new URL('start', baseURL).toString());
+  await page.getByTestId('dock-choose').click();
+  const picker = page.getByRole('dialog', { name: 'Choose something to dock' });
+  await picker.getByRole('combobox').fill('/eval System Prompts');
+  await picker.getByRole('option').click();
+  const frame = page.frameLocator('[data-testid="dock-iframe"]');
+  await frame.locator('summary').filter({ hasText: 'Direct (no context)' }).click();
+  const mainUrl = page.url();
+  await frame.getByRole('button', { name: 'Open Chat Settings', exact: true }).click();
+  await expect(frame.locator('#chat-prompt-system_prompt_direct')).toBeVisible();
+  await expect(page.getByTestId('dock-title')).toContainText('Chat — Settings');
+  await expect(frame.locator('.topbar')).toHaveCount(0);
+  expect(page.url()).toBe(mainUrl);
+  await page.reload();
+  await expect(frame.locator('#chat-prompt-system_prompt_direct')).toBeVisible();
+  await page.getByTestId('dock-swap').click();
+  await expect(page).toHaveURL(/\/chat\?.*prompt=system_prompt_direct/);
+  expect(new URL(page.url()).searchParams.get('subtab')).toBe('settings');
+  expect(new URL(page.url()).searchParams.has('embed')).toBe(false);
+  expect(new URL(page.url()).searchParams.has('dock')).toBe(false);
+  await expect(page.locator('#chat-prompt-system_prompt_direct')).toBeVisible();
+});
+
+test('Undo restores an iframe workspace after its reported navigation and a chooser replacement', async ({ page, baseURL }) => {
+  await page.goto(new URL('start', baseURL).toString());
+  await page.getByTestId('dock-choose').click();
+  const picker = page.getByRole('dialog', { name: 'Choose something to dock' });
+  await picker.getByRole('combobox').fill('/eval Analysis');
+  await picker.getByRole('option').click();
+  const frame = page.frameLocator('[data-testid="dock-iframe"]');
+  await frame.getByRole('button', { name: /Trace Viewer/ }).click();
+  await expect(page.getByTestId('dock-title')).toContainText('Eval Analysis — Trace Viewer');
+  await page.getByTestId('dock-choose').click();
+  await picker.getByRole('combobox').fill('/infrastructure Services');
+  await picker.getByRole('option').click();
+  await expect(frame.locator('#tab-infrastructure-services')).toBeVisible();
+  await page.getByTestId('dock-undo-toast').getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect(page.getByTestId('dock-title')).toContainText('Eval Analysis — Trace Viewer');
+  await expect(frame.getByText('Latest Trace', { exact: true })).toBeVisible();
+  await page.getByTestId('dock-swap').click();
+  await expect(page).toHaveURL(/\/eval\?.*subtab=trace/);
+  await expect(page.getByText('Latest Trace', { exact: true })).toBeVisible();
+});
 
 test('the docked glossary wraps or scrolls -- no line is clipped mid-word', async ({ page, baseURL }) => {
   await page.goto(new URL('dashboard?subtab=glossary', baseURL).toString(), { waitUntil: 'domcontentloaded' });

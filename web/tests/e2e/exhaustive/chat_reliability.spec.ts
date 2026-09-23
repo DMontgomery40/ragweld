@@ -278,7 +278,7 @@ test.describe.serial('chat reliability', () => {
 
     await expect(page.getByText('Streaming')).toBeHidden({ timeout: 20_000 });
     await expect(page.locator('#chat-input')).toBeEnabled({ timeout: 20_000 });
-    await expect(page.getByText('Chat stays grounded in recall, sources, and session continuity.')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId('chat-welcome-prompt-0')).toBeVisible({ timeout: 20_000 });
   });
 
   test('welcome prompt sends through a pinned runnable model', async ({ page, request }) => {

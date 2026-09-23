@@ -1,7 +1,8 @@
-import { createElement, isValidElement } from 'react';
+import { createElement, isValidElement, useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { Route, Routes } from 'react-router-dom';
 import { getRouteByPath } from '@/config/routes';
 import type { DockTarget } from '@/stores/useDockStore';
+import { useDockStore } from '@/stores/useDockStore';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { SubtabErrorFallback } from '@/components/ui/SubtabErrorFallback';
 
@@ -9,20 +10,68 @@ type DockViewProps = {
   target: DockTarget;
 };
 
-export function DockView({ target }: DockViewProps) {
-  if (target.renderMode === 'iframe') {
-    const src =
-      '/web' +
-      target.path +
-      target.search +
-      (target.search ? '&' : '?') +
-      'embed=1&dock=1';
+function IframeDockView({ target }: DockViewProps) {
+  const frameRef = useRef<HTMLIFrameElement>(null);
+  const reportedTarget = useRef<DockTarget | null>(null);
+  const loading = useRef(true);
 
-    return (
+  const syncLocation = useCallback(() => {
+    const frame = frameRef.current;
+    if (!frame || loading.current) return;
+    let url: URL;
+    try {
+      url = new URL(frame.contentWindow!.location.href);
+    } catch {
+      // A login redirect or an external document is not a dockable app route.
+      return;
+    }
+    if (url.origin !== window.location.origin || !url.pathname.startsWith('/web/')) return;
+    const path = url.pathname.slice('/web'.length);
+    const route = getRouteByPath(path);
+    if (!route) return;
+    url.searchParams.delete('embed');
+    url.searchParams.delete('dock');
+    const { docked, setDocked } = useDockStore.getState();
+    if (!docked || docked.renderMode !== 'iframe') return;
+    const subtabTitle = route.subtabs?.find((tab) => tab.id === url.searchParams.get('subtab'))?.title;
+    if (docked.path === path && docked.search === url.search && docked.subtabTitle === subtabTitle) return;
+    const next: DockTarget = {
+      path, search: url.search, label: route.label, icon: route.icon,
+      subtabTitle, renderMode: 'iframe',
+    };
+    reportedTarget.current = next;
+    setDocked(next, { rememberLast: false });
+  }, []);
+
+  useLayoutEffect(() => {
+    // Updating the parent's saved location must not reload the live workspace.
+    // Only an external selection (chooser, Swap, undo) navigates the frame.
+    if (target === reportedTarget.current || !frameRef.current) return;
+    const url = new URL('/web' + target.path + target.search, window.location.origin);
+    url.searchParams.set('embed', '1');
+    url.searchParams.set('dock', '1');
+    reportedTarget.current = null;
+    loading.current = true;
+    frameRef.current.src = url.href;
+  }, [target]);
+
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin || event.source !== frameRef.current?.contentWindow) return;
+      if (event.data !== 'ragweld:dock-location') return;
+      // Read the actual same-origin URL, never a URL supplied by message data.
+      syncLocation();
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [syncLocation]);
+
+  return (
       <iframe
+        ref={frameRef}
         data-testid="dock-iframe"
         title={`${target.label}${target.subtabTitle ? ` — ${target.subtabTitle}` : ''}`}
-        src={src}
+        onLoad={() => { loading.current = false; syncLocation(); }}
         loading="lazy"
         style={{
           width: '100%',
@@ -31,7 +80,12 @@ export function DockView({ target }: DockViewProps) {
           background: 'var(--bg)',
         }}
       />
-    );
+  );
+}
+
+export function DockView({ target }: DockViewProps) {
+  if (target.renderMode === 'iframe') {
+    return <IframeDockView target={target} />;
   }
 
   const route = getRouteByPath(target.path);
@@ -98,4 +152,3 @@ export function DockView({ target }: DockViewProps) {
     </div>
   );
 }
-
