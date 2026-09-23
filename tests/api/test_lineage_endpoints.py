@@ -343,7 +343,6 @@ async def test_lineage_dataset_and_synthetic_publish_refresh_current_bundle(clie
         provider="grounded_qa",
         recipe="eval_dataset",
         generator_model="ragweld-local",
-        judge_model="ragweld-local",
     )
     run = SyntheticRun(
         run_id=run_id,

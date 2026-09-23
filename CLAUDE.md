@@ -180,38 +180,37 @@ Mac checkout:
 ```bash
 uv run scripts/generate_types.py     # Regenerate after registered public boundary/config changes
 uv run scripts/validate_types.py     # Verify type sync
-uv run scripts/check_banned.py       # Check banned patterns
+python3 scripts/jev_lint.py          # Semantic lint; docs/jev-lint.md
+uv run scripts/check_contract_integrity.py # Deterministic catalog/schema checks
 ```
 
 ---
 
-## RALPH LOOP (HOW TO RUN IT CORRECTLY)
+## BOUNDED CHECKS AND SHARED-CHECKOUT COORDINATION
 
-**Do NOT rely on "completion promises" alone.** This repo prevents fake completion with a **verification-based Stop hook** that blocks stopping until checks pass.
-
-### What Actually Enforces Completion
-- **Stop hook**: `.claude/hooks/verify-tribrid.sh` — blocks stopping if validators/tests fail
-- **Ralph loop**: the `ralph-loop` plugin keeps re-feeding the same prompt each iteration
-
-### Preconditions
-- Start Claude Code from repo root: `cd /Users/davidmontgomery/ragweld`
-- Restart Claude Code after changing `.claude/settings.json` (hooks snapshot at startup)
-- Project config must include `enabledPlugins.ralph-loop@claude-plugins-official = true` and the Stop hook
-
-### Start a Ralph Loop
-```bash
-/ralph-loop "Continue implementing TriBridRAG.
-At the start of EACH iteration:
-1) Read TODO.md and pick the first unchecked [ ] item.
-2) Implement it end-to-end.
-3) Run verification: check_banned, validate_types, pytest
-4) Mark [x] only when truly done.
-IMPORTANT: If Stop hook blocks, fix that exact failure." --max-iterations 200 --completion-promise "COMPLETE"
-```
-
-### Monitor / Cancel
-- Monitor: `grep '^iteration:' .claude/ralph-loop.local.md`
-- Cancel: `/cancel-ralph`
+- Keep the one-worktree rule. Assign disjoint files and serialize overlapping
+  edits, dependency changes, and generated-contract updates. The Pydantic schema
+  and `web/src/types/generated.ts` have one coordinated owner during generation.
+- Run parsers, type checkers, and focused tests directly. Jev replaces ESLint/Ruff
+  and keyword-based semantic lint. Use `python3 scripts/jev_lint.py <owned paths>`
+  on LXC100; the tracked runner uses only the standard library. Rules, credential
+  setup, request limits and status codes are in `docs/jev-lint.md`. Reuse existing
+  credential configuration and never source an env file as code.
+- Every delegated brief needs owned files, a deliverable, a finite tool-call/time
+  budget, a stopping condition, and an integration owner. Do not launch an agent
+  merely to lint or repeatedly assess copy that Jev can check.
+- Contributors gate owned changes and hand unrelated or concurrently incomplete
+  failures to the lead with evidence. A project-wide type check is not file-scoped;
+  do not repair another contributor's unfinished schema to make your gate green.
+- After edits settle, the integration owner runs the required combined validators,
+  tests, lint, and build on LXC100. Repeat only for relevant repairs or invalidated
+  evidence. Required live acceptance remains separate.
+- Instruction/prose-only changes use diff, local link/import, and existing docs
+  checks. Do not launch application suites for a wording-only instruction edit.
+- Ralph is not a default lint/review strategy. If explicitly used, scope it to a
+  finite deliverable and budget. A repeated unchanged failure requires ownership
+  or environment diagnosis, not another iteration. Inspect actual hook settings;
+  a verifier script on disk does not establish that the hook is enabled.
 
 ---
 
@@ -252,7 +251,7 @@ This ensures institutional knowledge accumulates across sessions.
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **ragweld** (18757 symbols, 39820 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **ragweld** (22719 symbols, 48589 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 

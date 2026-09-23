@@ -10,171 +10,440 @@
   "liveNow": false,
   "panels": [
     {
-      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": { "fixedColor": "#22c55e", "mode": "fixed" },
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "rgba(15,23,42,0.2)", "value": null }, { "color": "#22c55e", "value": 0 }] },
-          "unit": "none"
+          "color": {
+            "fixedColor": "#22c55e",
+            "mode": "fixed"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "rgba(15,23,42,0.2)",
+                "value": null
+              },
+              {
+                "color": "#22c55e",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "none",
+          "noValue": "No data: API not scraped"
         }
       },
-      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 0
+      },
       "id": 1,
       "options": {
         "colorMode": "background_gradient",
         "graphMode": "area",
         "justifyMode": "center",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "value_and_name"
       },
-      "targets": [{ "expr": "last_over_time(tribrid_reranker_train_active_runs[24h])", "legendFormat": "__auto" }],
+      "targets": [
+        {
+          "expr": "last_over_time(tribrid_reranker_train_active_runs[24h])",
+          "legendFormat": "__auto"
+        }
+      ],
       "title": "Active Training Runs",
       "transparent": true,
       "type": "stat"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": { "fixedColor": "#38bdf8", "mode": "fixed" },
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "rgba(15,23,42,0.2)", "value": null }, { "color": "#38bdf8", "value": 0 }] },
-          "unit": "none"
+          "color": {
+            "fixedColor": "#38bdf8",
+            "mode": "fixed"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "rgba(15,23,42,0.2)",
+                "value": null
+              },
+              {
+                "color": "#38bdf8",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "none",
+          "noValue": "No data: API not scraped"
         }
       },
-      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 0
+      },
       "id": 2,
       "options": {
         "colorMode": "background_gradient",
         "graphMode": "area",
         "justifyMode": "center",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "value_and_name"
       },
-      "targets": [{ "expr": "increase(tribrid_reranker_train_runs_total{outcome=\"started\"}[24h])", "legendFormat": "__auto" }],
+      "targets": [
+        {
+          "expr": "increase(tribrid_reranker_train_runs_total{outcome=\"started\"}[24h])",
+          "legendFormat": "__auto"
+        }
+      ],
       "title": "Runs Started (24h)",
       "transparent": true,
       "type": "stat"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": { "fixedColor": "#ef4444", "mode": "fixed" },
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "rgba(15,23,42,0.2)", "value": null }, { "color": "#ef4444", "value": 0 }] },
-          "unit": "none"
+          "color": {
+            "fixedColor": "#ef4444",
+            "mode": "fixed"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "rgba(15,23,42,0.2)",
+                "value": null
+              },
+              {
+                "color": "#ef4444",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "none",
+          "noValue": "No data: API not scraped"
         }
       },
-      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 0
+      },
       "id": 3,
       "options": {
         "colorMode": "background_gradient",
         "graphMode": "area",
         "justifyMode": "center",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "value_and_name"
       },
-      "targets": [{ "expr": "increase(tribrid_reranker_train_runs_total{outcome=\"failed\"}[24h])", "legendFormat": "__auto" }],
+      "targets": [
+        {
+          "expr": "increase(tribrid_reranker_train_runs_total{outcome=\"failed\"}[24h])",
+          "legendFormat": "__auto"
+        }
+      ],
       "title": "Runs Failed (24h)",
       "transparent": true,
       "type": "stat"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": { "fixedColor": "#f59e0b", "mode": "fixed" },
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "rgba(15,23,42,0.2)", "value": null }, { "color": "#f59e0b", "value": 0 }] },
-          "unit": "percent"
+          "color": {
+            "fixedColor": "#f59e0b",
+            "mode": "fixed"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "rgba(15,23,42,0.2)",
+                "value": null
+              },
+              {
+                "color": "#f59e0b",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "percent",
+          "noValue": "No data: API not scraped"
         }
       },
-      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 0
+      },
       "id": 4,
       "options": {
         "colorMode": "background_gradient",
         "graphMode": "area",
         "justifyMode": "center",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "value_and_name"
       },
-      "targets": [{ "expr": "last_over_time(tribrid_reranker_train_progress_percent[24h])", "legendFormat": "__auto" }],
+      "targets": [
+        {
+          "expr": "last_over_time(tribrid_reranker_train_progress_percent[24h])",
+          "legendFormat": "__auto"
+        }
+      ],
       "title": "Last Progress",
       "transparent": true,
       "type": "stat"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": { "fixedColor": "#fb923c", "mode": "fixed" },
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "rgba(15,23,42,0.2)", "value": null }, { "color": "#fb923c", "value": 0 }] },
-          "unit": "none"
+          "color": {
+            "fixedColor": "#fb923c",
+            "mode": "fixed"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "rgba(15,23,42,0.2)",
+                "value": null
+              },
+              {
+                "color": "#fb923c",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "none",
+          "noValue": "No data: API not scraped"
         }
       },
-      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 0
+      },
       "id": 5,
       "options": {
         "colorMode": "background_gradient",
         "graphMode": "area",
         "justifyMode": "center",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "value_and_name"
       },
-      "targets": [{ "expr": "last_over_time(tribrid_reranker_train_last_metric{metric=\"train_loss\",phase=\"stream\"}[24h])", "legendFormat": "__auto" }],
+      "targets": [
+        {
+          "expr": "last_over_time(tribrid_reranker_train_last_metric{metric=\"train_loss\",phase=\"stream\"}[24h])",
+          "legendFormat": "__auto"
+        }
+      ],
       "title": "Last Loss",
       "transparent": true,
       "type": "stat"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": { "fixedColor": "#a78bfa", "mode": "fixed" },
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "rgba(15,23,42,0.2)", "value": null }, { "color": "#a78bfa", "value": 0 }] },
-          "unit": "none"
+          "color": {
+            "fixedColor": "#a78bfa",
+            "mode": "fixed"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "rgba(15,23,42,0.2)",
+                "value": null
+              },
+              {
+                "color": "#a78bfa",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "none",
+          "noValue": "No data: API not scraped"
         }
       },
-      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 0
+      },
       "id": 6,
       "options": {
         "colorMode": "background_gradient",
         "graphMode": "area",
         "justifyMode": "center",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "value_and_name"
       },
-      "targets": [{ "expr": "last_over_time(tribrid_reranker_train_last_metric{metric=\"grad_norm\",phase=\"stream\"}[24h])", "legendFormat": "__auto" }],
+      "targets": [
+        {
+          "expr": "last_over_time(tribrid_reranker_train_last_metric{metric=\"grad_norm\",phase=\"stream\"}[24h])",
+          "legendFormat": "__auto"
+        }
+      ],
       "title": "Last Grad Norm",
       "transparent": true,
       "type": "stat"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "mimir" },
-      "fieldConfig": { "defaults": { "unit": "none", "custom": { "drawStyle": "line", "fillOpacity": 16, "lineWidth": 2, "showPoints": "never", "spanNulls": false } } },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 16,
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "noValue": "No training run in range"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 4
+      },
       "id": 7,
       "options": {
-        "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true },
-        "tooltip": { "mode": "multi", "sort": "desc" }
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
-      "targets": [{ "expr": "rate(tribrid_reranker_train_samples_total[5m]) * 60", "legendFormat": "samples/min" }],
+      "targets": [
+        {
+          "expr": "rate(tribrid_reranker_train_samples_total[5m]) * 60",
+          "legendFormat": "samples/min"
+        }
+      ],
       "title": "Training Throughput",
       "transparent": true,
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "mimir" },
-      "fieldConfig": { "defaults": { "unit": "ms", "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2, "showPoints": "never", "spanNulls": false } } },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "noValue": "No training run in range"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 4
+      },
       "id": 8,
       "options": {
-        "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true },
-        "tooltip": { "mode": "multi", "sort": "desc" }
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
       "targets": [
         {
@@ -187,13 +456,40 @@
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "mimir" },
-      "fieldConfig": { "defaults": { "unit": "ms", "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2, "showPoints": "never", "spanNulls": false } } },
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 12 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "noValue": "No training run in range"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 12
+      },
       "id": 9,
       "options": {
-        "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true },
-        "tooltip": { "mode": "multi", "sort": "desc" }
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
       "targets": [
         {
@@ -206,45 +502,132 @@
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "mimir" },
-      "fieldConfig": { "defaults": { "unit": "none", "custom": { "drawStyle": "bars", "fillOpacity": 20, "lineWidth": 1, "showPoints": "never", "spanNulls": false } } },
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 12 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 20,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "noValue": "No data: API not scraped"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 12
+      },
       "id": 10,
       "options": {
-        "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true },
-        "tooltip": { "mode": "multi", "sort": "desc" }
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
       "targets": [
-        { "expr": "sum by (kind) (increase(tribrid_reranker_triplets_total[24h]))", "legendFormat": "{{kind}}" }
+        {
+          "expr": "sum by (kind) (increase(tribrid_reranker_triplets_total[24h]))",
+          "legendFormat": "{{kind}}"
+        }
       ],
       "title": "Triplets (24h)",
       "transparent": true,
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "mimir" },
-      "fieldConfig": { "defaults": { "unit": "none", "custom": { "drawStyle": "bars", "fillOpacity": 20, "lineWidth": 1, "showPoints": "never", "spanNulls": false } } },
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 12 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 20,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "noValue": "No data: API not scraped"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 12
+      },
       "id": 11,
       "options": {
-        "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true },
-        "tooltip": { "mode": "multi", "sort": "desc" }
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
       "targets": [
-        { "expr": "sum by (reason) (increase(tribrid_reranker_triplet_skips_total[24h]))", "legendFormat": "{{reason}}" }
+        {
+          "expr": "sum by (reason) (increase(tribrid_reranker_triplet_skips_total[24h]))",
+          "legendFormat": "{{reason}}"
+        }
       ],
       "title": "Triplet Skips (24h)",
       "transparent": true,
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "mimir" },
-      "fieldConfig": { "defaults": { "unit": "ms", "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2, "showPoints": "never", "spanNulls": false } } },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "noValue": "No training run in range"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 20
+      },
       "id": 12,
       "options": {
-        "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true },
-        "tooltip": { "mode": "multi", "sort": "desc" }
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
       "targets": [
         {
@@ -257,13 +640,40 @@
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "mimir" },
-      "fieldConfig": { "defaults": { "unit": "none", "custom": { "drawStyle": "line", "fillOpacity": 12, "lineWidth": 2, "showPoints": "never", "spanNulls": false } } },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 12,
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "noValue": "No data: API not scraped"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 20
+      },
       "id": 13,
       "options": {
-        "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true },
-        "tooltip": { "mode": "multi", "sort": "desc" }
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
       "targets": [
         {
@@ -276,13 +686,40 @@
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "mimir" },
-      "fieldConfig": { "defaults": { "unit": "none", "custom": { "drawStyle": "bars", "fillOpacity": 18, "lineWidth": 1, "showPoints": "never", "spanNulls": false } } },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 18,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "noValue": "No reranker diagnostics in range"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 28
+      },
       "id": 14,
       "options": {
-        "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true },
-        "tooltip": { "mode": "multi", "sort": "desc" }
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
       "targets": [
         {
@@ -295,13 +732,40 @@
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "mimir" },
-      "fieldConfig": { "defaults": { "unit": "ms", "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2, "showPoints": "never", "spanNulls": false } } },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 28 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "noValue": "No reranked searches in range"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 28
+      },
       "id": 15,
       "options": {
-        "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true },
-        "tooltip": { "mode": "multi", "sort": "desc" }
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
       "targets": [
         {
@@ -314,13 +778,40 @@
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "mimir" },
-      "fieldConfig": { "defaults": { "unit": "none", "custom": { "drawStyle": "bars", "fillOpacity": 18, "lineWidth": 1, "showPoints": "never", "spanNulls": false } } },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 36 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 18,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "noValue": "No data: API not scraped"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 36
+      },
       "id": 16,
       "options": {
-        "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true },
-        "tooltip": { "mode": "multi", "sort": "desc" }
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
       "targets": [
         {
@@ -337,13 +828,40 @@
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "mimir" },
-      "fieldConfig": { "defaults": { "unit": "none", "custom": { "drawStyle": "bars", "fillOpacity": 18, "lineWidth": 1, "showPoints": "never", "spanNulls": false } } },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 36 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 18,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "noValue": "No data: API not scraped"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 36
+      },
       "id": 17,
       "options": {
-        "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true },
-        "tooltip": { "mode": "multi", "sort": "desc" }
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
       "targets": [
         {
@@ -363,9 +881,18 @@
   "refresh": "10s",
   "schemaVersion": 38,
   "style": "dark",
-  "tags": ["reranker", "training", "observability"],
-  "templating": { "list": [] },
-  "time": { "from": "now-6h", "to": "now" },
+  "tags": [
+    "reranker",
+    "training",
+    "observability"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
   "timepicker": {},
   "timezone": "",
   "title": "Reranker Training",

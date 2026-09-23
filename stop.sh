@@ -20,6 +20,8 @@ fi
 stop_owned_process "frontend" "$ROOT_DIR/web"
 stop_owned_process "backend" "$ROOT_DIR"
 stop_owned_process "local-model" "$ROOT_DIR"
+# A stopped lane has no scrape target (else RagweldLocalModelDown pages for a stop).
+withdraw_local_model_scrape_target
 
 if [[ "$STOP_DOCKER" == "1" ]]; then
   if command -v docker >/dev/null 2>&1 && local_docker_ready; then

@@ -20,6 +20,15 @@ compactor:
     block_retention: 24h
 
 metrics_generator:
+  processor:
+    # Tempo's default buckets stop at 16.384 s, which hides every chat stall past
+    # 16 s (60-120 s tails were seen live on 2026-09-23). These are the chat latency
+    # contract's buckets (0.25-600 s, docs/exec-plans/active/observability-chat-
+    # telemetry-2026-09-23.md) plus the sub-250 ms bounds fast API routes need.
+    span_metrics:
+      histogram_buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 4, 8, 15, 30, 45, 60, 90, 120, 180, 300, 600]
+    service_graphs:
+      histogram_buckets: [0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 4, 8, 15, 30, 60, 120, 300, 600]
   storage:
     path: /var/tempo/generator/wal
     remote_write:

@@ -3,6 +3,103 @@
   "generated_from": "data/glossary.json",
   "terms": [
     {
+      "term": "System One Provider",
+      "key": "SYSTEM_ONE_PROVIDER",
+      "definition": "Which System One backend answers Ragweld's typed judgments (the synthetic eval judge's Noul questions). `typesafe` calls TypeSafe's hosted Jev with TYPESAFE_API_KEY; `laya` calls a self-hosted laya-serve with no credential, so judgments keep working offline. Both speak the same POST /v1/systemone contract and return the probability of yes for each question. There is no automatic switch between them: a backend that cannot answer fails the call.",
+      "category": "infrastructure",
+      "related": ["SYSTEM_ONE_TYPESAFE_BASE_URL", "SYSTEM_ONE_LAYA_BASE_URL", "SYSTEM_ONE_MODEL"],
+      "links": [
+        {
+          "text": "TypeSafe API reference",
+          "href": "https://docs.typesafe.ai/api"
+        },
+        {
+          "text": "Laya model card",
+          "href": "https://huggingface.co/convaiinnovations/laya"
+        }
+      ]
+    },
+    {
+      "term": "TypeSafe Base URL",
+      "key": "SYSTEM_ONE_TYPESAFE_BASE_URL",
+      "definition": "API root of the TypeSafe endpoint used when the System One provider is `typesafe`. Requests go to `<base>/v1/systemone` with `Authorization: Bearer $TYPESAFE_API_KEY`.",
+      "category": "infrastructure",
+      "related": ["SYSTEM_ONE_PROVIDER"],
+      "links": []
+    },
+    {
+      "term": "Laya Base URL",
+      "key": "SYSTEM_ONE_LAYA_BASE_URL",
+      "definition": "API root of the self-hosted laya-serve used when the System One provider is `laya`. It serves the same `/v1/systemone` contract as TypeSafe on this host, without a credential. Laya's English checkpoint reads at most 512 tokens per question, so long states are truncated.",
+      "category": "infrastructure",
+      "related": ["SYSTEM_ONE_PROVIDER"],
+      "links": []
+    },
+    {
+      "term": "System One Model",
+      "key": "SYSTEM_ONE_MODEL",
+      "definition": "Model named in every System One request. TypeSafe needs a Jev model id (`jev-latest`). laya-serve honours a checkpoint name (`english`, `multilingual`, `typed-decisions`) and routes any other value by the language of the state.",
+      "category": "infrastructure",
+      "related": ["SYSTEM_ONE_PROVIDER"],
+      "links": []
+    },
+    {
+      "term": "System One Timeout",
+      "key": "SYSTEM_ONE_TIMEOUT_S",
+      "definition": "Total time budget for one System One call in seconds, including retries and backoff after 408, 429 and 5xx answers (529 Overloaded included). A call that runs out of budget fails; nothing falls back to a default answer.",
+      "category": "infrastructure",
+      "related": ["SYSTEM_ONE_MAX_RETRIES"],
+      "links": []
+    },
+    {
+      "term": "System One Concurrency",
+      "key": "SYSTEM_ONE_MAX_CONCURRENCY",
+      "definition": "How many System One requests one caller (for example one synthetic run) keeps in flight at once. TypeSafe allows 1,200 requests per minute per key; a self-hosted Laya on CPU answers one request at a time, so extra concurrency there only queues.",
+      "category": "infrastructure",
+      "related": ["SYSTEM_ONE_PROVIDER"],
+      "links": []
+    },
+    {
+      "term": "System One Retries",
+      "key": "SYSTEM_ONE_MAX_RETRIES",
+      "definition": "Retries after a 408, 429 or 5xx answer or a connection failure, with exponential backoff that honours Retry-After and never sleeps past the call's timeout. 0 disables retries.",
+      "category": "infrastructure",
+      "related": ["SYSTEM_ONE_TIMEOUT_S"],
+      "links": []
+    },
+    {
+      "term": "Min Reader-Question Noul",
+      "key": "SYNTHETIC_JUDGE_READER_QUESTION_MIN",
+      "definition": "A generated eval row is kept only when System One's probability that a real reader would ask the question about the document's subject reaches this minimum. Cover or title-page text, report or document numbers, distribution codes, the filename itself, and questions that cannot be understood without the source score low. On nasa-apollo-11, cover-page trivia measured 0.07 to 0.61 on Jev and real questions 0.92 to 0.96.",
+      "category": "evaluation",
+      "related": ["SYNTHETIC_JUDGE_ANSWER_SUPPORTED_MIN", "SYSTEM_ONE_PROVIDER"],
+      "links": []
+    },
+    {
+      "term": "Min Answer-Supported Noul",
+      "key": "SYNTHETIC_JUDGE_ANSWER_SUPPORTED_MIN",
+      "definition": "A generated eval row is kept only when System One's probability that the row's evidence quote, taken from the located page or line span, supports its expected answer reaches this minimum. An answer that can only be read off the file name or path does not count as supported.",
+      "category": "evaluation",
+      "related": ["SYNTHETIC_JUDGE_READER_QUESTION_MIN", "SYSTEM_ONE_PROVIDER"],
+      "links": []
+    },
+    {
+      "term": "Expected Location",
+      "key": "EVAL_EXPECTED_LOCATION",
+      "definition": "Optional page range (PDFs and other paged documents) or line range (text and code) that pins an eval entry's expected path to where the answer actually is. A retrieved chunk counts as a hit only when it comes from that file and its pages or lines overlap the range. Without a location, any chunk of the file counts, so on a single-document corpus the entry cannot fail and is reported as uninformative.",
+      "category": "evaluation",
+      "related": ["EVAL_UNINFORMATIVE", "EVAL_FINAL_K"],
+      "links": []
+    },
+    {
+      "term": "Uninformative Eval Entry",
+      "key": "EVAL_UNINFORMATIVE",
+      "definition": "An eval entry whose expectations cannot discriminate between good and bad retrieval: it has no expected paths, or its whole-file expectations cover every indexed document (for example the only file of a single-document corpus). Such entries are excluded from top-1, top-k, MRR and the other headline metrics and counted separately, instead of scoring a vacuous 100%. Add an expected location to make them count.",
+      "category": "evaluation",
+      "related": ["EVAL_EXPECTED_LOCATION"],
+      "links": []
+    },
+    {
       "term": "Native Index Accounting",
       "key": "INDEX_NATIVE_ACCOUNTING",
       "definition": "Observed indexing costs read from the existing LiteLLM spend log for one saved run. Provider-reported amounts, gateway-calculated amounts, and the original pre-run estimate are shown separately. Pending workers, missing requests, uncertain outcomes, or unverified provider retry coverage prevent a complete total. Run history remains available after the index or corpus is deleted.",

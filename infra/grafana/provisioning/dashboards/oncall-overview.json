@@ -9,55 +9,52 @@
   "panels": [
     {
       "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "Alerts Prometheus is firing now (the always-on RagweldWatchdog is left out).",
       "fieldConfig": {
         "defaults": {
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 0.5 },
-              { "color": "red", "value": 1.0 }
-            ]
-          },
-          "unit": "s"
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "None firing",
+          "color": { "mode": "fixed", "fixedColor": "red" }
         }
       },
-      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 0 },
-      "id": 1,
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+      "id": 6,
       "options": {
-        "colorMode": "value",
-        "graphMode": "area",
+        "colorMode": "background",
+        "graphMode": "none",
         "justifyMode": "auto",
-        "orientation": "auto",
+        "orientation": "horizontal",
         "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
-        "textMode": "auto"
+        "textMode": "name"
       },
       "targets": [
-        { "expr": "histogram_quantile(0.95, rate(tribrid_search_latency_seconds_bucket[5m]))", "legendFormat": "p95" }
+        {
+          "refId": "A",
+          "expr": "count by (alertname, severity) (ALERTS{alertstate=\"firing\", alertname!=\"RagweldWatchdog\"})",
+          "legendFormat": "{{alertname}} ({{severity}})",
+          "instant": true
+        }
       ],
-      "title": "Search Latency (p95)",
+      "title": "Firing alerts",
       "type": "stat"
     },
     {
       "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "p95 end-to-end retrieval latency (search, chat, benchmark, MCP) across the selected range.",
       "fieldConfig": {
         "defaults": {
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 0.01 },
-              { "color": "red", "value": 0.05 }
-            ]
-          },
-          "unit": "percentunit"
+          "unit": "s",
+          "noValue": "No data: API not scraped",
+          "mappings": [{ "type": "special", "options": { "match": "nan", "result": { "text": "No traffic" } } }],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 2 }, { "color": "red", "value": 5 }] }
         }
       },
-      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 0 },
-      "id": 2,
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 },
+      "id": 1,
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
@@ -65,100 +62,307 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(tribrid_search_errors_total[5m])) / clamp_min(sum(rate(tribrid_search_requests_total[5m])), 1)",
-          "legendFormat": "error rate"
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (increase(tribrid_search_latency_seconds_bucket[$__range])))",
+          "legendFormat": "p95",
+          "instant": true
         }
       ],
-      "title": "Search Error Rate",
+      "title": "Search latency p95 (selected range)",
       "type": "stat"
     },
     {
       "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "Failed / total retrievals across the selected range.",
       "fieldConfig": {
         "defaults": {
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 1 },
-              { "color": "red", "value": 3 }
-            ]
-          },
-          "unit": "none"
+          "unit": "percentunit",
+          "decimals": 1,
+          "noValue": "No data: API not scraped",
+          "mappings": [{ "type": "special", "options": { "match": "nan", "result": { "text": "No traffic" } } }],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 0.01 }, { "color": "red", "value": 0.05 }] }
         }
       },
-      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 0 },
-      "id": 3,
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 0 },
+      "id": 2,
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
         "textMode": "auto"
       },
       "targets": [
-        { "expr": "increase(tribrid_reranker_train_runs_total{outcome=\"failed\"}[24h])", "legendFormat": "failed" }
+        {
+          "refId": "A",
+          "expr": "sum(increase(tribrid_search_errors_total[$__range])) / sum(increase(tribrid_search_requests_total[$__range]))",
+          "legendFormat": "error rate",
+          "instant": true
+        }
       ],
-      "title": "Training Failures (24h)",
+      "title": "Search error rate (selected range)",
       "type": "stat"
     },
     {
       "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "Failed / total gateway requests across the selected range, excluding ragweld-local (the local-model lane has its own alert). Same scope as RagweldGatewayFailedRequestRatioHigh.",
       "fieldConfig": {
         "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineWidth": 2,
-            "showPoints": "never",
-            "spanNulls": false
-          },
-          "unit": "reqps"
+          "unit": "percentunit",
+          "decimals": 1,
+          "noValue": "No data: gateway not scraped",
+          "mappings": [{ "type": "special", "options": { "match": "nan", "result": { "text": "No traffic" } } }],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 0.05 }, { "color": "red", "value": 0.2 }] }
         }
       },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 6 },
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 0 },
+      "id": 7,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(sum(increase(litellm_proxy_failed_requests_metric_total{requested_model!=\"ragweld-local\"}[$__range])) or on() (0 * sum(increase(litellm_proxy_total_requests_metric_total{requested_model!=\"ragweld-local\"}[$__range])))) / sum(increase(litellm_proxy_total_requests_metric_total{requested_model!=\"ragweld-local\"}[$__range]))",
+          "legendFormat": "failed ratio",
+          "instant": true
+        }
+      ],
+      "title": "Gateway failed request ratio (selected range)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "Whether Prometheus can scrape each job right now. The local-model (vllm) job appears only while that lane runs on this host.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No data: Prometheus not reachable",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "Down", "color": "red", "index": 0 },
+                "1": { "text": "Up", "color": "green", "index": 1 }
+              }
+            }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+        }
+      },
+      "gridPos": { "h": 5, "w": 24, "x": 0, "y": 6 },
+      "id": 8,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "vertical",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value_and_name"
+      },
+      "targets": [{ "refId": "A", "expr": "min by (job) (up)", "legendFormat": "{{job}}", "instant": true }],
+      "title": "Scrape targets",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "Retrieval and gateway requests per second (5m rate).",
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2, "showPoints": "never", "spanNulls": false },
+          "unit": "reqps",
+          "noValue": "No data: API and gateway not scraped"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 11 },
       "id": 4,
       "options": {
-        "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true, "calcs": ["max", "lastNotNull"] },
         "tooltip": { "mode": "multi", "sort": "desc" }
       },
       "targets": [
-        { "expr": "sum(rate(tribrid_search_requests_total[5m]))", "legendFormat": "searches/s" }
+        { "refId": "A", "expr": "sum(rate(tribrid_search_requests_total[5m]))", "legendFormat": "retrieval" },
+        { "refId": "B", "expr": "sum(rate(litellm_proxy_total_requests_metric_total[5m]))", "legendFormat": "gateway" }
       ],
-      "title": "Traffic Overview",
+      "title": "Traffic",
       "type": "timeseries"
     },
     {
-      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 14 },
+      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "p95 per traced operation across the selected range, from Tempo span metrics (chat, answer, search, indexing, gateway calls, retrieval legs).",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "No traced operations in range",
+          "min": 0,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 15 }, { "color": "red", "value": 60 }] }
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 11 },
+      "id": 9,
+      "options": {
+        "displayMode": "basic",
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, span_name) (increase(traces_spanmetrics_latency_bucket{service=\"ragweld-api\", span_name=~\"ragweld[.](chat|chat_stream|answer|search)|ragweld[.]index[.]index|generation[.]gateway_(call|stream)|retrieval[.](vector|sparse|graph)\"}[$__range]))) > 0",
+          "legendFormat": "{{span_name}}",
+          "instant": true
+        }
+      ],
+      "title": "Operation latency p95 (selected range)",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "loki", "uid": "loki" },
+      "description": "5xx responses served by the Caddy proxy across the selected range, from its access log.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "No Caddy access log in range",
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
+        }
+      },
+      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 19 },
+      "id": 10,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(count_over_time({compose_service=\"caddy\"} |= \"handled request\" | json | status >= 500 [$__range])) or (0 * sum(count_over_time({compose_service=\"caddy\"} |= \"handled request\" [$__range])))",
+          "queryType": "instant"
+        }
+      ],
+      "title": "Proxy 5xx responses (selected range)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "loki", "uid": "loki" },
+      "description": "Proxy 5xx responses per interval by host and status, from the Caddy access log.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "bars", "fillOpacity": 60, "lineWidth": 1, "showPoints": "never", "spanNulls": false, "stacking": { "mode": "normal", "group": "A" } },
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "No proxy 5xx in range"
+        }
+      },
+      "gridPos": { "h": 8, "w": 9, "x": 6, "y": 19 },
+      "id": 11,
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true, "calcs": ["sum"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (request_host, status) (count_over_time({compose_service=\"caddy\"} |= \"handled request\" | json | status >= 500 [$__interval]))",
+          "legendFormat": "{{request_host}} {{status}}",
+          "queryType": "range"
+        }
+      ],
+      "title": "Proxy 5xx by host",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "loki", "uid": "loki" },
+      "description": "Error-level Caddy proxy events (refused dials, upstream timeouts) by message. Client disconnects from streaming responses log at warn level and are left out.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "bars", "fillOpacity": 60, "lineWidth": 1, "showPoints": "never", "spanNulls": false, "stacking": { "mode": "normal", "group": "A" } },
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "No proxy upstream errors in range"
+        }
+      },
+      "gridPos": { "h": 8, "w": 9, "x": 15, "y": 19 },
+      "id": 12,
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true, "calcs": ["sum"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (msg) (count_over_time({compose_service=\"caddy\", level=\"error\"} | json | logger=~\"http[.]log[.]error.*|http[.]handlers[.]reverse_proxy\" [$__interval]))",
+          "legendFormat": "{{msg}}",
+          "queryType": "range"
+        }
+      ],
+      "title": "Proxy upstream errors",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "Learning Reranker training runs that ended in failure in the last 24 hours.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "No data: API not scraped",
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
+        }
+      },
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 27 },
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(tribrid_reranker_train_runs_total{outcome=\"failed\"}[24h]))",
+          "legendFormat": "failed",
+          "instant": true
+        }
+      ],
+      "title": "Training failures (24h)",
+      "type": "stat"
+    },
+    {
+      "gridPos": { "h": 6, "w": 16, "x": 8, "y": 27 },
       "id": 5,
       "options": {
-        "content": "## On-call Workflow\nStart here when something pages.\n\n- Check latency, error rate, and active training failures.\n- Jump to Grafana Incidents and the ragweld workbench links for eval, benchmark, and prompt regressions.\n- Use the shared dashboard variables to keep the same corpus/run/model context across tabs.",
+        "content": "## On-call\n- **Firing alerts** reads the same rules Alertmanager routes; RagweldWatchdog is always on and never pages.\n- **No traffic** on a ratio or latency stat means nothing was served in the selected range; widen it before reading the value as healthy.\n- Drill into **Gateway & Serving** for model-level latency and failures, **TriBridRAG Metrics** for retrieval stages, and **Frontend/RUM** for what the browser saw.",
         "mode": "markdown"
       },
       "title": "Operator Notes",
       "type": "text"
     }
   ],
-  "refresh": "10s",
+  "refresh": "30s",
   "schemaVersion": 38,
   "style": "dark",
   "tags": ["ragweld", "observability", "oncall"],
-  "templating": {
-    "list": [
-      { "name": "corpus_id", "label": "Corpus", "type": "textbox", "query": "*", "current": { "text": "*", "value": "*" } },
-      { "name": "run_id", "label": "Run", "type": "textbox", "query": "*", "current": { "text": "*", "value": "*" } },
-      { "name": "model", "label": "Model", "type": "textbox", "query": "*", "current": { "text": "*", "value": "*" } },
-      { "name": "provider", "label": "Provider", "type": "textbox", "query": "*", "current": { "text": "*", "value": "*" } },
-      { "name": "prompt_set", "label": "Prompt Set", "type": "textbox", "query": "current", "current": { "text": "current", "value": "current" } },
-      { "name": "workflow_id", "label": "Workflow", "type": "textbox", "query": "*", "current": { "text": "*", "value": "*" } }
-    ]
-  },
+  "templating": { "list": [] },
   "time": { "from": "now-1h", "to": "now" },
   "timepicker": {},
   "timezone": "",
   "title": "On-call Overview",
   "uid": "ragweld-oncall-overview",
-  "version": 1,
+  "version": 2,
   "weekStart": ""
 }

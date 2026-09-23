@@ -13,7 +13,9 @@ import InfrastructureTab from '../components/tabs/InfrastructureTab';
 import AdminTab from '../components/tabs/AdminTab';
 import StartTab from '../components/tabs/StartTab';
 
-const RAGTab = lazy(() => import('../components/tabs/RAGTab'));
+// One loader shared by lazy() and the nav prefetch, so hovering the nav item warms the same chunk.
+const loadRAGTab = () => import('../components/tabs/RAGTab');
+const RAGTab = lazy(loadRAGTab);
 const LazyRAGTabRoute: ComponentType = () =>
   createElement(
     Suspense,
@@ -35,6 +37,8 @@ export interface RouteConfig {
   icon: string;
   order: number;
   subtabs?: Subtab[];
+  /** Loads a lazily split route's code ahead of navigation (TabBar calls it on hover/focus). */
+  prefetch?: () => Promise<unknown>;
   nav?: {
     /** If false, route is not rendered in the TabBar. */
     visible?: boolean;
@@ -113,6 +117,7 @@ export const routes: RouteConfig[] = [
   {
     path: '/rag',
     element: LazyRAGTabRoute,
+    prefetch: loadRAGTab,
     label: 'RAG',
     icon: '🧠',
     order: 6,

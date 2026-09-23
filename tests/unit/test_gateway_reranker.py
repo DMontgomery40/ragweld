@@ -29,6 +29,7 @@ from server.retrieval.gateway_reranker import (
     reasoning_tokens_spent,
     rerank_output_budget,
     rerank_request_fields,
+    rerank_response_format,
     score_candidates,
 )
 
@@ -73,6 +74,12 @@ def test_parse_rerank_scores_maps_ids_back_to_candidate_order() -> None:
     assert parse_rerank_scores(fenced, ids) == [9.0, 1.0, 2.0]
     wrapped = json.dumps({"scores": [{"id": "k1a", "score": 12}, {"id": "k2b", "score": -1}, {"id": "k3c", "score": 5}]})
     assert parse_rerank_scores(wrapped, ids) == [10.0, 0.0, 5.0]
+    # Seen live (openai.gpt-6-luna, 2026-09-23): a complete verdict followed by trailing text.
+    assert parse_rerank_scores(wrapped + "\n" + wrapped, ids) == [10.0, 0.0, 5.0]
+    assert parse_rerank_scores(text + "\nDone.", ids) == [9.0, 1.0, 2.0]
+    # A truncated first value is still malformed even if a later one would parse.
+    with pytest.raises(GatewayRerankParseError):
+        parse_rerank_scores('{"scores": [{"id": "k1a", "score": 9}' + "\n" + wrapped, ids)
 
 
 @pytest.mark.parametrize(
@@ -191,6 +198,39 @@ def test_budget_error_is_none_when_the_alias_simply_answered_badly() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("upstream", "structured"),
+    [
+        ("openrouter/openai/gpt-6-luna", True),
+        ("openrouter/openai/gpt-6-sol", True),
+        ("openrouter/z-ai/glm-5.3-flash", False),
+        ("openrouter/google/gemini-3.7-flash", False),
+        ("openai/ragweld-local", False),
+        ("", False),
+    ],
+)
+def test_response_format_is_a_strict_schema_over_exactly_the_request_ids_for_openai_upstreams(
+    upstream: str, structured: bool
+) -> None:
+    ids = candidate_ids(3)
+    fmt = rerank_response_format(upstream, ids)
+    if not structured:
+        assert fmt is None
+        return
+    assert fmt is not None and fmt["type"] == "json_schema"
+    spec = fmt["json_schema"]
+    assert spec["strict"] is True
+    scores = spec["schema"]["properties"]["scores"]
+    assert scores["minItems"] == scores["maxItems"] == len(ids)
+    assert scores["items"]["properties"]["id"]["enum"] == ids
+    assert scores["items"]["properties"]["score"] == {"type": "number", "minimum": 0.0, "maximum": 10.0}
+    assert spec["schema"]["additionalProperties"] is False and scores["items"]["additionalProperties"] is False
+
+
+def test_response_format_needs_candidates() -> None:
+    assert rerank_response_format("openrouter/openai/gpt-6-luna", []) is None
+
+
 # --- D26: the whole request through a real HTTP gateway ---------------------------------
 
 
@@ -219,7 +259,10 @@ class _RerankGatewayHandler(BaseHTTPRequestHandler):
             choice = {"message": {"role": "assistant", "content": truncated}, "finish_reason": "length"}
             usage = {"prompt_tokens": 6030, "completion_tokens": 1260, "completion_tokens_details": {"reasoning_tokens": 882}}
         else:
-            verdict = [{"id": cid, "score": 9 if index == 0 else 1} for index, cid in enumerate(ids)]
+            verdict: Any = [{"id": cid, "score": 9 if index == 0 else 1} for index, cid in enumerate(ids)]
+            if "response_format" in payload:
+                # A strict json_schema request is answered in the schema's object shape.
+                verdict = {"scores": verdict}
             choice = {"message": {"role": "assistant", "content": json.dumps(verdict)}, "finish_reason": "stop"}
             usage = {"prompt_tokens": 400, "completion_tokens": 60, "completion_tokens_details": {"reasoning_tokens": 0}}
         body = json.dumps({"id": "resp-rerank", "choices": [choice], "usage": usage}).encode()
@@ -267,6 +310,28 @@ async def test_score_candidates_sends_the_lowest_effort_and_a_verdict_sized_budg
     assert "reasoning_effort" not in request
     assert request["max_tokens"] == rerank_output_budget(len(DOCS))
     assert request["temperature"] == 0.0 and request["stream"] is False
+    assert "response_format" not in request
+
+
+@pytest.mark.parametrize(("alias", "structured"), [("openai.gpt-6-luna", True), ("z-ai.glm-5.3-flash", False)])
+@pytest.mark.asyncio
+async def test_score_candidates_requests_structured_output_only_where_the_upstream_honours_it(
+    alias: str, structured: bool
+) -> None:
+    warm_gateway_catalog()
+    with _rerank_gateway() as base_url:
+        scores = await score_candidates(
+            route=_route(base_url, alias), system_prompt="", query=QUERY, docs=DOCS, timeout_s=10.0
+        )
+    assert scores == [9.0, 1.0, 1.0]
+    request = _RerankGatewayHandler.requests[0]["payload"]
+    user_message = request["messages"][-1]["content"]
+    sent_ids = [c["id"] for c in json.loads(user_message[user_message.index("[") :])]
+    if structured:
+        schema = request["response_format"]["json_schema"]["schema"]
+        assert schema["properties"]["scores"]["items"]["properties"]["id"]["enum"] == sent_ids
+    else:
+        assert "response_format" not in request
 
 
 @pytest.mark.asyncio

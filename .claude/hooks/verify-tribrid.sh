@@ -109,7 +109,8 @@ run_check() {
 }
 
 checks=(
-  "uv run scripts/check_banned.py"
+  "python3 scripts/jev_lint.py"
+  "uv run scripts/check_contract_integrity.py"
   "uv run scripts/validate_types.py"
   "uv run pytest -q"
 )
@@ -119,7 +120,7 @@ for c in "${checks[@]}"; do
 done
 
 if [[ -z "$fail_cmd" ]] && [[ $frontend_changed -eq 1 ]]; then
-  run_check "npm --prefix web run lint" || true
+  run_check "npm --prefix web run typecheck" || true
   if [[ -z "$fail_cmd" ]]; then
     run_check "npm --prefix web run build" || true
   fi

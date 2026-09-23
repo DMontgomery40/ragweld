@@ -767,6 +767,25 @@ class Neo4jClient:
         return records
 
     # Stats
+    async def get_graph_size(self, repo_id: str) -> tuple[int, int]:
+        """(entities, entity-to-entity relationships) of one graph: the two headline counts of
+        `get_graph_stats` without its per-type breakdowns, for the scrape-time size gauges."""
+        driver = self._require_driver()
+        async with driver.session(database=self.database) as session:
+            result = await session.run(
+                """
+                OPTIONAL MATCH (e:__Entity__ {repo_id: $repo_id})
+                WITH count(e) AS total_entities
+                OPTIONAL MATCH (:__Entity__ {repo_id: $repo_id})-[r]->(:__Entity__ {repo_id: $repo_id})
+                RETURN total_entities, count(r) AS total_relationships;
+                """,
+                repo_id=repo_id,
+            )
+            rec = await result.single()
+        if rec is None:
+            return 0, 0
+        return int(rec["total_entities"] or 0), int(rec["total_relationships"] or 0)
+
     async def get_graph_stats(self, repo_id: str) -> GraphStats:
         driver = self._require_driver()
         async with driver.session(database=self.database) as session:

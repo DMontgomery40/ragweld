@@ -111,7 +111,7 @@ async def test_generation_preserves_reported_cost_and_counts_tokens_once(account
                 error = None
                 try:
                     if stream:
-                        assert "salinity" in "".join([part async for part in stream_chat_text(**kwargs)])
+                        assert "salinity" in "".join([part.content async for part in stream_chat_text(**kwargs) if part.kind == "text"])
                     else:
                         result = await generate_chat_text(**kwargs)
                         assert result.usage is not None and result.usage["total_tokens"] == 120

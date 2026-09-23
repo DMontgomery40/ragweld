@@ -1,18 +1,34 @@
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from server.evaluation.query_guard import is_real_query
-from server.models.tribrid_config_model import SyntheticGeneratorConfig
+from server.models.index import Chunk, ChunkProvenance, PageRegion
+from server.models.tribrid_config_model import (
+    EvalDatasetItem,
+    EvalExpectedLocation,
+    SyntheticGeneratorConfig,
+    SyntheticJudgeConfig,
+)
 from server.synthetic.providers.grounded_qa_provider import (
+    ANSWER_CUED,
+    ANSWER_SUPPORTED,
+    JUDGE_QUESTIONS,
+    READER_QUESTION,
     GroundedQAParseError,
+    JudgeVerdict,
     answer_is_anchored,
     build_eval_item,
     is_grounded,
     is_self_contained_question,
+    judge_accepts,
+    judge_state,
+    judge_verdict,
     parse_generated_rows,
-    parse_judge_verdict,
     source_excerpt,
+    source_location,
 )
 
 EMAIL = (
@@ -21,6 +37,7 @@ EMAIL = (
     'Email metadata: Barry J. Cohen emailed Jeffrey Epstein on 2017-10-02 14:33:00. Subject: "Plane management".\n'
 )
 EMAIL_PATH = "HOUSE_OVERSIGHT_026216__msg_000__row_001162.txt"
+EMAIL_LOCATION = EvalExpectedLocation(path=EMAIL_PATH, unit="line", start=1, end=3)
 
 
 def test_parse_generated_rows_accepts_a_bare_json_array() -> None:
@@ -312,30 +329,61 @@ def test_answer_is_anchored_requires_the_answer_content_in_the_excerpt() -> None
     assert answer_is_anchored("Эпштейн", "Письмо отправил Эпштейн.")
 
 
-def test_parse_judge_verdict_reads_score_and_keep() -> None:
-    score, keep, reason = parse_judge_verdict('{"score": 8.5, "keep": true, "reason": "specific and grounded"}')
-    assert score == pytest.approx(8.5)
-    assert keep is True
-    assert reason == "specific and grounded"
+def test_judge_state_carries_the_row_its_document_and_the_located_span_not_the_excerpt() -> None:
+    item = EvalDatasetItem(
+        question="Which plane management company did Barry Cohen consider switching to from Jet Aviation?",
+        expected_paths=[EMAIL_PATH],
+        expected_locations=[EMAIL_LOCATION],
+        expected_answer="EJM",
+        evidence_quote="switching from Jet Aviation to EJM",
+    )
+    state = judge_state(item, source_path=EMAIL_PATH)
+    assert state == {
+        "document": EMAIL_PATH,
+        "answer_location": "lines 1-3",
+        "row": {
+            "question": item.question,
+            "expected_answer": "EJM",
+            "evidence_quote": "switching from Jet Aviation to EJM",
+        },
+    }
+    one_page = item.model_copy(
+        update={
+            "expected_paths": ["A11_MissionReport.pdf"],
+            "expected_locations": [EvalExpectedLocation(path="A11_MissionReport.pdf", unit="page", start=72, end=72)],
+        }
+    )
+    assert judge_state(one_page, source_path="A11_MissionReport.pdf")["answer_location"] == "page 72"
 
-    score, keep, _reason = parse_judge_verdict("```json\n{\"score\": 3, \"keep\": false, \"reason\": \"generic\"}\n```")
-    assert score == pytest.approx(3.0)
-    assert keep is False
 
-    with pytest.raises(GroundedQAParseError):
-        parse_judge_verdict("I would keep this one.")
-    huge = "9" * 400
-    for text in (
-        '{"score": Infinity, "keep": false}',
-        '{"score": NaN, "keep": true}',
-        '{"score": -Infinity, "keep": true}',
-        f'{{"score": {huge}, "keep": true}}',  # float() overflows before any clamp
-        f'{{"score": -{huge}, "keep": true}}',
-        '{"score": true, "keep": true}',
-        '{"score": "8", "keep": true}',
-    ):
-        with pytest.raises(GroundedQAParseError):
-            parse_judge_verdict(text)
+def test_every_judge_question_is_a_noul_with_true_and_false_criteria_and_the_state_paths_it_names() -> None:
+    assert set(JUDGE_QUESTIONS) == {READER_QUESTION, ANSWER_SUPPORTED, ANSWER_CUED}
+    state = judge_state(
+        EvalDatasetItem(question="q", expected_paths=[EMAIL_PATH], expected_locations=[EMAIL_LOCATION]),
+        source_path=EMAIL_PATH,
+    )
+    for question in JUDGE_QUESTIONS.values():
+        assert question.type == "noul"
+        assert question.criteria is not None and question.criteria.true and question.criteria.false
+        # Every backticked path the question points at must exist in the state judge_state builds.
+        refs = re.findall(r"`([^`]+)`", str(question.instructions))
+        assert refs
+        for ref in refs:
+            node: object = state
+            for part in ref.split("."):
+                assert isinstance(node, dict) and part in node, f"{ref!r} is not in the judge state"
+                node = node[part]
+    reader = JUDGE_QUESTIONS[READER_QUESTION]
+    # The eval agent's two basic-logic rules survive the move off the LLM prompt.
+    assert "cover or title-page" in str(reader.criteria.false) and "filename" in str(reader.criteria.false)
+    assert "file name or path" in str(JUDGE_QUESTIONS[ANSWER_SUPPORTED].criteria.false)
+
+
+def test_judge_verdict_requires_every_question_answered() -> None:
+    verdict = judge_verdict({READER_QUESTION: 0.9, ANSWER_SUPPORTED: 0.8, ANSWER_CUED: 0.1})
+    assert verdict == JudgeVerdict(reader_question=0.9, answer_supported=0.8, answer_cued=0.1)
+    with pytest.raises(KeyError):
+        judge_verdict({READER_QUESTION: 0.9, ANSWER_SUPPORTED: 0.8})
 
 
 def test_source_excerpt_caps_lines() -> None:
@@ -354,6 +402,7 @@ def test_build_eval_item_enforces_limits_and_tags() -> None:
     item = build_eval_item(
         row,
         source_path=EMAIL_PATH,
+        location=EMAIL_LOCATION,
         source_kind="document",
         include_expected_answer=True,
         include_tags=True,
@@ -369,6 +418,7 @@ def test_build_eval_item_enforces_limits_and_tags() -> None:
     assert build_eval_item(
         too_long,
         source_path=EMAIL_PATH,
+        location=EMAIL_LOCATION,
         source_kind="document",
         include_expected_answer=True,
         include_tags=True,
@@ -381,6 +431,7 @@ def test_build_eval_item_enforces_limits_and_tags() -> None:
     retained = build_eval_item(
         row,
         source_path=EMAIL_PATH,
+        location=EMAIL_LOCATION,
         source_kind="document",
         include_expected_answer=False,
         include_tags=False,
@@ -393,9 +444,88 @@ def test_build_eval_item_enforces_limits_and_tags() -> None:
     assert publish_item(retained, include_expected_answer=True).expected_answer == "EJM"
 
 
-def test_judge_threshold_is_authoritative_over_the_prompt_keep_flag() -> None:
-    from server.synthetic.providers.grounded_qa_provider import judge_accepts
+def _pdf_chunk(page_start: int, page_end: int) -> Chunk:
+    return Chunk(
+        chunk_id="pytest_pdf_chunk",
+        content="The descent engine was throttled to 55 percent at 7 minutes into powered descent.",
+        file_path="A11_MissionReport.pdf",
+        start_line=3056,
+        end_line=3092,
+        provenance=ChunkProvenance(
+            extraction="docling",
+            page_start=page_start,
+            page_end=page_end,
+            regions=[PageRegion(page=page_start, left=0.1, top=0.1, right=0.9, bottom=0.5)],
+        ),
+    )
 
-    assert judge_accepts(score=5.0, keep=False, threshold=0.0)
-    assert judge_accepts(score=7.0, keep=True, threshold=7.0)
-    assert not judge_accepts(score=6.9, keep=True, threshold=7.0)
+
+def test_source_location_is_the_page_span_for_paged_documents_and_the_line_span_otherwise() -> None:
+    assert source_location(_pdf_chunk(176, 179)) == EvalExpectedLocation(
+        path="A11_MissionReport.pdf", unit="page", start=176, end=179
+    )
+    text_chunk = Chunk(chunk_id="pytest_txt", content=EMAIL, file_path=EMAIL_PATH, start_line=120, end_line=180)
+    assert source_location(text_chunk) == EvalExpectedLocation(path=EMAIL_PATH, unit="line", start=120, end=180)
+    # A chunk with neither page provenance nor a line span cannot be located.
+    unlocated = Chunk(chunk_id="pytest_none", content=EMAIL, file_path=EMAIL_PATH, start_line=0, end_line=0)
+    assert source_location(unlocated) is None
+
+
+def test_whole_document_rows_are_rejected_and_located_rows_are_kept() -> None:
+    """A row whose only evidence is the whole file can never fail on a single-document corpus."""
+    limits = SyntheticGeneratorConfig()
+    row = {
+        "question": "To what percent was the Apollo 11 descent engine throttled seven minutes into powered descent?",
+        "expected_answer": "55 percent",
+        "evidence_quote": "throttled to 55 percent",
+    }
+    common = {
+        "source_path": "A11_MissionReport.pdf",
+        "source_kind": "document",
+        "include_expected_answer": True,
+        "include_tags": True,
+        "limits": limits,
+    }
+    assert build_eval_item(row, location=None, **common) is None
+
+    located = source_location(_pdf_chunk(176, 179))
+    item = build_eval_item(row, location=located, **common)
+    assert item is not None
+    assert item.expected_paths == ["A11_MissionReport.pdf"]
+    assert item.expected_locations == [
+        EvalExpectedLocation(path="A11_MissionReport.pdf", unit="page", start=176, end=179)
+    ]
+
+
+@pytest.mark.parametrize(
+    ("reader", "supported", "cued", "thresholds", "kept"),
+    [
+        # Both gated nouls at or above their minimums: kept (the minimum is inclusive).
+        (0.95, 0.93, 0.02, SyntheticJudgeConfig(), True),
+        (0.70, 0.70, 0.99, SyntheticJudgeConfig(), True),
+        # Either gate below its minimum drops the row, whatever the other says.
+        (0.69, 0.99, 0.0, SyntheticJudgeConfig(), False),
+        (0.99, 0.69, 0.0, SyntheticJudgeConfig(), False),
+        # Cover-page trivia measured on nasa-apollo-11 (reader 0.07-0.61) never passes the default.
+        (0.61, 0.97, 0.9, SyntheticJudgeConfig(), False),
+        (0.07, 0.97, 0.9, SyntheticJudgeConfig(), False),
+        # The minimums are the operator's: each gate moves independently.
+        (0.50, 0.95, 0.0, SyntheticJudgeConfig(reader_question_min=0.5), True),
+        (0.95, 0.50, 0.0, SyntheticJudgeConfig(answer_supported_min=0.5), True),
+        (0.95, 0.95, 0.0, SyntheticJudgeConfig(reader_question_min=1.0), False),
+        (0.0, 0.0, 0.0, SyntheticJudgeConfig(reader_question_min=0.0, answer_supported_min=0.0), True),
+    ],
+)
+def test_judge_keeps_a_row_only_when_every_gated_noul_reaches_its_minimum(
+    reader: float, supported: float, cued: float, thresholds: SyntheticJudgeConfig, kept: bool
+) -> None:
+    verdict = JudgeVerdict(reader_question=reader, answer_supported=supported, answer_cued=cued)
+    assert judge_accepts(verdict, thresholds) is kept
+
+
+def test_judge_thresholds_are_probabilities() -> None:
+    for field_name in ("reader_question_min", "answer_supported_min"):
+        with pytest.raises(ValueError):
+            SyntheticJudgeConfig(**{field_name: 1.5})
+        with pytest.raises(ValueError):
+            SyntheticJudgeConfig(**{field_name: -0.1})

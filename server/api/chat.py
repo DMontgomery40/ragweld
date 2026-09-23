@@ -31,6 +31,7 @@ from server.chat.prompt_budget import PromptBudgetError
 from server.chat.query_record import append_chat_query_record
 from server.chat.recall_indexer import RecallConversationIdError, index_recall_conversation
 from server.chat.source_router import resolve_sources
+from server.chat.telemetry import UNRESOLVED_MODEL_LABEL, ChatRunTelemetry, chat_model_label
 from server.db.postgres import PostgresClient
 from server.gateway_catalog import gateway_rows_by_alias_cached
 from server.indexing.embedder import Embedder, configure_postgres_embedding_cache_backend
@@ -46,6 +47,7 @@ from server.models.tribrid_config_model import (
     RecallIndexRequest,
     RecallIndexResponse,
     RecallStatusResponse,
+    RunOutcome,
     TracesLatestResponse,
     TriBridConfig,
     WebGroundingMetadata,
@@ -112,6 +114,23 @@ def _primary_corpus_id_from_request(request: ChatRequest) -> str | None:
         if cid and cid != "recall_default":
             return cid
     return corpus_ids[0]
+
+
+async def _load_chat_config(primary: str | None, *, boundary: str) -> TriBridConfig:
+    if _config is not None:
+        return _config
+    try:
+        return await load_scoped_config(repo_id=primary)
+    except CorpusNotFoundError:
+        return await load_scoped_config(repo_id=None)
+    except Exception as e:
+        raise_postgres_unavailable_if_applicable(e, boundary=boundary)
+        raise
+
+
+async def _record_trace_outcome(run_id: str, outcome: RunOutcome) -> None:
+    """The run's outcome on its trace: how feedback tells an answered run from an aborted one."""
+    await get_trace_store().add_event(run_id, kind="chat.outcome", data={"outcome": outcome})
 
 
 def _approx_base64_bytes(s: str) -> int:
@@ -187,21 +206,19 @@ async def get_latest_trace(
 )
 async def chat(request: ChatRequest, response: Response) -> ChatResponse:
     """Process a chat message and return a response (Chat 2.0)."""
+    # Counted from here; the alias label is known once the config is.
+    telemetry = ChatRunTelemetry(model=UNRESOLVED_MODEL_LABEL)
     store = get_conversation_store()
     conv = store.get_or_create(request.conversation_id)
 
     # Choose config scope from selected sources (best-effort).
     primary = _primary_corpus_id_from_request(request)
-    if _config is not None:
-        config = _config
-    else:
-        try:
-            config = await load_scoped_config(repo_id=primary)
-        except CorpusNotFoundError:
-            config = await load_scoped_config(repo_id=None)
-        except Exception as e:
-            raise_postgres_unavailable_if_applicable(e, boundary="Chat config load")
-            raise
+    try:
+        config = await _load_chat_config(primary, boundary="Chat config load")
+    except BaseException as exc:
+        telemetry.finish(telemetry.classify(exc))
+        raise
+    telemetry.bind_model(chat_model_label(request=request, config=config))
 
     _validate_chat_images(list(request.images or []), config.chat.multimodal)
 
@@ -247,13 +264,27 @@ async def chat(request: ChatRequest, response: Response) -> ChatResponse:
             )
 
         try:
-            chat_result = await chat_once(
-                request=request,
-                config=config,
-                fusion=fusion,
-                conversation=conv,
-                billing_session_id=run_id,
-            )
+            try:
+                chat_result = await chat_once(
+                    request=request,
+                    config=config,
+                    fusion=fusion,
+                    conversation=conv,
+                    telemetry=telemetry,
+                    billing_session_id=run_id,
+                )
+            except BaseException as exc:
+                outcome = telemetry.classify(exc)
+                telemetry.finish(outcome)
+                if trace_enabled:
+                    try:
+                        await asyncio.shield(_record_trace_outcome(run_id, outcome))
+                    except asyncio.CancelledError:
+                        pass
+                raise
+            telemetry.finish("ok")
+            if trace_enabled:
+                await _record_trace_outcome(run_id, "ok")
             response_text = chat_result.text
             sources = chat_result.sources
             provider_id = chat_result.provider_response_id
@@ -366,7 +397,8 @@ async def chat(request: ChatRequest, response: Response) -> ChatResponse:
                     conversation_id=conv.id,
                     corpus_ids=resolve_sources(request.sources),
                     query=request.message,
-                    top_paths=[s.file_path for s in sources[:5]],
+                    sources=sources,
+                    outcome="ok",
                 )
             except Exception:
                 pass
@@ -467,8 +499,9 @@ async def chat(request: ChatRequest, response: Response) -> ChatResponse:
 
 
 
-async def _close_chat_trace(run_id: str, ended_at_ms: int | None) -> None:
+async def _close_chat_trace(run_id: str, ended_at_ms: int | None, outcome: RunOutcome) -> None:
     trace_store = get_trace_store()
+    await _record_trace_outcome(run_id, outcome)
     await trace_store.annotate(run_id, **current_trace_payload_fields())
     await trace_store.end(run_id, ended_at_ms=ended_at_ms)
 
@@ -481,24 +514,27 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
     """Stream a chat response using Server-Sent Events.
 
     Returns SSE events with:
+    - type: "status" - stage "generating" once retrieval is done and the prompt is accepted;
+      the response headers go out with it, so no proxy waits on the model's first token
+    - type: "thinking" - the model's reasoning, when ui.chat_stream_include_thinking is on
+      (never persisted, cached or part of the answer)
     - type: "text" - content chunks as they arrive
     - type: "done" - final event with sources
     - type: "error" - if something goes wrong
+    and ": keepalive" SSE comments while the model is silent.
     """
+    # Counted from here; the alias label is known once the config is.
+    telemetry = ChatRunTelemetry(model=UNRESOLVED_MODEL_LABEL)
     store = get_conversation_store()
     conv = store.get_or_create(request.conversation_id)
 
     primary = _primary_corpus_id_from_request(request)
-    if _config is not None:
-        config = _config
-    else:
-        try:
-            config = await load_scoped_config(repo_id=primary)
-        except CorpusNotFoundError:
-            config = await load_scoped_config(repo_id=None)
-        except Exception as e:
-            raise_postgres_unavailable_if_applicable(e, boundary="Chat stream config load")
-            raise
+    try:
+        config = await _load_chat_config(primary, boundary="Chat stream config load")
+    except BaseException as exc:
+        telemetry.finish(telemetry.classify(exc))
+        raise
+    telemetry.bind_model(chat_model_label(request=request, config=config))
 
     _validate_chat_images(list(request.images or []), config.chat.multimodal)
 
@@ -557,24 +593,32 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
         conversation=conv,
         run_id=run_id,
         started_at_ms=started_at_ms,
+        telemetry=telemetry,
     )
     try:
         first_sse = await anext(handler_stream)
+        # The first event is what releases the response headers (`status`, or a cached answer).
+        telemetry.mark_event()
     except StopAsyncIteration:
         first_sse = None
     except asyncio.CancelledError:
-        # Cancelled while retrieval or the first provider token was pending: close the
-        # trace and the span here, because the wrapper that would has not started yet.
+        # Cancelled while retrieval or the prompt guard was pending (the first event is the
+        # handler's `status`, or a cached answer): close the trace and the span here,
+        # because the wrapper that would has not started yet.
+        telemetry.finish("client_disconnect")
         if trace_enabled:
             try:
-                await asyncio.shield(trace_store.end(run_id))
+                await asyncio.shield(_close_chat_trace(run_id, None, "client_disconnect"))
             except asyncio.CancelledError:
                 pass
         setup_scope.__exit__(None, None, None)
         observation.finish((None, None, None))
         raise
     except Exception as e:
+        failed_outcome = telemetry.classify(e)
+        telemetry.finish(failed_outcome)
         if trace_enabled:
+            await _record_trace_outcome(run_id, failed_outcome)
             await trace_store.add_event(run_id, kind="chat.error", msg=str(e), data={})
             await trace_store.annotate(run_id, **current_trace_payload_fields())
             await trace_store.end(run_id)
@@ -602,6 +646,9 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
         ended_at_ms: int | None = None
         accumulated = ""
         generation_failed = False
+        # Set by the terminal event or the exception that ends the stream; a stream that ends
+        # with neither produced no answer.
+        outcome: RunOutcome | None = None
         def _kick_off_recall() -> None:
             # Best-effort Recall indexing (only when recall_default is selected).
             corpus_ids = resolve_sources(request.sources)
@@ -666,6 +713,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                     delta = payload.get("content")
                     if isinstance(delta, str):
                         accumulated += delta
+                    telemetry.mark_text()
                     yield sse
                     continue
 
@@ -673,6 +721,8 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                     ended_at_ms = int(time.time() * 1000)
 
                     if generation_failed or payload.get("llm_used") is False:
+                        outcome = telemetry.classify(telemetry.generation_error)
+                        telemetry.finish(outcome)
                         # No exchange happened: the error event already told the client, and
                         # neither the failure text nor the unanswered question belongs in the
                         # durable history (Recall would index it as a conversation).
@@ -790,6 +840,8 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                     # The handler committed the exchange (messages, generation cache, query
                     # record) before it produced this event; Recall reads that committed history.
                     _kick_off_recall()
+                    outcome = "ok"
+                    telemetry.finish(outcome)
                     yield f"data: {json.dumps(payload)}\n\n"
 
                     continue
@@ -801,22 +853,31 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                     continue
 
                 yield sse
+            if outcome is None:
+                # The handler ended without a terminal event: no answer was produced.
+                outcome = "gateway_error"
         except (asyncio.CancelledError, GeneratorExit):
             # The client went away or the task was cancelled: whatever streamed so far is
             # not an answer and must not become one in the durable history.
+            if outcome is None:
+                outcome = "client_disconnect"
             raise
         except Exception as e:
             caught_exc = (type(e), e, e.__traceback__)
+            if outcome is None:
+                outcome = telemetry.classify(e)
             if trace_enabled:
                 await trace_store.add_event(run_id, kind="chat.error", msg=str(e), data={})
             raise
         finally:
+            final_outcome: RunOutcome = outcome if outcome is not None else "client_disconnect"
+            telemetry.finish(final_outcome)
             # Nothing is persisted before the commit that precedes `done`, so an exchange that
             # never got there has nothing to roll back. The trace close-out is shielded: a
             # second cancellation must not leave the trace open or the span unfinished.
             if trace_enabled:
                 try:
-                    await asyncio.shield(_close_chat_trace(run_id, ended_at_ms))
+                    await asyncio.shield(_close_chat_trace(run_id, ended_at_ms, final_outcome))
                 except asyncio.CancelledError:
                     pass
             observation.finish(caught_exc)

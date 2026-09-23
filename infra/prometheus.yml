@@ -48,8 +48,21 @@ scrape_configs:
     static_configs:
       - targets: ['litellm:4000']
 
+  # The local-model server (vllm-metal) runs on the host, not in the VM, and only
+  # when the launcher runs that lane. Its target is discovered from a file the
+  # launcher writes while the lane runs (scripts/runtime_lifecycle.sh); a runtime
+  # without the lane (production: --no-local-model, chat.vllm.enabled=false) has
+  # no target, so no `up{job="vllm"}` series and no RagweldLocalModelDown.
   - job_name: 'vllm'
     metrics_path: /metrics
+    file_sd_configs:
+      - files: ['/etc/prometheus/targets/vllm.json']
+
+  # Laya, the local/offline System One provider, always runs beside the platform (it is
+  # started best-effort, outside the boot `--wait` set), so it is scraped statically: a
+  # down Laya is visible whichever provider is selected. RagweldLayaDown only fires while
+  # Ragweld is actually sending it traffic (see infra/prometheus-rules.yml).
+  - job_name: 'laya'
+    metrics_path: /metrics
     static_configs:
-      # The local-model server (vllm-metal) runs on the host, not in the VM.
-      - targets: ['host.docker.internal:58080']
+      - targets: ['laya:8000']

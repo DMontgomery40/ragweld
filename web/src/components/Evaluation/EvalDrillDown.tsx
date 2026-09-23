@@ -12,6 +12,7 @@ import {
   type ConfigKeyTier,
 } from '@/utils/configKeyCategories';
 import type { EvalResult, EvalRun } from '@/types/generated';
+import { docMatchLabel, formatDocSpan, formatLocation, locationFor, scoredEntries } from './evalLocations';
 
 interface EvalDrillDownProps {
   runId: string;
@@ -410,6 +411,10 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
 
   const getRegressionStatus = (questionIdx: number) => {
     if (!compareRun || !compareRun.results?.[questionIdx]) return null;
+    // An uninformative entry (on either side) has no pass/fail to compare.
+    if (evalRun.results?.[questionIdx]?.uninformative || compareRun.results?.[questionIdx]?.uninformative) {
+      return 'unchanged';
+    }
 
     const currentHit = evalRun.results?.[questionIdx]?.topk_hit;
     const previousHit = compareRun.results?.[questionIdx]?.topk_hit;
@@ -422,6 +427,8 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
   const configDiffs = getConfigDiff();
   const resultSafeDiffCount = configDiffs.filter((d: { key: string }) => isResultSafeKey(d.key)).length;
   const results = evalRun.results || [];
+  const scored = scoredEntries(evalRun);
+  const uninformative = evalRun.uninformative_count ?? 0;
   const regressions = results.filter((_, idx) => getRegressionStatus(idx) === 'regression').length;
   const improvements = results.filter((_, idx) => getRegressionStatus(idx) === 'improvement').length;
 
@@ -464,10 +471,11 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
     if (!evalRun || !compareRun) return;
     const evalResults = evalRun.results || [];
     const compareResults = compareRun.results || [];
-    const topkRegressions = evalResults.filter((_, idx) => !evalResults[idx]?.topk_hit && compareResults[idx]?.topk_hit);
-    const topkImprovements = evalResults.filter((_, idx) => evalResults[idx]?.topk_hit && !compareResults[idx]?.topk_hit);
-    const top1Regressions = evalResults.filter((_, idx) => !evalResults[idx]?.top1_hit && compareResults[idx]?.top1_hit);
-    const top1Improvements = evalResults.filter((_, idx) => evalResults[idx]?.top1_hit && !compareResults[idx]?.top1_hit);
+    const comparable = (idx: number) => !evalResults[idx]?.uninformative && !compareResults[idx]?.uninformative;
+    const topkRegressions = evalResults.filter((_, idx) => comparable(idx) && !evalResults[idx]?.topk_hit && compareResults[idx]?.topk_hit);
+    const topkImprovements = evalResults.filter((_, idx) => comparable(idx) && evalResults[idx]?.topk_hit && !compareResults[idx]?.topk_hit);
+    const top1Regressions = evalResults.filter((_, idx) => comparable(idx) && !evalResults[idx]?.top1_hit && compareResults[idx]?.top1_hit);
+    const top1Improvements = evalResults.filter((_, idx) => comparable(idx) && evalResults[idx]?.top1_hit && !compareResults[idx]?.top1_hit);
     fetchLLMAnalysis(
       evalRun,
       compareRun,
@@ -497,11 +505,11 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
           <div style={{ fontSize: '12px', color: 'var(--fg-muted)', marginBottom: '8px' }}>
             Top-1 Accuracy
           </div>
-          <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--accent-text)' }}>
-            {((evalRun?.top1_accuracy ?? 0) * 100).toFixed(1)}%
+          <div data-testid="eval-top1-accuracy" style={{ fontSize: '24px', fontWeight: 700, color: 'var(--accent-text)' }}>
+            {scored > 0 ? `${((evalRun?.top1_accuracy ?? 0) * 100).toFixed(1)}%` : 'n/a'}
           </div>
-          <div style={{ fontSize: '11px', color: 'var(--fg-muted)' }}>
-            {evalRun?.top1_hits ?? 0} / {evalRun?.total ?? 0} questions
+          <div style={{ fontSize: '11.5px', color: 'var(--fg-muted)' }}>
+            {evalRun?.top1_hits ?? 0} / {scored} scored questions
           </div>
         </div>
 
@@ -515,10 +523,10 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
             Top-K Accuracy
           </div>
           <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--link)' }}>
-            {((evalRun?.topk_accuracy ?? 0) * 100).toFixed(1)}%
+            {scored > 0 ? `${((evalRun?.topk_accuracy ?? 0) * 100).toFixed(1)}%` : 'n/a'}
           </div>
-          <div style={{ fontSize: '11px', color: 'var(--fg-muted)' }}>
-            {evalRun?.topk_hits ?? 0} / {evalRun?.total ?? 0} questions
+          <div style={{ fontSize: '11.5px', color: 'var(--fg-muted)' }}>
+            {evalRun?.topk_hits ?? 0} / {scored} scored questions
           </div>
         </div>
 
@@ -532,12 +540,34 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
             MRR
           </div>
           <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--warn)' }}>
-            {evalRun?.metrics?.mrr !== undefined ? evalRun.metrics.mrr.toFixed(4) : 'N/A'}
+            {evalRun?.metrics?.mrr !== undefined && scored > 0 ? evalRun.metrics.mrr.toFixed(4) : 'n/a'}
           </div>
-          <div style={{ fontSize: '11px', color: 'var(--fg-muted)' }}>
-            Mean Reciprocal Rank
+          <div style={{ fontSize: '11.5px', color: 'var(--fg-muted)' }}>
+            Mean Reciprocal Rank (chunk rank)
           </div>
         </div>
+
+        {uninformative > 0 ? (
+          <div
+            data-testid="eval-uninformative-card"
+            style={{
+              background: 'var(--card-bg)',
+              border: '1px solid var(--line)',
+              borderRadius: '8px',
+              padding: '16px'
+            }}
+          >
+            <div style={{ fontSize: '12px', color: 'var(--fg-muted)', marginBottom: '8px' }}>
+              Uninformative
+            </div>
+            <div data-testid="eval-uninformative-count" style={{ fontSize: '24px', fontWeight: 700, color: 'var(--warn)' }}>
+              {uninformative} / {evalRun?.total ?? 0}
+            </div>
+            <div style={{ fontSize: '11.5px', color: 'var(--fg-muted)' }}>
+              Excluded from scores: these expectations cannot fail (a whole file that is the whole corpus). Add pages or lines.
+            </div>
+          </div>
+        ) : null}
 
         {evalRun?.metrics?.ragas && Object.keys(evalRun.metrics.ragas).length > 0 ? (
           <div
@@ -1445,37 +1475,46 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
                       </td>
                       <td style={{ padding: '10px', fontSize: '12px', color: 'var(--fg)', maxWidth: '400px' }}>
                         {result.question}
+                        {result.uninformative ? (
+                          <span
+                            data-testid="eval-question-uninformative"
+                            title="Excluded from scores: this expectation cannot fail on this corpus"
+                            style={{
+                              marginLeft: '8px',
+                              fontSize: '11.5px',
+                              fontWeight: 600,
+                              color: 'var(--warn)',
+                              border: '1px solid var(--warn)',
+                              borderRadius: '8px',
+                              padding: '0 6px',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            uninformative
+                          </span>
+                        ) : null}
                       </td>
-                      <td style={{ padding: '10px', textAlign: 'center' }}>
-                        <span style={{
-                          display: 'inline-block',
-                          width: '20px',
-                          height: '20px',
-                          borderRadius: '50%',
-                          background: result.top1_hit ? 'var(--accent-green)' : 'var(--err)',
-                          color: 'white',
-                          fontSize: '11px',
-                          fontWeight: 600,
-                          lineHeight: '20px'
-                        }}>
-                          {result.top1_hit ? '✓' : '✗'}
-                        </span>
-                      </td>
-                      <td style={{ padding: '10px', textAlign: 'center' }}>
-                        <span style={{
-                          display: 'inline-block',
-                          width: '20px',
-                          height: '20px',
-                          borderRadius: '50%',
-                          background: result.topk_hit ? 'var(--accent-green)' : 'var(--err)',
-                          color: 'white',
-                          fontSize: '11px',
-                          fontWeight: 600,
-                          lineHeight: '20px'
-                        }}>
-                          {result.topk_hit ? '✓' : '✗'}
-                        </span>
-                      </td>
+                      {([result.top1_hit, result.topk_hit] as const).map((hit, hitIdx) => (
+                        <td key={hitIdx} style={{ padding: '10px', textAlign: 'center' }}>
+                          {result.uninformative ? (
+                            <span style={{ fontSize: '11.5px', color: 'var(--fg-muted)' }}>n/a</span>
+                          ) : (
+                            <span style={{
+                              display: 'inline-block',
+                              width: '20px',
+                              height: '20px',
+                              borderRadius: '50%',
+                              background: hit ? 'var(--accent-green)' : 'var(--err)',
+                              color: 'white',
+                              fontSize: '11.5px',
+                              fontWeight: 600,
+                              lineHeight: '20px'
+                            }}>
+                              {hit ? '✓' : '✗'}
+                            </span>
+                          )}
+                        </td>
+                      ))}
                       <td style={{ padding: '10px', textAlign: 'center', fontFamily: 'monospace', fontSize: '11px', color: 'var(--fg-muted)' }}>
                         <div>{(result?.duration_secs ?? 0).toFixed(2)}s</div>
                         <div style={{ fontSize: '9px', color: 'var(--fg-muted)' }}>
@@ -1505,24 +1544,30 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
                             {/* Expected Paths */}
                             <div>
                               <div style={{ fontWeight: 600, color: 'var(--accent-text)', marginBottom: '8px' }}>
-                                ✓ Expected Paths:
-                                <span style={{ fontSize: '10px', color: 'var(--fg-muted)', marginLeft: '8px' }}>
-                                  (type: {typeof result.expected_paths}, array: {Array.isArray(result.expected_paths) ? 'yes' : 'no'}, count: {result.expected_paths?.length ?? 0})
-                                </span>
+                                ✓ Expected:
                               </div>
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                                 {result.expected_paths && Array.isArray(result.expected_paths) && result.expected_paths.length > 0 ? (
-                                  result.expected_paths.map((path, i) => (
-                                    <div key={i} style={{
-                                      fontFamily: 'monospace',
-                                      padding: '6px 10px',
-                                      background: 'var(--card-bg)',
-                                      borderRadius: '4px',
-                                      color: 'var(--fg)'
-                                    }}>
-                                      {path}
-                                    </div>
-                                  ))
+                                  result.expected_paths.map((path, i) => {
+                                    const location = locationFor(result.expected_locations, path);
+                                    return (
+                                      <div key={i} data-testid="eval-question-expected" style={{
+                                        fontFamily: 'monospace',
+                                        padding: '6px 10px',
+                                        background: 'var(--card-bg)',
+                                        borderRadius: '4px',
+                                        color: 'var(--fg)',
+                                        display: 'flex',
+                                        justifyContent: 'space-between',
+                                        gap: '8px'
+                                      }}>
+                                        <span>{path}</span>
+                                        <span style={{ color: location ? 'var(--fg)' : 'var(--fg-muted)', fontSize: '11.5px' }}>
+                                          {location ? formatLocation(location) : 'whole file'}
+                                        </span>
+                                      </div>
+                                    );
+                                  })
                                 ) : (
                                   <div style={{ color: 'var(--fg-muted)' }}>No expected paths specified</div>
                                 )}
@@ -1551,7 +1596,7 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
                                       }}>
                                         <span>{path}</span>
                                         {isExpected && (
-                                          <span style={{ color: 'var(--accent-green)', fontWeight: 600 }}>✓ MATCH</span>
+                                          <span style={{ color: 'var(--fg-muted)', fontWeight: 600, fontSize: '11.5px' }}>expected file</span>
                                         )}
                                       </div>
                                     );
@@ -1606,7 +1651,9 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
                                 </div>
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                                   {result.docs.map((doc, i) => {
-                                    const isExpectedDoc = result.expected_paths?.some(exp => doc.file_path.includes(exp));
+                                    const matchLabel = docMatchLabel(doc.match);
+                                    const isHit = matchLabel?.tone === 'hit';
+                                    const span = formatDocSpan(doc);
                                     return (
                                       <div key={i} data-testid="eval-question-chunk-row" style={{
                                         display: 'flex',
@@ -1614,8 +1661,12 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
                                         gap: '8px',
                                         fontFamily: 'monospace',
                                         padding: '6px 10px',
-                                        background: isExpectedDoc ? 'rgba(var(--accent-green-rgb), 0.1)' : 'var(--card-bg)',
-                                        borderLeft: isExpectedDoc ? '3px solid var(--accent-green)' : '3px solid transparent',
+                                        background: isHit ? 'rgba(var(--accent-green-rgb), 0.1)' : 'var(--card-bg)',
+                                        borderLeft: isHit
+                                          ? '3px solid var(--accent-green)'
+                                          : matchLabel
+                                            ? '3px solid var(--warn)'
+                                            : '3px solid transparent',
                                         borderRadius: '4px'
                                       }}>
                                         <span style={{
@@ -1629,10 +1680,22 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
                                           }}>{doc.source}</span>
                                         ) : null}
                                         <span style={{ color: 'var(--fg)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1 1 auto' }}>
-                                          {doc.file_path}{doc.start_line ? `:${doc.start_line}` : ''}
+                                          {doc.file_path}
+                                          {span ? <span data-testid="eval-chunk-span" style={{ color: 'var(--fg-muted)' }}> · {span}</span> : null}
                                         </span>
-                                        {isExpectedDoc ? (
-                                          <span style={{ flex: '0 0 auto', color: 'var(--accent-green)', fontWeight: 600, fontSize: '11.5px' }}>match</span>
+                                        {matchLabel ? (
+                                          <span
+                                            data-testid="eval-chunk-match"
+                                            data-match={doc.match}
+                                            style={{
+                                              flex: '0 0 auto',
+                                              color: isHit ? 'var(--accent-green)' : 'var(--warn)',
+                                              fontWeight: 600,
+                                              fontSize: '11.5px'
+                                            }}
+                                          >
+                                            {matchLabel.label}
+                                          </span>
                                         ) : null}
                                         <span style={{ flex: '0 0 auto', color: 'var(--accent-text)', fontWeight: 600 }}>
                                           {(doc?.score ?? 0).toFixed(4)}

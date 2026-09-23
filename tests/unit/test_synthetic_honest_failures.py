@@ -1,6 +1,6 @@
 """The synthetic lane has exactly one generation path and no fallback bookkeeping.
 
-Generator/judge failures fail the run; rows the model could not ground are
+Generator and System One judge failures fail the run; rows the model could not ground are
 rejected and counted; nothing is hydrated from a seed dataset. These tests pin
 the public contract (config fields, summary fields, prompt tokens) that the
 Synthetic Lab renders.
@@ -44,8 +44,13 @@ def test_synthetic_config_generator_defaults() -> None:
 
 def test_synthetic_config_judge_defaults() -> None:
     cfg = TriBridConfig()
-    assert cfg.synthetic.judge.temperature == 0.0
-    assert cfg.synthetic.judge.max_tokens == 400
+    assert cfg.synthetic.judge.reader_question_min == 0.7
+    assert cfg.synthetic.judge.answer_supported_min == 0.7
+    # The LLM judge is gone: no sampling knobs, no judge prompt, no judge alias on the request.
+    assert set(SyntheticJudgeConfig.model_fields) == {"reader_question_min", "answer_supported_min"}
+    assert "synthetic_judge" not in SystemPromptsConfig.model_fields
+    assert "judge_model" not in SyntheticRunStartRequest.model_fields
+    assert "curate_threshold" not in SyntheticRunStartRequest.model_fields
 
 
 def test_summary_rejection_counters_default_to_zero() -> None:
@@ -56,7 +61,10 @@ def test_summary_rejection_counters_default_to_zero() -> None:
     assert summary.items_curated_in == 0
     assert summary.items_curated_out == 0
     assert summary.triplets_mined == 0
-    assert summary.avg_judge_score is None
+    assert summary.mean_reader_question_noul is None
+    assert summary.mean_answer_supported_noul is None
+    assert summary.mean_answer_cued_noul is None
+    assert "avg_judge_score" not in SyntheticRunSummary.model_fields
 
 
 def test_generator_prompt_carries_every_render_token() -> None:

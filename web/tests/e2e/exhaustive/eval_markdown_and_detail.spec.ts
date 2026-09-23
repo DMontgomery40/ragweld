@@ -17,6 +17,7 @@ import path from 'node:path';
 import { expect, test } from '@playwright/test';
 import {
   activateCorpusInBrowser,
+  API_BASE,
   EXHAUSTIVE_CHAT_MODEL,
   patchCorpusConfigSection,
   provisionExhaustiveCorpus,
@@ -68,7 +69,10 @@ function evalRunJson(corpusId: string, runId: string, useMulti: boolean, fusion:
     // The flat snapshot carries EVAL_MULTI; the runtime fields carry use_multi.
     // Old code counted EVAL_MULTI + use_multi + eval_multi as three changes.
     config: { EVAL_MULTI: useMulti, FUSION_METHOD: fusion },
-    total: 1,
+    // Two entries: q1 is located (lines 8-20) and scored; q2 expects the whole file of a
+    // corpus that file covers, so it is uninformative and excluded from the headline numbers.
+    total: 2,
+    uninformative_count: 1,
     top1_hits: 1,
     topk_hits: 1,
     top1_accuracy: 1.0,
@@ -83,6 +87,7 @@ function evalRunJson(corpusId: string, runId: string, useMulti: boolean, fusion:
         question: 'What procedure calibrates the tide sensor?',
         retrieved_paths: ['sensor-calibration.md'],
         expected_paths: ['sensor-calibration.md'],
+        expected_locations: [{ path: 'sensor-calibration.md', unit: 'line', start: 8, end: 20 }],
         top_paths: ['sensor-calibration.md'],
         top1_path: ['sensor-calibration.md'],
         top1_hit: true,
@@ -92,12 +97,30 @@ function evalRunJson(corpusId: string, runId: string, useMulti: boolean, fusion:
         latency_ms: 120,
         duration_secs: 0.12,
         docs: [
-          { file_path: 'sensor-calibration.md', start_line: 10, score: 0.91, source: 'vector' },
-          { file_path: 'tide-tables.md', start_line: 3, score: 0.55, source: 'sparse' },
-          { file_path: 'harbor-log.md', start_line: 1, score: 0.4, source: 'graph' },
+          { file_path: 'sensor-calibration.md', start_line: 10, end_line: 18, score: 0.91, source: 'vector', match: 'location' },
+          { file_path: 'tide-tables.md', start_line: 3, end_line: 9, score: 0.55, source: 'sparse', match: 'none' },
+          { file_path: 'sensor-calibration.md', start_line: 40, end_line: 52, score: 0.4, source: 'graph', match: 'outside_location' },
         ],
         generated_answer: GFM_FIXTURE,
         ragas: { faithfulness: 0.92, answer_relevancy: 0.88 },
+      },
+      {
+        entry_id: 'q2',
+        question: 'How often are the Aurora buoy salinity sensors recalibrated?',
+        retrieved_paths: ['sensor-calibration.md'],
+        expected_paths: ['sensor-calibration.md'],
+        top_paths: ['sensor-calibration.md'],
+        top1_path: ['sensor-calibration.md'],
+        top1_hit: true,
+        topk_hit: true,
+        uninformative: true,
+        reciprocal_rank: 1.0,
+        recall: 1.0,
+        latency_ms: 110,
+        duration_secs: 0.11,
+        docs: [
+          { file_path: 'sensor-calibration.md', start_line: 1, end_line: 6, score: 0.8, source: 'sparse', match: 'file' },
+        ],
       },
     ],
     started_at: '2026-08-30T12:00:00Z',
@@ -315,4 +338,56 @@ test('the eval dataset form captures an expected answer that round-trips', async
   // The saved entry shows its expected answer — the field persisted through the API.
   const saved = page.getByTestId('eval-entry-expected-answer').filter({ hasText: answer });
   await expect(saved).toBeVisible();
+});
+
+// Chunk-level scoring: a located expectation shows which retrieved chunks hit its span and
+// which only share the file, and entries that cannot fail are counted, not scored as 100%.
+test('the drill-down separates location matches from file-only matches and counts uninformative entries', async ({ page, baseURL }) => {
+  await activateCorpusInBrowser(page, corpus.corpusId);
+  await page.goto(new URL('eval?subtab=analysis', baseURL ?? '').toString());
+
+  await expect(page.getByTestId('eval-uninformative-count')).toHaveText('1 / 2');
+  await expect(page.getByTestId('eval-top1-accuracy')).toHaveText('100.0%');
+  await expect(page.getByTestId('eval-question-row-1').getByTestId('eval-question-uninformative')).toBeVisible();
+  await expect(page.getByTestId('eval-question-row-0').getByTestId('eval-question-uninformative')).toHaveCount(0);
+
+  await page.getByTestId('eval-question-row-0').click();
+  await expect(page.getByTestId('eval-question-expected')).toContainText('lines 8–20');
+  const matches = page.getByTestId('eval-chunk-match');
+  await expect(matches).toHaveCount(2); // tide-tables.md is not an expected file: no label
+  await expect(matches.nth(0)).toHaveText('location match');
+  await expect(matches.nth(0)).toHaveAttribute('data-match', 'location');
+  await expect(matches.nth(1)).toHaveText('right file, wrong span');
+  await expect(page.getByTestId('eval-chunk-span').first()).toHaveText(' · lines 10–18');
+});
+
+test('the eval dataset form stores a page location per expected path', async ({ page, baseURL, request }) => {
+  await activateCorpusInBrowser(page, corpus.corpusId);
+  await page.goto(new URL('eval?subtab=dataset', baseURL ?? '').toString());
+
+  const question = `On which pages does the Apollo 11 report describe powered descent throttling? ${Date.now().toString(36)}`;
+  await page.getByPlaceholder('Question (e.g., Where is X implemented?)').fill(question);
+  await page.getByTestId('eval-new-expected-paths').fill('A11_MissionReport.pdf');
+  await expect(page.getByTestId('eval-location-hint')).toBeVisible();
+  await page.getByTestId('eval-new-location-unit-0').selectOption('page');
+
+  // A reversed span is refused in the form, not sent.
+  await page.getByTestId('eval-new-location-start-0').fill('9');
+  await page.getByTestId('eval-new-location-end-0').fill('3');
+  await page.getByRole('button', { name: 'Add Entry' }).click();
+  await expect(page.getByTestId('eval-entry-expected').filter({ hasText: 'A11_MissionReport.pdf' })).toHaveCount(0);
+
+  await page.getByTestId('eval-new-location-start-0').fill('176');
+  await page.getByTestId('eval-new-location-end-0').fill('179');
+  await page.getByRole('button', { name: 'Add Entry' }).click();
+  await expect(
+    page.getByTestId('eval-entry-expected').filter({ hasText: 'A11_MissionReport.pdf (pp. 176–179)' }),
+  ).toBeVisible();
+
+  // Persisted through the real API as a typed location.
+  const listed = await request.get(`${API_BASE}/dataset?corpus_id=${encodeURIComponent(corpus.corpusId)}`);
+  expect(listed.ok()).toBeTruthy();
+  const rows = (await listed.json()) as Array<{ question: string; expected_locations?: unknown[] }>;
+  const row = rows.find((r) => r.question === question);
+  expect(row?.expected_locations).toEqual([{ path: 'A11_MissionReport.pdf', unit: 'page', start: 176, end: 179 }]);
 });

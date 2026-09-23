@@ -66,6 +66,11 @@ _REMOVED_NESTED_KEYS: tuple[str, ...] = (
     "graph_indexing.wait_vector_index_online",
     "graph_indexing.vector_index_online_timeout_s",
     "graph_storage.community_algorithm",
+    # The synthetic LLM judge (prompt + sampling knobs) was replaced by System One Nouls with
+    # typed thresholds in synthetic.judge; stored copies of the retired fields are dead.
+    "system_prompts.synthetic_judge",
+    "synthetic.judge.temperature",
+    "synthetic.judge.max_tokens",
 )
 
 _REMOVED_FLAT_KEYS: tuple[str, ...] = (

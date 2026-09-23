@@ -525,8 +525,11 @@ async def stream_answer_best_effort(
             timeout_s=float(getattr(config.ui, "chat_stream_timeout", 120) or 120),
             on_provider_response_id=_capture_provider_response_id,
         ):
-            accumulated += delta
-            yield f"data: {json.dumps({'type': 'text', 'content': delta})}\n\n"
+            # Reasoning is not requested here; the answer stream carries answer text only.
+            if delta.kind != "text":
+                continue
+            accumulated += delta.content
+            yield f"data: {json.dumps({'type': 'text', 'content': delta.content})}\n\n"
 
         if not accumulated.strip():
             raise RuntimeError("LLM stream produced no content (check provider compatibility/config)")

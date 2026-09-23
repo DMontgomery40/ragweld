@@ -102,6 +102,7 @@ _SECTION_DEFAULTS: dict[str, _SectionDefaults] = {
     "synthetic": _SectionDefaults("corpus", "ragas", "eval", "advanced", "live"),
     "docker": _SectionDefaults("global", "shell_ui", "shell", "advanced", "restart"),
     "document_viewer": _SectionDefaults("global", "shell_ui", "shell", "advanced", "live"),
+    "system_one": _SectionDefaults("global", "litellm", "runtime", "advanced", "live"),
 }
 
 _FIELD_OVERRIDES: dict[str, dict[str, Any]] = {
@@ -324,11 +325,6 @@ _FIELD_OVERRIDES: dict[str, dict[str, Any]] = {
         "ui_surface": "eval",
         "exposure_level": "expert",
     },
-    "system_prompts.synthetic_judge": {
-        "integration": "promptfoo",
-        "ui_surface": "eval",
-        "exposure_level": "expert",
-    },
 }
 
 _LOCKED_INTEGRATION_CONTRACTS: tuple[ConfigIntegrationContract, ...] = (
@@ -481,9 +477,9 @@ _LOCKED_INTEGRATION_CONTRACTS: tuple[ConfigIntegrationContract, ...] = (
         label="Promptfoo",
         summary="Regression and prompt-comparison substrate for evaluation workflows.",
         ui_surface="eval",
-        required_config_paths=["evaluation.baseline_path", "system_prompts.synthetic_judge"],
+        required_config_paths=["evaluation.baseline_path"],
         required_secret_ids=[],
-        readiness_checks=["baseline_present", "judge_prompt_present"],
+        readiness_checks=["baseline_present"],
         blocked_surfaces=["eval"],
     ),
     ConfigIntegrationContract(

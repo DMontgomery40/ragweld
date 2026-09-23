@@ -29,6 +29,7 @@ except ImportError:
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from server.evaluation.path_match import normalize_path
 from server.model_policy import ensure_model_allowed
 from server.models.corpus import CorpusAlreadyIndexedDetail as CorpusAlreadyIndexedDetail
 from server.models.corpus import CorpusAlreadyIndexedResponse as CorpusAlreadyIndexedResponse
@@ -62,6 +63,7 @@ from server.models.synthetic import SyntheticConfig as SyntheticConfig
 from server.models.synthetic import SyntheticGeneratorConfig as SyntheticGeneratorConfig
 from server.models.synthetic import SyntheticJudgeConfig as SyntheticJudgeConfig
 from server.models.synthetic import SyntheticQualityGateConfig as SyntheticQualityGateConfig
+from server.models.system_one import SystemOneConfig as SystemOneConfig
 
 # =============================================================================
 # DOMAIN MODELS - Core data types for the tribrid RAG system
@@ -320,15 +322,17 @@ class ReadinessDependencyStatus(BaseModel):
     info: dict[str, Any] | None = Field(default=None, description="Sanitized dependency readiness metadata.")
 
 
+# "laya" is present only while system_one.provider is laya.
+ReadinessDependencyName = Literal["postgres", "neo4j", "litellm", "vllm", "index_manifests", "laya"]
+
+
 class ReadinessStatus(BaseModel):
     """Readiness payload; unavailable required dependencies are served with HTTP 503."""
 
     ready: bool
     corpus_id: str | None = None
     corpus_error: str | None = None
-    dependencies: dict[
-        Literal["postgres", "neo4j", "litellm", "vllm", "index_manifests"], ReadinessDependencyStatus
-    ]
+    dependencies: dict[ReadinessDependencyName, ReadinessDependencyStatus]
 
 
 class DockerContainer(BaseModel):
@@ -1082,6 +1086,12 @@ class SearchRequest(BaseModel):
 
 class SearchResponse(BaseModel):
     """Response from tri-brid search."""
+    event_id: str = Field(
+        description=(
+            "Correlation id of this search (its run id); POST /api/feedback with this event_id "
+            "and surface=search to rate the results"
+        ),
+    )
     query: str = Field(description="The original query")
     matches: list[ChunkMatch] = Field(description="Ranked list of matching chunks")
     fusion_method: str = Field(description="Fusion method used (rrf or weighted)")
@@ -1897,6 +1907,11 @@ class EvalObservabilitySummaryResponse(BaseModel):
     latest_completed_at: datetime | None = Field(default=None, description="Completion time for the latest eval run.")
     freshness_minutes: float | None = Field(default=None, ge=0.0, description="How old the latest eval run is.")
     total_questions: int = Field(default=0, ge=0, description="Question count for the latest eval run.")
+    uninformative_questions: int = Field(
+        default=0,
+        ge=0,
+        description="Latest-run questions excluded from the headline metrics (expectations cannot discriminate).",
+    )
     ai_comparison_ready: bool = Field(
         default=False,
         description="Whether a comparison-ready pair of runs exists for AI analysis.",
@@ -2452,22 +2467,43 @@ class ConfigReadinessResponse(BaseModel):
     operator_hint: str | None = Field(default=None, description="Top-level next-step guidance for operators.")
 
 
+FeedbackSurface = Literal["chat", "search"]
+
+# How a chat/search run ended. One vocabulary for the chat metrics
+# (`tribrid_chat_requests_total{outcome}`), the query record and the trace, so feedback can
+# refuse a run that produced no answer. `cancelled` is reserved for an explicit server-side
+# stop; chat has none today, so a stream that ends before `done` is `client_disconnect`.
+RunOutcome = Literal["ok", "retrieval_error", "gateway_error", "timeout", "cancelled", "client_disconnect"]
+
+
 class FeedbackRequest(BaseModel):
     """Request payload for POST /api/feedback.
 
     Supports:
-    - Learning reranker feedback correlation: event_id + signal (+ optional doc_id/note)
+    - Event feedback: event_id + signal (+ optional doc_id/note/chunk_ids/surface)
     - UI meta feedback: rating (+ optional comment/timestamp/context)
     """
 
-    # Learning reranker feedback
+    # Event feedback (chat answer or search results)
     event_id: str | None = Field(default=None, description="Event id returned by chat/search for correlation")
     signal: str | None = Field(
         default=None,
-        description="Feedback signal (thumbsup|thumbsdown|click|noclick|note|star1..star5)",
+        description="Feedback signal (thumbsup|thumbsdown|click|note|star1..star5)",
     )
     doc_id: str | None = Field(default=None, description="Document id/path (for click-based signals)")
     note: str | None = Field(default=None, description="Optional freeform note")
+    chunk_ids: list[Annotated[str, Field(min_length=1, max_length=512)]] = Field(
+        default_factory=list,
+        max_length=200,
+        description="chunk_id of each chunk the rated answer cited (chat sources or search matches)",
+    )
+    surface: FeedbackSurface | None = Field(
+        default=None,
+        description=(
+            "Where the rated event happened. Optional when the event's query record is known "
+            "(its kind is used); required otherwise"
+        ),
+    )
 
     # UI/meta feedback (not used for triplet mining)
     rating: int | None = Field(default=None, ge=1, le=5, description="1-5 star rating")
@@ -2479,8 +2515,15 @@ class FeedbackRequest(BaseModel):
     def _validate_shape(self) -> Self:
         # Meta feedback: rating-only shape (plus optional comment/timestamp/context).
         if self.rating is not None:
-            if self.event_id is not None or self.signal is not None or self.doc_id is not None or self.note is not None:
-                raise ValueError("rating feedback must not include event_id/signal/doc_id/note")
+            if (
+                self.event_id is not None
+                or self.signal is not None
+                or self.doc_id is not None
+                or self.note is not None
+                or self.chunk_ids
+                or self.surface is not None
+            ):
+                raise ValueError("rating feedback must not include event_id/signal/doc_id/note/chunk_ids/surface")
             return self
 
         # Otherwise require event-correlated signal feedback.
@@ -2493,6 +2536,21 @@ class FeedbackResponse(BaseModel):
     """Response payload for POST /api/feedback."""
 
     ok: bool = Field(description="Whether feedback was accepted")
+
+
+class FeedbackEventNotAnsweredDetail(BaseModel):
+    """Public error detail (HTTP 409): the rated event failed or was aborted, so it has no answer to rate."""
+
+    code: Literal["feedback_event_not_answered"] = "feedback_event_not_answered"
+    event_id: str = Field(description="The rated event")
+    outcome: RunOutcome = Field(description="How the event ended (never ok)")
+    message: str = Field(description="Stable, non-sensitive summary")
+
+
+class FeedbackEventNotAnsweredResponse(BaseModel):
+    """FastAPI response envelope for feedback on a failed or aborted event (HTTP 409)."""
+
+    detail: FeedbackEventNotAnsweredDetail
 
 
 class RerankerClickRequest(BaseModel):
@@ -3064,6 +3122,41 @@ class GraphNeighborsResponse(BaseModel):
     )
 
 
+EvalLocationUnit = Literal["page", "line"]
+
+
+class EvalExpectedLocation(BaseModel):
+    """Where inside one expected file the answer lives: a page range (paged documents) or a line range.
+
+    A retrieved chunk satisfies the expectation only when it comes from ``path`` and its
+    page span (PDF provenance) or line span overlaps ``start..end`` (inclusive, 1-based).
+    """
+
+    path: str = Field(min_length=1, description="The expected path this location refines (one of expected_paths)")
+    unit: EvalLocationUnit = Field(description="page = document pages (PDF provenance); line = source/markdown lines")
+    start: int = Field(ge=1, description="First page or line of the expected span (1-based, inclusive)")
+    end: int = Field(ge=1, description="Last page or line of the expected span (1-based, inclusive)")
+
+    @model_validator(mode="after")
+    def _ordered(self) -> EvalExpectedLocation:
+        if self.start > self.end:
+            raise ValueError(f"expected location for {self.path!r} has start {self.start} > end {self.end}")
+        return self
+
+
+def _validate_expected_locations(expected_paths: list[str], locations: list[EvalExpectedLocation]) -> None:
+    """Every location refines exactly one expected path (normalized equality), at most once per path."""
+    expected = {normalize_path(path) for path in expected_paths}
+    seen: set[str] = set()
+    for location in locations:
+        key = normalize_path(location.path)
+        if key not in expected:
+            raise ValueError(f"expected location path {location.path!r} is not one of expected_paths")
+        if key in seen:
+            raise ValueError(f"expected path {location.path!r} has more than one expected location")
+        seen.add(key)
+
+
 class EvalDatasetItem(BaseModel):
     """Single evaluation dataset entry (formerly DatasetEntry)."""
     entry_id: str = Field(
@@ -3074,6 +3167,13 @@ class EvalDatasetItem(BaseModel):
     expected_paths: list[str] = Field(
         description="File paths that should be retrieved (relative or absolute)",
         validation_alias=AliasChoices("expected_paths", "expected_chunks"),
+    )
+    expected_locations: list[EvalExpectedLocation] = Field(
+        default_factory=list,
+        description=(
+            "Optional page/line span per expected path. A path with a location is only hit by a chunk "
+            "overlapping that span; a path without one is hit by any chunk of the file."
+        ),
     )
     expected_answer: str | None = Field(default=None, description="Expected answer if testing generation")
     evidence_quote: str | None = Field(
@@ -3088,6 +3188,11 @@ class EvalDatasetItem(BaseModel):
         default_factory=lambda: datetime.now(UTC),
         description="When this entry was created",
     )
+
+    @model_validator(mode="after")
+    def _locations_refine_expected_paths(self) -> EvalDatasetItem:
+        _validate_expected_locations(self.expected_paths, self.expected_locations)
+        return self
 
 
 class EvalRequest(BaseModel):
@@ -3114,8 +3219,17 @@ class EvalTestRequest(BaseModel):
         description="Expected file paths to retrieve",
         validation_alias=AliasChoices("expected_paths", "expected_chunks"),
     )
+    expected_locations: list[EvalExpectedLocation] = Field(
+        default_factory=list,
+        description="Optional page/line span per expected path (same contract as EvalDatasetItem)",
+    )
     use_multi: bool | None = Field(default=None, description="Optional override for multi-query")
     final_k: int | None = Field(default=None, ge=1, le=50, description="Optional override for final-k")
+
+    @model_validator(mode="after")
+    def _locations_refine_expected_paths(self) -> EvalTestRequest:
+        _validate_expected_locations(self.expected_paths, self.expected_locations)
+        return self
 
 
 class EvalMetrics(BaseModel):
@@ -3126,6 +3240,12 @@ class EvalMetrics(BaseModel):
     recall_at_20: float = Field(ge=0.0, le=1.0, description="Recall at top 20")
     precision_at_5: float = Field(ge=0.0, le=1.0, description="Precision at top 5")
     ndcg_at_10: float = Field(ge=0.0, le=1.0, description="NDCG at top 10")
+    map_at_5: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Mean average precision over the top 5 chunks (None on runs scored before chunk-level scoring)",
+    )
     latency_p50_ms: float = Field(ge=0.0, description="50th percentile latency in ms")
     latency_p95_ms: float = Field(ge=0.0, description="95th percentile latency in ms")
     ragas: dict[str, float] = Field(
@@ -3134,13 +3254,28 @@ class EvalMetrics(BaseModel):
     )
 
 
+EvalDocMatch = Literal["location", "file", "outside_location", "no_page_provenance", "none"]
+
+
 class EvalDoc(BaseModel):
     """Lightweight scored retrieval doc for eval drill-down."""
 
     file_path: str = Field(description="Retrieved file path")
     start_line: int | None = Field(default=None, description="Optional start line for the retrieved span")
+    end_line: int | None = Field(default=None, description="End line of the retrieved span")
+    page_start: int | None = Field(default=None, description="First page of the retrieved span (paged documents)")
+    page_end: int | None = Field(default=None, description="Last page of the retrieved span (paged documents)")
     score: float = Field(description="Retrieval score (post-fusion)")
     source: str | None = Field(default=None, description="Retrieval source (vector/sparse/graph)")
+    match: EvalDocMatch = Field(
+        default="none",
+        description=(
+            "How this chunk scored: location = overlaps an expected page/line span (hit); file = in an "
+            "expected file that has no location (hit); outside_location = expected file, wrong span; "
+            "no_page_provenance = expected file with a page span but the chunk carries no page data; "
+            "none = not an expected file."
+        ),
+    )
 
 
 class EvalResult(BaseModel):
@@ -3155,13 +3290,24 @@ class EvalResult(BaseModel):
         description="File paths that should have been retrieved",
         validation_alias=AliasChoices("expected_paths", "expected_chunks"),
     )
+    expected_locations: list[EvalExpectedLocation] = Field(
+        default_factory=list,
+        description="Page/line spans the entry expected, per expected path",
+    )
     top_paths: list[str] = Field(
         default_factory=list,
-        description="Top retrieved file paths (ranked, truncated for UI)",
+        description="Files of the top final-k retrieved chunks (ranked, de-duplicated, for display)",
     )
     top1_path: list[str] = Field(default_factory=list, description="Top-1 retrieved file path (0 or 1 items)")
-    top1_hit: bool = Field(default=False, description="Whether top-1 contained any expected path")
-    topk_hit: bool = Field(default=False, description="Whether top-k contained any expected path")
+    top1_hit: bool = Field(default=False, description="Whether the top-1 chunk satisfied an expectation")
+    topk_hit: bool = Field(default=False, description="Whether any of the top final-k chunks satisfied an expectation")
+    uninformative: bool = Field(
+        default=False,
+        description=(
+            "True when the expectations cannot discriminate (no expectations, or file-only expectations "
+            "covering every indexed document); the entry is excluded from the run's headline metrics."
+        ),
+    )
     reciprocal_rank: float = Field(ge=0.0, le=1.0, description="Reciprocal rank for this entry")
     recall: float = Field(ge=0.0, le=1.0, description="Recall for this entry")
     latency_ms: float = Field(ge=0.0, description="Latency for this query")
@@ -3195,10 +3341,19 @@ class EvalRun(BaseModel):
     config_snapshot: dict[str, Any] = Field(description="Nested config state during evaluation")
     config: dict[str, Any] = Field(default_factory=dict, description="Flat env-style config snapshot (for UI)")
     total: int = Field(default=0, ge=0, description="Total questions evaluated")
-    top1_hits: int = Field(default=0, ge=0, description="Count of top-1 hits")
-    topk_hits: int = Field(default=0, ge=0, description="Count of top-k hits")
-    top1_accuracy: float = Field(default=0.0, ge=0.0, le=1.0, description="Top-1 accuracy")
-    topk_accuracy: float = Field(default=0.0, ge=0.0, le=1.0, description="Top-k accuracy")
+    uninformative_count: int = Field(
+        default=0,
+        ge=0,
+        description="Entries excluded from headline metrics because their expectations cannot discriminate",
+    )
+    top1_hits: int = Field(default=0, ge=0, description="Count of top-1 hits among scored (informative) entries")
+    topk_hits: int = Field(default=0, ge=0, description="Count of top-k hits among scored (informative) entries")
+    top1_accuracy: float = Field(
+        default=0.0, ge=0.0, le=1.0, description="Top-1 accuracy over scored entries (total - uninformative_count)"
+    )
+    topk_accuracy: float = Field(
+        default=0.0, ge=0.0, le=1.0, description="Top-k accuracy over scored entries (total - uninformative_count)"
+    )
     duration_secs: float = Field(default=0.0, ge=0.0, description="Total run duration (seconds)")
     use_multi: bool = Field(default=False, description="Whether multi-query was enabled for this run")
     final_k: int = Field(default=0, ge=0, description="Final-k used for this run")
@@ -3260,6 +3415,9 @@ class EvalRunMeta(BaseModel):
     topk_accuracy: float = Field(ge=0.0, le=1.0, description="Top-k accuracy")
     mrr: float | None = Field(default=None, ge=0.0, le=1.0, description="Mean reciprocal rank")
     total: int = Field(ge=0, description="Total questions evaluated")
+    uninformative_count: int = Field(
+        default=0, ge=0, description="Entries excluded from headline metrics (expectations cannot discriminate)"
+    )
     duration_secs: float = Field(ge=0.0, description="Total run duration (seconds)")
     has_config: bool = Field(default=True, description="Whether config snapshot is present")
     bundle_id: str | None = Field(default=None, description="Bundle id associated with this eval run.")
@@ -3910,16 +4068,20 @@ class SyntheticRunStartRequest(BaseModel):
     max_pairs: int | None = Field(default=200, ge=10, le=50000)
     pairs_per_source: int | None = Field(default=2, ge=1, le=20)
 
-    curate_enabled: bool = Field(default=True)
-    curate_threshold: float = Field(default=7.0, ge=0.0, le=10.0)
+    curate_enabled: bool = Field(
+        default=True,
+        description=(
+            "Judge every grounded row with System One (system_one) and keep it only when its nouls reach "
+            "synthetic.judge's minimums."
+        ),
+    )
     include_expected_answer: bool = Field(default=True)
     include_tags: bool = Field(default=True)
 
     seed: int | None = Field(default=1337)
     generator_model: str = Field(min_length=1)
-    judge_model: str = Field(min_length=1)
 
-    @field_validator("generator_model", "judge_model")
+    @field_validator("generator_model")
     @classmethod
     def _validate_non_blank_models(cls, value: str) -> str:
         model_name = str(value or "").strip()
@@ -3964,14 +4126,34 @@ class SyntheticRunSummary(BaseModel):
         ge=0,
         description="Rows dropped for unparseable output, self-referential questions, or exceeding configured limits.",
     )
-    items_curated_in: int = Field(default=0, ge=0, description="Grounded rows handed to the judge.")
-    items_curated_out: int = Field(default=0, ge=0, description="Rows kept after the judge.")
+    items_curated_in: int = Field(default=0, ge=0, description="Grounded rows judged by System One.")
+    items_curated_out: int = Field(default=0, ge=0, description="Rows kept after the System One judge.")
     triplets_mined: int = Field(
         default=0,
         ge=0,
         description="Reranker triplets mined from the quality-gate retrieval results (triplets/full_stack recipes).",
     )
-    avg_judge_score: float | None = Field(default=None, ge=0.0, le=10.0)
+    mean_reader_question_noul: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Mean probability, over judged rows, that a real reader would ask the question.",
+    )
+    mean_answer_supported_noul: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Mean probability, over judged rows, that the located evidence supports the expected answer.",
+    )
+    mean_answer_cued_noul: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Mean probability, over judged rows, that the question copies distinctive cue words that let a "
+            "keyword search find the answer (reported, not gated)."
+        ),
+    )
     quality_top1_accuracy: float | None = Field(default=None, ge=0.0, le=1.0)
     quality_topk_accuracy: float | None = Field(default=None, ge=0.0, le=1.0)
     quality_mrr: float | None = Field(default=None, ge=0.0, le=1.0)
@@ -6636,44 +6818,6 @@ Format your response with clear sections using markdown headers.''',
         description="Analyze eval regressions with skeptical approach - avoid false explanations"
     )
 
-    synthetic_judge: str = Field(
-        default='''You are a strict evaluator for synthetic retrieval QA rows.
-
-You receive:
-- question
-- expected_paths
-- expected_answer
-- source_file_path
-- source_excerpt
-
-Decide whether this row is useful for retrieval evaluation.
-
-Scoring rubric (0-10):
-- 9-10: specific, answerable from source, unambiguous grounding
-- 7-8: mostly grounded, minor ambiguity
-- 4-6: weak grounding, generic wording, low discriminative value
-- 0-3: invalid, contradictory, not answerable from source, or not self-contained
-
-Self-contained means a reader who has NOT seen the source can tell what the question is about:
-it names a person, organization, place, document title, date, number, address or quoted phrase.
-A question whose only content is a pronoun plus a predicate ("What did he write?", "Where did
-they go?", "彼は何を食べましたか？", "그는 무엇을 썼나요?", "מה הוא כתב שם?") or that refers to
-"this email" / "the document" / "the text above" is NOT self-contained, in any language: score 0-3.
-
-Output JSON only:
-{
-  "score": 0.0,
-  "keep": false,
-  "reason": "short reason"
-}
-
-Rules:
-- Keep reason concise (<200 chars)
-- Set keep=true only when score >= 7.0
-- Never output markdown or prose outside JSON''',
-        description="Judge prompt for synthetic eval row curation and quality filtering"
-    )
-
     synthetic_generator: str = Field(
         default='''You write retrieval-evaluation questions for a document corpus.
 
@@ -7038,6 +7182,7 @@ class TriBridConfig(BaseModel):
     system_prompts: SystemPromptsConfig = Field(default_factory=SystemPromptsConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     synthetic: SyntheticConfig = Field(default_factory=SyntheticConfig)
+    system_one: SystemOneConfig = Field(default_factory=SystemOneConfig)
     docker: DockerConfig = Field(default_factory=DockerConfig)
     document_viewer: DocumentViewerConfig = Field(default_factory=DocumentViewerConfig)
 
@@ -7376,7 +7521,6 @@ class TriBridConfig(BaseModel):
             'PROMPT_SEMANTIC_KG_EXTRACTION': self.system_prompts.semantic_kg_extraction,
             'PROMPT_EVAL_ANALYSIS': self.system_prompts.eval_analysis,
             'PROMPT_LIGHTWEIGHT_CARDS': self.system_prompts.lightweight_chunk_summaries,
-            'PROMPT_SYNTHETIC_JUDGE': self.system_prompts.synthetic_judge,
             'PROMPT_SYNTHETIC_GENERATOR': self.system_prompts.synthetic_generator,
             'PROMPT_GATEWAY_RERANK': self.system_prompts.gateway_rerank,
             # MCP (inbound) params (7)
@@ -7779,7 +7923,6 @@ class TriBridConfig(BaseModel):
                 ),
                 eval_analysis=data.get('PROMPT_EVAL_ANALYSIS', SystemPromptsConfig().eval_analysis),
                 lightweight_chunk_summaries=data.get('PROMPT_LIGHTWEIGHT_CARDS', SystemPromptsConfig().lightweight_chunk_summaries),
-                synthetic_judge=data.get('PROMPT_SYNTHETIC_JUDGE', SystemPromptsConfig().synthetic_judge),
                 synthetic_generator=data.get('PROMPT_SYNTHETIC_GENERATOR', SystemPromptsConfig().synthetic_generator),
                 gateway_rerank=data.get('PROMPT_GATEWAY_RERANK', SystemPromptsConfig().gateway_rerank),
             ),
@@ -8068,7 +8211,6 @@ TRIBRID_CONFIG_KEYS = {
     'PROMPT_CODE_ENRICHMENT',
     'PROMPT_SEMANTIC_KG_EXTRACTION',
     'PROMPT_EVAL_ANALYSIS',
-    'PROMPT_SYNTHETIC_JUDGE',
     'PROMPT_SYNTHETIC_GENERATOR',
     'PROMPT_GATEWAY_RERANK',
     # MCP (inbound) params (7)

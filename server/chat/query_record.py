@@ -1,12 +1,14 @@
-"""The per-exchange query/source record the reranker's triplet mining correlates with feedback.
+"""The per-exchange query/source record that feedback and triplet mining correlate by event id.
 
 One writer for the chat lane (non-stream and stream): the record is part of the exchange's
 commit, written together with the messages and the generation cache, never ahead of them.
+A failed generation writes its record with the failure outcome, so feedback on it is refused.
 """
 
 from __future__ import annotations
 
-from server.models.tribrid_config_model import TriBridConfig
+from server.models.retrieval import ChunkMatch
+from server.models.tribrid_config_model import RunOutcome, TriBridConfig
 from server.services.rag import FusionProtocol
 
 
@@ -18,13 +20,14 @@ async def append_chat_query_record(
     conversation_id: str,
     corpus_ids: list[str],
     query: str,
-    top_paths: list[str],
+    sources: list[ChunkMatch],
+    outcome: RunOutcome,
 ) -> None:
-    """Best-effort query log append for triplet mining correlation."""
+    """Append the chat exchange's query record (skipped when tracing is disabled)."""
     if not getattr(config.tracing, "tracing_enabled", True):
         return
 
-    from server.observability.query_log import append_query_log
+    from server.observability.query_log import append_query_log, query_record_candidates
 
     fusion_debug = getattr(fusion, "last_debug", None) or {}
     rag_debug = fusion_debug.get("chat_rag_fusion") if isinstance(fusion_debug, dict) else None
@@ -36,6 +39,7 @@ async def append_chat_query_record(
         entry={
             "event_id": event_id,
             "kind": "chat",
+            "outcome": outcome,
             "conversation_id": conversation_id,
             "corpus_ids": corpus_ids,
             "query": query,
@@ -45,6 +49,8 @@ async def append_chat_query_record(
             "rerank_skipped_reason": rag_debug.get("rerank_skipped_reason"),
             "rerank_error": rag_debug.get("rerank_error"),
             "rerank_candidates_reranked": int(rag_debug.get("rerank_candidates_reranked") or 0),
-            "top_paths": list(top_paths[:5]),
+            # The triplet miner's input (server/training/triplet_miner.py reads top_paths).
+            "top_paths": [s.file_path for s in sources[:5]],
+            "candidates": query_record_candidates(sources),
         },
     )

@@ -248,5 +248,43 @@ test.describe('app shell', () => {
     await expect(picker).toBeVisible();
     await inViewport(picker.getByTestId('dock-picker-listbox'), 'the dock picker');
   });
+
+  test('a lazily loaded workspace starts downloading when its nav item is hovered or focused', async ({ page, baseURL }) => {
+    // Only the RAG workspace is split out of the main bundle. Hovering or focusing its sidebar
+    // link asks for that chunk, so the click that follows does not wait on the network (the
+    // module URL in the dev server, the hashed chunk in a build: both carry the name).
+    await activateCorpusInBrowser(page, corpusId);
+    const chunkRequests: string[] = [];
+    page.on('request', (req) => {
+      if (/RAGTab/.test(new URL(req.url()).pathname)) chunkRequests.push(req.url());
+    });
+    await gotoWeb(page, baseURL, 'dashboard?subtab=system');
+    const nav = page.getByTestId('tab-bar');
+    await expect(nav).toBeVisible();
+    await page.waitForTimeout(1500);
+    expect(chunkRequests, 'the RAG workspace was fetched before anyone pointed at it').toEqual([]);
+
+    await nav.getByRole('link', { name: 'RAG', exact: true }).hover();
+    await expect.poll(() => chunkRequests.length, { timeout: 10_000 }).toBeGreaterThan(0);
+    const fetchedOnHover = chunkRequests.length;
+    await nav.getByRole('link', { name: 'RAG', exact: true }).click();
+    await expect(page).toHaveURL(/\/rag/);
+    await expect(page.locator('#tab-rag')).toBeVisible({ timeout: 30_000 });
+    expect(chunkRequests.length, 'the click fetched the workspace again').toBe(fetchedOnHover);
+
+    // Keyboard users get the same head start from focus.
+    const focusRequests: string[] = [];
+    const fresh = await page.context().newPage();
+    fresh.on('request', (req) => {
+      if (/RAGTab/.test(new URL(req.url()).pathname)) focusRequests.push(req.url());
+    });
+    await gotoWeb(fresh, baseURL, 'dashboard?subtab=system');
+    await expect(fresh.getByTestId('tab-bar')).toBeVisible();
+    await fresh.waitForTimeout(1500);
+    expect(focusRequests).toEqual([]);
+    await fresh.getByTestId('tab-bar').getByRole('link', { name: 'RAG', exact: true }).focus();
+    await expect.poll(() => focusRequests.length, { timeout: 10_000 }).toBeGreaterThan(0);
+    await fresh.close();
+  });
 });
 

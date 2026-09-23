@@ -66,6 +66,13 @@ LOCAL_GATEWAY_UPSTREAM = "openai/ragweld-local"
 # generation.local_serving), never a property of the catalog row.
 LOCAL_GATEWAY_BASE_URL = "http://host.docker.internal:58080/v1"
 
+# The chat latency contract's buckets (0.25 s .. 600 s) plus the sub-250 ms bounds the
+# gateway's own overhead and queue-time histograms need.
+GATEWAY_LATENCY_BUCKETS_SECONDS: tuple[float, ...] = (
+    0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0,
+    15.0, 30.0, 45.0, 60.0, 90.0, 120.0, 180.0, 300.0, 600.0,
+)
+
 GENERATED_HEADER = (
     "# GENERATED from data/models.json by scripts/generate_litellm_config.py. DO NOT HAND-EDIT.\n"
     "# Every gateway-served GEN or EMB catalog row becomes one model_list entry; regenerate after\n"
@@ -295,6 +302,12 @@ def build_litellm_config(catalog: dict[str, Any]) -> dict[str, Any]:
             "num_retries": 0,
             "fallbacks": [],
             "context_window_fallbacks": [],
+            # Latency histogram buckets for every LiteLLM latency metric (TTFT, total,
+            # upstream API, queue, overhead). The v1.94 defaults already reach 600 s but
+            # jump 10 -> 30 -> 60 -> 120; the extra bounds resolve the 15-180 s stalls
+            # seen on reasoning models. Listed before `callbacks` because the proxy
+            # applies settings in order and the Prometheus logger reads this at init.
+            "prometheus_latency_buckets": list(GATEWAY_LATENCY_BUCKETS_SECONDS),
             "callbacks": ["prometheus", "langfuse_otel"],
             # Only the bounded execution lane belongs in metric labels; native
             # spend rows and traces retain run/corpus identity independently.

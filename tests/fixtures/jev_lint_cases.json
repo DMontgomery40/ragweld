@@ -1,0 +1,164 @@
+[
+  [
+    "removed_dependency",
+    "server/a.py",
+    "import redis\ncache = redis.Redis.from_url(url)",
+    true
+  ],
+  [
+    "removed_dependency",
+    "server/b.py",
+    "from langgraph.graph import StateGraph\n# Redis and LangChain were removed.\ngraph = StateGraph(State)",
+    false
+  ],
+  [
+    "wire_contract",
+    "web/src/api/a.ts",
+    "export interface SearchResponse { hits: {text: string; score: number}[] }\nexport async function search(): Promise<SearchResponse> { return (await fetch(\"/api/search\")).json() }",
+    true
+  ],
+  [
+    "wire_contract",
+    "web/src/api/b.ts",
+    "import type { SearchResponse } from \"../types/generated\";\ntype SearchView = {expanded: boolean};\nexport async function search(): Promise<SearchResponse> { return (await fetch(\"/api/search\")).json() }",
+    false
+  ],
+  [
+    "operator_eval_name",
+    "web/src/a.tsx",
+    "export function Panel() { return <h2>Golden questions</h2> }",
+    true
+  ],
+  [
+    "operator_chunk_name",
+    "web/src/b.tsx",
+    "export function Panel() { return <><h2>Model Cards</h2><article>Citation card</article></> }",
+    false
+  ],
+  [
+    "citation_copy",
+    "web/src/c.tsx",
+    "export function Help() { return <p>Click a retrieval citation to open its source in VS Code.</p> }",
+    true
+  ],
+  [
+    "citation_copy",
+    "web/src/d.tsx",
+    "export function Help() { return <p>Click a retrieval citation to open the Source viewer.</p> }",
+    false
+  ],
+  [
+    "mocked_dependency",
+    "tests/test_a.py",
+    "from unittest.mock import patch\ndef test_fetch():\n    with patch(\"server.fetch\", return_value={\"ok\": True}):\n        assert app.fetch()[\"ok\"]",
+    true
+  ],
+  [
+    "mocked_dependency",
+    "tests/test_b.py",
+    "def test_update(client):\n    response = client.patch(\"/api/config\", json={\"limit\": 10})\n    assert response.status_code == 200",
+    false
+  ],
+  [
+    "mocked_dependency",
+    "tests/test_c.py",
+    "def test_source_parser():\n    source = \"from unittest.mock import patch\"\n    assert parse(source).imports == [\"unittest.mock\"]",
+    false
+  ],
+  [
+    "static_catalog",
+    "web/src/catalog.ts",
+    "export async function load() { return (await fetch(\"/models.json\")).json() }",
+    true
+  ],
+  [
+    "static_catalog",
+    "web/src/catalog2.ts",
+    "export async function load() { return (await fetch(\"/api/models\")).json() }",
+    false
+  ],
+  [
+    "conditional_hooks",
+    "web/src/e.tsx",
+    "import { useState } from \"react\";\nexport function App({show}) { if (!show) return null; const [x] = useState(0); return <p>{x}</p> }",
+    true
+  ],
+  [
+    "conditional_hooks",
+    "web/src/f.tsx",
+    "import { useState } from \"react\";\nexport function App({show}) { const [x] = useState(0); if (!show) return null; return <p>{x}</p> }",
+    false
+  ],
+  [
+    "render_side_effect",
+    "web/src/g.tsx",
+    "export function App() { fetch(\"/api/jobs\", {method: \"POST\"}); return <p>Ready</p> }",
+    true
+  ],
+  [
+    "render_side_effect",
+    "web/src/h.tsx",
+    "import { useEffect } from \"react\";\nexport function App() { useEffect(() => { fetch(\"/api/jobs\", {method: \"POST\"}) }, []); return <p>Ready</p> }",
+    false
+  ],
+  [
+    "runtime_configuration",
+    "server/env_bad.py",
+    "import os\nmodel = os.getenv(\"LLM_MODEL\", \"fallback\")\nanswer = generate(model=model)",
+    true
+  ],
+  [
+    "runtime_configuration",
+    "server/env_good.py",
+    "import os\napi_key = os.getenv(\"OPENAI_API_KEY\")\nanswer = generate(model=config.generation.model, api_key=api_key)",
+    false
+  ],
+  [
+    "legacy_frontend",
+    "web/src/legacy.jsx",
+    "export function Panel() { return <p>Hello</p> }",
+    true
+  ],
+  [
+    "legacy_frontend",
+    "web/src/example.js",
+    "// Documentation example only. No executable statements.\n// export function Panel() { return <p>Hello</p> }",
+    false
+  ],
+  [
+    "studio_styles",
+    "web/src/components/RerankerTraining/TrainingStudio.tsx",
+    "export function Studio() { return <main style={{color: \"red\"}}>Training</main> }",
+    true
+  ],
+  [
+    "studio_styles",
+    "web/src/components/RerankerTraining/OtherStudio.tsx",
+    "export function Studio() { return <main className=\"training-studio\">Training</main> }",
+    false
+  ],
+  [
+    "operator_chunk_name",
+    "web/src/chunks.tsx",
+    "export function Chunks() { return <h2>Retrieved chunk cards</h2> }",
+    true
+  ],
+  [
+    "operator_ranker_name",
+    "web/src/ranker.tsx",
+    "export function Reranking() { return <h2>Train the retrieval ranker</h2> }",
+    true
+  ],
+  [
+    "operator_ranker_name",
+    "web/src/reranker.tsx",
+    "export function Reranking() { return <h2>Train the reranker</h2> }",
+    false
+  ],
+  [
+    "operator_eval_name",
+    "web/src/eval.tsx",
+    "export function Eval() { return <h2>Evaluation datasets</h2> }",
+    false
+  ]
+]

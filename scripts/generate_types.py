@@ -381,6 +381,8 @@ def main(output_path: Path | None = None) -> None:
             EvalRunsResponse,
             EvalTestRequest,
             # Domain models - Feedback
+            FeedbackEventNotAnsweredDetail,
+            FeedbackEventNotAnsweredResponse,
             FeedbackRequest,
             FeedbackResponse,
             GenerationUnavailableDetail,
@@ -665,6 +667,8 @@ def main(output_path: Path | None = None) -> None:
         ChatModelsResponse,
         ProviderHealth,
         ProvidersHealthResponse,
+        FeedbackEventNotAnsweredDetail,
+        FeedbackEventNotAnsweredResponse,
         FeedbackRequest,
         FeedbackResponse,
         RerankerClickRequest,

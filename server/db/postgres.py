@@ -8,6 +8,7 @@ import os
 import time
 import uuid
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -60,6 +61,15 @@ _VECTOR_AVAILABLE_BY_DSN: dict[tuple[str, str], bool] = {}
 
 
 _STAGING_REPO_PREFIX = "__staging__"
+
+
+@dataclass(frozen=True)
+class ChunkPosition:
+    """Where a chunk sits in its corpus, without its content (whole-corpus sampling input)."""
+
+    chunk_id: str
+    file_path: str
+    start_line: int
 
 
 class CorpusAlreadyIndexedError(RuntimeError):
@@ -1173,6 +1183,23 @@ class PostgresClient:
     # Corpus management (repo_id == corpus_id)
     # ---------------------------------------------------------------------
 
+    async def count_chunks_by_corpus(self) -> dict[str, int]:
+        """Chunk rows per corpus in one aggregate (staging namespaces excluded): the
+        `total_chunks` of `get_index_stats` for every corpus, without its per-file scan."""
+        await self._require_pool()
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT repo_id, COUNT(*)::bigint AS total_chunks
+                FROM chunks
+                WHERE repo_id NOT LIKE $1
+                GROUP BY repo_id;
+                """,
+                f"{_STAGING_REPO_PREFIX}%",
+            )
+        return {str(r["repo_id"]): int(r["total_chunks"] or 0) for r in rows}
+
     async def list_corpora(self) -> list[dict[str, Any]]:
         await self._require_pool()
         assert self._pool is not None
@@ -1858,6 +1885,40 @@ class PostgresClient:
                 file_path,
             )
         return bool(found)
+
+    async def list_indexed_file_paths(self, repo_id: str) -> list[str]:
+        """Every file the corpus holds chunks for (what retrieval can return), sorted."""
+        await self._require_pool()
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT DISTINCT file_path FROM chunks WHERE repo_id = $1 ORDER BY file_path;",
+                repo_id,
+            )
+        return [str(row["file_path"]) for row in rows]
+
+    async def list_chunk_positions(self, repo_id: str) -> list[ChunkPosition]:
+        """Id, file and start line of every chunk in the corpus (no content), for whole-corpus sampling."""
+        await self._require_pool()
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT chunk_id, file_path, start_line
+                FROM chunks
+                WHERE repo_id = $1
+                ORDER BY file_path ASC, start_line ASC, chunk_id ASC;
+                """,
+                repo_id,
+            )
+        return [
+            ChunkPosition(
+                chunk_id=str(row["chunk_id"]),
+                file_path=str(row["file_path"]),
+                start_line=int(row["start_line"] or 0),
+            )
+            for row in rows
+        ]
 
     async def count_documents(self, repo_id: str) -> int:
         await self._require_pool()

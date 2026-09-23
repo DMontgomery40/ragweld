@@ -32,6 +32,9 @@ _GAUGES = (
     "tribrid_eval_last_topk_accuracy",
     "tribrid_promptfoo_last_pass_ratio",
     "tribrid_benchmark_last_avg_latency_ms",
+    "tribrid_eval_last_run_timestamp_seconds",
+    "tribrid_promptfoo_last_run_timestamp_seconds",
+    "tribrid_benchmark_last_run_timestamp_seconds",
 )
 
 
@@ -182,6 +185,47 @@ def test_the_latest_gauges_report_the_persisted_run_without_any_run_completing(t
     assert samples["tribrid_benchmark_last_avg_latency_ms"] == 200.0
 
 
+def test_each_latest_run_exports_when_it_completed_from_its_own_record(tmp_path: Path) -> None:
+    """A "latest" number is only as useful as its age: each newest run's completion time
+    comes from the run record itself, so a copied or touched file does not look fresh."""
+
+    corpus_id = f"pytest_quality_{uuid.uuid4().hex[:8]}"
+    eval_path = _write_eval(tmp_path, _eval_run(corpus_id, top1=1.0, topk=1.0))
+    _write_promptfoo(tmp_path, _promptfoo_run(corpus_id, passed=6, total=6))
+    _write_benchmark(tmp_path, _benchmark_run(corpus_id, latencies=[100.0]))
+    os.utime(eval_path, (1_900_000_000, 1_900_000_000))  # mtime is not the completion time
+
+    samples = _scrape(tmp_path)
+
+    assert samples["tribrid_eval_last_run_timestamp_seconds"] == datetime(2026, 8, 30, 10, 15, 10, tzinfo=UTC).timestamp()
+    assert samples["tribrid_promptfoo_last_run_timestamp_seconds"] == datetime(2026, 8, 30, 10, 25, 0, tzinfo=UTC).timestamp()
+    assert samples["tribrid_benchmark_last_run_timestamp_seconds"] == 1_788_000_001.0
+
+
+def test_benchmark_latency_is_the_mean_of_successful_calls_only(tmp_path: Path) -> None:
+    """A failed call's latency is how long it took to fail (a 60 s gateway timeout, or 5 ms
+    for a rejected key), not a model latency; it used to be averaged in."""
+
+    corpus_id = f"pytest_quality_{uuid.uuid4().hex[:8]}"
+    run = _benchmark_run(corpus_id, latencies=[100.0, 300.0, 60_000.0])
+    failed = run.results[2].model_copy(update={"error": "LiteLLM stream failed: ReadTimeout", "response": ""})
+    _write_benchmark(tmp_path, run.model_copy(update={"results": [run.results[0], run.results[1], failed]}))
+
+    assert _scrape(tmp_path)["tribrid_benchmark_last_avg_latency_ms"] == 200.0
+
+
+def test_a_benchmark_run_where_every_call_failed_exports_no_latency(tmp_path: Path) -> None:
+    corpus_id = f"pytest_quality_{uuid.uuid4().hex[:8]}"
+    run = _benchmark_run(corpus_id, latencies=[40.0, 60.0])
+    failed = [result.model_copy(update={"error": "spend limit exceeded", "response": ""}) for result in run.results]
+    _write_benchmark(tmp_path, run.model_copy(update={"results": failed}))
+
+    samples = _scrape(tmp_path)
+
+    assert "tribrid_benchmark_last_avg_latency_ms" not in samples
+    assert samples["tribrid_benchmark_last_run_timestamp_seconds"] == 1_788_000_001.0
+
+
 def test_a_persisted_zero_is_still_reported_as_zero(tmp_path: Path) -> None:
     """A real 0% run must still export 0 — absence is reserved for "no run".
 
@@ -196,6 +240,36 @@ def test_a_persisted_zero_is_still_reported_as_zero(tmp_path: Path) -> None:
 
     assert samples["tribrid_eval_last_top1_accuracy"] == 0.0
     assert samples["tribrid_eval_last_topk_accuracy"] == 0.0
+
+
+def test_a_run_with_only_uninformative_entries_exports_no_eval_series(tmp_path: Path) -> None:
+    """A single-document corpus scored on file-only expectations used to export a vacuous 100%.
+
+    When every entry is uninformative the run has no headline accuracy; the series is absent
+    (Grafana "No data"), neither 1.0 nor a fake 0.0.
+    """
+
+    corpus_id = f"pytest_quality_{uuid.uuid4().hex[:8]}"
+    vacuous = _eval_run(corpus_id, top1=0.0, topk=0.0).model_copy(
+        update={"uninformative_count": 2, "top1_hits": 0, "topk_hits": 0}
+    )
+    _write_eval(tmp_path, vacuous)
+
+    samples = _scrape(tmp_path)
+
+    assert "tribrid_eval_last_top1_accuracy" not in samples
+    assert "tribrid_eval_last_topk_accuracy" not in samples
+
+
+def test_a_partly_uninformative_run_exports_its_scored_accuracy(tmp_path: Path) -> None:
+    corpus_id = f"pytest_quality_{uuid.uuid4().hex[:8]}"
+    partial = _eval_run(corpus_id, top1=0.0, topk=1.0).model_copy(update={"uninformative_count": 1})
+    _write_eval(tmp_path, partial)
+
+    samples = _scrape(tmp_path)
+
+    assert samples["tribrid_eval_last_top1_accuracy"] == 0.0
+    assert samples["tribrid_eval_last_topk_accuracy"] == 1.0
 
 
 def test_no_persisted_run_exports_no_series_at_all(tmp_path: Path) -> None:

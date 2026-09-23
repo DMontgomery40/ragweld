@@ -55,18 +55,42 @@ def test_both_eval_routes_use_the_shared_ragas_helpers() -> None:
     assert "_attach_ragas_scores" in stream_route
 
 
+def _calls_named(node: ast.AST, name: str) -> list[ast.Call]:
+    return [
+        child
+        for child in ast.walk(node)
+        if isinstance(child, ast.Call) and isinstance(child.func, ast.Name) and child.func.id == name
+    ]
+
+
 def test_stream_route_carries_ragas_into_the_persisted_metrics() -> None:
     tree = ast.parse(EVAL_SOURCE.read_text(encoding="utf-8"))
     stream = _function_node(tree, "eval_run_stream")
+    post_core = _function_node(tree, "evaluate_dataset_entries")
 
-    metric_calls = [
-        node
-        for node in ast.walk(stream)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "EvalMetrics"
-    ]
-    assert metric_calls, "eval_run_stream no longer constructs EvalMetrics"
-    for call in metric_calls:
-        keywords = {kw.arg for kw in call.keywords}
-        assert "ragas" in keywords, "stream route EvalMetrics dropped the ragas means"
+    # Both routes build their EvalMetrics through the one shared builder, fed the ragas means.
+    for route_name, route in (("eval_run_stream", stream), ("evaluate_dataset_entries", post_core)):
+        builder_calls = _calls_named(route, "_run_metrics")
+        assert builder_calls, f"{route_name} no longer builds metrics through _run_metrics"
+        assert _calls_named(route, "EvalMetrics") == [], f"{route_name} assembles EvalMetrics on its own"
+        for call in builder_calls:
+            assert len(call.args) == 3, f"{route_name} dropped an argument (headline, latencies, ragas)"
+
+    metric_calls = _calls_named(_function_node(tree, "_run_metrics"), "EvalMetrics")
+    assert len(metric_calls) == 1
+    keywords = {kw.arg for kw in metric_calls[0].keywords}
+    assert {"ragas", "map_at_5", "mrr"} <= keywords, "shared EvalMetrics builder dropped a metric"
+
+
+def test_every_eval_path_scores_through_the_one_chunk_level_scorer() -> None:
+    """POST /eval/run, the SSE stream and /eval/test share one scorer and one aggregator
+    (server/evaluation/scoring.py); a second, file-level copy must fail here."""
+    source = EVAL_SOURCE.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+
+    for route_name in ("evaluate_dataset_entries", "eval_run_stream", "test_eval_entry"):
+        assert _calls_named(_function_node(tree, route_name), "_score_entry"), f"{route_name} bypasses _score_entry"
+    for route_name in ("evaluate_dataset_entries", "eval_run_stream"):
+        assert _calls_named(_function_node(tree, route_name), "aggregate_entry_scores"), route_name
+    assert _calls_named(_function_node(tree, "_score_entry"), "score_entry")
+    assert "path_matches" not in _referenced_names(tree), "file-level path matching is back in server/api/eval.py"

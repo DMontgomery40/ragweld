@@ -6,11 +6,12 @@ when the quote is found in the source excerpt (whitespace-, case- and
 quote-mark-insensitive), the expected answer's content words are anchored in
 that excerpt, and the question is self-contained (no references to "this
 email"/"the excerpt", and at least one searchable anchor such as a name, date,
-number, quoted phrase or address). Survivors are rated by the configured judge
-alias (``system_prompts.synthetic_judge``) when curation is enabled; rows under
-the curation threshold are dropped.
+number, quoted phrase or address). When curation is enabled, survivors are judged
+by System One (``system_one``: TypeSafe Jev or a self-hosted Laya) with typed Noul
+questions, and a row is kept only when its reader_question and answer_supported
+nouls reach ``synthetic.judge``'s minimums.
 
-There is no deterministic fallback: a gateway failure fails the run, a row the
+There is no deterministic fallback: a gateway or System One failure fails the run, a row the
 model could not ground is rejected, cancellation aborts in-flight gateway calls,
 and a run that keeps nothing fails its quality gate downstream. The local
 single-stream serving alias is serialized process-wide, not per run.
@@ -21,7 +22,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-import math
 import re
 import unicodedata
 from collections.abc import Awaitable, Callable, Coroutine
@@ -35,10 +35,13 @@ from server.gateway_catalog import gateway_rows_snapshot
 from server.models.index import (
     Chunk,
 )
+from server.models.system_one import SystemOneNoul, SystemOneNoulCriteria
 from server.models.tribrid_config_model import (
     EvalDatasetItem,
+    EvalExpectedLocation,
     SyntheticArtifactKind,
     SyntheticGeneratorConfig,
+    SyntheticJudgeConfig,
     SyntheticRunStartRequest,
     SyntheticRunSummary,
     TriBridConfig,
@@ -51,6 +54,7 @@ from server.synthetic.recipes import (
     resolve_synthetic_route,
     select_source_chunks,
 )
+from server.system_one.client import SystemOneClient, SystemOneError
 
 PROVIDER_NAME = "grounded_qa"
 LOCAL_SERVING_PROVIDER = "ragweld"
@@ -874,37 +878,101 @@ def is_self_contained_question(question: str, *, source_excerpt: str | None = No
     return excerpt is not None and _shares_content_span(text, excerpt)
 
 
-def judge_accepts(*, score: float, keep: bool, threshold: float) -> bool:
-    """The configured curation threshold is authoritative; the prompt's keep flag is advisory only."""
-    del keep
-    return float(score) >= float(threshold)
+# System One judge: typed Nouls over one generated row. Rows already passed the
+# deterministic checks (verbatim quote, anchored answer, self-contained question), so the
+# state carries the row, its document and the located span, not the source excerpt; that
+# keeps it inside a self-hosted Laya's 512-token context.
+READER_QUESTION = "reader_question"
+ANSWER_SUPPORTED = "answer_supported"
+ANSWER_CUED = "answer_cued_in_question"
+
+JUDGE_QUESTIONS: dict[str, SystemOneNoul] = {
+    READER_QUESTION: SystemOneNoul(
+        instructions=(
+            "Would a person reading or searching `document` plausibly ask `row.question` to learn about the "
+            "document's subject matter (its events, findings, systems, people or decisions)?"
+        ),
+        criteria=SystemOneNoulCriteria(
+            true=(
+                "It asks about the substance the document is about, and a reader who has not seen the source can "
+                "tell what it asks: it names the people, organisations, places, systems, dates or quoted phrases it is about."
+            ),
+            false=(
+                "It is trivia about the file itself (cover or title-page text, report or document numbers, "
+                "distribution codes, table-of-contents or boilerplate metadata, or the filename), or it cannot be "
+                "understood without the source (a pronoun plus a predicate, or 'this email', 'the document', "
+                "'the text above')."
+            ),
+        ),
+    ),
+    ANSWER_SUPPORTED: SystemOneNoul(
+        instructions=(
+            "Does `row.evidence_quote`, taken from `answer_location` of `document`, state or directly imply "
+            "`row.expected_answer` as the answer to `row.question`?"
+        ),
+        criteria=SystemOneNoulCriteria(
+            true="The quoted evidence itself specifically and correctly answers the question with the expected answer.",
+            false=(
+                "The quote does not support the expected answer, the answer is vague or off-question, or it can only "
+                "be read off the file name or path rather than from the quoted evidence."
+            ),
+        ),
+    ),
+    ANSWER_CUED: SystemOneNoul(
+        instructions=(
+            "Does `row.question` copy distinctive cue words (exact phrases, codes, dates, test or site names) from "
+            "`row.evidence_quote`, so that a keyword search would find the answering passage without understanding "
+            "the question?"
+        ),
+        criteria=SystemOneNoulCriteria(
+            true="The question leaks where the answer is through distinctive words copied from the evidence.",
+            false="Finding the answer requires understanding the question, not matching copied cue words.",
+        ),
+    ),
+}
 
 
-def _reject_json_constant(name: str) -> float:
-    raise ValueError(f"non-finite JSON constant {name!r}")
+@dataclass(frozen=True)
+class JudgeVerdict:
+    """The judge's nouls for one row (probability of yes per question)."""
+
+    reader_question: float
+    answer_supported: float
+    answer_cued: float
 
 
-def parse_judge_verdict(text: str) -> tuple[float, bool, str]:
-    try:
-        payload = json.loads(_extract_json(text, opener="{", closer="}"), parse_constant=_reject_json_constant)
-    except (json.JSONDecodeError, ValueError) as exc:
-        raise GroundedQAParseError(f"judge output is not valid JSON: {exc}") from exc
-    if not isinstance(payload, dict):
-        raise GroundedQAParseError("judge output is not a JSON object")
-    raw_score = payload.get("score")
-    if isinstance(raw_score, bool) or not isinstance(raw_score, (int, float)):
-        raise GroundedQAParseError("judge output has no numeric score")
-    try:
-        score_value = float(raw_score)  # a huge JSON integer overflows here rather than at the clamp
-    except (OverflowError, ValueError) as exc:
-        raise GroundedQAParseError(f"judge score is not representable: {exc}") from exc
-    if not math.isfinite(score_value):
-        raise GroundedQAParseError("judge output has no finite numeric score")
-    score = min(10.0, max(0.0, score_value))
-    raw_keep = payload.get("keep")
-    keep = bool(raw_keep) if isinstance(raw_keep, bool) else score >= 7.0
-    reason = str(payload.get("reason") or "").strip()
-    return score, keep, reason
+def judge_state(item: EvalDatasetItem, *, source_path: str) -> dict[str, Any]:
+    """The System One state for one row: its document, the located answer span and the row."""
+    location = item.expected_locations[0] if item.expected_locations else None
+    span = ""
+    if location is not None:
+        unit = "page" if location.unit == "page" else "line"
+        span = f"{unit} {location.start}" if location.start == location.end else f"{unit}s {location.start}-{location.end}"
+    return {
+        "document": source_path,
+        "answer_location": span,
+        "row": {
+            "question": item.question,
+            "expected_answer": item.expected_answer or "",
+            "evidence_quote": item.evidence_quote or "",
+        },
+    }
+
+
+def judge_verdict(nouls: dict[str, float]) -> JudgeVerdict:
+    return JudgeVerdict(
+        reader_question=float(nouls[READER_QUESTION]),
+        answer_supported=float(nouls[ANSWER_SUPPORTED]),
+        answer_cued=float(nouls[ANSWER_CUED]),
+    )
+
+
+def judge_accepts(verdict: JudgeVerdict, thresholds: SyntheticJudgeConfig) -> bool:
+    """Keep a row only when every gated noul reaches its configured minimum; the cue noul is reported only."""
+    return (
+        verdict.reader_question >= float(thresholds.reader_question_min)
+        and verdict.answer_supported >= float(thresholds.answer_supported_min)
+    )
 
 
 def source_excerpt(content: str, *, max_lines: int) -> str:
@@ -912,15 +980,41 @@ def source_excerpt(content: str, *, max_lines: int) -> str:
     return "\n".join(lines[: max(1, int(max_lines))]).strip()
 
 
+def source_location(chunk: Chunk) -> EvalExpectedLocation | None:
+    """The located span a row generated from ``chunk`` must be retrieved at.
+
+    Paged documents (Docling provenance) are located by page range, everything else by the
+    chunk's line span. A chunk with neither has no usable location.
+    """
+    path = str(chunk.file_path or "").strip()
+    if not path:
+        return None
+    provenance = chunk.provenance
+    if provenance is not None and provenance.page_start is not None and provenance.page_end is not None:
+        return EvalExpectedLocation(path=path, unit="page", start=provenance.page_start, end=provenance.page_end)
+    start = int(chunk.start_line or 0)
+    if start < 1:
+        return None
+    return EvalExpectedLocation(path=path, unit="line", start=start, end=max(start, int(chunk.end_line or start)))
+
+
 def build_eval_item(
     row: dict[str, Any],
     *,
     source_path: str,
+    location: EvalExpectedLocation | None,
     source_kind: str,
     include_expected_answer: bool,
     include_tags: bool,
     limits: SyntheticGeneratorConfig,
 ) -> EvalDatasetItem | None:
+    """One eval row, or None when the row is malformed, over a limit, or has no located span.
+
+    A row whose only evidence would be the whole document is never kept: on a single-document
+    corpus it could not fail, so it carries no signal.
+    """
+    if location is None:
+        return None
     question = str(row.get("question") or "").strip()
     answer = str(row.get("expected_answer") or "").strip()
     quote = str(row.get("evidence_quote") or "").strip()
@@ -939,6 +1033,7 @@ def build_eval_item(
     return EvalDatasetItem(
         question=question,
         expected_paths=[source_path],
+        expected_locations=[location.model_copy(update={"path": source_path})],
         expected_answer=answer,
         evidence_quote=quote,
         tags=tags,
@@ -1016,7 +1111,11 @@ class _Stats:
     rejected_ungrounded: int = 0
     judged: int = 0
     kept: int = 0
-    judge_scores: list[float] = field(default_factory=list)
+    verdicts: list[JudgeVerdict] = field(default_factory=list)
+
+    def mean_noul(self, name: str) -> float | None:
+        values = [float(getattr(verdict, name)) for verdict in self.verdicts]
+        return (sum(values) / len(values)) if values else None
 
 
 @dataclass(frozen=True)
@@ -1081,12 +1180,14 @@ async def _generate_rows_for_chunk(
         return []
 
     source_kind = _infer_source_kind(file_path, excerpt)
+    location = source_location(chunk)
     candidates: list[_Candidate] = []
     for row in rows[:num_pairs]:
         stats.generated += 1
         item = build_eval_item(
             row,
             source_path=file_path,
+            location=location,
             source_kind=source_kind,
             include_expected_answer=bool(request.include_expected_answer),
             include_tags=bool(request.include_tags),
@@ -1109,52 +1210,26 @@ async def _generate_rows_for_chunk(
 
 async def _judge_candidate(
     *,
-    cfg: TriBridConfig,
-    route: ProviderRoute,
+    judge: SystemOneClient,
+    thresholds: SyntheticJudgeConfig,
     candidate: _Candidate,
-    threshold: float,
-    timeout_s: float,
     stats: _Stats,
     cancel_event: asyncio.Event | None,
 ) -> bool:
-    judge_cfg = cfg.synthetic.judge
-    payload = {
-        "question": candidate.item.question,
-        "expected_paths": candidate.item.expected_paths,
-        "expected_answer": candidate.item.expected_answer or "",
-        "evidence_quote": candidate.item.evidence_quote or "",
-        "source_file_path": candidate.source_path,
-        "source_excerpt": candidate.source_excerpt,
-    }
+    """Ask System One every judge Noul about one row in one request; any failure fails the run."""
     try:
-        result = await _cancellable(
-            generate_chat_text(
-                route=route,
-                system_prompt=cfg.system_prompts.synthetic_judge,
-                user_message=json.dumps(payload, ensure_ascii=False, indent=2),
-                images=[],
-                image_detail="auto",
-                observation_name="synthetic.grounded_qa.judge",
-                temperature=float(judge_cfg.temperature),
-                max_tokens=int(judge_cfg.max_tokens),
-                context_text="",
-                context_chunks=[],
-                timeout_s=timeout_s,
-            ),
+        nouls = await _cancellable(
+            judge.nouls(judge_state(candidate.item, source_path=candidate.source_path), JUDGE_QUESTIONS),
             cancel_event,
         )
     except asyncio.CancelledError:
         raise
-    except Exception as exc:
-        raise GroundedQAGenerationError(f"judge alias {route.model!r} failed: {exc}") from exc
-    try:
-        score, keep, _reason = parse_judge_verdict(str(result.text or ""))
-    except GroundedQAParseError:
-        stats.rejected_malformed += 1
-        return False
+    except SystemOneError as exc:
+        raise GroundedQAGenerationError(f"System One judge ({judge.provider}) failed: {exc}") from exc
+    verdict = judge_verdict(nouls)
     stats.judged += 1
-    stats.judge_scores.append(score)
-    return judge_accepts(score=score, keep=keep, threshold=threshold)
+    stats.verdicts.append(verdict)
+    return judge_accepts(verdict, thresholds)
 
 
 async def generate_eval_items(
@@ -1167,20 +1242,21 @@ async def generate_eval_items(
 ) -> tuple[list[EvalDatasetItem], _Stats]:
     curate = bool(request.curate_enabled)
     generator_route = resolve_synthetic_route(cfg=cfg, model=str(request.generator_model or ""))
-    judge_route = resolve_synthetic_route(cfg=cfg, model=str(request.judge_model or "")) if curate else None
-    aliases = [generator_route.model] + ([judge_route.model] if judge_route is not None else [])
-    concurrency = gateway_concurrency(cfg, *aliases)
+    judge: SystemOneClient | None = None
+    if curate:
+        try:
+            judge = SystemOneClient(cfg.system_one)
+        except SystemOneError as exc:
+            raise GroundedQAGenerationError(f"curation needs the System One judge: {exc}") from exc
+    concurrency = gateway_concurrency(cfg, generator_route.model)
     timeout_s = float(cfg.generation.gen_timeout)
     max_pairs = max(1, int(request.max_pairs or 150))
     pairs_per_source = max(1, int(request.pairs_per_source or 1))
-    threshold = float(request.curate_threshold)
+    thresholds = cfg.synthetic.judge
     stats = _Stats()
     kept: list[EvalDatasetItem] = []
     run_semaphore = asyncio.Semaphore(concurrency)
     generator_semaphore = _alias_semaphore(generator_route.model, run_semaphore=run_semaphore)
-    judge_semaphore = (
-        _alias_semaphore(judge_route.model, run_semaphore=run_semaphore) if judge_route is not None else run_semaphore
-    )
 
     def _check_cancelled() -> None:
         if cancel_event is not None and cancel_event.is_set():
@@ -1201,48 +1277,48 @@ async def generate_eval_items(
             )
         items: list[EvalDatasetItem] = []
         for candidate in candidates:
-            if judge_route is not None:
+            if judge is not None:
                 _check_cancelled()
-                async with judge_semaphore:
-                    accepted = await _judge_candidate(
-                        cfg=cfg,
-                        route=judge_route,
-                        candidate=candidate,
-                        threshold=threshold,
-                        timeout_s=timeout_s,
-                        stats=stats,
-                        cancel_event=cancel_event,
-                    )
+                accepted = await _judge_candidate(
+                    judge=judge,
+                    thresholds=thresholds,
+                    candidate=candidate,
+                    stats=stats,
+                    cancel_event=cancel_event,
+                )
                 if not accepted:
                     continue
             items.append(candidate.item)
         return items
 
-    if on_progress is not None:
-        await on_progress(
-            f"Generating grounded QA rows with {generator_route.model} "
-            f"(judge {judge_route.model if judge_route is not None else 'disabled'}, concurrency {concurrency}) "
-            f"over {len(chunks)} source chunks.",
-            0.0,
-        )
-
-    for start in range(0, len(chunks), concurrency):
-        _check_cancelled()
-        batch = chunks[start : start + concurrency]
-        async with asyncio.TaskGroup() as group:
-            tasks = [group.create_task(_process(chunk)) for chunk in batch]
-        for task in tasks:
-            kept.extend(task.result())
-        stats.kept = len(kept)
+    judge_label = f"System One {judge.provider}" if judge is not None else "disabled"
+    async with contextlib.AsyncExitStack() as stack:
+        if judge is not None:
+            await stack.enter_async_context(judge)
         if on_progress is not None:
-            done = min(len(chunks), start + len(batch))
             await on_progress(
-                f"{done}/{len(chunks)} sources processed: {stats.generated} generated, "
-                f"{stats.rejected_ungrounded} ungrounded, {stats.rejected_malformed} malformed, {len(kept)} kept.",
-                100.0 * done / max(1, len(chunks)),
+                f"Generating grounded QA rows with {generator_route.model} "
+                f"(judge {judge_label}, concurrency {concurrency}) over {len(chunks)} source chunks.",
+                0.0,
             )
-        if len(kept) >= max_pairs:
-            break
+
+        for start in range(0, len(chunks), concurrency):
+            _check_cancelled()
+            batch = chunks[start : start + concurrency]
+            async with asyncio.TaskGroup() as group:
+                tasks = [group.create_task(_process(chunk)) for chunk in batch]
+            for task in tasks:
+                kept.extend(task.result())
+            stats.kept = len(kept)
+            if on_progress is not None:
+                done = min(len(chunks), start + len(batch))
+                await on_progress(
+                    f"{done}/{len(chunks)} sources processed: {stats.generated} generated, "
+                    f"{stats.rejected_ungrounded} ungrounded, {stats.rejected_malformed} malformed, {len(kept)} kept.",
+                    100.0 * done / max(1, len(chunks)),
+                )
+            if len(kept) >= max_pairs:
+                break
     return kept[:max_pairs], stats
 
 
@@ -1291,16 +1367,32 @@ async def run_grounded_qa_provider(
         artifacts["config_patch_json"] = patch
 
     curate = bool(request.curate_enabled)
-    avg_judge_score = (sum(stats.judge_scores) / len(stats.judge_scores)) if stats.judge_scores else None
+    thresholds = cfg.synthetic.judge
+    reader_mean = stats.mean_noul("reader_question")
+    supported_mean = stats.mean_noul("answer_supported")
+    cued_mean = stats.mean_noul("answer_cued")
+
+    def _fmt(value: float | None) -> str:
+        return "n/a" if value is None else f"{value:.2f}"
+
+    judge_line = (
+        f"System One ({cfg.system_one.provider}, {cfg.system_one.model}); keeps rows with "
+        f"reader_question >= {thresholds.reader_question_min:.2f} and answer_supported >= "
+        f"{thresholds.answer_supported_min:.2f}"
+        if curate
+        else "(curation disabled)"
+    )
     artifacts["report_md"] = (
         "Grounded QA rows generated through the LiteLLM gateway with verbatim evidence checks.\n"
         f"Generator model: {request.generator_model}\n"
-        f"Judge model: {request.judge_model if curate else '(curation disabled)'}\n"
+        f"Judge: {judge_line}\n"
         f"Sources used: {len(chunks)}\n"
         f"Rows generated: {stats.generated}\n"
         f"Rejected (ungrounded quote or unanchored answer): {stats.rejected_ungrounded}\n"
         f"Rejected (malformed / self-referential / over limit): {stats.rejected_malformed}\n"
         f"Judged: {stats.judged}\n"
+        f"Mean nouls: reader_question {_fmt(reader_mean)}, answer_supported {_fmt(supported_mean)}, "
+        f"answer_cued_in_question {_fmt(cued_mean)}\n"
         f"Eval items kept: {len(eval_items)}\n"
         f"Keywords: {len(keywords)}\n"
     )
@@ -1312,5 +1404,7 @@ async def run_grounded_qa_provider(
     summary.items_rejected_malformed = stats.rejected_malformed
     summary.items_curated_in = stats.judged if curate else 0
     summary.items_curated_out = len(eval_items)
-    summary.avg_judge_score = avg_judge_score
+    summary.mean_reader_question_noul = reader_mean
+    summary.mean_answer_supported_noul = supported_mean
+    summary.mean_answer_cued_noul = cued_mean
     return artifacts, summary, eval_items

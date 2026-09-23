@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { TraceExternalLinks } from '@/components/Observability/TraceExternalLinks';
 import { ChatSubtabs } from '@/components/Chat/ChatSubtabs';
 import { ChatInterface } from '@/components/Chat/ChatInterface';
@@ -8,6 +8,7 @@ import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { useAPI, useConfig, useSubtab } from '@/hooks';
 import { LiveTerminal, type LiveTerminalHandle } from '@/components/LiveTerminal/LiveTerminal';
 import { TerminalService } from '@/services/TerminalService';
+import { rememberPanelHeight } from '@/utils/resizablePanels';
 import { useRepoStore } from '@/stores/useRepoStore';
 import type { Trace, TracesLatestResponse } from '@/types/generated';
 
@@ -20,6 +21,7 @@ export default function ChatTab() {
   const { activeRepo } = useRepoStore();
   const { activeSubtab, setSubtab } = useSubtab<ChatSubtab>({ routePath: '/chat', defaultSubtab: 'ui' });
   const [traceOpen, setTraceOpen] = useState(false);
+  const workbenchId = `chat-workbench-${useId().replace(/:/g, '')}`;
 
   const traceInitRef = useRef(false);
   const terminalRef = useRef<LiveTerminalHandle>(null);
@@ -40,7 +42,7 @@ export default function ChatTab() {
       : null;
 
   useEffect(() => {
-    // Apply config default once (do not override manual toggles).
+    // Apply config default once (do not override manual toggles)
     if (!traceInitRef.current && config) {
       traceInitRef.current = true;
       setTraceOpen(chatShowTraceDefault);
@@ -242,17 +244,26 @@ export default function ChatTab() {
     <div id="tab-chat" className="tab-content">
       <ChatSubtabs activeSubtab={activeSubtab} onSubtabChange={(s) => setSubtab(s as ChatSubtab)} />
 
-      <div
-        id="tab-chat-ui"
-        className={`section-subtab ${activeSubtab === 'ui' ? 'active' : ''}`}
-      >
-        <div className="settings-section" style={{ borderLeft: '3px solid var(--link)', padding: 0 }}>
+      <div id="tab-chat-ui" className={`section-subtab ${activeSubtab === 'ui' ? 'active' : ''}`}>
+        <div
+          ref={rememberPanelHeight}
+          className="settings-section chat-workbench"
+          data-resizable="chat-workbench"
+          style={{ borderLeft: '3px solid var(--link)', padding: 0, margin: 0 }}
+        >
           <ErrorBoundary>
-            <ChatInterface />
+            <ChatInterface workbenchId={workbenchId} />
           </ErrorBoundary>
         </div>
 
-        <div className="settings-section" style={{ padding: '0 12px 12px 12px' }}>
+        <div
+          ref={rememberPanelHeight}
+          className="settings-section"
+          data-resizable="chat-routing-trace"
+          data-region="routing-trace"
+          data-collapsed={traceOpen ? 'false' : 'true'}
+          style={{ padding: '0 12px 12px 12px' }}
+        >
           <details
             id="chat-trace"
             open={traceOpen}

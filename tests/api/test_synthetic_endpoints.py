@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from server.api.dataset import _dataset_path_for_corpus
 from server.models.tribrid_config_model import (
     SyntheticArtifactRef,
     SyntheticRun,
@@ -66,25 +67,22 @@ def _write_full_stack_run(
     gate_passed: bool,
     triplets_text: str = _VALID_TRIPLET_LINE,
     bundle_id: str | None = None,
+    eval_rows: list[dict[str, object]] | None = None,
 ) -> Path:
     run_dir = synthetic_runs_dir() / run_id
     artifacts_dir = run_dir / "artifacts"
     artifacts_dir.mkdir(parents=True, exist_ok=True)
 
     eval_path = artifacts_dir / "eval_dataset.json"
-    eval_path.write_text(
-        json.dumps(
-            [
-                {
-                    "question": "Who is named in this document?",
-                    "expected_paths": ["notes.txt"],
-                    "expected_answer": "Example",
-                    "tags": ["synthetic"],
-                }
-            ]
-        ),
-        encoding="utf-8",
-    )
+    default_rows: list[dict[str, object]] = [
+        {
+            "question": "Who is named in this document?",
+            "expected_paths": ["notes.txt"],
+            "expected_answer": "Example",
+            "tags": ["synthetic"],
+        }
+    ]
+    eval_path.write_text(json.dumps(eval_rows if eval_rows is not None else default_rows), encoding="utf-8")
     triplets_path = artifacts_dir / "triplets.jsonl"
     triplets_path.write_text(triplets_text, encoding="utf-8")
 
@@ -93,7 +91,6 @@ def _write_full_stack_run(
         provider="grounded_qa",
         recipe="full_stack",
         generator_model="litellm:synthetic-quality",
-        judge_model="litellm:synthetic-quality",
     )
     run = SyntheticRun(
         run_id=run_id,
@@ -150,35 +147,11 @@ async def test_synthetic_stream_route_not_shadowed(client) -> None:
 @pytest.mark.parametrize(
     ("payload", "field_name"),
     [
-        (
-            {
-                "judge_model": "litellm:synthetic-quality",
-            },
-            "generator_model",
-        ),
-        (
-            {
-                "generator_model": "litellm:synthetic-quality",
-            },
-            "judge_model",
-        ),
-        (
-            {
-                "generator_model": "   ",
-                "judge_model": "litellm:synthetic-quality",
-            },
-            "generator_model",
-        ),
-        (
-            {
-                "generator_model": "litellm:synthetic-quality",
-                "judge_model": "   ",
-            },
-            "judge_model",
-        ),
+        ({}, "generator_model"),
+        ({"generator_model": "   "}, "generator_model"),
     ],
 )
-async def test_synthetic_start_requires_generator_and_judge_models(client, payload, field_name: str) -> None:
+async def test_synthetic_start_requires_a_generator_model(client, payload, field_name: str) -> None:
     corpus_id = f"pytest_synth_models_{uuid.uuid4().hex[:8]}"
     res = await client.post(
         "/api/synthetic/run/start",
@@ -204,7 +177,6 @@ async def test_synthetic_start_rejects_invalid_corpus_id(client, corpus_id: str)
             "provider": "grounded_qa",
             "recipe": "eval_dataset",
             "generator_model": "litellm:synthetic-quality",
-            "judge_model": "litellm:synthetic-quality",
         },
     )
     assert res.status_code == 422
@@ -223,7 +195,6 @@ async def test_synthetic_start_schema_rejects_every_provider_except_grounded_qa(
             "provider": provider,
             "recipe": "eval_dataset",
             "generator_model": "litellm:synthetic-quality",
-            "judge_model": "litellm:synthetic-quality",
         },
     )
     assert res.status_code == 422
@@ -448,7 +419,6 @@ async def test_synthetic_run_without_indexed_chunks_fails_closed_and_blocks_publ
                 "provider": "grounded_qa",
                 "recipe": "eval_dataset",
                 "generator_model": model,
-                "judge_model": model,
                 "max_source_chunks": 10,
                 "max_pairs": 10,
                 "pairs_per_source": 1,
@@ -493,6 +463,41 @@ async def test_synthetic_start_refuses_an_unknown_corpus_instead_of_using_global
         },
     )
     assert res.status_code == 404, res.text
+
+
+@pytest.mark.requires_postgres
+@pytest.mark.asyncio
+async def test_publish_eval_dataset_keeps_each_rows_located_span(client, tmp_path: Path) -> None:
+    """A published synthetic row keeps the page span it was generated from, so the corpus eval
+    dataset is scored against the located evidence instead of the whole (single) document."""
+    corpus_id = f"pytest_synth_publish_eval_{uuid.uuid4().hex[:8]}"
+    corpus_root = tmp_path / "corpus"
+    corpus_root.mkdir()
+    created = await client.post("/api/corpora", json={"corpus_id": corpus_id, "name": corpus_id, "path": str(corpus_root)})
+    assert created.status_code == 200, created.text
+    run_dirs: list[Path] = []
+    located = [{"path": "A11_MissionReport.pdf", "unit": "page", "start": 176, "end": 179}]
+    try:
+        run_id = f"{corpus_id}__located"
+        row: dict[str, object] = {
+            "question": "To what percent was the Apollo 11 descent engine throttled seven minutes into powered descent?",
+            "expected_paths": ["A11_MissionReport.pdf"],
+            "expected_locations": located,
+            "expected_answer": "55 percent",
+            "tags": ["synthetic", "grounded_qa"],
+        }
+        run_dirs.append(_write_full_stack_run(corpus_id=corpus_id, run_id=run_id, gate_passed=True, eval_rows=[row]))
+        published = await client.post(f"/api/synthetic/run/{run_id}/publish/eval_dataset")
+        assert published.status_code == 200, published.text
+
+        listed = await client.get(f"/api/dataset?corpus_id={corpus_id}")
+        assert listed.status_code == 200, listed.text
+        assert [r["expected_locations"] for r in listed.json()] == [located]
+    finally:
+        for run_dir in run_dirs:
+            shutil.rmtree(run_dir, ignore_errors=True)
+        _dataset_path_for_corpus(corpus_id).unlink(missing_ok=True)
+        await client.delete(f"/api/corpora/{corpus_id}")
 
 
 @pytest.mark.requires_postgres

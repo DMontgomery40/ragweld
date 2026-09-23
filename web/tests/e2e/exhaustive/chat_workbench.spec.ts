@@ -3,6 +3,7 @@
 // file costs nothing to run. The paid Stop proof lives in chat_reliability.spec.ts.
 import { expect, test, type Page } from '@playwright/test';
 import { API_BASE, patchCorpusConfigSection, provisionExhaustiveCorpus } from './corpus_fixture';
+import { dragPanelCorner, overflowingPanels } from './panel_resize';
 
 const SCHEMA_MODEL = String(process.env.GRAPH_E2E_KG_MODEL || '').trim() || 'deepseek.deepseek-v4-flash';
 
@@ -388,5 +389,168 @@ test.describe.serial('chat workbench (seeded, no paid sends)', () => {
     } finally {
       await corpus.dispose(request);
     }
+  });
+});
+
+// GUI-050 / GUI-052 / GUI-059, revised: the workbench is a panel like every other. It opens at a
+// comfortable default height, NOT pinned to fill the pane (the operator read the fill-the-pane
+// version as "frozen solid all the way open"), and the operator drags it taller or shorter from
+// its corner through the global resizable-panel rule; the height is remembered per viewer.
+// Seeded from localStorage (no sends), real app + API, measured at deviceScaleFactor 1.
+test.describe('chat workbench is a resizable panel (GUI-050)', () => {
+  test.use({ deviceScaleFactor: 1 });
+
+  const LAYOUT_QUESTION = 'What is the calibration interval for the pressure sensor on the acceptance rig?';
+  const WORKBENCH = '.main-content [data-resizable="chat-workbench"]';
+
+  type ChatGeom = {
+    innerH: number;
+    scrollportBottom: number;
+    panelTop: number;
+    panelBottom: number;
+    panelH: number;
+    panelClientH: number;
+    workbenchH: number;
+    messagesH: number;
+    traceTop: number | null;
+    resize: string;
+  };
+
+  async function seedLayoutThread(page: Page): Promise<void> {
+    await seedThread(page, {
+      sources: { corpus_ids: ['recall_default'] },
+      messages: [
+        { id: 'u1', role: 'user', createdAt: new Date().toISOString(), content: [{ type: 'text', text: LAYOUT_QUESTION }] },
+        completedAssistant('The acceptance rig recalibrates the pressure sensor every 90 days.'),
+      ],
+    });
+  }
+
+  // The message region is found as the scroll container of the seeded question, so the
+  // measurement does not trust a test id to point at the right element.
+  async function measure(page: Page): Promise<ChatGeom> {
+    return page.evaluate(
+      ({ selector, question }) => {
+        const panel = document.querySelector(selector) as HTMLElement;
+        const root = panel.querySelector('[data-react-chat="true"]') as HTMLElement;
+        const scrollport = panel.closest('.tab-content') as HTMLElement;
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        let questionNode: Node | null = null;
+        while (walker.nextNode()) {
+          if ((walker.currentNode.textContent || '').includes(question)) {
+            questionNode = walker.currentNode;
+            break;
+          }
+        }
+        let messages: HTMLElement | null = questionNode ? questionNode.parentElement : null;
+        while (messages && messages !== root && !/(auto|scroll)/.test(getComputedStyle(messages).overflowY)) {
+          messages = messages.parentElement;
+        }
+        const trace = document.querySelector('.main-content #chat-trace') as HTMLElement | null;
+        const sp = scrollport.getBoundingClientRect();
+        const pr = panel.getBoundingClientRect();
+        return {
+          innerH: window.innerHeight,
+          scrollportBottom: Math.round(sp.top + scrollport.clientHeight),
+          panelTop: Math.round(pr.top),
+          panelBottom: Math.round(pr.bottom),
+          panelH: Math.round(pr.height),
+          panelClientH: panel.clientHeight,
+          workbenchH: Math.round(root.getBoundingClientRect().height),
+          messagesH: messages && messages !== root ? Math.round(messages.getBoundingClientRect().height) : -1,
+          traceTop: trace && trace.offsetParent ? Math.round(trace.getBoundingClientRect().top) : null,
+          resize: getComputedStyle(panel).resize,
+        };
+      },
+      { selector: WORKBENCH, question: LAYOUT_QUESTION },
+    );
+  }
+
+  for (const vp of [
+    { width: 1440, height: 900 },
+    { width: 1920, height: 1200 },
+  ]) {
+    test(`at ${vp.width}x${vp.height} it opens at a comfortable default, with Routing Trace below it in the pane`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(vp);
+      await seedLayoutThread(page);
+      await gotoChat(page);
+      await page.waitForTimeout(500);
+
+      const g = await measure(page);
+      const detail = JSON.stringify(g);
+      // clamp(520px, 68vh, 900px): a normal size, not the whole pane.
+      const expected = Math.min(900, Math.max(520, Math.round(0.68 * g.innerH)));
+      expect(Math.abs(g.panelH - expected), `default workbench height: ${detail}`).toBeLessThanOrEqual(2);
+      expect(g.resize, detail).toBe('vertical');
+      // The conversation fills the panel it is in.
+      expect(g.panelClientH - g.workbenchH, `workbench does not fill its panel: ${detail}`).toBeLessThanOrEqual(1);
+      expect(g.workbenchH - g.panelClientH, `workbench overflows its panel: ${detail}`).toBeLessThanOrEqual(1);
+      expect(g.messagesH, `message list not found: ${detail}`).toBeGreaterThan(0);
+      // The toolbar can wrap and carry a Sources notice; the conversation still gets real room.
+      expect(g.messagesH, `message list is a strip: ${detail}`).toBeGreaterThanOrEqual(200);
+      // Not pinned to the pane: the panel ends inside it and Routing Trace starts above its bottom.
+      expect(g.panelBottom, `workbench runs to the pane bottom: ${detail}`).toBeLessThan(g.scrollportBottom);
+      expect(g.traceTop, `Routing Trace is not rendered: ${detail}`).not.toBeNull();
+      expect(g.traceTop!, `Routing Trace is pushed out of the pane: ${detail}`).toBeLessThan(g.scrollportBottom);
+      expect(await overflowingPanels(page, '.main-content'), 'a resizable chat panel clips its content').toEqual([]);
+    });
+  }
+
+  test('dragging its corner makes it shorter and taller, the conversation follows, and the height survives a reload', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await seedLayoutThread(page);
+    await gotoChat(page);
+    await page.waitForTimeout(500);
+    const panel = page.locator(WORKBENCH);
+    const start = await measure(page);
+
+    // Count the height writes (a pass-through spy; the write itself still happens): a drag
+    // rewrites the inline height every frame, and storage must see only where it came to rest.
+    await page.evaluate(() => {
+      const w = window as unknown as { __panelWrites: string[] };
+      w.__panelWrites = [];
+      const setItem = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (key: string, value: string) {
+        if (key.startsWith('ragweld-panel-height:')) w.__panelWrites.push(`${key}=${value}`);
+        return setItem.call(this, key, value);
+      };
+    });
+    const shorter = (await dragPanelCorner(page, panel, -180)).to;
+    await page.waitForTimeout(600);
+    const writes = await page.evaluate(() => (window as unknown as { __panelWrites: string[] }).__panelWrites);
+    expect(writes, 'the dragged height must be written once, after the drag').toEqual([
+      `ragweld-panel-height:v1:main:chat-workbench=${shorter}`,
+    ]);
+    const shrunk = await measure(page);
+    const shrunkDetail = JSON.stringify({ start, shrunk });
+    expect(Math.abs(shorter - (start.panelH - 180)), shrunkDetail).toBeLessThanOrEqual(4);
+    expect(Math.abs(shrunk.panelClientH - shrunk.workbenchH), shrunkDetail).toBeLessThanOrEqual(1);
+    expect(Math.abs(start.messagesH - shrunk.messagesH - 180), `the message list did not give up the height: ${shrunkDetail}`).toBeLessThanOrEqual(8);
+    // The edge moves, not the pane: resizing never scrolls the conversation away.
+    expect(Math.abs(shrunk.panelTop - start.panelTop), shrunkDetail).toBeLessThanOrEqual(1);
+
+    const taller = (await dragPanelCorner(page, panel, 120)).to;
+    const grown = await measure(page);
+    expect(Math.abs(taller - (shorter + 120)), JSON.stringify({ shrunk, grown })).toBeLessThanOrEqual(4);
+    expect(grown.messagesH, JSON.stringify({ shrunk, grown })).toBeGreaterThan(shrunk.messagesH + 100);
+    expect(Math.abs(grown.panelClientH - grown.workbenchH), JSON.stringify(grown)).toBeLessThanOrEqual(1);
+
+    // It never collapses below a usable conversation (min-height 420px).
+    const floor = (await dragPanelCorner(page, panel, -400)).to;
+    expect(floor, 'the workbench shrank below its floor').toBeGreaterThanOrEqual(418);
+    expect(floor).toBeLessThanOrEqual(424);
+
+    // The size the operator leaves it at is the size it comes back at.
+    const kept = (await dragPanelCorner(page, panel, 90)).to;
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('#chat-input', { timeout: 90_000 });
+    await page.waitForTimeout(500);
+    const reloaded = await measure(page);
+    expect(Math.abs(reloaded.panelH - kept), JSON.stringify({ kept, reloaded })).toBeLessThanOrEqual(2);
+    expect(Math.abs(reloaded.panelClientH - reloaded.workbenchH), JSON.stringify(reloaded)).toBeLessThanOrEqual(1);
   });
 });

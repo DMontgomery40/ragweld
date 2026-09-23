@@ -5,13 +5,19 @@ import hashlib
 import json
 import time
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
+from contextlib import aclosing
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 
 from server.chat.context_formatter import format_context_for_llm
-from server.chat.generation import GenerationResult, generate_chat_text, stream_chat_text
+from server.chat.generation import (
+    GatewayContentMissingError,
+    GenerationResult,
+    generate_chat_text,
+    stream_chat_text,
+)
 from server.chat.generation_failure import generation_unavailable_detail, safe_error_message
 from server.chat.prompt_budget import (
     PromptBudgetError,
@@ -20,10 +26,12 @@ from server.chat.prompt_budget import (
     plan_prompt_budget,
 )
 from server.chat.prompt_builder import get_system_prompt
+from server.chat.provider_router import effective_model_override as resolve_effective_model_override
 from server.chat.provider_router import select_provider_route
 from server.chat.query_record import append_chat_query_record
 from server.chat.retrieval_gate import classify_for_recall
 from server.chat.source_router import resolve_sources
+from server.chat.telemetry import ChatRunTelemetry
 from server.db.postgres import PostgresClient
 from server.gateway_catalog import OPENROUTER_UPSTREAM_PREFIX, gateway_rows_snapshot
 from server.models.chat import Message
@@ -41,6 +49,66 @@ from server.observability.run_census import RunIdentity
 from server.retrieval.cache import CacheMode, SemanticCacheService
 from server.services.conversation_store import Conversation, get_conversation_store
 from server.services.rag import FusionProtocol
+
+# Once the stream is open, an SSE comment goes out whenever the client has seen nothing for
+# this long, well inside Cloudflare's ~100 s origin timeout: a reasoning model can think for
+# a minute or more before its first answer token, and every proxy on the public path
+# (Cloudflare -> cloudflared -> Caddy) would otherwise idle the request out with a 524.
+SSE_KEEPALIVE_INTERVAL_S = 15.0
+SSE_KEEPALIVE = ": keepalive\n\n"
+
+_T = TypeVar("_T")
+
+
+class _SourceExhausted:
+    """Marks the end of the source in `with_idle_ticks` (a task cannot raise StopAsyncIteration usefully)."""
+
+
+_SOURCE_EXHAUSTED = _SourceExhausted()
+
+
+async def _advance(source: AsyncGenerator[_T, None]) -> _T | _SourceExhausted:
+    try:
+        return await anext(source)
+    except StopAsyncIteration:
+        return _SOURCE_EXHAUSTED
+
+
+def _discard_outcome(task: asyncio.Task[Any]) -> None:
+    # The consumer is gone; retrieving the outcome keeps a late failure out of the loop's
+    # "exception was never retrieved" log.
+    if not task.cancelled():
+        task.exception()
+
+
+async def with_idle_ticks(source: AsyncGenerator[_T, None], *, interval_s: float) -> AsyncGenerator[_T | None, None]:
+    """Yield ``source``'s items, and ``None`` each time ``interval_s`` passes without one.
+
+    The source is advanced in a task of its own so a tick can be produced while an item is
+    still pending; the consumer's own work (commits, the terminal event) stays in the
+    consumer's task. Closing or cancelling this generator cancels the pending advance, which
+    reaches the source at its current await exactly as a direct cancellation would.
+    """
+    pending: asyncio.Task[_T | _SourceExhausted] | None = None
+    try:
+        while True:
+            if pending is None:
+                pending = asyncio.create_task(_advance(source))
+            done, _ = await asyncio.wait({pending}, timeout=interval_s)
+            if not done:
+                yield None
+                continue
+            finished, pending = pending, None
+            item = finished.result()
+            if isinstance(item, _SourceExhausted):
+                return
+            yield item
+    finally:
+        if pending is not None:
+            pending.cancel()
+            pending.add_done_callback(_discard_outcome)
+        else:
+            await source.aclose()
 
 
 def _normalize_cache_mode(cache_mode: str | CacheMode | None) -> CacheMode:
@@ -309,9 +377,11 @@ async def chat_once(
     config: TriBridConfig,
     fusion: FusionProtocol,
     conversation: Conversation,
+    telemetry: ChatRunTelemetry,
     billing_session_id: str | None = None,
 ) -> ChatOnceResult:
-    """Non-streaming chat handler."""
+    """Non-streaming chat handler. Reports its generation phase, usage and cost to `telemetry`;
+    the caller finishes it with the request's outcome."""
     billing_session_id = billing_session_id or str(uuid.uuid4())
 
     corpus_ids = resolve_sources(request.sources)
@@ -407,12 +477,8 @@ async def chat_once(
 
     # Provider + prompt. The route is resolved first so the retrieved context can be
     # trimmed to the selected alias's context window (lowest-ranked chunks first).
-    effective_model_override = (request.model_override or "").strip()
-    if request.images or []:
-        # chat.multimodal.vision_model_override is "force model for vision": it wins over the picker.
-        vision_override = str(config.chat.multimodal.vision_model_override or "").strip()
-        if vision_override:
-            effective_model_override = vision_override
+    # chat.multimodal.vision_model_override is "force model for vision": it wins over the picker.
+    effective_model_override = resolve_effective_model_override(request=request, config=config)
     resolved_route = None
     try:
         resolved_route = select_provider_route(
@@ -567,6 +633,7 @@ async def chat_once(
                 web_grounding=WebGroundingMetadata(),
             )
 
+    telemetry.begin_generation()
     try:
         route = resolved_route or select_provider_route(
             config=config,
@@ -597,12 +664,18 @@ async def chat_once(
         )
         text = generation.text
         provider_id = generation.provider_response_id
+        telemetry.record_usage(generation.usage)
+        telemetry.record_cost(generation.cost_summary)
         if not str(text or "").strip():
             raise RuntimeError("LLM returned an empty response")
     except PromptBudgetError:
         # Typed, non-retryable request refusal; the API maps it to a 422 detail.
         raise
     except Exception as e:
+        if isinstance(e, GatewayContentMissingError):
+            # Billed although it produced no answer (a reasoning model out of budget).
+            telemetry.record_usage(e.usage)
+            telemetry.record_cost(e.cost_summary)
         llm_used = False
         llm_error = safe_error_message(e)
         raise ChatGenerationError(llm_error) from e
@@ -665,8 +738,17 @@ async def chat_stream(
     conversation: Conversation,
     run_id: str,
     started_at_ms: int,
+    telemetry: ChatRunTelemetry,
 ) -> AsyncIterator[str]:
-    """Streaming chat handler that yields SSE events (type=text/done/error)."""
+    """Streaming chat handler that yields SSE events. Reports its generation phase, usage,
+    cost and generation failure to `telemetry`; the endpoint marks events and finishes it.
+
+    ``status`` (stage ``generating``, once the prompt is accepted and the request is about to
+    go to the gateway), ``thinking`` (the model's reasoning, only when
+    ``ui.chat_stream_include_thinking`` is on), ``text``, ``error`` and the terminal ``done``;
+    plus ``: keepalive`` comments while the model is silent after ``status``. Only ``text``
+    is the answer: reasoning is never persisted, cached or counted as content.
+    """
 
     corpus_ids = resolve_sources(request.sources)
     request_cache_mode = _normalize_cache_mode(request.cache_mode)
@@ -758,12 +840,8 @@ async def chat_stream(
 
     # Provider + prompt. The route is resolved first so the retrieved context can be
     # trimmed to the selected alias's context window (lowest-ranked chunks first).
-    effective_model_override = (request.model_override or "").strip()
-    if request.images or []:
-        # chat.multimodal.vision_model_override is "force model for vision": it wins over the picker.
-        vision_override = str(config.chat.multimodal.vision_model_override or "").strip()
-        if vision_override:
-            effective_model_override = vision_override
+    # chat.multimodal.vision_model_override is "force model for vision": it wins over the picker.
+    effective_model_override = resolve_effective_model_override(request=request, config=config)
     resolved_route = None
     try:
         resolved_route = select_provider_route(
@@ -942,7 +1020,8 @@ async def chat_stream(
                         conversation_id=conversation.id,
                         corpus_ids=list(corpus_ids),
                         query=request.message,
-                        top_paths=[s.file_path for s in sources[:5]],
+                        sources=sources,
+                        outcome="ok",
                     )
                 except Exception:
                     pass
@@ -962,11 +1041,13 @@ async def chat_stream(
     def _capture_usage(value: dict[str, Any]) -> None:
         nonlocal provider_usage
         provider_usage = dict(value)
+        telemetry.record_usage(value)
 
     def _capture_web_grounding(value: WebGroundingMetadata) -> None:
         nonlocal web_grounding
         web_grounding = value
 
+    telemetry.begin_generation()
     try:
         route = resolved_route or select_provider_route(
             config=config,
@@ -980,7 +1061,11 @@ async def chat_stream(
         )
         web_config = _web_config_for_route(request=request, config=config, route=route)
 
-        async for delta in stream_chat_text(
+        # The first event this handler yields is what lets the endpoint send its response
+        # headers, so nothing goes out before `status`: until the transport reports the prompt
+        # accepted, a refusal is still an HTTP status (a prompt-budget 413), not a stream.
+        generation_started = False
+        gateway_stream = stream_chat_text(
             route=route,
             system_prompt=system_prompt,
             user_message=request.message,
@@ -993,22 +1078,39 @@ async def chat_stream(
             timeout_s=float(getattr(config.ui, "chat_stream_timeout", 120) or 120),
             on_provider_response_id=_capture_provider_response_id,
             on_usage=_capture_usage,
+            on_cost_summary=telemetry.record_cost,
             on_web_grounding=_capture_web_grounding,
             web_config=web_config,
-        ):
-            accumulated += delta
-            yield f"data: {json.dumps({'type': 'text', 'content': delta})}\n\n"
+            include_reasoning=bool(config.ui.chat_stream_include_thinking),
+        )
+        async with aclosing(with_idle_ticks(gateway_stream, interval_s=SSE_KEEPALIVE_INTERVAL_S)) as events:
+            async for event in events:
+                if event is None:
+                    if generation_started:
+                        yield SSE_KEEPALIVE
+                    continue
+                if event.kind == "request":
+                    generation_started = True
+                    status = {"type": "status", "stage": "generating", "sources_count": len(sources)}
+                    yield f"data: {json.dumps(status)}\n\n"
+                    continue
+                if event.kind == "reasoning":
+                    yield f"data: {json.dumps({'type': 'thinking', 'content': event.content})}\n\n"
+                    continue
+                accumulated += event.content
+                yield f"data: {json.dumps({'type': 'text', 'content': event.content})}\n\n"
 
         if not accumulated.strip():
             # A provider that streams no text is a failed generation, reported through the
             # same typed error event as every other one, never as an assistant message.
             raise RuntimeError("LLM stream produced no content (check provider compatibility/config)")
     except PromptBudgetError:
-        # The transport refuses before any network I/O and before the first delta is
-        # yielded, so nothing has been streamed yet: let the API map it to the typed 413.
+        # The transport refuses before any network I/O and before its `request` item, so
+        # `status` has not gone out and nothing has been streamed: the API maps it to the 413.
         raise
     except Exception as e:
         llm_used = False
+        telemetry.generation_error = e
         # One classifier for every generation surface: the card carries the sanitised
         # provider reason and a hint chosen from it (spend limit, rejected key, lane down).
         error_detail = generation_unavailable_detail(e, operation="Chat stream generation")
@@ -1045,6 +1147,9 @@ async def chat_stream(
         }
         # No exchange to commit. Retrieval did happen, and its query/source record is a
         # retrieval record for feedback and triplet mining, written the same shielded way.
+        # Its outcome says the run produced no answer, so feedback on it is refused.
+        failed_outcome = telemetry.classify(e)
+
         async def _record_failed_retrieval() -> None:
             try:
                 await append_chat_query_record(
@@ -1054,7 +1159,8 @@ async def chat_stream(
                     conversation_id=conversation.id,
                     corpus_ids=list(corpus_ids),
                     query=request.message,
-                    top_paths=[s.file_path for s in sources[:5]],
+                    sources=sources,
+                    outcome=failed_outcome,
                 )
             except Exception:
                 pass
@@ -1107,7 +1213,8 @@ async def chat_stream(
                 conversation_id=conversation.id,
                 corpus_ids=list(corpus_ids),
                 query=request.message,
-                top_paths=[s.file_path for s in sources[:5]],
+                sources=sources,
+                outcome="ok",
             )
         except Exception:
             pass

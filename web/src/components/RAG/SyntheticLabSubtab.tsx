@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { useNotification } from '@/hooks';
+import { useConfigField, useNotification } from '@/hooks';
 import { api, apiClient, withCorpusScope } from '@/api/client';
 import { LineageMeta } from '@/components/ui/LineageMeta';
 import { NumberField } from '@/components/ui/NumberField';
+import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { useActiveRepo } from '@/stores';
 import { configApi } from '@/api/config';
 import { describeSyntheticFailure, syntheticService } from '@/services/SyntheticService';
@@ -90,7 +91,7 @@ function SyntheticModelPicker({
   );
 }
 
-// A judge score is a 0–10 mean; the raw value carries 15 decimals, which reads as a
+// A mean noul is a probability; the raw value carries 15 decimals, which reads as a
 // debug leak. Two decimals is the reported precision everywhere it is shown.
 function fmtScore(value: number | null | undefined): string {
   return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(2) : 'n/a';
@@ -170,11 +171,12 @@ export function SyntheticLabSubtab() {
   const [provider, setProvider] = useState<SyntheticProvider>('grounded_qa');
   const [recipe, setRecipe] = useState<SyntheticRecipeKind>('eval_dataset');
   const [generatorModel, setGeneratorModel] = useState('');
-  const [judgeModel, setJudgeModel] = useState('');
   const [maxSourceChunks, setMaxSourceChunks] = useState(150);
   const [maxPairs, setMaxPairs] = useState(150);
   const [pairsPerSource, setPairsPerSource] = useState(1);
-  const [curateThreshold, setCurateThreshold] = useState(7.0);
+  const [systemOneProvider] = useConfigField<string>('system_one.provider', 'typesafe');
+  const [readerQuestionMin, setReaderQuestionMin] = useConfigField<number>('synthetic.judge.reader_question_min', 0.7);
+  const [answerSupportedMin, setAnswerSupportedMin] = useConfigField<number>('synthetic.judge.answer_supported_min', 0.7);
   const [starting, setStarting] = useState(false);
   const [availableModels, setAvailableModels] = useState<ChatModelInfo[]>([]);
   const [loadingAvailableModels, setLoadingAvailableModels] = useState(false);
@@ -211,9 +213,7 @@ export function SyntheticLabSubtab() {
 
   useEffect(() => {
     const gm = String(localStorage.getItem('synthetic.generator_model') || '').trim();
-    const jm = String(localStorage.getItem('synthetic.judge_model') || '').trim();
     if (gm) setGeneratorModel(gm);
-    if (jm) setJudgeModel(jm);
   }, []);
 
   useEffect(() => {
@@ -259,19 +259,13 @@ export function SyntheticLabSubtab() {
     if (loadingAvailableModels) return;
 
     const gm = String(generatorModel || '').trim();
-    const jm = String(judgeModel || '').trim();
     const generatorStillAvailable = !gm || availableModelValues.has(gm);
-    const judgeStillAvailable = !jm || availableModelValues.has(jm);
 
     if (!generatorStillAvailable) {
       setGeneratorModel('');
       localStorage.removeItem('synthetic.generator_model');
     }
-    if (!judgeStillAvailable) {
-      setJudgeModel('');
-      localStorage.removeItem('synthetic.judge_model');
-    }
-  }, [availableModelValues, generatorModel, judgeModel, loadingAvailableModels]);
+  }, [availableModelValues, generatorModel, loadingAvailableModels]);
 
   const loadRuns = useCallback(async () => {
     const corpusId = String(activeRepo || '').trim();
@@ -349,13 +343,12 @@ export function SyntheticLabSubtab() {
         return;
       }
       const gm = String(generatorModel || '').trim();
-      const jm = String(judgeModel || '').trim();
-      if (!gm || !jm) {
-        notifyError('Select both generator and judge models.');
+      if (!gm) {
+        notifyError('Select a generator model.');
         return;
       }
-      if (!availableModelValues.has(gm) || !availableModelValues.has(jm)) {
-        notifyError('Selected generator and judge models must be currently available.');
+      if (!availableModelValues.has(gm)) {
+        notifyError('The selected generator model must be currently available.');
         return;
       }
 
@@ -369,16 +362,13 @@ export function SyntheticLabSubtab() {
           max_pairs: maxPairs,
           pairs_per_source: pairsPerSource,
           curate_enabled: true,
-          curate_threshold: curateThreshold,
           include_expected_answer: true,
           include_tags: true,
           seed: 1337,
           generator_model: gm,
-          judge_model: jm,
         };
         const run = await syntheticService.startRun(payload);
         localStorage.setItem('synthetic.generator_model', gm);
-        localStorage.setItem('synthetic.judge_model', jm);
         info(`Synthetic run started: ${run.run_id}`);
         setSelectedRunId(run.run_id);
         void loadRuns();
@@ -390,10 +380,8 @@ export function SyntheticLabSubtab() {
     },
     [
       activeRepo,
-      curateThreshold,
       generatorModel,
       info,
-      judgeModel,
       loadRuns,
       maxPairs,
       maxSourceChunks,
@@ -511,11 +499,8 @@ export function SyntheticLabSubtab() {
   }, [activeRepo, notifyError, patchPreview, success]);
 
   const generatorModelSelected = String(generatorModel || '').trim();
-  const judgeModelSelected = String(judgeModel || '').trim();
-  const modelSelectionMissing = !generatorModelSelected || !judgeModelSelected;
-  const selectionUnavailable =
-    Boolean(generatorModelSelected) && !availableModelValues.has(generatorModelSelected) ||
-    Boolean(judgeModelSelected) && !availableModelValues.has(judgeModelSelected);
+  const modelSelectionMissing = !generatorModelSelected;
+  const selectionUnavailable = Boolean(generatorModelSelected) && !availableModelValues.has(generatorModelSelected);
 
   const startDisabled =
     starting ||
@@ -596,14 +581,12 @@ export function SyntheticLabSubtab() {
             />
           </div>
           <div style={{ flex: 1 }}>
-            <SyntheticModelPicker
-              value={judgeModel}
-              onChange={setJudgeModel}
-              label="Judge Model"
-              models={availableModels}
-              loading={loadingAvailableModels}
-              error={availableModelsError}
-            />
+            <div className="setting-row" data-testid="synthetic-judge-backend">
+              <label>
+                Judge <TooltipIcon name="SYSTEM_ONE_PROVIDER" />
+              </label>
+              <span>System One: {systemOneProvider === 'laya' ? 'Laya (self-hosted)' : 'TypeSafe Jev'}</span>
+            </div>
           </div>
         </div>
 
@@ -631,14 +614,16 @@ export function SyntheticLabSubtab() {
             />
           </div>
           <div className="input-group">
-            <label>Curate threshold</label>
-            <NumberField
-              min={0}
-              max={10}
-              step={0.1}
-              value={curateThreshold}
-              onCommit={setCurateThreshold}
-            />
+            <label>
+              Min reader-question noul <TooltipIcon name="SYNTHETIC_JUDGE_READER_QUESTION_MIN" />
+            </label>
+            <NumberField min={0} max={1} step={0.05} value={readerQuestionMin} onCommit={setReaderQuestionMin} />
+          </div>
+          <div className="input-group">
+            <label>
+              Min answer-supported noul <TooltipIcon name="SYNTHETIC_JUDGE_ANSWER_SUPPORTED_MIN" />
+            </label>
+            <NumberField min={0} max={1} step={0.05} value={answerSupportedMin} onCommit={setAnswerSupportedMin} />
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -663,7 +648,7 @@ export function SyntheticLabSubtab() {
           </div>
         ) : modelSelectionMissing ? (
           <div style={{ fontSize: 12, color: 'var(--fg-muted)', marginTop: 8 }}>
-            Select both generator and judge models to enable start actions.
+            Select a generator model to enable start actions.
           </div>
         ) : null}
       </section>
@@ -794,9 +779,13 @@ export function SyntheticLabSubtab() {
 
             <div className="studio-callout" style={{ marginBottom: 10 }} data-testid="synthetic-grounding-summary">
               <div style={{ fontWeight: 600, marginBottom: 6 }}>Grounding &amp; Curation</div>
-              <div data-testid="synthetic-avg-judge" style={{ marginBottom: 6 }}>
-                Avg judge score{' '}
-                <span style={{ fontWeight: 600 }}>{fmtScore(selectedRun.summary?.avg_judge_score)}</span> / 10
+              <div data-testid="synthetic-mean-nouls" style={{ marginBottom: 6 }}>
+                Mean nouls: reader question{' '}
+                <span style={{ fontWeight: 600 }}>{fmtScore(selectedRun.summary?.mean_reader_question_noul)}</span>
+                {' '}· answer supported{' '}
+                <span style={{ fontWeight: 600 }}>{fmtScore(selectedRun.summary?.mean_answer_supported_noul)}</span>
+                {' '}· cue words copied{' '}
+                <span style={{ fontWeight: 600 }}>{fmtScore(selectedRun.summary?.mean_answer_cued_noul)}</span>
                 <span style={{ color: 'var(--fg-muted)' }}> ({selectedRun.summary?.items_curated_in ?? 0} judged)</span>
               </div>
               <div className="studio-mono">
@@ -806,8 +795,8 @@ export function SyntheticLabSubtab() {
                 triplets={selectedRun.summary?.triplets_mined ?? 0}
               </div>
               <div style={{ color: 'var(--fg-muted)', marginTop: 6, fontSize: '13px' }}>
-                Rows are kept only when their evidence quote appears verbatim in the source chunk and the judge scores them at or
-                above the curation threshold. Triplets pair each kept question with the highest-ranked non-expected documents the
+                Rows are kept only when their evidence quote appears verbatim in the source chunk and System One's
+                reader-question and answer-supported nouls reach their minimums. Triplets pair each kept question with the highest-ranked non-expected documents the
                 real retrieval lane returned for it.
               </div>
             </div>

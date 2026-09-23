@@ -108,6 +108,7 @@
 
 .glossary-card-header {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: flex-start;
   gap: 12px;
@@ -137,6 +138,10 @@
   color: var(--accent-text);
   font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
   flex-shrink: 0;
+  /* A long parameter name (RAGWELD_AGENT_LORA_TARGET_MODULES) drops below the title and wraps
+     inside its card instead of pushing the header past the card and the Glossary panel. */
+  max-width: 100%;
+  overflow-wrap: anywhere;
   font-weight: 600;
 }
 

@@ -3,9 +3,10 @@ from __future__ import annotations
 import random
 import re
 from collections import Counter, defaultdict
+from collections.abc import Sequence
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, TypeVar
 
 from server.chat.provider_router import ProviderRoute, select_provider_route
 from server.db.postgres import PostgresClient
@@ -73,30 +74,76 @@ def _content_contains_excluded_keyword(content: str, exclude_keywords: list[str]
     return False
 
 
-def _round_robin_chunks(chunks: list[Chunk], limit: int, rng: random.Random) -> list[Chunk]:
-    grouped: dict[str, list[Chunk]] = defaultdict(list)
+class _Positioned(Protocol):
+    @property
+    def chunk_id(self) -> str: ...
+
+    @property
+    def file_path(self) -> str: ...
+
+    @property
+    def start_line(self) -> int: ...
+
+
+_P = TypeVar("_P", bound=_Positioned)
+
+
+def _spread_order(count: int, rng: random.Random) -> list[int]:
+    """Positions ``0..count-1`` ordered so every prefix is spread across the whole range.
+
+    A base-2 radical-inverse (van der Corput) sequence rotated by a seeded offset: the first
+    draw lands at a seeded point, the next in the opposite half, then the remaining quarters,
+    and so on. However few chunks a file contributes, they come from across the document
+    instead of its head (cover page, front matter).
+    """
+    if count <= 0:
+        return []
+    bits = max(1, (count - 1).bit_length())
+    size = 1 << bits
+    offset = rng.random()
+    order: list[int] = []
+    seen: set[int] = set()
+    for k in range(size):
+        inverse = int(format(k, f"0{bits}b")[::-1], 2) / size
+        position = min(count - 1, int(((inverse + offset) % 1.0) * count))
+        if position not in seen:
+            seen.add(position)
+            order.append(position)
+    order.extend(position for position in range(count) if position not in seen)
+    return order
+
+
+def _sample_order(chunks: Sequence[_P], rng: random.Random) -> list[_P]:
+    """Seeded whole-corpus draw order: files interleaved round-robin in a seeded order, each
+    file's chunks in a position-spread order (see ``_spread_order``)."""
+    grouped: dict[str, list[_P]] = defaultdict(list)
     for ch in chunks:
         grouped[str(ch.file_path)].append(ch)
-    for fp in grouped:
-        grouped[fp].sort(key=lambda c: (int(c.start_line or 0), str(c.chunk_id)))
+    queues: dict[str, list[_P]] = {}
+    for fp in sorted(grouped):
+        items = sorted(grouped[fp], key=lambda c: (int(c.start_line or 0), str(c.chunk_id)))
+        queues[fp] = [items[position] for position in _spread_order(len(items), rng)]
 
-    file_paths = list(grouped.keys())
+    file_paths = sorted(queues)
     rng.shuffle(file_paths)
-
-    out: list[Chunk] = []
-    while len(out) < limit and file_paths:
+    cursors = dict.fromkeys(file_paths, 0)
+    out: list[_P] = []
+    active = file_paths
+    while active:
         next_round: list[str] = []
-        for fp in file_paths:
-            items = grouped.get(fp) or []
-            if not items:
-                continue
-            out.append(items.pop(0))
-            if items:
+        for fp in active:
+            queue = queues[fp]
+            cursor = cursors[fp]
+            out.append(queue[cursor])
+            cursors[fp] = cursor + 1
+            if cursor + 1 < len(queue):
                 next_round.append(fp)
-            if len(out) >= limit:
-                break
-        file_paths = next_round
+        active = next_round
     return out
+
+
+def _round_robin_chunks(chunks: Sequence[_P], limit: int, rng: random.Random) -> list[_P]:
+    return _sample_order(chunks, rng)[: max(0, int(limit))]
 
 
 async def select_source_chunks(
@@ -105,28 +152,40 @@ async def select_source_chunks(
     cfg: TriBridConfig,
     request: SyntheticRunStartRequest,
 ) -> list[Chunk]:
+    """Seeded source chunks drawn from the whole corpus (every file, every position in it).
+
+    Positions are listed without content so no file or document head is truncated away;
+    content is fetched in draw order and the keyword exclusions apply to it.
+    """
     max_source_chunks = int(request.max_source_chunks or 150)
-    candidate_limit = min(max_source_chunks * 8, 50000)
+    exclude_dirs = list(cfg.chunk_summaries.exclude_dirs or [])
+    exclude_patterns = list(cfg.chunk_summaries.exclude_patterns or [])
+    exclude_keywords = list(cfg.chunk_summaries.exclude_keywords or [])
 
     pg = PostgresClient(cfg.indexing.postgres_url)
     await pg.connect()
     try:
-        chunks: list[Chunk] = await pg.list_chunks_for_repo(repo_id, limit=candidate_limit)
+        positions = await pg.list_chunk_positions(repo_id)
+        eligible = [
+            p
+            for p in positions
+            if not _path_contains_excluded_dir(p.file_path, exclude_dirs)
+            and not _path_matches_any_pattern(p.file_path, exclude_patterns)
+        ]
+        ordered = _sample_order(eligible, random.Random(int(request.seed or 1337)))
+        selected: list[Chunk] = []
+        batch_size = max(1, max_source_chunks)
+        for start in range(0, len(ordered), batch_size):
+            batch = await pg.get_chunks(repo_id, [p.chunk_id for p in ordered[start : start + batch_size]])
+            for ch in batch:
+                if _content_contains_excluded_keyword(ch.content, exclude_keywords):
+                    continue
+                selected.append(ch)
+                if len(selected) >= max_source_chunks:
+                    return selected
+        return selected
     finally:
         await pg.disconnect()
-
-    filtered: list[Chunk] = []
-    for ch in chunks:
-        if _path_contains_excluded_dir(ch.file_path, list(cfg.chunk_summaries.exclude_dirs or [])):
-            continue
-        if _path_matches_any_pattern(ch.file_path, list(cfg.chunk_summaries.exclude_patterns or [])):
-            continue
-        if _content_contains_excluded_keyword(ch.content, list(cfg.chunk_summaries.exclude_keywords or [])):
-            continue
-        filtered.append(ch)
-
-    rng = random.Random(int(request.seed or 1337))
-    return _round_robin_chunks(filtered, max_source_chunks, rng)
 
 
 def _chunk_to_summary(chunk: Chunk, *, card_source: str = "deterministic") -> ChunkSummary:

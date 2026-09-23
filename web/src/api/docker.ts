@@ -32,6 +32,7 @@ export const RAGWELD_DOCKER_SERVICES = [
   'langfuse-redis',
   'langfuse-minio',
   'litellm',
+  'laya',
   'qdrant',
   'mlflow',
   'flyte',

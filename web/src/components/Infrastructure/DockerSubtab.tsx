@@ -40,6 +40,7 @@ const SERVICE_LABELS: Record<RagweldDockerService, string> = {
   cloudflared: 'Cloudflare Tunnel',
   alloy: 'Grafana Alloy',
   litellm: 'LiteLLM Gateway',
+  laya: 'Laya System One',
   qdrant: 'Qdrant Vector Store',
   mlflow: 'MLflow Tracking',
   flyte: 'Flyte Control Plane',

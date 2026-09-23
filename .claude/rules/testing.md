@@ -11,6 +11,11 @@ paths:
 
 ## Mandatory Testing
 Every change MUST be tested before completion.
+- Contributors run focused checks for owned changes; the integration owner runs
+  the required combined gate on stable work. Do not loop on another agent's
+  unfinished changes or edit them without coordinated ownership.
+- Instruction/prose-only edits use diff, link/import, and existing docs checks.
+  Executable code, configuration, and behavior changes retain the gates below.
 - Temporary feature tests -> `.tests/` (gitignored)
 - Reusable permanent tests -> `tests/` (not gitignored)
 
@@ -42,6 +47,9 @@ model BEFORE it is considered done — not only self-verified.
   prompted to REFUTE the change (find correctness bugs, fake-green tests,
   contract drift, hidden fallbacks, blocking-IO, race conditions).
 - Record the review outcome and any fixes in the slice's exec-plan/memory note.
+- Use one bounded review of a stable diff and one focused follow-up for fixes.
+  Further review needs a concrete unresolved correctness issue or new evidence;
+  report unresolved blockers instead of starting repeated polish rounds.
 - Trivial mechanical edits (copy, formatting, a one-line fix with a test) do not
   require this; use judgment, and when unsure, review.
 

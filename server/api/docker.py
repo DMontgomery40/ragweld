@@ -58,6 +58,7 @@ _DOCKER_SERVICES = frozenset(
         "langfuse-redis",
         "langfuse-minio",
         "litellm",
+        "laya",
         "qdrant",
         "mlflow",
         "flyte",

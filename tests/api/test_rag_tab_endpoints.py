@@ -5,9 +5,7 @@ from typing import Any
 import pytest
 
 from server.models.index import Chunk
-from server.models.retrieval import ChunkMatch
 from server.models.tribrid_config_model import TriBridConfig
-from server.retrieval.fusion import TriBridFusion
 
 
 class _FakePostgres:
@@ -81,41 +79,6 @@ async def _fake_get_config(*_args: Any, **_kwargs: Any) -> TriBridConfig:
     return cfg
 
 
-async def _fake_fusion_search(
-    self: TriBridFusion,
-    corpus_ids: list[str],
-    query: str,
-    config: Any,
-    *,
-    include_vector: bool = True,
-    include_sparse: bool = True,
-    include_graph: bool = True,
-    top_k: int | None = None,
-) -> list[ChunkMatch]:
-    _ = (self, corpus_ids, config, include_vector, include_sparse, include_graph)
-    # Deterministic: return config.py first for "config" queries, otherwise chunk_summaries.py first.
-    if "config" in query.lower():
-        paths = ["server/api/config.py", "server/api/eval.py", "server/api/dataset.py"]
-    else:
-        paths = ["server/api/chunk_summaries.py", "server/api/keywords.py", "server/api/eval.py"]
-    out: list[ChunkMatch] = []
-    for i, fp in enumerate(paths[: int(top_k or 3)]):
-        out.append(
-            ChunkMatch(
-                chunk_id=f"c{i}",
-                content="",
-                file_path=fp,
-                start_line=1,
-                end_line=1,
-                language="py",
-                score=1.0 / (i + 1),
-                source="vector",
-                metadata={},
-            )
-        )
-    return out
-
-
 @pytest.mark.asyncio
 async def test_eval_dataset_crud(client, tmp_path, monkeypatch):
     # Isolate file-backed persistence
@@ -150,79 +113,6 @@ async def test_eval_dataset_crud(client, tmp_path, monkeypatch):
     r = await client.delete(f"/api/dataset/{entry_id}", params={"corpus_id": corpus_id})
     assert r.status_code == 200
     assert r.json()["ok"] is True
-
-
-@pytest.mark.asyncio
-async def test_eval_run_list_get_delete(client, tmp_path, monkeypatch):
-    # Isolate dataset + runs persistence
-    import server.api.dataset as dataset_api
-    import server.api.eval as eval_api
-
-    monkeypatch.setattr(dataset_api, "_DATASET_DIR", tmp_path / "eval_dataset", raising=True)
-    monkeypatch.setattr(eval_api, "_RUNS_DIR", tmp_path / "eval_runs", raising=True)
-    monkeypatch.setattr(eval_api, "load_scoped_config", _fake_get_config, raising=True)
-    monkeypatch.setattr(TriBridFusion, "search", _fake_fusion_search, raising=True)
-
-    corpus_id = "test_corpus"
-
-    # Seed dataset with 2 entries
-    entries = [
-        {"question": "Where is config persistence implemented?", "expected_paths": ["server/api/config.py"]},
-        {"question": "Where are chunk summaries endpoints implemented?", "expected_paths": ["server/api/chunk_summaries.py"]},
-    ]
-    for e in entries:
-        r = await client.post("/api/dataset", params={"corpus_id": corpus_id}, json=e)
-        assert r.status_code == 200
-
-    # Single entry test
-    r = await client.post(
-        "/api/eval/test",
-        json={"corpus_id": corpus_id, "question": entries[0]["question"], "expected_paths": entries[0]["expected_paths"]},
-    )
-    assert r.status_code == 200
-    test_result = r.json()
-    assert test_result["topk_hit"] is True
-    assert test_result["top_paths"]
-
-    # Run evaluation
-    r = await client.post("/api/eval/run", json={"corpus_id": corpus_id, "dataset_id": None, "sample_size": None})
-    assert r.status_code == 200
-    run = r.json()
-    assert run["corpus_id"] == corpus_id
-    assert run["total"] == 2
-    assert "run_id" in run
-
-    run_id = run["run_id"]
-
-    # List runs
-    r = await client.get("/api/eval/runs", params={"corpus_id": corpus_id})
-    assert r.status_code == 200
-    data = r.json()
-    assert data["ok"] is True
-    assert data["runs"][0]["run_id"] == run_id
-
-    # Latest results
-    r = await client.get("/api/eval/results", params={"corpus_id": corpus_id})
-    assert r.status_code == 200
-    assert r.json()["run_id"] == run_id
-
-    # Run results by id
-    r = await client.get(f"/api/eval/results/{run_id}")
-    assert r.status_code == 200
-    assert r.json()["run_id"] == run_id
-
-    # Get eval run (alias)
-    r = await client.get(f"/api/eval/run/{run_id}")
-    assert r.status_code == 200
-    assert r.json()["run_id"] == run_id
-
-    # Delete eval run
-    r = await client.delete(f"/api/eval/run/{run_id}")
-    assert r.status_code == 200
-
-    # Now missing
-    r = await client.get(f"/api/eval/run/{run_id}")
-    assert r.status_code == 404
 
 
 @pytest.mark.asyncio

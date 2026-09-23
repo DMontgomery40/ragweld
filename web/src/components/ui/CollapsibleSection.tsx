@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, ReactNode } from 'react';
 import { useUIStore } from '@/stores';
+import { rememberPanelHeight } from '@/utils/resizablePanels';
 
 interface CollapsibleSectionProps {
   title: string;
@@ -41,7 +42,11 @@ export function CollapsibleSection({
 
   return (
     <div
+      // Resizable like every panel; a keyed section also remembers the height it is dragged to.
+      ref={rememberPanelHeight}
       className="settings-section"
+      data-resizable={storageKey}
+      data-collapsed={isExpanded ? 'false' : 'true'}
       style={{
         background: 'var(--card-bg)',
         border: '1px solid var(--line)',

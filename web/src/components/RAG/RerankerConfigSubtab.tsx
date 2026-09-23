@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useConfigField, useModels } from '@/hooks';
+import { useAPI, useConfigField, useModels } from '@/hooks';
 import { useReranker } from '@/hooks/useReranker';
+import { ModelPicker as GatewayModelPicker } from '@/components/Chat/ModelPicker';
 import { SyntheticCallout } from '@/components/RAG/SyntheticCallout';
 import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { ApiKeyStatus } from '@/components/ui/ApiKeyStatus';
 import { NumberField } from '@/components/ui/NumberField';
 import { ModelPicker } from '@/components/RAG/ModelPicker';
-import type { RerankerInfoResponse, TrainingConfig } from '@/types/generated';
+import type { ChatModelInfo, ChatModelsResponse, RerankerInfoResponse, TrainingConfig } from '@/types/generated';
 
 const RERANKER_MODES = ['none', 'learning', 'cloud'] as const;
 type RerankerMode = (typeof RERANKER_MODES)[number];
@@ -32,6 +33,25 @@ export function RerankerConfigSubtab() {
   const [cloudProvider, setCloudProvider] = useConfigField<string>('reranking.reranker_cloud_provider', 'litellm');
   const [cloudModel, setCloudModel] = useConfigField<string>('reranking.reranker_cloud_model', '');
   const [cloudTopN, setCloudTopN] = useConfigField<number>('reranking.reranker_cloud_top_n', 50);
+
+  // Gateway chat aliases for the LiteLLM (listwise) reranker: the same catalog the chat picker uses.
+  const { api } = useAPI();
+  const [gatewayModels, setGatewayModels] = useState<ChatModelInfo[]>([]);
+  useEffect(() => {
+    if (cloudProvider !== 'litellm') return;
+    let alive = true;
+    fetch(api('chat/models'))
+      .then((response) => (response.ok ? (response.json() as Promise<ChatModelsResponse>) : null))
+      .then((data) => {
+        if (alive) setGatewayModels(Array.isArray(data?.models) ? (data.models as ChatModelInfo[]) : []);
+      })
+      .catch(() => {
+        if (alive) setGatewayModels([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [api, cloudProvider]);
 
   // Learning reranker is configured under training + reranking
   const [learningModelPath, setLearningModelPath] = useConfigField<string>(
@@ -209,18 +229,35 @@ export function RerankerConfigSubtab() {
               </select>
             </div>
 
-            <div className="input-group">
-              <ModelPicker
-                componentType="RERANK"
-                selectionRole="reranker_cloud"
-                provider={cloudProvider}
-                value={cloudModel}
-                onChange={setCloudModel}
-                label="Model"
-                tooltipKey="RERANKER_CLOUD_MODEL"
-                disabled={modelsLoading}
-              />
-            </div>
+            {cloudProvider === 'litellm' ? (
+              // The LiteLLM reranker scores candidates listwise with a gateway chat alias, so the
+              // choices are the gateway's chat aliases (the chat picker's list), not rerank-API models.
+              <div className="input-group">
+                <label>
+                  Model <TooltipIcon name="RERANKER_CLOUD_MODEL" />
+                </label>
+                <GatewayModelPicker
+                  value={cloudModel}
+                  onChange={setCloudModel}
+                  models={gatewayModels}
+                  valueMode="id"
+                  testId="reranker-cloud-model"
+                />
+              </div>
+            ) : (
+              <div className="input-group">
+                <ModelPicker
+                  componentType="RERANK"
+                  selectionRole="reranker_cloud"
+                  provider={cloudProvider}
+                  value={cloudModel}
+                  onChange={setCloudModel}
+                  label="Model"
+                  tooltipKey="RERANKER_CLOUD_MODEL"
+                  disabled={modelsLoading}
+                />
+              </div>
+            )}
           </div>
 
           <div className="input-row">

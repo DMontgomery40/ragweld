@@ -119,7 +119,7 @@ def route_prompt(prompt: str) -> Route:
             [
                 "Backend/API/retrieval changes require real pytest (no mocked green).",
                 "Run: uv run python scripts/check_docs_ownership.py",
-                "Run: uv run scripts/check_banned.py",
+                "Run: python3 scripts/jev_lint.py (use explicit owned paths; see docs/jev-lint.md)",
                 "Run: uv run scripts/validate_types.py",
                 "Run: uv run pytest -q",
             ]

@@ -17,7 +17,7 @@
  */
 
 import { useState, useCallback, useEffect } from 'react';
-import type { EvalDatasetItem } from '@/types/generated';
+import type { EvalDatasetItem, EvalExpectedLocation } from '@/types/generated';
 import { useRepoStore } from '@/stores';
 import { apiUrl } from '@/api/client';
 
@@ -35,6 +35,7 @@ interface DatasetState {
 interface NewDatasetEntry {
   question: string;
   expected_paths: string[];
+  expected_locations?: EvalExpectedLocation[];
   expected_answer?: string;
   tags?: string[];
 }
@@ -163,7 +164,9 @@ export function useEvalDataset() {
         const payload: EvalDatasetItem = {
           question: updates.question ?? existing.question,
           expected_paths: updates.expected_paths ?? existing.expected_paths,
+          expected_locations: updates.expected_locations ?? existing.expected_locations ?? [],
           expected_answer: updates.expected_answer ?? existing.expected_answer ?? null,
+          evidence_quote: existing.evidence_quote ?? null,
           tags: updates.tags ?? existing.tags ?? [],
         };
 

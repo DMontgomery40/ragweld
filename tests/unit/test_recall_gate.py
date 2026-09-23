@@ -127,3 +127,57 @@ def test_skip_when_rag_active_if_configured() -> None:
     )
     assert plan.intensity == RecallIntensity.skip
 
+
+
+_STATEMENT = "I want to compare ingestion throughput numbers across both staging clusters this week"
+
+
+@pytest.mark.parametrize(
+    ("message", "turn", "gate", "override", "rule", "intensity"),
+    [
+        ("Which flights did Jeffrey Epstein arrange for Barry Cohen in October 2017?", 0, RecallGateConfig(enabled=False), None, "disabled_default", RecallIntensity.standard),
+        ("Which flights did Jeffrey Epstein arrange for Barry Cohen in October 2017?", 0, config, RecallIntensity.deep, "user_override", RecallIntensity.deep),
+        ("hello!", 3, config, None, "greeting", RecallIntensity.skip),
+        ("ok got it", 3, config, None, "ack", RecallIntensity.skip),
+        ("what did we discuss about auth?", 5, config, None, "explicit_reference", RecallIntensity.deep),
+        ("the bug", 3, config, None, "topic_followup", RecallIntensity.standard),
+        ("how does chunking work?", 1, config, None, "standalone_question", RecallIntensity.skip),
+        ("continue", 1, RecallGateConfig(skip_when_rag_active=True), None, "rag_active", RecallIntensity.skip),
+        ("is the retry budget per request?", 2, config, None, "short_question", RecallIntensity.light),
+        ("sounds reasonable to me", 2, config, None, "short_statement", RecallIntensity.light),
+        (_STATEMENT, 0, config, None, "first_message", RecallIntensity.standard),
+        (_STATEMENT, 2, config, None, "default", RecallIntensity.standard),
+    ],
+)
+def test_every_gate_rule_is_named_and_counted(
+    message: str,
+    turn: int,
+    gate: RecallGateConfig,
+    override: RecallIntensity | None,
+    rule: str,
+    intensity: RecallIntensity,
+) -> None:
+    """Each rule of the gate has its own `reason`, and the chat lane's entry point counts
+    the decision as `tribrid_recall_gate_decisions_total{intensity,reason}`."""
+    from prometheus_client import REGISTRY
+
+    from server.chat.retrieval_gate import decide_recall
+
+    kwargs = {
+        "message": message,
+        "conversation_turn": turn,
+        "last_recall_had_results": True,
+        "rag_corpora_active": True,
+        "config": gate,
+        "user_override": override,
+    }
+    decision = decide_recall(**kwargs)
+    assert (decision.rule, decision.plan.intensity) == (rule, intensity)
+
+    labels = {"intensity": intensity.value, "reason": rule}
+    before = REGISTRY.get_sample_value("tribrid_recall_gate_decisions_total", labels) or 0.0
+    plan = classify_for_recall(**kwargs)
+    after = REGISTRY.get_sample_value("tribrid_recall_gate_decisions_total", labels)
+
+    assert plan.intensity == intensity
+    assert after == before + 1.0

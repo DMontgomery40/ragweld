@@ -9,113 +9,153 @@
   "panels": [
     {
       "datasource": { "type": "prometheus", "uid": "mimir" },
-      "fieldConfig": { "defaults": { "unit": "short" } },
-      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 0 },
-      "id": 1,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
-        "textMode": "auto"
-      },
-      "targets": [{ "expr": "max_over_time(tribrid_chunks_indexed_current[1h])", "legendFormat": "chunks" }],
-      "title": "Indexed Chunks",
-      "type": "stat"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "mimir" },
-      "fieldConfig": { "defaults": { "unit": "short" } },
-      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 0 },
-      "id": 2,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
-        "textMode": "auto"
-      },
-      "targets": [{ "expr": "max_over_time(tribrid_graph_relationships_current[1h])", "legendFormat": "relationships" }],
-      "title": "Graph Relationships",
-      "type": "stat"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "mimir" },
-      "fieldConfig": { "defaults": { "unit": "short" } },
-      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 0 },
+      "description": "Retrievals per second over the last 5 minutes (search, chat, benchmark, MCP).",
+      "fieldConfig": { "defaults": { "unit": "reqps", "decimals": 2, "noValue": "No data: API not scraped" } },
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
       "id": 3,
       "options": {
         "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [{ "refId": "A", "expr": "sum(rate(tribrid_search_requests_total[5m]))", "legendFormat": "searches/s" }],
+      "title": "Retrieval traffic (5m)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "p95 end-to-end retrieval latency across the selected range.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "No data: API not scraped",
+          "mappings": [{ "type": "special", "options": { "match": "nan", "result": { "text": "No traffic" } } }],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 2 }, { "color": "red", "value": 5 }] }
+        }
+      },
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 },
+      "id": 6,
+      "options": {
+        "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
         "textMode": "auto"
       },
-      "targets": [{ "expr": "sum(rate(tribrid_search_requests_total[5m]))", "legendFormat": "searches/s" }],
-      "title": "Retrieval Traffic",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (increase(tribrid_search_latency_seconds_bucket[$__range])))",
+          "legendFormat": "p95",
+          "instant": true
+        }
+      ],
+      "title": "Retrieval latency p95 (selected range)",
       "type": "stat"
     },
     {
       "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "Chunk rows indexed in each corpus now, refreshed from the registry at most every 5 minutes.",
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0, "min": 0, "noValue": "No data: no per-corpus index size reported since the API began emitting them", "color": { "mode": "fixed", "fixedColor": "blue" } } },
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 0 },
+      "id": 1,
+      "options": { "displayMode": "basic", "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "showUnfilled": true, "valueMode": "text" },
+      "targets": [{ "refId": "A", "expr": "max by (corpus) (tribrid_corpus_chunks)", "legendFormat": "{{corpus}}", "instant": true }],
+      "title": "Indexed chunks by corpus",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "Entity-to-entity relationships in each corpus's active graph generation, refreshed at most every 5 minutes. A corpus without a graph has no bar.",
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0, "min": 0, "noValue": "No data: no per-corpus graph size reported since the API began emitting them", "color": { "mode": "fixed", "fixedColor": "blue" } } },
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 0 },
+      "id": 2,
+      "options": { "displayMode": "basic", "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "showUnfilled": true, "valueMode": "text" },
+      "targets": [{ "refId": "A", "expr": "max by (corpus) (tribrid_corpus_graph_relationships)", "legendFormat": "{{corpus}}", "instant": true }],
+      "title": "Graph relationships by corpus",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "Rolling 15-minute p95 of each retrieval leg, the Qdrant-seeded Neo4j graph traversal inside the graph leg, and the reranker. Gaps mean no searches in that window.",
       "fieldConfig": {
         "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineWidth": 2,
-            "showPoints": "never",
-            "spanNulls": false
-          },
-          "unit": "s"
+          "custom": { "drawStyle": "line", "fillOpacity": 0, "lineWidth": 2, "showPoints": "auto", "spanNulls": false },
+          "unit": "s",
+          "noValue": "No searches in range"
         }
       },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 6 },
+      "gridPos": { "h": 9, "w": 16, "x": 0, "y": 6 },
       "id": 4,
       "options": {
-        "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true, "calcs": ["max", "lastNotNull"] },
         "tooltip": { "mode": "multi", "sort": "desc" }
       },
       "targets": [
-        { "expr": "histogram_quantile(0.50, rate(tribrid_vector_leg_latency_seconds_bucket[5m]))", "legendFormat": "vector p50" },
-        { "expr": "histogram_quantile(0.50, rate(tribrid_sparse_leg_latency_seconds_bucket[5m]))", "legendFormat": "sparse p50" },
-        { "expr": "histogram_quantile(0.50, rate(tribrid_graph_leg_latency_seconds_bucket[5m]))", "legendFormat": "graph p50" }
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le) (rate(tribrid_vector_leg_latency_seconds_bucket[15m])))", "legendFormat": "vector leg" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(tribrid_sparse_leg_latency_seconds_bucket[15m])))", "legendFormat": "sparse leg" },
+        { "refId": "C", "expr": "histogram_quantile(0.95, sum by (le) (rate(tribrid_graph_leg_latency_seconds_bucket[15m])))", "legendFormat": "graph leg" },
+        { "refId": "D", "expr": "histogram_quantile(0.95, sum by (le) (rate(tribrid_search_stage_latency_seconds_bucket{stage=\"graphrag_qdrant_neo4j_traversal\"}[15m])))", "legendFormat": "graph traversal" },
+        { "refId": "E", "expr": "histogram_quantile(0.95, sum by (le) (rate(tribrid_search_stage_latency_seconds_bucket{stage=\"rerank\"}[15m])))", "legendFormat": "rerank" }
       ],
-      "title": "Retrieval Leg Latency",
+      "title": "Retrieval leg, graph traversal and rerank latency (rolling 15m p95)",
       "type": "timeseries"
     },
     {
-      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 14 },
+      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "Semantic cache lookups by endpoint and outcome across the selected range. bypass means the cache was not read for that request: the cache is disabled or write-only, or the request asked to bypass or refresh it.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "No cache lookups in range",
+          "min": 0
+        }
+      },
+      "gridPos": { "h": 9, "w": 8, "x": 16, "y": 6 },
+      "id": 7,
+      "options": {
+        "displayMode": "basic",
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (endpoint, outcome) (increase(tribrid_semantic_cache_lookups_total[$__range])) > 0",
+          "legendFormat": "{{endpoint}} / {{outcome}}",
+          "instant": true
+        }
+      ],
+      "title": "Semantic cache outcomes (selected range)",
+      "type": "bargauge"
+    },
+    {
+      "gridPos": { "h": 5, "w": 24, "x": 0, "y": 15 },
       "id": 5,
       "options": {
-        "content": "## Retrieval / Indexing / Graph\nUse this board with the ragweld Retrieval and Indexing workbench tabs (Postgres control rows, Qdrant dense + sparse generations, Neo4j graph). The shared variables are there so the same corpus and run context can travel with you into Eval Analysis and Benchmark.",
+        "content": "## Retrieval / Indexing / Graph\nPair with the Retrieval and Indexing workbench tabs. Traffic and latency panels are deployment-wide (no corpus label); the index-size bars are per corpus. Stage-level detail is on **TriBridRAG Metrics**.",
         "mode": "markdown"
       },
       "title": "Operator Notes",
       "type": "text"
     }
   ],
-  "refresh": "10s",
+  "refresh": "30s",
   "schemaVersion": 38,
   "style": "dark",
   "tags": ["ragweld", "observability", "retrieval", "graph"],
-  "templating": {
-    "list": [
-      { "name": "corpus_id", "label": "Corpus", "type": "textbox", "query": "*", "current": { "text": "*", "value": "*" } },
-      { "name": "run_id", "label": "Run", "type": "textbox", "query": "*", "current": { "text": "*", "value": "*" } },
-      { "name": "model", "label": "Model", "type": "textbox", "query": "*", "current": { "text": "*", "value": "*" } },
-      { "name": "provider", "label": "Provider", "type": "textbox", "query": "*", "current": { "text": "*", "value": "*" } },
-      { "name": "prompt_set", "label": "Prompt Set", "type": "textbox", "query": "current", "current": { "text": "current", "value": "current" } },
-      { "name": "workflow_id", "label": "Workflow", "type": "textbox", "query": "*", "current": { "text": "*", "value": "*" } }
-    ]
-  },
+  "templating": { "list": [] },
   "time": { "from": "now-1h", "to": "now" },
   "timepicker": {},
   "timezone": "",
   "title": "Retrieval/Indexing/Graph",
   "uid": "ragweld-retrieval-indexing-graph",
-  "version": 1,
+  "version": 2,
   "weekStart": ""
 }

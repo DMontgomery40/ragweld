@@ -9,14 +9,17 @@ client disconnect does. Its config comes from ``config_path``; its provider from
 
 from __future__ import annotations
 
+import asyncio
+import json
 import os
 import socket
 import subprocess
 import sys
 import time
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 import httpx
 
@@ -60,3 +63,62 @@ def live_app_subprocess(*, config_path: Path, env: Mapping[str, str]) -> Iterato
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait(timeout=10)
+
+
+async def post_stream_then_disconnect(
+    app: Any,
+    path: str,
+    body: Mapping[str, Any],
+    *,
+    disconnect_when: Callable[[bytes], bool],
+    timeout_s: float = 60.0,
+) -> list[bytes]:
+    """POST `body` to the ASGI `app` in-process and disconnect once a response body chunk
+    satisfies `disconnect_when`; returns the body chunks received.
+
+    The ASGI client here is the protocol itself, not a transport that buffers: after the
+    request body, `receive()` blocks until the chosen chunk has been sent and then reports
+    `http.disconnect`, which is exactly what a server delivers when the socket closes.
+    No `asgi.spec_version` is advertised, so Starlette takes the same disconnect-listening
+    branch it takes under uvicorn.
+    """
+    payload = json.dumps(dict(body)).encode("utf-8")
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode("ascii"),
+        "query_string": b"",
+        "root_path": "",
+        "headers": [
+            (b"host", b"test"),
+            (b"content-type", b"application/json"),
+            (b"content-length", str(len(payload)).encode("ascii")),
+        ],
+        "client": ("127.0.0.1", 50123),
+        "server": ("test", 80),
+    }
+    request_sent = False
+    gone = asyncio.Event()
+    chunks: list[bytes] = []
+
+    async def receive() -> dict[str, Any]:
+        nonlocal request_sent
+        if not request_sent:
+            request_sent = True
+            return {"type": "http.request", "body": payload, "more_body": False}
+        await gone.wait()
+        return {"type": "http.disconnect"}
+
+    async def send(message: dict[str, Any]) -> None:
+        if message.get("type") == "http.response.body":
+            chunk = bytes(message.get("body") or b"")
+            chunks.append(chunk)
+            if disconnect_when(chunk):
+                gone.set()
+
+    await asyncio.wait_for(app(scope, receive, send), timeout=timeout_s)
+    return chunks

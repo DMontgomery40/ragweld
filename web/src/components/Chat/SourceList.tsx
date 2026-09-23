@@ -13,6 +13,8 @@ type Props = {
   /** Images the prompting user turn attached, listed as real answer sources so an image-only
    * answer does not look grounded purely in low-scoring corpus chunks (M-95/B-18). */
   attachedImageCount?: number;
+  /** Called after a citation opens in the Source viewer (the answer's click signal). */
+  onOpenCitation?: (source: ChunkMatch) => void;
 };
 
 const RECALL_CORPUS_ID = 'recall_default';
@@ -51,7 +53,7 @@ const rowButton: React.CSSProperties = {
  * "paper" thumbnail card; everything else is a compact clickable file:line row. Both open the
  * source in the right rail at the cited location.
  */
-export function SourceList({ sources, legacyCitations, webCitations, attachedImageCount = 0 }: Props) {
+export function SourceList({ sources, legacyCitations, webCitations, attachedImageCount = 0, onOpenCitation }: Props) {
   const openDocument = useDockStore((s) => s.openDocument);
   const repos = useRepoStore((s) => s.repos);
   const corpusName = (id: string) => repos.find((r) => r.corpus_id === id)?.name || id;
@@ -102,7 +104,9 @@ export function SourceList({ sources, legacyCitations, webCitations, attachedIma
         const number = index + 1;
         const fileName = source.file_path.split('/').pop() || source.file_path;
         const open = () => {
-          if (corpusId) openDocument({ corpusId, source });
+          if (!corpusId) return;
+          openDocument({ corpusId, source });
+          onOpenCitation?.(source);
         };
         if (hasPageRegions(source) && corpusId) {
           const page = source.provenance?.page_start ?? 1;

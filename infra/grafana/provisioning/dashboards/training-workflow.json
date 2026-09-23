@@ -1,5 +1,7 @@
 {
-  "annotations": { "list": [] },
+  "annotations": {
+    "list": []
+  },
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -8,58 +10,133 @@
   "liveNow": false,
   "panels": [
     {
-      "datasource": { "type": "prometheus", "uid": "mimir" },
-      "fieldConfig": { "defaults": { "unit": "none" } },
-      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 0 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "noValue": "No data: API not scraped"
+        }
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 0,
+        "y": 0
+      },
       "id": 1,
       "options": {
         "colorMode": "value",
         "graphMode": "area",
         "justifyMode": "auto",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "auto"
       },
-      "targets": [{ "expr": "last_over_time(tribrid_reranker_train_active_runs[24h])", "legendFormat": "active" }],
+      "targets": [
+        {
+          "expr": "last_over_time(tribrid_reranker_train_active_runs[24h])",
+          "legendFormat": "active"
+        }
+      ],
       "title": "Active Training Runs",
       "type": "stat"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "mimir" },
-      "fieldConfig": { "defaults": { "unit": "none" } },
-      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 0 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "noValue": "No data: API not scraped"
+        }
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 8,
+        "y": 0
+      },
       "id": 2,
       "options": {
         "colorMode": "value",
         "graphMode": "area",
         "justifyMode": "auto",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "auto"
       },
-      "targets": [{ "expr": "increase(tribrid_reranker_train_runs_total{outcome=\"started\"}[24h])", "legendFormat": "started" }],
+      "targets": [
+        {
+          "expr": "increase(tribrid_reranker_train_runs_total{outcome=\"started\"}[24h])",
+          "legendFormat": "started"
+        }
+      ],
       "title": "Runs Started (24h)",
       "type": "stat"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "mimir" },
-      "fieldConfig": { "defaults": { "unit": "none" } },
-      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 0 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "noValue": "No data: API not scraped"
+        }
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 16,
+        "y": 0
+      },
       "id": 3,
       "options": {
         "colorMode": "value",
         "graphMode": "area",
         "justifyMode": "auto",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "auto"
       },
-      "targets": [{ "expr": "increase(tribrid_reranker_train_runs_total{outcome=\"failed\"}[24h])", "legendFormat": "failed" }],
+      "targets": [
+        {
+          "expr": "increase(tribrid_reranker_train_runs_total{outcome=\"failed\"}[24h])",
+          "legendFormat": "failed"
+        }
+      ],
       "title": "Runs Failed (24h)",
       "type": "stat"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -69,14 +146,27 @@
             "showPoints": "never",
             "spanNulls": false
           },
-          "unit": "ms"
+          "unit": "ms",
+          "noValue": "No training run in range"
         }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 6
+      },
       "id": 4,
       "options": {
-        "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true },
-        "tooltip": { "mode": "multi", "sort": "desc" }
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
       "targets": [
         {
@@ -88,7 +178,10 @@
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -98,21 +191,44 @@
             "showPoints": "never",
             "spanNulls": false
           },
-          "unit": "none"
+          "unit": "none",
+          "noValue": "No training run in range"
         }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 6
+      },
       "id": 5,
       "options": {
-        "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true },
-        "tooltip": { "mode": "multi", "sort": "desc" }
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
-      "targets": [{ "expr": "rate(tribrid_reranker_train_samples_total[5m]) * 60", "legendFormat": "samples/min" }],
+      "targets": [
+        {
+          "expr": "rate(tribrid_reranker_train_samples_total[5m]) * 60",
+          "legendFormat": "samples/min"
+        }
+      ],
       "title": "Training Throughput",
       "type": "timeseries"
     },
     {
-      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 14 },
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      },
       "id": 6,
       "options": {
         "content": "## Training and Workflow\nThis is the workflow lane for Flyte, MLflow, and Unsloth correlation. Pair it with the Learning Agent Studio control plane when runs stall, fail, or drift from the last healthy lane.",
@@ -125,18 +241,19 @@
   "refresh": "10s",
   "schemaVersion": 38,
   "style": "dark",
-  "tags": ["ragweld", "observability", "training", "workflow"],
+  "tags": [
+    "ragweld",
+    "observability",
+    "training",
+    "workflow"
+  ],
   "templating": {
-    "list": [
-      { "name": "corpus_id", "label": "Corpus", "type": "textbox", "query": "*", "current": { "text": "*", "value": "*" } },
-      { "name": "run_id", "label": "Run", "type": "textbox", "query": "*", "current": { "text": "*", "value": "*" } },
-      { "name": "model", "label": "Model", "type": "textbox", "query": "*", "current": { "text": "*", "value": "*" } },
-      { "name": "provider", "label": "Provider", "type": "textbox", "query": "*", "current": { "text": "*", "value": "*" } },
-      { "name": "prompt_set", "label": "Prompt Set", "type": "textbox", "query": "current", "current": { "text": "current", "value": "current" } },
-      { "name": "workflow_id", "label": "Workflow", "type": "textbox", "query": "*", "current": { "text": "*", "value": "*" } }
-    ]
+    "list": []
   },
-  "time": { "from": "now-6h", "to": "now" },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
   "timepicker": {},
   "timezone": "",
   "title": "Training & Workflow",

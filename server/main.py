@@ -60,11 +60,12 @@ from server.models.tribrid_config_model import (
     TriBridConfig,
 )
 from server.observability.costing import warm_costing_catalog
-from server.observability.metrics import render_latest
+from server.observability.metrics import CORPUS_INDEX_SIZES, render_latest
 from server.observability.runtime import (
     apply_default_links,
     current_header_values,
     start_request_observation,
+    update_route_summary,
 )
 from server.services.config_store import CorpusNotFoundError
 from server.services.config_store import get_config as load_scoped_config
@@ -418,6 +419,9 @@ record_mounted_state(
 
 @app.get("/metrics")
 async def metrics() -> Response:
+    # Per-corpus sizes are served from a cache; a stale cache starts one background reload
+    # and this scrape answers from what is cached (nothing heavy runs on a scrape).
+    CORPUS_INDEX_SIZES.schedule_refresh()
     body, content_type = render_latest()
     return Response(content=body, media_type=content_type)
 
@@ -435,6 +439,18 @@ def _request_observability_route_name(path: str) -> str:
     if not clean:
         return "root"
     return clean.replace("/", ".").replace("-", "_")
+
+
+# Span name for a path no route matched: a raw 404 path is client-chosen, unbounded text.
+_UNMATCHED_ROUTE_TEMPLATE = "/api/unmatched"
+
+
+def _matched_route_template(request: Request) -> str:
+    """The route template FastAPI matched (`/api/repos/{corpus_id}/stats`), never the concrete
+    path: span names are Tempo span-metric dimensions, and ids in them are unbounded."""
+    route = request.scope.get("route")
+    template = getattr(route, "path", None)
+    return template if isinstance(template, str) and template else _UNMATCHED_ROUTE_TEMPLATE
 
 
 async def _load_request_observability_config(request: Request) -> TriBridConfig:
@@ -460,16 +476,28 @@ async def observability_middleware(
     config = await _load_request_observability_config(request)
     scope_id = _request_observability_scope_id(request)
 
+    # Routing runs inside call_next, so the span opens under a bounded provisional name and
+    # is renamed to the matched template once routing has happened (in a finally, so an
+    # exception cannot leave a concrete path as the name).
     with start_request_observation(
         config=config,
-        route_name=_request_observability_route_name(path),
-        path=path,
+        route_name=_request_observability_route_name(_UNMATCHED_ROUTE_TEMPLATE),
+        path=_UNMATCHED_ROUTE_TEMPLATE,
         method=request.method,
         correlation_id=request.headers.get("X-Correlation-ID"),
         repo_id=scope_id,
     ) as observation:
         apply_default_links(config)
-        response = await call_next(request)
+        try:
+            response = await call_next(request)
+        finally:
+            if observation is not None:
+                template = _matched_route_template(request)
+                route_name = _request_observability_route_name(template)
+                observation.span.update_name(f"ragweld.{route_name}")
+                observation.span.set_attribute("ragweld.route_name", route_name)
+                observation.span.set_attribute("http.route", template)
+                update_route_summary(route_name=route_name, path=template)
         if observation is not None:
             observation.span.set_attribute("http.response.status_code", int(response.status_code))
         for key, value in current_header_values().items():

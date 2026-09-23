@@ -199,6 +199,40 @@ async def test_generic_api_endpoint_emits_canonical_observability_headers(client
 
 
 @pytest.mark.asyncio
+async def test_request_spans_are_named_by_route_template_never_by_concrete_path(client: AsyncClient) -> None:
+    """Span names are Tempo span-metric dimensions: an id in the name is a new series per id.
+    The middleware names the span after the matched FastAPI route template, and a path no
+    route matched gets one bounded name instead of the client's text."""
+    import uuid
+
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    from server.config import load_config
+    from server.observability.runtime import get_observability_manager
+
+    manager = get_observability_manager(load_config())
+    exporter = InMemorySpanExporter()
+    processor = SimpleSpanProcessor(exporter)
+    manager.tracer_provider.add_span_processor(processor)
+    conversation_id = f"conv-{uuid.uuid4().hex}"
+    stray = f"no-such-route-{uuid.uuid4().hex}"
+    try:
+        history = await client.get(f"/api/chat/history/{conversation_id}")
+        missing = await client.get(f"/api/{stray}/stats")
+    finally:
+        processor.shutdown()
+    assert history.status_code == 200 and missing.status_code == 404
+
+    roots = [span for span in exporter.get_finished_spans() if span.attributes.get("ragweld.route_name")]
+    names = {span.name: dict(span.attributes) for span in roots}
+    assert "ragweld.api.chat.history.{conversation_id}" in names, sorted(names)
+    assert names["ragweld.api.chat.history.{conversation_id}"]["http.route"] == "/api/chat/history/{conversation_id}"
+    assert "ragweld.api.unmatched" in names, sorted(names)
+    assert not any(conversation_id in name or stray in name for name in names)
+
+
+@pytest.mark.asyncio
 async def test_observability_status_includes_gateway_and_workflow_control_plane_components(client: AsyncClient) -> None:
     baseline = await client.get("/api/config")
     assert baseline.status_code == 200
@@ -300,13 +334,20 @@ async def test_observability_status_and_catalog_include_enterprise_stack_compone
         "eval_benchmark_prompt_regressions",
         "cost_capacity",
         "frontend_rum",
+        "tribrid_overview",
+        "tribrid_rag_metrics",
+        "reranker_training",
     }.issubset(dashboard_ids)
-    variables = {
-        variable["id"]
+    # Variables are the ones each dashboard's panels actually filter on, never a shared
+    # decorative set: the gateway board filters by model alias, no board by corpus/run.
+    variables_by_dashboard = {
+        dashboard["id"]: {variable["id"] for variable in dashboard.get("variables", [])}
         for dashboard in catalog_data["dashboards"]
-        for variable in dashboard.get("variables", [])
     }
-    assert {"corpus_id", "run_id", "model", "provider", "prompt_set", "workflow_id"}.issubset(variables)
+    assert variables_by_dashboard["gateway_serving"] == {"model", "time_range"}
+    assert all("time_range" in ids for ids in variables_by_dashboard.values())
+    decorative = {"corpus_id", "run_id", "provider", "prompt_set", "workflow_id"}
+    assert all(not (ids & decorative) for ids in variables_by_dashboard.values())
 
 
 @pytest.mark.asyncio
