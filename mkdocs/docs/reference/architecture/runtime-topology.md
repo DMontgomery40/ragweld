@@ -4,7 +4,7 @@
     Drawn from `docker-compose.yml`, `infra/docker-compose.observability.yml` and
     `deploy/proxmox/docker-compose.yml` on every docs-autopilot run. Edit the compose files, not this page.
 
-27 services; an arrow means *depends on*. Host ports are the defaults from the compose files
+28 services; an arrow means *depends on*. Host ports are the defaults from the compose files
 (`HOST->CONTAINER`), all bound to `127.0.0.1`; the pve1 overlay exposes the app only through Cloudflare Tunnel -> Caddy -> Authelia.
 
 ```mermaid
@@ -27,7 +27,7 @@ flowchart LR
     end
     subgraph n_Metrics__logs__traces__profiling["Metrics, logs, traces, profiling"]
         n_prometheus["prometheus\nprom/prometheus:v2.45.0\nports 59090->9090"]
-        n_alertmanager["alertmanager\nprom/alertmanager:v0.27.0\nports 59093->9093"]
+        n_alertmanager["alertmanager\nprom/alertmanager:v0.28.1\nports 59093->9093"]
         n_mimir["mimir\ngrafana/mimir:2.13.0\nports 59009->9009"]
         n_loki["loki\ngrafana/loki:latest\nports 53100->3100"]
         n_promtail["promtail\ngrafana/promtail:latest"]
@@ -51,6 +51,7 @@ flowchart LR
     end
     subgraph n_other["Other services"]
         n_authelia_redis["authelia-redis\nredis:7-alpine"]
+        n_laya["laya\nragweld-laya:0.3.11"]
     end
     n_alloy --> n_tempo
     n_api --> n_postgres
@@ -78,7 +79,7 @@ flowchart LR
 
 | Service | Image | Host ports | Depends on | Defined in |
 |---|---|---|---|---|
-| `alertmanager` | `prom/alertmanager:v0.27.0` | 59093->9093 | - | observability overlay |
+| `alertmanager` | `prom/alertmanager:v0.28.1` | 59093->9093 | - | observability overlay, pve1 production overlay |
 | `alloy` | `grafana/alloy:v1.8.3` | 52345->12345, 54319->4317, 54320->4318, 52347->12347 | `tempo` | observability overlay, pve1 production overlay |
 | `api` | `(built from repo)` | 58012->8000 | `postgres`, `neo4j`, `litellm` | base |
 | `authelia` | `authelia/authelia:4.39.20` | 59091->9091 | `authelia-redis` | pve1 production overlay |
@@ -93,6 +94,7 @@ flowchart LR
 | `langfuse-postgres` | `postgres:16-alpine` | - | - | observability overlay, pve1 production overlay |
 | `langfuse-redis` | `redis:7-alpine` | - | - | observability overlay, pve1 production overlay |
 | `langfuse-worker` | `langfuse/langfuse-worker:4` | - | `langfuse-postgres`, `langfuse-clickhouse`, `langfuse-redis`, `langfuse-minio` | observability overlay, pve1 production overlay |
+| `laya` | `ragweld-laya:0.3.11` | 58180->8000 | - | base |
 | `litellm` | `ghcr.io/berriai/litellm:v1.94.0` | 54000->4000 | - | base |
 | `loki` | `grafana/loki:latest` | 53100->3100 | - | base |
 | `mimir` | `grafana/mimir:2.13.0` | 59009->9009 | - | observability overlay |

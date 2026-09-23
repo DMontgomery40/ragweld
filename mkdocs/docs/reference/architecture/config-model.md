@@ -60,12 +60,14 @@ flowchart LR
     root --> n_hydration
     n_evaluation["evaluation\n14 fields"]
     root --> n_evaluation
-    n_system_prompts["system_prompts\n11 fields"]
+    n_system_prompts["system_prompts\n10 fields"]
     root --> n_system_prompts
     n_mcp["mcp\n11 fields"]
     root --> n_mcp
     n_synthetic["synthetic\n3 fields"]
     root --> n_synthetic
+    n_system_one["system_one\n7 fields"]
+    root --> n_system_one
     n_docker["docker\n7 fields"]
     root --> n_docker
     n_document_viewer["document_viewer\n3 fields"]
@@ -100,8 +102,9 @@ flowchart LR
 | `chat` | 18 | Top-level chat configuration. Lives at TriBridConfig.chat. | [chat](../config/chat.md) |
 | `hydration` | 2 | Context hydration configuration. | [hydration](../config/hydration.md) |
 | `evaluation` | 14 | Evaluation dataset configuration. | [evaluation](../config/evaluation.md) |
-| `system_prompts` | 11 | System prompts for LLM interactions - affects RAG pipeline behavior. | [system_prompts](../config/system_prompts.md) |
+| `system_prompts` | 10 | System prompts for LLM interactions - affects RAG pipeline behavior. | [system_prompts](../config/system_prompts.md) |
 | `mcp` | 11 | Inbound MCP (Model Context Protocol) server configuration. | [mcp](../config/mcp.md) |
 | `synthetic` | 3 | Top-level synthetic data pipeline configuration. | [synthetic](../config/synthetic.md) |
+| `system_one` | 7 | Which System One endpoint answers Ragweld's typed judgments, and how it is called. | [system_one](../config/system_one.md) |
 | `docker` | 7 | Docker infrastructure configuration. | [docker](../config/docker.md) |
 | `document_viewer` | 3 | Source document evidence viewer: how cited files are rendered back to the user. | [document_viewer](../config/document_viewer.md) |

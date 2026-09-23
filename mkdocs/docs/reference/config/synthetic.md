@@ -37,20 +37,20 @@
 
 | JSON key | Env key(s) | Type | Default | Constraints | Summary |
 |---------|------------|------|---------|-------------|---------|
-| `synthetic.generator.concurrency` | — | `int` | `4` | ≥ 1, ≤ 16 | Concurrent generator/judge requests sent to the LiteLLM gateway per synthetic run. Forced to 1 when the selected alias is the single-stream local vLLM serving row. |
+| `synthetic.generator.concurrency` | — | `int` | `4` | ≥ 1, ≤ 16 | Concurrent generator requests sent to the LiteLLM gateway per synthetic run. Forced to 1 when the selected alias is the single-stream local vLLM serving row. |
 | `synthetic.generator.evidence_quote_max_chars` | — | `int` | `200` | ≥ 50, ≤ 1000 | Max characters for evidence quote field |
 | `synthetic.generator.expected_answer_max_chars` | — | `int` | `400` | ≥ 50, ≤ 2000 | Max characters for expected answer field |
 | `synthetic.generator.max_tokens` | — | `int` | `1200` | ≥ 100, ≤ 16000 | Max tokens for generator LLM response |
 | `synthetic.generator.question_max_chars` | — | `int` | `180` | ≥ 50, ≤ 500 | Max characters for generated question text |
-| `synthetic.generator.source_excerpt_max_lines` | — | `int` | `80` | ≥ 10, ≤ 500 | Max lines of source chunk content sent as context to generator/judge |
+| `synthetic.generator.source_excerpt_max_lines` | — | `int` | `80` | ≥ 10, ≤ 500 | Max lines of source chunk content sent as context to the generator |
 | `synthetic.generator.temperature` | — | `float` | `0.0` | ≥ 0.0, ≤ 2.0 | Temperature for synthetic generator LLM calls |
 
 ## `judge`
 
 | JSON key | Env key(s) | Type | Default | Constraints | Summary |
 |---------|------------|------|---------|-------------|---------|
-| `synthetic.judge.max_tokens` | — | `int` | `400` | ≥ 100, ≤ 4000 | Max tokens for judge LLM response |
-| `synthetic.judge.temperature` | — | `float` | `0.0` | ≥ 0.0, ≤ 2.0 | Temperature for synthetic judge LLM calls |
+| `synthetic.judge.answer_supported_min` | — | `float` | `0.7` | ≥ 0.0, ≤ 1.0 | Minimum probability that the located evidence quote, not the file name or path, supports the expected answer to the question |
+| `synthetic.judge.reader_question_min` | — | `float` | `0.7` | ≥ 0.0, ≤ 1.0 | Minimum probability that a real reader would ask the question about the document's subject (not cover, title-page, report-number or filename trivia, and understandable without the source) |
 
 ## `quality_gate`
 
