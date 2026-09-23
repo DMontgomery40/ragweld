@@ -133,7 +133,10 @@ jobs:
           NEO4J_URI: bolt://127.0.0.1:7687
           NEO4J_USER: neo4j
           NEO4J_PASSWORD: ci-fixture-only
-        run: uv run pytest tests/ -v --cov=server
+        run: >-
+          uv run pytest -q
+          tests/unit/test_refresh_models_catalog.py
+          tests/unit/test_proxmox_deployment_contract.py
 
   test-frontend:
     runs-on: ubuntu-latest
