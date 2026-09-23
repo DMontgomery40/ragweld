@@ -35,7 +35,7 @@ async def test_validate_config_warns_when_gen_alias_is_not_a_catalog_gateway_ali
         assert len(gen_model_warnings) == 1
         assert "not a gateway alias in data/models.json" in gen_model_warnings[0]["message"]
 
-        cfg["generation"]["gen_model"] = "openai.gpt-5.4-mini"
+        cfg["generation"]["gen_model"] = "openai.gpt-6-luna"
         assert (await client.put("/api/config", json=cfg)).status_code == 200
         result = (await client.get("/api/config/validate")).json()
         assert [w for w in result["warnings"] if w["field"] == "generation.gen_model"] == []

@@ -119,7 +119,7 @@ def native_telemetry(tmp_path_factory: pytest.TempPathFactory) -> Iterator[_Tele
     }, "litellm_params": {
         "model": "openai/" + model, "api_key": "synthetic-only",
         "api_base": f"http://127.0.0.1:{server.server_port}/v1", "max_retries": 0, "num_retries": 0,
-    }} for alias, model in [("openai.gpt-5.4-mini", "gpt-5-mini"), ("zero-cost", "gpt-5-mini"), ("embedding", "text-embedding-3-small"), ("failure", "failure"), ("held", "held")]]
+    }} for alias, model in [("openai.gpt-6-luna", "gpt-5-mini"), ("zero-cost", "gpt-5-mini"), ("embedding", "text-embedding-3-small"), ("failure", "failure"), ("held", "held")]]
     config_file = directory / "config.json"
     config_file.write_text(json.dumps(config))
     env_file = directory / "gateway.env"
@@ -190,7 +190,7 @@ def test_native_generations_join_trace_session_and_export_only_bounded_lane_metr
             scope = RunCensusScope(RunIdentity(session, "synthetic-corpus", lane), lambda _checkpoint: None,
                 trace_headers={"traceparent": f"00-{_TRACE}-{_PARENT}-01"})
             with httpx.Client(transport=CensusTransport(scope), timeout=30, trust_env=False) as client:
-                body = {"model": "openai.gpt-5.4-mini", "messages": [{"role": "user", "content": _INPUT}], "stream": streaming}
+                body = {"model": "openai.gpt-6-luna", "messages": [{"role": "user", "content": _INPUT}], "stream": streaming}
                 if streaming:
                     body["stream_options"] = {"include_usage": True}
                 response = client.post(state.base_url + "/v1/chat/completions", headers={"Authorization": "Bearer sk-synthetic-telemetry"}, json=body)
@@ -346,7 +346,7 @@ cfg.tracing.langfuse_enabled=True
 cfg.tracing.langfuse_base_url=sys.argv[2]
 cfg.tracing.langfuse_public_base_url=sys.argv[2]
 cfg.tracing.langfuse_project="fixture-project"
-route=ProviderRoute(kind="litellm",provider_name="LiteLLM",model="openai.gpt-5.4-mini",base_url=sys.argv[1]+"/v1",api_key="sk-synthetic-telemetry")
+route=ProviderRoute(kind="litellm",provider_name="LiteLLM",model="openai.gpt-6-luna",base_url=sys.argv[1]+"/v1",api_key="sk-synthetic-telemetry")
 async def main():
  traces=[]
  for stream in (False, True):

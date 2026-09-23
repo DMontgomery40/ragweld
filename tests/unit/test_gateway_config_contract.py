@@ -145,12 +145,12 @@ def test_removed_flat_keys_are_rejected_by_nested_root_validation(removed_key: s
 @pytest.mark.parametrize(
     "payload",
     [
-        {"generation": {"gen_model": "openai/gpt-5.4-mini"}},
-        {"generation": {"enrich_model": "openrouter:openai/gpt-5.4-mini"}},
+        {"generation": {"gen_model": "openai/gpt-6-luna"}},
+        {"generation": {"enrich_model": "openrouter:openai/gpt-6-luna"}},
         {"generation": {"gen_model_cli": "local:qwen3:8b"}},
-        {"chat": {"litellm": {"default_model": "openai/gpt-5.4-mini"}}},
+        {"chat": {"litellm": {"default_model": "openai/gpt-6-luna"}}},
         {"chat": {"multimodal": {"vision_model_override": "openrouter:vision"}}},
-        {"graph_indexing": {"semantic_kg_llm_model": "openai/gpt-5.4-mini"}},
+        {"graph_indexing": {"semantic_kg_llm_model": "openai/gpt-6-luna"}},
     ],
 )
 def test_direct_provider_identifiers_are_rejected_during_config_parse(payload: dict[str, object]) -> None:

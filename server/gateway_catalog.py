@@ -100,7 +100,7 @@ class GatewayRow:
 def gateway_alias_for_openrouter_id(model_id: str) -> str:
     """Derive the application-visible alias for one OpenRouter model id.
 
-    ``openai/gpt-5.4-mini`` becomes ``openai.gpt-5.4-mini`` and the variant
+    ``openai/gpt-6-luna`` becomes ``openai.gpt-6-luna`` and the variant
     ``qwen/qwen3-coder:free`` becomes ``qwen.qwen3-coder.free``. Aliases are
     lowercase and never contain ``/`` or ``:`` so they cannot be mistaken for a
     direct provider id.

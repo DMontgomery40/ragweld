@@ -6,7 +6,7 @@ const productionConfig = JSON.parse(
   readFileSync(resolve(process.cwd(), 'tribrid_config.json'), 'utf-8'),
 );
 productionConfig.ui.runtime_mode = 'production';
-productionConfig.generation.gen_model = 'openai.gpt-5.6-terra';
+productionConfig.generation.gen_model = 'openai.gpt-6-sol';
 productionConfig.chat.litellm.default_model = 'z-ai.glm-5.3-flash';
 productionConfig.ui.chat_default_model = 'z-ai.glm-5.3-flash';
 
@@ -49,7 +49,7 @@ test('production retrieval identifies the non-chat generation alias as deploymen
         contentType: 'application/json',
         body: JSON.stringify({
           models: [
-            model('openai.gpt-5.6-terra', 'OpenAI: GPT-5.6 Terra', 'openai'),
+            model('openai.gpt-6-sol', 'OpenAI: GPT-6 Sol', 'openai'),
             model('z-ai.glm-5.3-flash', 'Z.ai: GLM 5.3 Flash', 'z-ai'),
           ],
         }),
@@ -70,7 +70,7 @@ test('production retrieval identifies the non-chat generation alias as deploymen
     'aria-describedby',
     'retrieval-generation-answer-alias-lock-note',
   );
-  await expect(control.locator('select')).toHaveValue('openai.gpt-5.6-terra');
+  await expect(control.locator('select')).toHaveValue('openai.gpt-6-sol');
   await expect(control).toContainText('Chat uses its own model picker');
   await expect(control).toContainText('locked by the production deployment');
 });

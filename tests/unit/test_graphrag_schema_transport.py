@@ -53,7 +53,7 @@ def proposal_gateway(scenario: str) -> Iterator[tuple[str, list[dict[str, Any]]]
         def do_GET(self) -> None:  # noqa: N802 - stdlib HTTP handler
             if self.path.endswith("/models"):
                 self._control_response({"object": "list", "data": [{
-                    "id": "openai.gpt-5.6-sol", "object": "model", "created": 1,
+                    "id": "openai.gpt-6-sol", "object": "model", "created": 1,
                     "owned_by": "transport-fixture",
                 }]})
                 return
@@ -100,7 +100,7 @@ def proposal_gateway(scenario: str) -> Iterator[tuple[str, list[dict[str, Any]]]
                 content = ""
             completion = {
                 "id": "proposal-contract-response", "object": "chat.completion", "created": 1,
-                "model": "openai.gpt-5.6-sol",
+                "model": "openai.gpt-6-sol",
                 "choices": [{"index": 0, "finish_reason": "length" if selected == "truncated" else "stop",
                              "message": {"role": "assistant", "content": content,
                                          "refusal": "PRIVATE PROVIDER DETAIL" if selected == "refusal" else None}}],
@@ -144,9 +144,9 @@ async def _proposal(base_url: str, *, timeout_s: float = 2.0, reasoning_effort: 
         corpus_id="mission-instruments",
         chunks=[Chunk(chunk_id="mission:1", file_path="mission.md", start_line=1, end_line=2,
                       content="The orbital survey mission uses a radar altimeter.", token_count=12)],
-        model_alias="openai.gpt-5.6-sol", route_model="openai.gpt-5.6-sol",
+        model_alias="openai.gpt-6-sol", route_model="openai.gpt-6-sol",
         route_base_url=base_url, route_api_key="transport-fixture-key",
-        route_upstream="openrouter/openai/gpt-5.6-sol", reasoning_effort=reasoning_effort,
+        route_upstream="openrouter/openai/gpt-6-sol", reasoning_effort=reasoning_effort,
         input_fingerprint="a" * 64, timeout_s=timeout_s, max_output_tokens=16384,
     )
 
@@ -158,7 +158,7 @@ async def test_proposal_gateway_serves_native_model_discovery_and_separate_contr
             models = await client.get(f"{url}/models")
             state = await client.get(f"{url}/__fixture__/state")
     assert models.status_code == 200
-    assert models.json()["data"][0]["id"] == "openai.gpt-5.6-sol"
+    assert models.json()["data"][0]["id"] == "openai.gpt-6-sol"
     assert state.json() == {"received": 0, "completed": 0, "last_reasoning_effort": None, "last_model": None}
     assert not requests
 

@@ -2,7 +2,7 @@
 
 Defect D26: the listwise reranker sent one chat completion whose output budget a reasoning
 model spent thinking about the candidates, so the verdict came back empty or truncated and
-every such alias failed with a parse error (openai.gpt-5.6-luna 1 in 3 at 50 candidates,
+every such alias failed with a parse error (openai.gpt-6-luna 1 in 3 at 50 candidates,
 google.gemini-3.7-flash 3 in 3, deepseek.deepseek-v4-flash every time). The candidates are
 the top 60 fused results the live deployment returned for a real Epstein-corpus question
 (``tests/fixtures/gateway_rerank_candidates.json``); the query is the one the unit suite
@@ -41,7 +41,7 @@ _CANDIDATES = 50
 # plus the operator's configured non-reasoning reranker, which must keep answering with the
 # control attached.
 _ALIASES = [
-    "openai.gpt-5.6-luna",
+    "openai.gpt-6-luna",
     "google.gemini-3.7-flash",
     "deepseek.deepseek-v4-flash",
     "openai.gpt-4.1-nano",

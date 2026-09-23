@@ -92,8 +92,8 @@ class _SnapshotPostgres:
 def _production_global_config() -> TriBridConfig:
     cfg = TriBridConfig()
     cfg.ui.runtime_mode = "production"
-    cfg.generation.gen_model = "openai.gpt-5.6-terra"
-    cfg.generation.enrich_model = "openai.gpt-5.6-terra"
+    cfg.generation.gen_model = "openai.gpt-6-sol"
+    cfg.generation.enrich_model = "openai.gpt-6-sol"
     cfg.chat.max_tokens = 16000
     cfg.chat.litellm.default_model = "z-ai.glm-5.3-flash"
     cfg.ui.chat_default_model = "z-ai.glm-5.3-flash"
@@ -107,8 +107,8 @@ def _production_global_config() -> TriBridConfig:
     cfg.tracing.trace_store_path = "data/traces/workbench.json"
     cfg.training.ragweld_agent_flyte_console_base_url = "https://ragweld-flyte.dtmont.com"
     cfg.training.ragweld_agent_mlflow_console_base_url = "https://ragweld-mlflow.dtmont.com"
-    cfg.evaluation.ragas_judge_model = "openai.gpt-5.6-terra"
-    cfg.evaluation.promptfoo_grader_model = "openai.gpt-5.6-terra"
+    cfg.evaluation.ragas_judge_model = "openai.gpt-6-sol"
+    cfg.evaluation.promptfoo_grader_model = "openai.gpt-6-sol"
     return cfg
 
 
@@ -117,8 +117,8 @@ def _legacy_scoped_config() -> TriBridConfig:
     cfg.generation.gen_model = "z-ai.glm-5.3-flash"
     cfg.generation.enrich_model = "z-ai.glm-5.3-flash"
     cfg.chat.max_tokens = 4096
-    cfg.chat.litellm.default_model = "openai.gpt-5.6-terra"
-    cfg.ui.chat_default_model = "openai.gpt-5.6-terra"
+    cfg.chat.litellm.default_model = "openai.gpt-6-sol"
+    cfg.ui.chat_default_model = "openai.gpt-6-sol"
     cfg.chat.web.enabled = False
     cfg.chat.web.max_results = 1
     cfg.synthetic.generator.max_tokens = 4096
@@ -145,8 +145,8 @@ async def test_production_scope_reconciles_deployment_contract_and_persists_migr
 
     scoped = await store.get(repo_id="nasa-apollo-11")
 
-    assert scoped.generation.gen_model == "openai.gpt-5.6-terra"
-    assert scoped.generation.enrich_model == "openai.gpt-5.6-terra"
+    assert scoped.generation.gen_model == "openai.gpt-6-sol"
+    assert scoped.generation.enrich_model == "openai.gpt-6-sol"
     assert scoped.chat.max_tokens == 16000
     assert scoped.chat.litellm.default_model == "z-ai.glm-5.3-flash"
     assert scoped.ui.chat_default_model == "z-ai.glm-5.3-flash"
@@ -158,8 +158,8 @@ async def test_production_scope_reconciles_deployment_contract_and_persists_migr
     assert scoped.tracing.trace_store_path == "data/traces/workbench.json"
     assert scoped.training.ragweld_agent_flyte_console_base_url == "https://ragweld-flyte.dtmont.com"
     assert scoped.training.ragweld_agent_mlflow_console_base_url == "https://ragweld-mlflow.dtmont.com"
-    assert scoped.evaluation.ragas_judge_model == "openai.gpt-5.6-terra"
-    assert scoped.evaluation.promptfoo_grader_model == "openai.gpt-5.6-terra"
+    assert scoped.evaluation.ragas_judge_model == "openai.gpt-6-sol"
+    assert scoped.evaluation.promptfoo_grader_model == "openai.gpt-6-sol"
     assert scoped.chat.temperature == 1.7
 
     assert len(postgres.upserts) == 1
@@ -218,7 +218,7 @@ async def test_nonproduction_scope_preserves_corpus_overrides() -> None:
     scoped = await store.get(repo_id="development-corpus")
 
     assert scoped.ui.grafana_base_url == "https://grafana.ragweld.com"
-    assert scoped.chat.litellm.default_model == "openai.gpt-5.6-terra"
+    assert scoped.chat.litellm.default_model == "openai.gpt-6-sol"
     assert scoped.chat.web.enabled is False
     assert scoped.chat.max_tokens == 4096
     assert postgres.upserts == []

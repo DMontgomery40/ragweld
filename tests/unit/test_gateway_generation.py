@@ -38,7 +38,7 @@ async def test_gateway_dispatch_parents_native_generation_and_preserves_trace_li
     config.tracing.langfuse_public_base_url = "https://traces.example.invalid"
     config.tracing.langfuse_project = "synthetic-project"
     with _gateway_server() as base_url:
-        route = _route(base_url, model="openai.gpt-5.4-mini", api_key=FAIL_ONCE_KEY if fails else "synthetic")
+        route = _route(base_url, model="openai.gpt-6-luna", api_key=FAIL_ONCE_KEY if fails else "synthetic")
         with start_request_observation(config=config, route_name="synthetic.telemetry", path="/fixture", method="POST", run_id="fixture-run", repo_id="fixture-corpus") as observation:
             assert observation is not None
             kwargs = dict(route=route, system_prompt="System", user_message="Hello", images=[], temperature=0.0, max_tokens=32, context_chunks=[])
@@ -239,7 +239,7 @@ async def test_nonstream_body_fields_ride_at_the_top_level_of_the_request() -> N
     protocol; the transport carries it verbatim and never lets it redefine its own keys."""
     with _gateway_server() as base_url:
         result = await generate_chat_text(
-            route=_route(base_url, model="openai.gpt-5.6-luna"),
+            route=_route(base_url, model="openai.gpt-6-luna"),
             system_prompt="You are a retrieval reranker.",
             user_message="Which plane management company did Barry Cohen consider switching to from Jet Aviation?",
             images=[],
@@ -251,11 +251,11 @@ async def test_nonstream_body_fields_ride_at_the_top_level_of_the_request() -> N
         assert result.text == "Hello gateway"
         payload = _GatewayHandler.requests[-1]["payload"]
         assert payload["reasoning"] == {"effort": "none"}
-        assert payload["max_tokens"] == 8 and payload["model"] == "openai.gpt-5.6-luna"
+        assert payload["max_tokens"] == 8 and payload["model"] == "openai.gpt-6-luna"
 
         with pytest.raises(ValueError, match="max_tokens"):
             await generate_chat_text(
-                route=_route(base_url, model="openai.gpt-5.6-luna"),
+                route=_route(base_url, model="openai.gpt-6-luna"),
                 system_prompt="You are a retrieval reranker.",
                 user_message="Which plane management company did Barry Cohen consider switching to from Jet Aviation?",
                 images=[],
@@ -358,7 +358,7 @@ async def test_a_billed_reasoning_only_reply_is_costed_before_the_typed_error() 
             with pytest.raises(GatewayContentMissingError) as raised:
                 await generate_chat_text(
                     route=_route(
-                        base_url, model="openai.gpt-5.6-luna", api_key=REASONING_ONLY_KEY
+                        base_url, model="openai.gpt-6-luna", api_key=REASONING_ONLY_KEY
                     ),
                     system_prompt="You are a retrieval reranker.",
                     user_message=(
@@ -379,7 +379,7 @@ async def test_a_billed_reasoning_only_reply_is_costed_before_the_typed_error() 
     assert error.usage["completion_tokens_details"]["reasoning_tokens"] == 256
 
     assert cost is not None, "a billed empty-content reply left no cost summary on the trace"
-    assert cost.provider == "LiteLLM" and cost.model == "openai.gpt-5.6-luna"
+    assert cost.provider == "LiteLLM" and cost.model == "openai.gpt-6-luna"
     assert (cost.input_tokens, cost.output_tokens, cost.total_tokens) == (918, 256, 1174)
     assert cost.estimated_cost_usd == pytest.approx(REASONING_ONLY_COST_USD)
     assert cost.cost_source == "provider" and cost.authoritative is True
@@ -411,7 +411,7 @@ async def test_a_billed_reasoning_only_stream_is_costed_before_the_typed_error()
                     delta
                     async for delta in stream_chat_text(
                         route=_route(
-                            base_url, model="openai.gpt-5.6-luna", api_key=REASONING_ONLY_KEY
+                            base_url, model="openai.gpt-6-luna", api_key=REASONING_ONLY_KEY
                         ),
                         system_prompt="You are a retrieval reranker.",
                         user_message=(
@@ -479,7 +479,7 @@ async def test_image_bearing_requests_do_not_stall_the_event_loop() -> None:
             for transport in ("nonstream", "stream"):
                 if transport == "nonstream":
                     result = await generate_chat_text(
-                        route=_route(base_url, model="openai.gpt-5.6-luna"),
+                        route=_route(base_url, model="openai.gpt-6-luna"),
                         system_prompt="Describe the attached plane-management documents.",
                         user_message="Which aircraft management change do these scans discuss?",
                         images=images,
@@ -493,7 +493,7 @@ async def test_image_bearing_requests_do_not_stall_the_event_loop() -> None:
                     deltas = [
                         delta
                         async for delta in stream_chat_text(
-                            route=_route(base_url, model="openai.gpt-5.6-luna"),
+                            route=_route(base_url, model="openai.gpt-6-luna"),
                             system_prompt="Describe the attached plane-management documents.",
                             user_message="Which aircraft management change do these scans discuss?",
                             images=images,

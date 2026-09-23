@@ -251,7 +251,7 @@ async def test_deleting_the_index_preserves_accounting_and_late_worker_history(
     status = "cancelled" if state == "held" else state
     summary = _summary(corpus_id, run_id, status=status)
     owner = IndexAccountingOwner(
-        path, summary, config_json='{"synthetic": true}', models={"semantic_kg": "openai.gpt-5.6-sol"},
+        path, summary, config_json='{"synthetic": true}', models={"semantic_kg": "openai.gpt-6-sol"},
         coverage_complete=True, coverage_notes=[], estimate=_estimate_snapshot(0.25),
     )
     release = threading.Event()

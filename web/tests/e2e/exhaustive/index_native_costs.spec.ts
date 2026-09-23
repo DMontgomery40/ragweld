@@ -194,7 +194,7 @@ test.beforeAll(async ({ request }) => {
     if (req.method === 'GET' && url.pathname === '/v1/models') {
       res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({
         object: 'list',
-        data: [{ id: 'openai.gpt-5.6-sol', object: 'model', created: 1, owned_by: 'native-cost-fixture' }],
+        data: [{ id: 'openai.gpt-6-sol', object: 'model', created: 1, owned_by: 'native-cost-fixture' }],
       }));
       return;
     }
@@ -231,7 +231,7 @@ test.beforeAll(async ({ request }) => {
           id: requestId,
           object: 'chat.completion',
           created: 1,
-          model: 'openai.gpt-5.6-sol',
+          model: 'openai.gpt-6-sol',
           choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: JSON.stringify(schema), refusal: null } }],
           usage: { prompt_tokens: 11, completion_tokens: 7, total_tokens: 18 },
         }));
@@ -614,7 +614,7 @@ asyncio.run(main())
   }
 
   await patchCorpusConfigSection(page.request, corpus.corpusId, 'graph_indexing', {
-    enabled: true, build_code_graph: false, semantic_kg_llm_model: 'openai.gpt-5.6-sol',
+    enabled: true, build_code_graph: false, semantic_kg_llm_model: 'openai.gpt-6-sol',
   });
   proposalScenario = 'valid';
   await page.goto(`rag?subtab=indexing&corpus=${encodeURIComponent(corpus.corpusId)}`);

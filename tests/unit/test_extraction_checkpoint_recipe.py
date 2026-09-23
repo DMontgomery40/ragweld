@@ -19,7 +19,7 @@ def _recipe(**changes):
     arguments = dict(
         schema=GraphSchema(node_types=["Mission"], additional_node_types=False),
         prompt_template="Approved mission extraction: {schema} {text} {examples}", examples="",
-        route_model="openai.gpt-5.6-sol", route_upstream="openrouter/openai/gpt-5.6-sol",
+        route_model="openai.gpt-6-sol", route_upstream="openrouter/openai/gpt-6-sol",
         route_base_url="http://127.0.0.1:4000/v1", reasoning_effort="low",
     )
     arguments.update(changes)
@@ -29,7 +29,7 @@ def _recipe(**changes):
 def test_recipe_tracks_exact_official_parameters_and_implementation_versions() -> None:
     recipe = _recipe()
     assert recipe.model_parameters == reasoning_model_params(
-        reasoning_effort="low", route_upstream="openrouter/openai/gpt-5.6-sol")
+        reasoning_effort="low", route_upstream="openrouter/openai/gpt-6-sol")
     assert recipe.neo4j_graphrag_version == version("neo4j-graphrag")
     assert recipe.prompt_template_sha256 == hashlib.sha256(
         b"Approved mission extraction: {schema} {text} {examples}").hexdigest()
@@ -37,8 +37,8 @@ def test_recipe_tracks_exact_official_parameters_and_implementation_versions() -
 
 
 @pytest.mark.parametrize("changes", [
-    {"route_model": "openai.gpt-5.6-luna"},
-    {"route_upstream": "openrouter/openai/gpt-5.6-luna"},
+    {"route_model": "openai.gpt-6-luna"},
+    {"route_upstream": "openrouter/openai/gpt-6-luna"},
     {"route_base_url": "http://127.0.0.1:4001/v1"},
     {"reasoning_effort": "medium"},
     {"prompt_template": "Extract explicit facts only: {schema} {text} {examples}"},

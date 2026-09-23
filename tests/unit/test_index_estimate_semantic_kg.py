@@ -49,7 +49,7 @@ from server.observability.gateway_costs import NativeSpendRow
 EPSTEIN_CHUNKS = 3126
 EPSTEIN_WORKERS = 4
 EPSTEIN_WALL_SECONDS = 7654.0  # run ca5b8d92: 21:46:27 -> 23:54:01 UTC
-LUNA = "openai.gpt-5.6-luna"
+LUNA = "openai.gpt-6-luna"
 
 
 def _run(
@@ -235,7 +235,7 @@ def _usage_row(name="request-1", *, output=40, reasoning=10, **changes):
     run = _usage_run()
     payload = {
         "request_id": name, "call_type": "acompletion", "session_id": run.run_id,
-        "model": "openrouter/openai/gpt-5.6-luna", "custom_llm_provider": "openrouter",
+        "model": "openrouter/openai/gpt-6-luna", "custom_llm_provider": "openrouter",
         "startTime": run.started_at.isoformat(),
         "endTime": (run.started_at + timedelta(seconds=1)).isoformat(),
         "spend": 0.01, "status": "success", "cache_hit": "False",
@@ -256,7 +256,7 @@ def _usage_row(name="request-1", *, output=40, reasoning=10, **changes):
 
 def _sample(rows, run=None, **changes):
     args = dict(run=run or _usage_run(), corpus_id="cost-corpus", alias=LUNA,
-                upstream="openrouter/openai/gpt-5.6-luna", schema_hash="a" * 64)
+                upstream="openrouter/openai/gpt-6-luna", schema_hash="a" * 64)
     args.update(changes)
     return index_api._semantic_kg_usage_sample(rows, **args)
 
@@ -365,7 +365,7 @@ async def test_output_history_searches_past_unusable_newer_runs(tmp_path: Path, 
             elif unusable == "not_ingested":
                 pages[new.run_id] = []
             elif unusable == "wrong_upstream":
-                new_row.model = "openrouter/openai/gpt-5.6-sol"
+                new_row.model = "openrouter/openai/gpt-6-sol"
             elif unusable == "wrong_native_corpus":
                 new_row.metadata.spend_logs_metadata.corpus_id = "another-corpus"
             elif unusable == "wrong_native_lane":
@@ -383,7 +383,7 @@ async def test_output_history_searches_past_unusable_newer_runs(tmp_path: Path, 
             elif unusable == "wrong_gateway":
                 new.accounting.gateway_base_url = "http://127.0.0.1:1"
             elif unusable == "wrong_alias":
-                new.accounting.models["semantic_kg"] = "openai.gpt-5.6-sol"
+                new.accounting.models["semantic_kg"] = "openai.gpt-6-sol"
             elif unusable == "wrong_schema":
                 new.graph_metadata.schema_hash = "c" * 64
             elif unusable == "wrong_policy":
@@ -485,15 +485,15 @@ def test_successful_native_outputs_in_failed_runs_are_samples_not_completed_corp
 
 
 @pytest.mark.parametrize("field,value", [
-    ("corpus_id", "another-corpus"), ("alias", "openai.gpt-5.6-sol"),
-    ("upstream", "openrouter/openai/gpt-5.6-sol"), ("schema_hash", "c" * 64),
+    ("corpus_id", "another-corpus"), ("alias", "openai.gpt-6-sol"),
+    ("upstream", "openrouter/openai/gpt-6-sol"), ("schema_hash", "c" * 64),
 ])
 def test_output_evidence_cannot_cross_current_run_contract(field, value) -> None:
     assert _sample([_usage_row()], **{field: value}) is None
 
 
 @pytest.mark.parametrize("field,value", [
-    ("session_id", "other-run"), ("model", "openrouter/openai/gpt-5.6-sol"),
+    ("session_id", "other-run"), ("model", "openrouter/openai/gpt-6-sol"),
     ("status", "failure"), ("cache_hit", "True"), ("call_type", "embedding"),
 ])
 def test_only_actual_successful_matching_generation_rows_inform_output(field, value) -> None:

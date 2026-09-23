@@ -70,7 +70,7 @@ def test_generator_prompt_carries_every_render_token() -> None:
 def test_only_the_grounded_qa_provider_exists() -> None:
     request = SyntheticRunStartRequest(
         corpus_id="epstein-files-1",
-        generator_model="litellm:openai.gpt-5.4-mini",
-        judge_model="litellm:openai.gpt-5.4-mini",
+        generator_model="litellm:openai.gpt-6-luna",
+        judge_model="litellm:openai.gpt-6-luna",
     )
     assert request.provider == "grounded_qa"

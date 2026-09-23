@@ -25,20 +25,20 @@ test.describe('Model execution policy', () => {
     await activateCorpusInBrowser(page, corpus.corpusId);
     await page.goto('rag?subtab=reranker', { waitUntil: 'domcontentloaded' });
     const section = page.locator('#tab-rag-reranker');
-    const picker = section.locator('select').filter({ has: page.locator('option[value="openai.gpt-5.6-luna"]') });
+    const picker = section.locator('select').filter({ has: page.locator('option[value="openai.gpt-6-luna"]') });
     await expect(picker).toBeVisible();
     await expect(picker).toHaveValue('');
     await expect(picker.locator('option:checked')).toHaveText('Select a model');
     expect(await picker.locator('option').allTextContents()).not.toEqual(expect.arrayContaining([expect.stringMatching(/gpt-4(?:o|\.)?/i)]));
     const configUrl = `${API_BASE}/config?corpus_id=${encodeURIComponent(corpus.corpusId)}`;
     expect((await (await request.get(configUrl)).json()).reranking.reranker_cloud_model).toBe('');
-    await picker.selectOption('openai.gpt-5.6-luna');
+    await picker.selectOption('openai.gpt-6-luna');
     const apply = page.getByRole('button', { name: /^Apply \d+ changes?$/i });
     await expect(apply).toBeVisible();
     await apply.click();
-    await expect.poll(async () => (await (await request.get(configUrl)).json()).reranking.reranker_cloud_model).toBe('openai.gpt-5.6-luna');
+    await expect.poll(async () => (await (await request.get(configUrl)).json()).reranking.reranker_cloud_model).toBe('openai.gpt-6-luna');
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await expect(picker).toHaveValue('openai.gpt-5.6-luna');
+    await expect(picker).toHaveValue('openai.gpt-6-luna');
     await page.screenshot({ path: '/tmp/astra-model-policy-picker.png', fullPage: true });
 
     await page.getByTestId('reranker-cloud-provider').selectOption('cohere');

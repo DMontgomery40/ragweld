@@ -109,8 +109,8 @@ function promptfooRunJson(corpusId: string, runId: string): Record<string, unkno
   return {
     run_id: runId,
     corpus_id: corpusId,
-    provider_alias: 'openai.gpt-5.6-luna',
-    grader_alias: 'openai.gpt-5.6-luna',
+    provider_alias: 'openai.gpt-6-luna',
+    grader_alias: 'openai.gpt-6-luna',
     promptfoo_version: '0.0.0-seed',
     total: 1,
     passed: 1,

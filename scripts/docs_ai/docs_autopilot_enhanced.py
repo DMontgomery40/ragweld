@@ -654,17 +654,17 @@ class EnhancedDocsAutopilot:
             "Content-Type": "application/json",
         }
 
-        # Primary and fallback models (GPT-5 only)
-        primary_model = os.getenv("OPENAI_MODEL", "gpt-5.6-sol")
-        fallback_model = os.getenv("OPENAI_FALLBACK_MODEL", "gpt-5.6-terra")
-        if not primary_model.startswith("gpt-5"):
-            raise ValueError(f"OPENAI_MODEL must be GPT-5 (got: {primary_model})")
-        if fallback_model and not fallback_model.startswith("gpt-5"):
-            raise ValueError(f"OPENAI_FALLBACK_MODEL must be GPT-5 (got: {fallback_model})")
+        # Primary and fallback models (current GPT-6 family only)
+        primary_model = os.getenv("OPENAI_MODEL", "gpt-6-sol")
+        fallback_model = os.getenv("OPENAI_FALLBACK_MODEL", "gpt-6-luna")
+        if not primary_model.startswith("gpt-6"):
+            raise ValueError(f"OPENAI_MODEL must be GPT-6 (got: {primary_model})")
+        if fallback_model and not fallback_model.startswith("gpt-6"):
+            raise ValueError(f"OPENAI_FALLBACK_MODEL must be GPT-6 (got: {fallback_model})")
 
         def build_payload(model: str) -> dict[str, Any]:
-            if not model.startswith("gpt-5"):
-                raise ValueError(f"Model must be GPT-5 (got: {model})")
+            if not model.startswith("gpt-6"):
+                raise ValueError(f"Model must be GPT-6 (got: {model})")
             base = {
                 "model": model,
                 "input": [
@@ -672,7 +672,7 @@ class EnhancedDocsAutopilot:
                     {"role": "user", "content": user_prompt},
                 ],
             }
-            # GPT-5 models use new controls
+            # GPT-6 models use the Responses API controls.
             base["text"] = {"verbosity": os.getenv("OPENAI_VERBOSITY", "high")}
             base["reasoning"] = {"effort": os.getenv("OPENAI_REASONING_EFFORT", "high")}
             base["max_output_tokens"] = int(os.getenv("OPENAI_MAX_OUTPUT_TOKENS", "32000"))

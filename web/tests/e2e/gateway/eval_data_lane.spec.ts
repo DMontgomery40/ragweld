@@ -70,7 +70,7 @@ test.describe('eval data lane surfaces', () => {
     await expect(providerSelect.locator('option[value="litellm"]')).toHaveCount(1);
     await providerSelect.selectOption('litellm');
     await expect(providerSelect).toHaveValue('litellm');
-    const modelSelect = page.locator('select').filter({ has: page.locator('option[value="openai.gpt-5.6-luna"]') }).first();
+    const modelSelect = page.locator('select').filter({ has: page.locator('option[value="openai.gpt-6-luna"]') }).first();
     await expect(modelSelect).toBeVisible();
     await expect(page.getByText('LITELLM_API_KEY')).toBeVisible();
   });
@@ -140,8 +140,8 @@ test.describe('eval data lane surfaces', () => {
         corpus_id: corpusId,
         provider: 'grounded_qa',
         recipe: 'full_stack',
-        generator_model: 'litellm:openai.gpt-5.6-luna',
-        judge_model: 'litellm:openai.gpt-5.6-luna',
+        generator_model: 'litellm:openai.gpt-6-luna',
+        judge_model: 'litellm:openai.gpt-6-luna',
       },
       artifacts: [
         {

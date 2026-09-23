@@ -103,7 +103,7 @@ async def test_semantic_extraction_grounds_edges_and_attributes_in_their_own_pas
     """A broad schema must not turn table order, prior headings, or hypotheses into facts."""
     cfg = load_config()
     cfg.graph_indexing.semantic_kg_llm_model = os.environ.get(
-        "GRAPH_E2E_KG_MODEL", "openai.gpt-5.6-luna"
+        "GRAPH_E2E_KG_MODEL", "openai.gpt-6-luna"
     )
     await asyncio.to_thread(warm_gateway_catalog)
     route = _resolve_semantic_kg_route(cfg)
@@ -334,7 +334,7 @@ async def test_semantic_and_code_files_use_scoped_official_writer_contract(
     code_repo = f"__staging__pytest_pipeline_code__{code_run}"
     cfg, driver, database = _driver_and_database("pytest_pipeline_live")
     cfg.graph_indexing.semantic_kg_llm_model = os.environ.get(
-        "GRAPH_E2E_KG_MODEL", "openai.gpt-5.6-luna"
+        "GRAPH_E2E_KG_MODEL", "openai.gpt-6-luna"
     )
     await asyncio.to_thread(warm_gateway_catalog)
     route = _resolve_semantic_kg_route(cfg)
@@ -623,7 +623,7 @@ async def test_full_index_promotes_the_approved_official_pipeline_generation(
         combined_fixture,
         encoding="utf-8",
     )
-    model_alias = os.environ.get("GRAPH_E2E_KG_MODEL", "openai.gpt-5.6-luna")
+    model_alias = os.environ.get("GRAPH_E2E_KG_MODEL", "openai.gpt-6-luna")
     pg = PostgresClient(require_env("POSTGRES_DSN"))
     await pg.connect()
     created = await client.post(

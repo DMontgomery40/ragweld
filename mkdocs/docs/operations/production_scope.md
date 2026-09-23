@@ -59,7 +59,7 @@ When the global config has `ui.runtime_mode=production`:
     `embedding.*` was once reconciled to the deployment globals here; it no longer is. A corpus's embedding settings are its own index contract — the generation records them and the mismatch guard enforces them, and the index job reads the corpus's saved value — so reconciling them made a corpus-scoped save answer `200` and read back the global, and the next non-forced run refused with `stored=..., config=...`. What you save on a corpus applies to that corpus; the deployment owns URLs and default models, not the embedding contract.
 
 !!! note "Concrete production aliases"
-    The Proxmox production render (`deploy/proxmox/render_config.py`) sets `chat.litellm.default_model` and `ui.chat_default_model` to `z-ai.glm-5.3-flash`, while keeping `chat.multimodal.vision_model_override` on `openai.gpt-5.6-terra`. Two things follow from this split:
+    The Proxmox production render (`deploy/proxmox/render_config.py`) sets `chat.litellm.default_model` and `ui.chat_default_model` to `z-ai.glm-5.3-flash`, while keeping `chat.multimodal.vision_model_override` on `openai.gpt-6-sol`. Two things follow from this split:
 
     - The **chat default** is a fast, lightweight gateway alias — it is what every conversation starts on unless a per-message override is picked.
     - The **vision override** stays pinned to a multimodal-capable alias, because image-capable requests route through `chat.multimodal.vision_model_override` rather than the chat default.

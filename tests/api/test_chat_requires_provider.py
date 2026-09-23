@@ -197,7 +197,7 @@ OPENROUTER_LIMIT_MESSAGE = (
     "litellm.APIError: APIError: OpenrouterException - "
     '{"error":{"message":"Key limit exceeded (weekly limit). Manage it using '
     f'https://openrouter.ai/workspaces/default/keys/{_FAKE_KEY_HASH}","code":403}}}}'
-    "No fallback model group found for original model_group=openai.gpt-5.6-luna. Fallbacks=[]"
+    "No fallback model group found for original model_group=openai.gpt-6-luna. Fallbacks=[]"
 )
 LANE_DOWN_MESSAGE = (
     "litellm.InternalServerError: InternalServerError: OpenAIException - Connection error."

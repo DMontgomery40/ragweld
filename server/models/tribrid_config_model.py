@@ -2086,7 +2086,7 @@ class ModelCatalogEntry(BaseModel):
     gateway_upstream: str | None = Field(
         default=None,
         description=(
-            "LiteLLM litellm_params.model for gateway_alias (for example openrouter/openai/gpt-5.4-mini "
+            "LiteLLM litellm_params.model for gateway_alias (for example openrouter/openai/gpt-6-luna "
             "openai/ragweld-local for the vLLM serving path, or openai/text-embedding-3-small for native embeddings)."
         ),
     )

@@ -421,7 +421,7 @@ async def test_generation_precision_only_refuses_the_relevant_semantic_forecast(
     await asyncio.to_thread(warm_sampler, _chunker(warm_cfg))
     cfg.graph_indexing.enabled = semantic_enabled
     cfg.graph_indexing.build_code_graph = False
-    cfg.graph_indexing.semantic_kg_llm_model = "openai.gpt-5.6-luna"
+    cfg.graph_indexing.semantic_kg_llm_model = "openai.gpt-6-luna"
     cfg.indexing.skip_dense = True
     cfg.indexing.figures.enabled = False
     cfg.indexing.estimate.max_relative_error = 0.4

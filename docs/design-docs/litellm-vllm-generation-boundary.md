@@ -24,7 +24,7 @@ GEN catalog row carries `gateway_alias` + `gateway_upstream`, and
 (`scripts/generate_litellm_config.py`; lockstep enforced by
 `tests/unit/test_gateway_catalog.py`). The former hand-written
 `ragweld-openrouter-smoke` alias is gone; paid OpenRouter routes are ordinary,
-catalog-backed aliases (for example `openai.gpt-5.4-mini`) and never the
+catalog-backed aliases (for example `openai.gpt-6-luna`) and never the
 default, never a retry target, never a fallback. See
 `docs/references/generation-gateway-catalog.md`.
 
@@ -119,5 +119,4 @@ No Python mocks or Playwright interception.
   deployment constraints.
 - OpenRouter's official documentation defines Bearer authentication, the
   OpenAI-compatible Chat Completions endpoint, streaming, and the
-  `openai/gpt-5.4-mini` slug.
-
+  `openai/gpt-6-luna` slug.

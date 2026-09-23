@@ -8,7 +8,7 @@ const productionConfig = JSON.parse(
   readFileSync(resolve(process.cwd(), 'tribrid_config.json'), 'utf-8'),
 );
 productionConfig.chat.litellm.enabled = true;
-productionConfig.chat.litellm.default_model = 'openai.gpt-5.6-terra';
+productionConfig.chat.litellm.default_model = 'openai.gpt-6-sol';
 
 const model = (id: string, displayName: string, catalogProvider: string) => ({
   id,
@@ -72,7 +72,7 @@ test('a saved chat model survives startup while the real model catalog is loadin
         contentType: 'application/json',
         body: JSON.stringify({
           models: [
-            model('openai.gpt-5.6-terra', 'OpenAI: GPT-5.6 Terra', 'openai'),
+            model('openai.gpt-6-sol', 'OpenAI: GPT-6 Sol', 'openai'),
             model('z-ai.glm-5.3-flash', 'Z.ai: GLM 5.3 Flash', 'z-ai'),
           ],
         }),

@@ -47,7 +47,7 @@ What `coverage.spec.ts` does:
 Prerequisites:
 - Full stack running (frontend + backend + required infra), started from the repo root.
 - The paid gateway alias used for probes (`EXHAUSTIVE_CHAT_MODEL`, default
-  `openai.gpt-5.6-luna`) must be advertised by `/api/chat/models`.
+  `openai.gpt-6-luna`) must be advertised by `/api/chat/models`.
 - Run from the repo root: the corpus fixture path resolves from `process.cwd()`.
 
 Preflight once (cheap inventory + readiness checks; provisions but does not index):
@@ -93,7 +93,7 @@ run with the same config and no `--grep`.
 - `EXHAUSTIVE_API_BASE_URL` (default: `http://127.0.0.1:58012/api`)
 - `EXHAUSTIVE_OUTPUT_DIR` (default: `output/playwright/exhaustive`)
 - `EXHAUSTIVE_MODE=preflight|smoke|full` (default: `full`)
-- `EXHAUSTIVE_CHAT_MODEL` (default: `openai.gpt-5.6-luna`) — gateway alias for every probe
+- `EXHAUSTIVE_CHAT_MODEL` (default: `openai.gpt-6-luna`) — gateway alias for every probe
 - `EXHAUSTIVE_CORPUS_PREFIX` (default: `ragweld-exhaustive`) — prefix of the per-run corpus id
 - `EXHAUSTIVE_PROVIDER_MODELS` — `provider=alias,...` overrides for the provider-coverage probes
 - `EXHAUSTIVE_INDEX_TIMEOUT_MS` (default: 5 min) — wait for the provisioning index run

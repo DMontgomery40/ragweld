@@ -330,10 +330,10 @@ function toModelOverrideValue(model: ChatModel): string {
  * "first alias for the provider" used to pick retired upstreams
  * (`openai.gpt-3.5-turbo` answers 400 through the gateway) and the whole gate
  * failed on a dead model rather than a dead provider. Override with
- * `EXHAUSTIVE_PROVIDER_MODELS="openai=openai.gpt-5.6-luna,cohere=cohere.command-r7b-12-2024"`.
+ * `EXHAUSTIVE_PROVIDER_MODELS="openai=openai.gpt-6-luna,cohere=cohere.command-r7b-12-2024"`.
  */
 const PREFERRED_PROVIDER_MODELS: Record<string, string> = {
-  openai: 'openai.gpt-5.6-luna',
+  openai: 'openai.gpt-6-luna',
   // Every non-local alias reaches its upstream via OpenRouter after the cutover.
   openrouter: 'z-ai.glm-5.3-flash',
   cohere: 'cohere.command-r7b-12-2024',
