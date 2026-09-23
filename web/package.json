@@ -6,11 +6,12 @@
   "scripts": {
     "dev": "vite",
     "dev:lan": "vite --host 0.0.0.0",
-    "lint": "tsc -p tsconfig.json",
+    "lint": "python3 ../scripts/jev_lint.py",
     "test:unit": "node --test tests/unit/*.test.ts",
     "build": "vite build",
     "preview": "vite preview",
-    "preview:lan": "vite preview --host 0.0.0.0"
+    "preview:lan": "vite preview --host 0.0.0.0",
+    "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
     "@assistant-ui/react": "^0.12.20",

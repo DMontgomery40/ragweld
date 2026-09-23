@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import re
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -45,6 +46,19 @@ AUTO_PRICING_TIERED = "[auto-refresh] pricing_tiered=true"
 ROLLING_POINTER_PREFIX = "~"
 ROUTER_PROVIDER = "openrouter"  # openrouter/auto etc. pick another model at request time
 
+_OPENAI_NUMBERED_GPT_RE = re.compile(
+    r"^openai/gpt-(?P<version>\d+(?:\.\d+)*)(?P<suffix>(?:[-:].*)?)$",
+    re.IGNORECASE,
+)
+_ANTHROPIC_CURRENT_RE = re.compile(
+    r"^anthropic/claude-(?P<family>opus|fable|sonnet|haiku)-(?P<version>\d+(?:\.\d+)*)(?:[-:].*)?$",
+    re.IGNORECASE,
+)
+_ANTHROPIC_LEGACY_RE = re.compile(
+    r"^anthropic/claude-(?P<version>\d+(?:\.\d+)*)-(?P<family>opus|fable|sonnet|haiku)(?:[-:].*)?$",
+    re.IGNORECASE,
+)
+
 _DECIMAL_1K = Decimal("1000")
 _DECIMAL_ROUND_12 = Decimal("0.000000000001")
 
@@ -75,6 +89,7 @@ class RefreshStats:
     skipped_router: int = 0
     skipped_missing_context: int = 0
     skipped_invalid_alias: int = 0
+    skipped_superseded: int = 0
     duplicate_feed_ids: int = 0
     rows_pricing_tiered: int = 0
     previous_gateway_rows: int = 0
@@ -134,6 +149,66 @@ def _parse_per_1k_pricing(value: Any) -> float | None:
     if per_token < 0:
         return None
     return float((per_token * _DECIMAL_1K).quantize(_DECIMAL_ROUND_12))
+
+
+def _version_tuple(raw: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in raw.split("."))
+
+
+def _openai_frontier_version(model_id: str) -> tuple[int, ...] | None:
+    """Return the generation for ordinary numbered GPT routes.
+
+    Image and open-weight GPT routes are distinct product families, so a newer
+    frontier generation must not remove them from the catalog.
+    """
+
+    match = _OPENAI_NUMBERED_GPT_RE.fullmatch(model_id)
+    if match is None or match.group("suffix").lower().startswith("-image"):
+        return None
+    return _version_tuple(match.group("version"))
+
+
+def _anthropic_family_version(model_id: str) -> tuple[str, tuple[int, ...]] | None:
+    for pattern in (_ANTHROPIC_CURRENT_RE, _ANTHROPIC_LEGACY_RE):
+        match = pattern.fullmatch(model_id)
+        if match is not None:
+            return match.group("family").lower(), _version_tuple(match.group("version"))
+    return None
+
+
+def _remove_superseded_versions(normalized: dict[str, FeedModel], stats: RefreshStats) -> None:
+    """Drop older OpenAI GPT generations and Claude family versions in place."""
+
+    openai_versions = {
+        version
+        for model_id in normalized
+        if (version := _openai_frontier_version(model_id)) is not None
+    }
+    latest_openai = max(openai_versions, default=None)
+
+    latest_anthropic: dict[str, tuple[int, ...]] = {}
+    for model_id in normalized:
+        parsed = _anthropic_family_version(model_id)
+        if parsed is None:
+            continue
+        family, version = parsed
+        latest_anthropic[family] = max(version, latest_anthropic.get(family, version))
+
+    superseded: list[str] = []
+    for model_id in normalized:
+        openai_version = _openai_frontier_version(model_id)
+        if openai_version is not None and latest_openai is not None and openai_version < latest_openai:
+            superseded.append(model_id)
+            continue
+        anthropic = _anthropic_family_version(model_id)
+        if anthropic is not None:
+            family, version = anthropic
+            if version < latest_anthropic[family]:
+                superseded.append(model_id)
+
+    for model_id in superseded:
+        del normalized[model_id]
+    stats.skipped_superseded += len(superseded)
 
 
 def normalize_openrouter_rows(rows: list[dict[str, Any]], stats: RefreshStats | None = None) -> dict[str, FeedModel]:
@@ -200,6 +275,7 @@ def normalize_openrouter_rows(rows: list[dict[str, Any]], stats: RefreshStats | 
             supports_vision=_accepts_images(row),
             pricing_tiered=pricing_tiered,
         )
+    _remove_superseded_versions(normalized, stats)
     stats.normalized_feed_rows = len(normalized)
     return normalized
 

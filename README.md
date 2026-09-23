@@ -895,10 +895,10 @@ uv run pytest
 uv run mypy server
 
 # Linting
-uv run ruff check server
+python3 scripts/jev_lint.py
 
-# Format code
-uv run ruff format server
+# Inspect semantic lint scope
+python3 scripts/jev_lint.py --dry-run # inspect semantic lint scope
 
 # Regenerate TypeScript types (after changing Pydantic models)
 uv run python scripts/generate_types.py

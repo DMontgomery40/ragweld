@@ -1,0 +1,132 @@
+{
+  "include": [
+    "server/*.py",
+    "web/src/*.ts",
+    "web/src/*.tsx",
+    "data/glossary.json",
+    "tests/*.py",
+    ".tests/*.ts",
+    "web/src/*.js",
+    "web/src/*.jsx"
+  ],
+  "exclude": [
+    "web/src/types/generated.ts",
+    "tests/test_jev_lint.py",
+    "tests/fixtures/*"
+  ],
+  "context": "Lint source semantics. Formatting, import order, naming taste and line length are not violations. Consider executable behavior rather than keyword presence. Do not judge assertions about model quality as established without evidence. Ragweld uses generated public wire types from backend boundary schemas. Local UI/view types are allowed. Retrieval sources open in the Source viewer. Redis and LangChain wrappers are removed; LangGraph is allowed. Runtime model catalogs come from /api/models. Tests use real dependencies; a real HTTP PATCH is allowed. Existing tests may contain old mocks; judge actual newly selected source, not strings describing mocks.",
+  "rules": [
+    {
+      "id": "removed_dependency",
+      "include": [
+        "server/*.py"
+      ],
+      "question": "Does executable code import and use Redis or LangChain wrappers (not LangGraph)?"
+    },
+    {
+      "id": "wire_contract",
+      "include": [
+        "web/src/api/*.ts",
+        "web/src/services/*.ts",
+        "web/src/stores/*.ts"
+      ],
+      "question": "Does this module hand-declare a serialized backend API request/response DTO instead of importing the generated boundary type? Internal UI/view models, internal helper types and mappings are allowed."
+    },
+    {
+      "id": "operator_eval_name",
+      "include": [
+        "web/src/*.tsx",
+        "data/glossary.json",
+        "web/src/*.ts"
+      ],
+      "question": "Does displayed operator-facing text call evaluation datasets or eval entries golden questions? Identifiers and comments are not displayed copy."
+    },
+    {
+      "id": "operator_ranker_name",
+      "include": [
+        "web/src/*.tsx",
+        "data/glossary.json",
+        "web/src/*.ts"
+      ],
+      "question": "Does displayed operator-facing text use the standalone word ranker to mean the retrieval reranker? The word reranker is correct."
+    },
+    {
+      "id": "operator_chunk_name",
+      "include": [
+        "web/src/*.tsx",
+        "data/glossary.json",
+        "web/src/*.ts"
+      ],
+      "question": "Does displayed operator-facing text label retrieved text chunks or their summaries card or cards? Generic layout cards, citation cards, and HuggingFace Model Cards are explicitly allowed and are not violations."
+    },
+    {
+      "id": "citation_copy",
+      "include": [
+        "web/src/*.tsx",
+        "data/glossary.json",
+        "web/src/*.ts"
+      ],
+      "question": "Does operator-facing copy falsely promise that retrieval citations open VS Code rather than the Source viewer?"
+    },
+    {
+      "id": "mocked_dependency",
+      "include": [
+        "tests/*.py",
+        ".tests/*.ts"
+      ],
+      "question": "Does the test actually replace a production dependency with monkeypatch, unittest.mock, or a fabricated Playwright network response? Real client.patch HTTP calls and test fixtures containing sample code as strings are allowed."
+    },
+    {
+      "id": "static_catalog",
+      "include": [
+        "web/src/*.ts",
+        "web/src/*.tsx"
+      ],
+      "question": "Does executable frontend runtime code fetch static models.json instead of the /api/models API?"
+    },
+    {
+      "id": "conditional_hooks",
+      "include": [
+        "*/src/*.jsx",
+        "*/src/*.tsx",
+        "*/src/*.js",
+        "*/src/*.ts"
+      ],
+      "question": "Does a React component or custom hook execute useState, useEffect, useMemo, useRef, or a similar hook on some renders but skip it on others? A conditional return BEFORE a later hook skips that hook and is a violation. Hooks inside branches or loops also violate this rule. Hooks before all conditional returns are allowed. The special React use() API is exempt."
+    },
+    {
+      "id": "render_side_effect",
+      "include": [
+        "*/src/*.jsx",
+        "*/src/*.tsx",
+        "*/src/*.js",
+        "*/src/*.ts"
+      ],
+      "question": "Does a component execute a network request or state update directly during rendering, rather than inside an event handler or effect, in a way that creates repeated unintended actions?"
+    },
+    {
+      "id": "runtime_configuration",
+      "include": [
+        "server/*.py"
+      ],
+      "question": "Does executable server code read operator-tunable model/provider selection, generation temperature or embedding dimensions from environment variables instead of validated runtime config? Secrets, ports, DSNs and service wiring may use environment variables."
+    },
+    {
+      "id": "legacy_frontend",
+      "include": [
+        "web/src/*.js",
+        "web/src/*.jsx"
+      ],
+      "question": "Is this a JavaScript/JSX runtime source module under web/src, which is required to use TypeScript/TSX? Generated assets and quoted JavaScript examples are not runtime source modules."
+    },
+    {
+      "id": "studio_styles",
+      "include": [
+        "web/src/components/RerankerTraining/*Studio*.tsx",
+        "web/src/components/RerankerTraining/NeuralVisualizer*.tsx",
+        "web/src/components/RAG/LearningRankerSubtab.tsx"
+      ],
+      "question": "Does this Studio component attach actual inline style properties to rendered JSX elements instead of using stylesheet classes?"
+    }
+  ]
+}

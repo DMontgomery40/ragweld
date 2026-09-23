@@ -34,7 +34,8 @@ For non-obvious failures:
 ## Required Validation After Any Code Change
 
 ```bash
-uv run scripts/check_banned.py
+python3 scripts/jev_lint.py
+uv run scripts/check_contract_integrity.py
 uv run scripts/validate_types.py
 uv run pytest -q
 npm --prefix web run lint
