@@ -11,7 +11,7 @@ from pathlib import Path
 from server.config import _strip_removed_keys
 from server.models.tribrid_config_model import TriBridConfig
 
-PRODUCTION_MODEL_ALIAS = "openai.gpt-5.6-terra"
+PRODUCTION_MODEL_ALIAS = "openai.gpt-6-sol"
 PRODUCTION_CHAT_MODEL_ALIAS = "z-ai.glm-5.3-flash"
 PRODUCTION_LONG_FORM_MAX_TOKENS = 16000
 PRODUCTION_EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
