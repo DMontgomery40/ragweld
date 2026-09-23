@@ -936,7 +936,17 @@ const ThreadWelcome = memo(function ThreadWelcome({ onPromptSelect }: { onPrompt
   );
 });
 
-export function ChatInterface() {
+export type ChatInterfaceProps = {
+  /** DOM id of the workbench root; unique per surface (main pane and Dock can both show Chat). */
+  workbenchId: string;
+  /** Workbench height in CSS px, sized by the Chat tab to the pane it lives in. */
+  height: number;
+  /** Whether the operator gave the conversation the whole pane (Routing Trace out of the way). */
+  expanded: boolean;
+  onToggleExpanded: () => void;
+};
+
+export function ChatInterface({ workbenchId, height, expanded, onToggleExpanded }: ChatInterfaceProps) {
   const { api } = useAPI();
   const { config } = useConfig();
   const { showToast } = useUIHelpers();
@@ -2021,15 +2031,16 @@ export function ChatInterface() {
 
   return (
     <div
+      id={workbenchId}
       data-react-chat="true"
+      data-expanded={expanded ? 'true' : 'false'}
       style={{
         display: 'flex',
         flexDirection: 'column',
-        // At short desktop window heights, 70vh left less than 100px between the
-        // toolbar and composer. Citation/feedback controls then occupied the same
-        // screen coordinates as the status bar and could not be clicked. Keep a
-        // usable message viewport; the surrounding tab remains the page scroller.
-        height: 'clamp(560px, 70vh, 760px)',
+        // The Chat tab sizes the workbench to the pane it lives in (main pane or Dock) and
+        // never below its floor, so the message list, not a fixed clamp, takes the room.
+        height: `${height}px`,
+        boxSizing: 'border-box',
         border: '1px solid var(--line)',
         borderRadius: '18px',
         overflow: 'hidden',
@@ -2038,22 +2049,24 @@ export function ChatInterface() {
     >
       <div
         style={{
-          padding: '14px 18px',
+          padding: '10px 16px',
           borderBottom: '1px solid var(--line)',
           display: 'flex',
           flexWrap: 'wrap',
-          gap: '12px',
+          gap: '10px 12px',
           alignItems: 'center',
           background: 'linear-gradient(180deg, var(--bg-elev1) 0%, rgba(255,255,255,0.02) 100%)',
         }}
       >
         <div style={{ flexShrink: 0 }}>
-          <h3 style={{ margin: '0 0 4px 0', fontSize: '14px', fontWeight: 700 }}>
+          {/* The global `.settings-section h3` rule adds an underline and 28px of padding/margin
+              the toolbar does not want; the title sits on the same row as the controls. */}
+          <h3 style={{ margin: 0, padding: 0, border: 0, fontSize: '14px', fontWeight: 700 }}>
             Chat Workbench
           </h3>
         </div>
 
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center', flex: '1 1 auto', minWidth: 0 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center', flex: '1 1 0%', minWidth: '260px' }}>
           <SourceDropdown
             value={activeSources}
             onChange={(next) => {
@@ -2164,6 +2177,26 @@ export function ChatInterface() {
             }}
           >
             Settings
+          </button>
+
+          <button
+            type="button"
+            data-testid="chat-expand"
+            aria-pressed={expanded}
+            aria-controls={workbenchId}
+            onClick={onToggleExpanded}
+            style={{
+              background: expanded ? 'var(--accent)' : 'var(--bg-elev2)',
+              color: expanded ? 'var(--accent-contrast)' : 'var(--fg)',
+              border: `1px solid ${expanded ? 'var(--accent)' : 'var(--line)'}`,
+              padding: '8px 12px',
+              borderRadius: '12px',
+              fontSize: '12px',
+              fontWeight: 700,
+              cursor: 'pointer',
+            }}
+          >
+            {expanded ? 'Collapse' : 'Expand'}
           </button>
         </div>
 
@@ -2362,11 +2395,11 @@ export function ChatInterface() {
 
           <div
             style={{
-              padding: '16px',
+              padding: '12px 16px',
               borderTop: '1px solid var(--line)',
               background: 'linear-gradient(180deg, rgba(255,255,255,0.02) 0%, var(--bg-elev1) 100%)',
               display: 'grid',
-              gap: '12px',
+              gap: '10px',
             }}
           >
             <ChatComposer
@@ -2405,10 +2438,9 @@ export function ChatInterface() {
                   {toggle.label}
                 </button>
               ))}
-            </div>
-
-            <div style={{ fontSize: '11px', color: 'var(--fg-muted)' }}>
-              Press Ctrl+Enter to send.
+              <span style={{ marginLeft: 'auto', fontSize: '11px', color: 'var(--fg-muted)' }}>
+                Press Ctrl+Enter to send.
+              </span>
             </div>
           </div>
         </div>

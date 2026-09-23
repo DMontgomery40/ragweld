@@ -390,3 +390,245 @@ test.describe.serial('chat workbench (seeded, no paid sends)', () => {
     }
   });
 });
+
+// GUI-050 / GUI-052 / GUI-059: the conversation must be the dominant vertical region of the
+// Chat tab. The workbench used to be pinned to clamp(560px, 70vh, 760px): at the operator's
+// 1440x1408 desktop the message list was ~437px (31% of the viewport) while Routing Trace and
+// dead space took the rest, and nothing let the operator give the conversation the pane.
+// Seeded from localStorage (no sends), real app + API, measured at deviceScaleFactor 1.
+test.describe('chat workbench fills the pane (GUI-050)', () => {
+  test.use({ deviceScaleFactor: 1 });
+
+  const LAYOUT_QUESTION = 'What is the calibration interval for the pressure sensor on the acceptance rig?';
+
+  type ChatGeom = {
+    innerH: number;
+    scrollportTop: number;
+    scrollportBottom: number;
+    workbenchTop: number;
+    workbenchBottom: number;
+    workbenchH: number;
+    messagesH: number;
+    traceTop: number | null;
+    traceOpen: boolean | null;
+  };
+
+  async function seedLayoutThread(page: Page): Promise<void> {
+    await seedThread(page, {
+      sources: { corpus_ids: ['recall_default'] },
+      messages: [
+        { id: 'u1', role: 'user', createdAt: new Date().toISOString(), content: [{ type: 'text', text: LAYOUT_QUESTION }] },
+        completedAssistant('The acceptance rig recalibrates the pressure sensor every 90 days.'),
+      ],
+    });
+  }
+
+  // `surface` scopes to the main pane or the Dock; the message region is found as the scroll
+  // container of the seeded question, so the measurement does not trust a test id to point at
+  // the right element.
+  async function measure(page: Page, surface: '.main-content' | '[data-testid="dock-native"]'): Promise<ChatGeom> {
+    return page.evaluate(
+      ({ surface, question }) => {
+        const scope = document.querySelector(surface) as HTMLElement;
+        const root = scope.querySelector('[data-react-chat="true"]') as HTMLElement;
+        const scrollport = root.closest('.tab-content') as HTMLElement;
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        let questionNode: Node | null = null;
+        while (walker.nextNode()) {
+          if ((walker.currentNode.textContent || '').includes(question)) {
+            questionNode = walker.currentNode;
+            break;
+          }
+        }
+        let messages: HTMLElement | null = questionNode ? questionNode.parentElement : null;
+        while (messages && messages !== root && !/(auto|scroll)/.test(getComputedStyle(messages).overflowY)) {
+          messages = messages.parentElement;
+        }
+        const trace = scope.querySelector('#chat-trace') as HTMLDetailsElement | null;
+        const sp = scrollport.getBoundingClientRect();
+        const wb = root.getBoundingClientRect();
+        return {
+          innerH: window.innerHeight,
+          scrollportTop: Math.round(sp.top),
+          scrollportBottom: Math.round(sp.top + scrollport.clientHeight),
+          workbenchTop: Math.round(wb.top),
+          workbenchBottom: Math.round(wb.bottom),
+          workbenchH: Math.round(wb.height),
+          messagesH: messages && messages !== root ? Math.round(messages.getBoundingClientRect().height) : -1,
+          traceTop: trace && trace.offsetParent ? Math.round(trace.getBoundingClientRect().top) : null,
+          traceOpen: trace ? trace.open : null,
+        };
+      },
+      { surface, question: LAYOUT_QUESTION },
+    );
+  }
+
+  test('at the operator desktop geometry the conversation fills the pane, and Expand gives it the rest', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 1408 });
+    await seedLayoutThread(page);
+    await gotoChat(page);
+    await page.waitForTimeout(500);
+
+    const before = await measure(page, '.main-content');
+    const detail = JSON.stringify(before);
+    expect(before.messagesH, `message list not found: ${detail}`).toBeGreaterThan(0);
+    expect(
+      before.messagesH / before.innerH,
+      `message list is ${before.messagesH}px of a ${before.innerH}px viewport: ${detail}`,
+    ).toBeGreaterThanOrEqual(0.5);
+    // No stranded band: the workbench reaches the bottom of the visible pane.
+    expect(before.workbenchBottom, `workbench stops short of the pane bottom: ${detail}`).toBeGreaterThanOrEqual(
+      before.scrollportBottom - 40,
+    );
+
+    const expand = page.getByTestId('chat-expand');
+    await expect(expand).toHaveAttribute('aria-pressed', 'false');
+    await expect(expand).toHaveText('Expand');
+    await expand.focus();
+    await page.keyboard.press('Enter');
+    await expect(expand).toHaveAttribute('aria-pressed', 'true');
+    await expect(expand).toHaveText('Collapse');
+
+    const expanded = await measure(page, '.main-content');
+    const expandedDetail = JSON.stringify(expanded);
+    expect(expanded.messagesH, `expanded list shrank: ${expandedDetail}`).toBeGreaterThan(before.messagesH);
+    expect(
+      expanded.messagesH / expanded.innerH,
+      `expanded message list is ${expanded.messagesH}px of ${expanded.innerH}px: ${expandedDetail}`,
+    ).toBeGreaterThanOrEqual(0.55);
+    // Expanded, the workbench owns the whole scrollport: top to bottom, and Routing Trace is out of it.
+    expect(expanded.workbenchBottom, expandedDetail).toBeGreaterThanOrEqual(expanded.scrollportBottom - 16);
+    expect(expanded.workbenchBottom, expandedDetail).toBeLessThanOrEqual(expanded.scrollportBottom + 1);
+    expect(expanded.traceOpen, `Routing Trace stayed open: ${expandedDetail}`).not.toBe(true);
+    if (expanded.traceTop !== null) {
+      expect(expanded.traceTop, `Routing Trace is inside the expanded pane: ${expandedDetail}`).toBeGreaterThanOrEqual(
+        expanded.scrollportBottom,
+      );
+    }
+    // The resize handle has nothing to negotiate while expanded.
+    await expect(page.getByTestId('chat-resize-handle')).toBeHidden();
+    // Keyboard focus on the composer's bottom row does not jump the pane.
+    await page.getByTestId('chat-toggle-graph').focus();
+    const focused = await measure(page, '.main-content');
+    expect(Math.abs(focused.workbenchTop - expanded.workbenchTop), JSON.stringify({ expanded, focused })).toBeLessThanOrEqual(1);
+
+    // The choice is per viewer and survives a reload.
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('#chat-input', { timeout: 90_000 });
+    await expect(page.getByTestId('chat-expand')).toHaveAttribute('aria-pressed', 'true');
+    // Reloaded expanded, Routing Trace starts folded even though the config default opens it.
+    await expect(page.locator('#chat-trace')).toHaveJSProperty('open', false);
+
+    // Asking an answer for its trace brings Routing Trace back: expanded mode steps aside.
+    await page.locator('.main-content').getByRole('button', { name: 'Trace', exact: true }).click();
+    await expect(page.getByTestId('chat-expand')).toHaveAttribute('aria-pressed', 'false');
+    await expect(page.locator('#chat-trace')).toHaveJSProperty('open', true);
+
+    await page.getByTestId('chat-expand').click();
+    await expect(page.getByTestId('chat-expand')).toHaveAttribute('aria-pressed', 'true');
+    await page.getByTestId('chat-expand').click();
+    await expect(page.getByTestId('chat-expand')).toHaveAttribute('aria-pressed', 'false');
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('#chat-input', { timeout: 90_000 });
+    await expect(page.getByTestId('chat-expand')).toHaveAttribute('aria-pressed', 'false');
+    await expect(page.getByTestId('chat-resize-handle')).toBeVisible();
+  });
+
+  test('at 1440x900 the workbench still reaches the bottom of the pane', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await seedLayoutThread(page);
+    await gotoChat(page);
+    await page.waitForTimeout(500);
+
+    const geom = await measure(page, '.main-content');
+    const detail = JSON.stringify(geom);
+    expect(geom.messagesH, `message list not found: ${detail}`).toBeGreaterThan(0);
+    expect(geom.workbenchBottom, `workbench stops short of the pane bottom: ${detail}`).toBeGreaterThanOrEqual(
+      geom.scrollportBottom - 40,
+    );
+    expect(geom.workbenchBottom, `workbench runs past the visible pane: ${detail}`).toBeLessThanOrEqual(
+      geom.scrollportBottom + 1,
+    );
+
+    await page.getByTestId('chat-expand').click();
+    const expanded = await measure(page, '.main-content');
+    expect(expanded.messagesH, JSON.stringify(expanded)).toBeGreaterThanOrEqual(geom.messagesH);
+    expect(expanded.workbenchBottom, JSON.stringify(expanded)).toBeGreaterThanOrEqual(expanded.scrollportBottom - 16);
+  });
+
+  test('the bottom-edge handle resizes chat against Routing Trace by keyboard and pointer, and persists', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 1408 });
+    await seedLayoutThread(page);
+    await gotoChat(page);
+    await page.waitForTimeout(500);
+
+    const handle = page.getByTestId('chat-resize-handle');
+    await expect(handle).toBeVisible();
+    await expect(handle).toHaveAttribute('role', 'separator');
+    await expect(handle).toHaveAttribute('aria-orientation', 'horizontal');
+    const start = await measure(page, '.main-content');
+    const startNow = Number(await handle.getAttribute('aria-valuenow'));
+    expect(Math.abs(startNow - start.workbenchH), `aria-valuenow ${startNow} vs ${start.workbenchH}px`).toBeLessThanOrEqual(1);
+    const maxNow = Number(await handle.getAttribute('aria-valuemax'));
+    const minNow = Number(await handle.getAttribute('aria-valuemin'));
+    expect(minNow).toBeGreaterThan(0);
+    expect(maxNow).toBeGreaterThan(minNow);
+
+    await handle.focus();
+    for (let i = 0; i < 6; i += 1) await page.keyboard.press('ArrowUp');
+    const shrunk = await measure(page, '.main-content');
+    expect(shrunk.workbenchH, JSON.stringify({ start, shrunk })).toBeLessThan(start.workbenchH - 100);
+    // The bottom edge moves, not the conversation: focusing the handle and resizing never
+    // scroll the pane (the handle used to sit in the scroll-padding band, and focus
+    // centre-scrolled the pane ~600px, hiding the whole conversation).
+    expect(Math.abs(shrunk.workbenchTop - start.workbenchTop), JSON.stringify({ start, shrunk })).toBeLessThanOrEqual(1);
+    expect(Math.abs(Number(await handle.getAttribute('aria-valuenow')) - shrunk.workbenchH)).toBeLessThanOrEqual(1);
+    // The space given up goes to Routing Trace, which is now inside the visible pane.
+    expect(shrunk.traceTop, JSON.stringify(shrunk)).not.toBeNull();
+    expect(shrunk.traceTop!, JSON.stringify(shrunk)).toBeLessThan(shrunk.scrollportBottom);
+
+    await page.keyboard.press('ArrowDown');
+    const grown = await measure(page, '.main-content');
+    expect(grown.workbenchH).toBeGreaterThan(shrunk.workbenchH);
+
+    // Pointer drag on the same edge.
+    const box = (await handle.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 - 60, { steps: 6 });
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 - 120, { steps: 6 });
+    await page.mouse.up();
+    const dragged = await measure(page, '.main-content');
+    expect(Math.abs(grown.workbenchH - 120 - dragged.workbenchH), JSON.stringify({ grown, dragged })).toBeLessThanOrEqual(4);
+    // The edge follows the pointer.
+    const handleAfter = (await handle.boundingBox())!;
+    expect(Math.abs(handleAfter.y - (box.y - 120)), JSON.stringify({ box, handleAfter })).toBeLessThanOrEqual(4);
+
+    // Clamped: it never shrinks below its floor.
+    await handle.focus();
+    await page.keyboard.press('Home');
+    const floor = await measure(page, '.main-content');
+    expect(Math.abs(floor.workbenchH - minNow), JSON.stringify(floor)).toBeLessThanOrEqual(1);
+    for (let i = 0; i < 3; i += 1) await page.keyboard.press('ArrowUp');
+    expect((await measure(page, '.main-content')).workbenchH).toBe(floor.workbenchH);
+
+    // The size survives a reload.
+    await page.keyboard.press('ArrowDown');
+    const persisted = await measure(page, '.main-content');
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('#chat-input', { timeout: 90_000 });
+    await page.waitForTimeout(500);
+    const reloaded = await measure(page, '.main-content');
+    expect(Math.abs(reloaded.workbenchH - persisted.workbenchH), JSON.stringify({ persisted, reloaded })).toBeLessThanOrEqual(1);
+
+    // End restores the full pane.
+    await page.getByTestId('chat-resize-handle').focus();
+    await page.keyboard.press('End');
+    const full = await measure(page, '.main-content');
+    expect(full.workbenchBottom, JSON.stringify(full)).toBeGreaterThanOrEqual(full.scrollportBottom - 40);
+  });
+});

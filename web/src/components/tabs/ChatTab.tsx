@@ -1,9 +1,22 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type React from 'react';
 import { TraceExternalLinks } from '@/components/Observability/TraceExternalLinks';
 import { ChatSubtabs } from '@/components/Chat/ChatSubtabs';
 import { ChatInterface } from '@/components/Chat/ChatInterface';
 import { CHAT_SESSIONS_CHANGED_EVENT, readActiveConversationRunIds } from '@/components/Chat/chatSessions';
 import { ChatSettings } from '@/components/Chat/ChatSettings';
+import {
+  CHAT_WORKBENCH_MIN_PX,
+  DEFAULT_CHAT_PANE_LAYOUT,
+  chatWorkbenchHeightForKey,
+  chatWorkbenchMaxHeight,
+  normalizeChatWorkbenchHeight,
+  readChatPaneLayout,
+  resolveChatWorkbenchHeight,
+  writeChatPaneLayout,
+  type ChatPaneLayout,
+  type ChatPaneSurface,
+} from '@/components/Chat/chatPaneLayout';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { useAPI, useConfig, useSubtab } from '@/hooks';
 import { LiveTerminal, type LiveTerminalHandle } from '@/components/LiveTerminal/LiveTerminal';
@@ -14,12 +27,34 @@ import type { Trace, TracesLatestResponse } from '@/types/generated';
 // React-native Chat tab with UI and Settings subtabs
 type ChatSubtab = 'ui' | 'settings';
 
+// Room kept under the workbench inside the visible pane: the resize handle (16px) plus a small
+// gap by default; only the section padding when expanded (the handle is not shown then).
+const CHAT_HANDLE_RESERVE_PX = 24;
+const CHAT_EXPANDED_RESERVE_PX = 8;
+
+function layoutStorage(): Storage | null {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
 export default function ChatTab() {
   const { api } = useAPI();
   const { config } = useConfig();
   const { activeRepo } = useRepoStore();
   const { activeSubtab, setSubtab } = useSubtab<ChatSubtab>({ routePath: '/chat', defaultSubtab: 'ui' });
   const [traceOpen, setTraceOpen] = useState(false);
+
+  // Workbench layout (GUI-050): per viewer and per surface, UI-only (never config).
+  const workbenchFrameRef = useRef<HTMLDivElement>(null);
+  const workbenchId = `chat-workbench-${useId().replace(/:/g, '')}`;
+  const [paneSurface, setPaneSurface] = useState<ChatPaneSurface | null>(null);
+  const [paneLayout, setPaneLayout] = useState<ChatPaneLayout>(DEFAULT_CHAT_PANE_LAYOUT);
+  const [paneAvailablePx, setPaneAvailablePx] = useState<number | null>(null);
+  const [resizing, setResizing] = useState(false);
+  const dragRef = useRef<{ startY: number; startHeight: number } | null>(null);
 
   const traceInitRef = useRef(false);
   const terminalRef = useRef<LiveTerminalHandle>(null);
@@ -39,13 +74,129 @@ export default function ChatTab() {
       ? Math.max(0, trace.ended_at_ms - trace.started_at_ms)
       : null;
 
-  useEffect(() => {
-    // Apply config default once (do not override manual toggles).
-    if (!traceInitRef.current && config) {
-      traceInitRef.current = true;
-      setTraceOpen(chatShowTraceDefault);
+  // Which surface this Chat tab is (the main pane or the Dock) decides its layout key, so the
+  // docked chat keeps its own Expand/height choice.
+  useLayoutEffect(() => {
+    const frame = workbenchFrameRef.current;
+    if (!frame) return;
+    const docked =
+      frame.closest('.dock-native') !== null || new URLSearchParams(window.location.search).get('dock') === '1';
+    const surface: ChatPaneSurface = docked ? 'dock' : 'main';
+    setPaneSurface(surface);
+    setPaneLayout(readChatPaneLayout(layoutStorage(), surface));
+  }, []);
+
+  // The workbench is sized to the pane it lives in: the height left in the tab's scroll
+  // container below the subtab bar, re-measured whenever that container resizes.
+  useLayoutEffect(() => {
+    if (activeSubtab !== 'ui') return;
+    const frame = workbenchFrameRef.current;
+    const scroller = frame?.closest('.tab-content') as HTMLElement | null;
+    if (!frame || !scroller) return;
+    const reserve = paneLayout.expanded ? CHAT_EXPANDED_RESERVE_PX : CHAT_HANDLE_RESERVE_PX;
+    const measure = () => {
+      const section = frame.firstElementChild as HTMLElement | null;
+      if (!section || frame.offsetParent === null) return;
+      const sectionStyle = getComputedStyle(section);
+      const sectionBorderY = parseFloat(sectionStyle.borderTopWidth) + parseFloat(sectionStyle.borderBottomWidth);
+      const offset = frame.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+      // Capped by the window so a container that grows with its content can never feed back.
+      const paneHeight = Math.min(scroller.clientHeight, window.innerHeight);
+      setPaneAvailablePx(Math.floor(paneHeight - offset - sectionBorderY - reserve));
+    };
+    measure();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    observer?.observe(scroller);
+    const subtabBar = scroller.querySelector(':scope > .subtab-bar');
+    if (subtabBar) observer?.observe(subtabBar);
+    window.addEventListener('resize', measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, [activeSubtab, paneLayout.expanded]);
+
+  const updatePaneLayout = useCallback(
+    (next: ChatPaneLayout) => {
+      setPaneLayout(next);
+      if (paneSurface) writeChatPaneLayout(layoutStorage(), paneSurface, next);
+    },
+    [paneSurface]
+  );
+
+  const workbenchHeight = resolveChatWorkbenchHeight(paneLayout, paneAvailablePx);
+  const workbenchMaxHeight = chatWorkbenchMaxHeight(paneAvailablePx);
+
+  const toggleExpanded = useCallback(() => {
+    const next = { ...paneLayout, expanded: !paneLayout.expanded };
+    updatePaneLayout(next);
+    if (next.expanded) {
+      // The conversation takes the pane; the diagnostics fold away below it.
+      setTraceOpen(false);
+      const scroller = workbenchFrameRef.current?.closest('.tab-content') as HTMLElement | null;
+      scroller?.scrollTo({ top: 0 });
     }
-  }, [chatShowTraceDefault, config]);
+  }, [paneLayout, updatePaneLayout]);
+
+  const onResizeKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
+      const next = chatWorkbenchHeightForKey(event.key, workbenchHeight, paneAvailablePx);
+      if (!next) return;
+      event.preventDefault();
+      updatePaneLayout({ ...paneLayout, height: next.height });
+    },
+    [paneAvailablePx, paneLayout, updatePaneLayout, workbenchHeight]
+  );
+
+  const onResizePointerDown = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      dragRef.current = { startY: event.clientY, startHeight: workbenchHeight };
+      setResizing(true);
+    },
+    [workbenchHeight]
+  );
+
+  const onResizePointerMove = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      const drag = dragRef.current;
+      if (!drag) return;
+      const height = normalizeChatWorkbenchHeight(drag.startHeight + event.clientY - drag.startY, paneAvailablePx);
+      // Live while dragging; persisted once, when the drag ends.
+      setPaneLayout((prev) => (prev.height === height ? prev : { ...prev, height }));
+    },
+    [paneAvailablePx]
+  );
+
+  const onResizePointerEnd = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      const drag = dragRef.current;
+      if (!drag) return;
+      dragRef.current = null;
+      setResizing(false);
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+      // A cancelled pointer can report stale coordinates: keep the last live height instead.
+      const height =
+        event.type === 'pointercancel'
+          ? paneLayout.height
+          : normalizeChatWorkbenchHeight(drag.startHeight + event.clientY - drag.startY, paneAvailablePx);
+      updatePaneLayout({ ...paneLayout, height });
+    },
+    [paneAvailablePx, paneLayout, updatePaneLayout]
+  );
+
+  useEffect(() => {
+    // Apply config default once (do not override manual toggles). An expanded workbench keeps
+    // Routing Trace folded: the operator asked for the conversation to have the pane.
+    if (!traceInitRef.current && config && paneSurface) {
+      traceInitRef.current = true;
+      setTraceOpen(chatShowTraceDefault && !paneLayout.expanded);
+    }
+  }, [chatShowTraceDefault, config, paneLayout.expanded, paneSurface]);
 
   const loadTrace = useCallback(
     async (opts?: { runId?: string | null }) => {
@@ -123,13 +274,15 @@ export default function ChatTab() {
       const runId = typeof detail.run_id === 'string' ? detail.run_id : null;
       setSubtab('ui', { replace: true });
       setSelectedRunId(runId);
+      // Asking for a run's trace brings Routing Trace back into the pane.
+      if (paneLayout.expanded) updatePaneLayout({ ...paneLayout, expanded: false });
       setTraceOpen(true);
       // Load immediately (uses run_id if present)
       void loadTrace({ runId });
     };
     window.addEventListener('tribrid:chat:open-trace', onOpen as EventListener);
     return () => window.removeEventListener('tribrid:chat:open-trace', onOpen as EventListener);
-  }, [loadTrace]);
+  }, [loadTrace, paneLayout, updatePaneLayout]);
 
   // When a chat run completes (answered or failed), the panel follows it: the run id is
   // remembered even while the panel is closed, so opening it later shows this conversation's
@@ -244,12 +397,39 @@ export default function ChatTab() {
 
       <div
         id="tab-chat-ui"
-        className={`section-subtab ${activeSubtab === 'ui' ? 'active' : ''}`}
+        className={`section-subtab ${activeSubtab === 'ui' ? 'active' : ''}${paneLayout.expanded ? ' chat-ui--expanded' : ''}`}
       >
-        <div className="settings-section" style={{ borderLeft: '3px solid var(--link)', padding: 0 }}>
-          <ErrorBoundary>
-            <ChatInterface />
-          </ErrorBoundary>
+        <div ref={workbenchFrameRef} className="chat-workbench-frame">
+          <div className="settings-section" style={{ borderLeft: '3px solid var(--link)', padding: 0, margin: 0 }}>
+            <ErrorBoundary>
+              <ChatInterface
+                workbenchId={workbenchId}
+                height={workbenchHeight}
+                expanded={paneLayout.expanded}
+                onToggleExpanded={toggleExpanded}
+              />
+            </ErrorBoundary>
+          </div>
+          {paneLayout.expanded ? null : (
+            <div
+              role="separator"
+              aria-orientation="horizontal"
+              aria-label="Resize chat workbench"
+              aria-controls={workbenchId}
+              aria-valuenow={workbenchHeight}
+              aria-valuemin={CHAT_WORKBENCH_MIN_PX}
+              aria-valuemax={workbenchMaxHeight}
+              aria-valuetext={`${workbenchHeight} pixels tall`}
+              tabIndex={0}
+              data-testid="chat-resize-handle"
+              className={`chat-resize-handle${resizing ? ' is-dragging' : ''}`}
+              onKeyDown={onResizeKeyDown}
+              onPointerDown={onResizePointerDown}
+              onPointerMove={onResizePointerMove}
+              onPointerUp={onResizePointerEnd}
+              onPointerCancel={onResizePointerEnd}
+            />
+          )}
         </div>
 
         <div className="settings-section" style={{ padding: '0 12px 12px 12px' }}>

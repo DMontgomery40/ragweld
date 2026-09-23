@@ -357,3 +357,71 @@ test('the docked chat composer keeps Attach and Send on one line', async ({ page
     dockBox.x + dockBox.width + 2,
   );
 });
+
+// GUI-050 in the Dock: the docked chat workbench is sized to the dock's own scroll pane, not
+// to the window. The old clamp(560px, 70vh, 760px) height ignored the pane it lived in, so the
+// docked message list was a fixed strip under a pile of wrapped toolbar rows. The docked chat
+// keeps its own Expand choice (a dock-scoped key), so expanding it never changes the main pane.
+test('the docked chat workbench fills the dock pane and expands on its own', async ({ page, baseURL }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto(new URL('dashboard?subtab=glossary', baseURL).toString(), { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.layout', { timeout: 20000 });
+
+  await page.getByTestId('dock-chat').click();
+  const dockNative = page.getByTestId('dock-native');
+  await expect(dockNative.locator('#chat-input'), 'the docked chat composer did not render').toBeVisible({
+    timeout: 60_000,
+  });
+  await page.waitForTimeout(500);
+
+  const measure = () =>
+    dockNative.evaluate((root) => {
+      const chat = root.querySelector('[data-react-chat="true"]') as HTMLElement;
+      const scrollport = chat.closest('.tab-content') as HTMLElement;
+      const sp = scrollport.getBoundingClientRect();
+      const wb = chat.getBoundingClientRect();
+      const trace = root.querySelector('#chat-trace') as HTMLDetailsElement | null;
+      return {
+        scrollportBottom: Math.round(sp.top + scrollport.clientHeight),
+        workbenchBottom: Math.round(wb.bottom),
+        workbenchH: Math.round(wb.height),
+        traceTop: trace && trace.offsetParent ? Math.round(trace.getBoundingClientRect().top) : null,
+      };
+    });
+
+  const docked = await measure();
+  expect(docked.workbenchBottom, `docked workbench stops short of the dock pane: ${JSON.stringify(docked)}`).toBeGreaterThanOrEqual(
+    docked.scrollportBottom - 40,
+  );
+  expect(docked.workbenchBottom, `docked workbench runs past the dock pane: ${JSON.stringify(docked)}`).toBeLessThanOrEqual(
+    docked.scrollportBottom + 1,
+  );
+
+  const expand = dockNative.getByTestId('chat-expand');
+  await expect(expand).toBeVisible();
+  await expect(expand).toHaveAttribute('aria-pressed', 'false');
+  await expand.click();
+  await expect(expand).toHaveAttribute('aria-pressed', 'true');
+  const expanded = await measure();
+  expect(expanded.workbenchH, JSON.stringify({ docked, expanded })).toBeGreaterThanOrEqual(docked.workbenchH);
+  if (expanded.traceTop !== null) {
+    expect(expanded.traceTop, JSON.stringify(expanded)).toBeGreaterThanOrEqual(expanded.scrollportBottom);
+  }
+
+  // The main pane's own choice is untouched by the docked one.
+  await page.goto(new URL('chat', baseURL).toString(), { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.main-content #chat-input', { timeout: 90_000 });
+  await expect(page.locator('.main-content').getByTestId('chat-expand')).toHaveAttribute('aria-pressed', 'false');
+
+  // Both surfaces mounted at once: each Expand control names its own workbench.
+  await expect(page.locator('[data-react-chat="true"]')).toHaveCount(2);
+  const wiring = await page.evaluate(() =>
+    Array.from(document.querySelectorAll('[data-testid="chat-expand"]')).map((button) => {
+      const target = document.getElementById(button.getAttribute('aria-controls') || '');
+      return { id: button.getAttribute('aria-controls'), ownsButton: Boolean(target && target.contains(button)) };
+    }),
+  );
+  expect(wiring, JSON.stringify(wiring)).toHaveLength(2);
+  expect(new Set(wiring.map((w) => w.id)).size, JSON.stringify(wiring)).toBe(2);
+  for (const w of wiring) expect(w.ownsButton, JSON.stringify(wiring)).toBe(true);
+});

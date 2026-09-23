@@ -921,6 +921,65 @@
             height: 0;
         }
 
+        /* Chat workbench (GUI-050): ChatTab sizes the workbench to the pane; Expand gives it
+           the whole pane, and the bottom-edge handle trades height with Routing Trace. */
+        .chat-workbench-frame {
+            display: flex;
+            flex-direction: column;
+            flex: 0 0 auto;
+        }
+
+        /* The Apply footer sits outside the scroller, so the scroller's 60px bottom padding is
+           an empty band under the chat composer; Chat owns its bottom edge. */
+        .content-scroll:has(> #tab-chat) {
+            padding-bottom: 0;
+        }
+
+        /* The workbench owns the pane's bottom edge (the Apply footer is outside the scroller),
+           so the generic 48px bottom scroll-padding would only put the resize handle and the
+           composer's lower row inside the "not visible" band: focusing them made Chromium
+           centre-scroll the pane ~600px. Resizing must also move the edge, not the view, so
+           scroll anchoring is off here. */
+        .tab-content#tab-chat {
+            scroll-padding-bottom: 0;
+            overflow-anchor: none;
+        }
+
+        #tab-chat-ui.chat-ui--expanded {
+            padding: 8px 12px;
+        }
+
+        .chat-resize-handle {
+            height: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: row-resize;
+            touch-action: none;
+            border-radius: 8px;
+            outline: none;
+        }
+
+        .chat-resize-handle::before {
+            content: '';
+            width: 56px;
+            height: 4px;
+            border-radius: 2px;
+            background: var(--fg-muted);
+            transition: width var(--timing-fast, 120ms) ease, background var(--timing-fast, 120ms) ease;
+        }
+
+        .chat-resize-handle:hover::before,
+        .chat-resize-handle.is-dragging::before,
+        .chat-resize-handle:focus-visible::before {
+            width: 96px;
+            background: var(--accent);
+        }
+
+        .chat-resize-handle:focus-visible {
+            box-shadow: 0 0 0 2px var(--accent);
+        }
+
         .sidepanel-shell {
             background: var(--card-bg);
             padding: 0;
