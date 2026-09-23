@@ -1,65 +1,48 @@
 {
-  "annotations": {
-    "list": []
-  },
+  "annotations": { "list": [] },
   "editable": true,
   "fiscalYearStartMonth": 0,
-  "graphTooltip": 1,
+  "graphTooltip": 0,
   "id": null,
   "links": [],
   "liveNow": false,
   "panels": [
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "mimir"
-      },
+      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "p95 end-to-end retrieval latency (search, chat, benchmark, MCP) across the selected range.",
       "fieldConfig": {
         "defaults": {
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 0.5 },
-              { "color": "red", "value": 1.0 }
-            ]
-          },
-          "unit": "s"
+          "unit": "s",
+          "noValue": "No data: API not scraped",
+          "mappings": [{ "type": "special", "options": { "match": "nan", "result": { "text": "No traffic" } } }],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 2 }, { "color": "red", "value": 5 }] }
         }
       },
       "gridPos": { "h": 7, "w": 8, "x": 0, "y": 0 },
       "id": 1,
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
-        "reduceOptions": {
-          "calcs": ["lastNotNull"],
-          "fields": "",
-          "values": false
-        },
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
         "textMode": "auto"
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, rate(tribrid_search_latency_seconds_bucket[5m]))",
-          "legendFormat": "p95 search"
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (increase(tribrid_search_latency_seconds_bucket[$__range])))",
+          "legendFormat": "p95",
+          "instant": true
         }
       ],
-      "title": "Search Latency (p95)",
+      "title": "Search latency p95 (selected range)",
       "type": "stat"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "mimir"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "reqps"
-        }
-      },
+      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "Retrievals per second over the last 5 minutes.",
+      "fieldConfig": { "defaults": { "unit": "reqps", "decimals": 2, "noValue": "No data: API not scraped" } },
       "gridPos": { "h": 7, "w": 8, "x": 8, "y": 0 },
       "id": 2,
       "options": {
@@ -67,218 +50,116 @@
         "graphMode": "area",
         "justifyMode": "auto",
         "orientation": "auto",
-        "reduceOptions": {
-          "calcs": ["lastNotNull"],
-          "fields": "",
-          "values": false
-        },
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
         "textMode": "auto"
       },
-      "targets": [
-        {
-          "expr": "sum(rate(tribrid_search_requests_total[5m]))",
-          "legendFormat": "searches/s"
-        }
-      ],
-      "title": "Search Rate",
+      "targets": [{ "refId": "A", "expr": "sum(rate(tribrid_search_requests_total[5m]))", "legendFormat": "searches/s" }],
+      "title": "Search rate (5m)",
       "type": "stat"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "mimir"
-      },
+      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "Share of retrievals that completed without error across the selected range.",
       "fieldConfig": {
         "defaults": {
-          "unit": "percentunit"
+          "unit": "percentunit",
+          "decimals": 1,
+          "noValue": "No data: API not scraped",
+          "mappings": [{ "type": "special", "options": { "match": "nan", "result": { "text": "No traffic" } } }],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "yellow", "value": 0.95 }, { "color": "green", "value": 0.99 }] }
         }
       },
       "gridPos": { "h": 7, "w": 8, "x": 16, "y": 0 },
       "id": 3,
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
-        "reduceOptions": {
-          "calcs": ["lastNotNull"],
-          "fields": "",
-          "values": false
-        },
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
         "textMode": "auto"
       },
       "targets": [
         {
-          "expr": "1 - (sum(rate(tribrid_search_errors_total[5m])) / clamp_min(sum(rate(tribrid_search_requests_total[5m])), 1))",
-          "legendFormat": "success rate"
+          "refId": "A",
+          "expr": "1 - sum(increase(tribrid_search_errors_total[$__range])) / sum(increase(tribrid_search_requests_total[$__range]))",
+          "legendFormat": "success",
+          "instant": true
         }
       ],
-      "title": "Search Success Rate",
+      "title": "Search success rate (selected range)",
       "type": "stat"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "mimir"
-      },
+      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "Rolling 15-minute p95 of each retrieval leg, the reranker, and the whole retrieval. Rerank runs after fusion, so it adds to the slowest leg. Gaps mean no searches in that window.",
       "fieldConfig": {
         "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineWidth": 1,
-            "showPoints": "never",
-            "spanNulls": false
-          },
-          "unit": "s"
+          "custom": { "drawStyle": "line", "fillOpacity": 0, "lineWidth": 2, "showPoints": "auto", "spanNulls": false },
+          "unit": "s",
+          "noValue": "No searches in range"
         }
       },
       "gridPos": { "h": 9, "w": 24, "x": 0, "y": 7 },
       "id": 4,
       "options": {
-        "legend": {
-          "calcs": ["mean", "max"],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
+        "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true, "calcs": ["max", "lastNotNull"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
       },
       "targets": [
-        {
-          "expr": "histogram_quantile(0.50, rate(tribrid_vector_leg_latency_seconds_bucket[5m]))",
-          "legendFormat": "vector p50"
-        },
-        {
-          "expr": "histogram_quantile(0.50, rate(tribrid_sparse_leg_latency_seconds_bucket[5m]))",
-          "legendFormat": "sparse p50"
-        },
-        {
-          "expr": "histogram_quantile(0.50, rate(tribrid_graph_leg_latency_seconds_bucket[5m]))",
-          "legendFormat": "graph p50"
-        }
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le) (rate(tribrid_vector_leg_latency_seconds_bucket[15m])))", "legendFormat": "vector leg" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(tribrid_sparse_leg_latency_seconds_bucket[15m])))", "legendFormat": "sparse leg" },
+        { "refId": "C", "expr": "histogram_quantile(0.95, sum by (le) (rate(tribrid_graph_leg_latency_seconds_bucket[15m])))", "legendFormat": "graph leg" },
+        { "refId": "D", "expr": "histogram_quantile(0.95, sum by (le) (rate(tribrid_search_stage_latency_seconds_bucket{stage=\"rerank\"}[15m])))", "legendFormat": "rerank" },
+        { "refId": "E", "expr": "histogram_quantile(0.95, sum by (le) (rate(tribrid_search_latency_seconds_bucket[15m])))", "legendFormat": "end to end" }
       ],
-      "title": "Search Latency by Leg (p50)",
+      "title": "Retrieval latency by leg, rerank, and end to end (rolling 15m p95)",
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "mimir"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        }
-      },
+      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "Chunk rows indexed in each corpus now, refreshed from the registry at most every 5 minutes.",
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0, "min": 0, "noValue": "No data: no per-corpus index size reported since the API began emitting them", "color": { "mode": "fixed", "fixedColor": "blue" } } },
       "gridPos": { "h": 7, "w": 8, "x": 0, "y": 16 },
       "id": 5,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": ["lastNotNull"],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "targets": [
-        {
-          "expr": "max_over_time(tribrid_chunks_indexed_current[1h])",
-          "legendFormat": "chunks"
-        }
-      ],
-      "title": "Indexed Chunks (current)",
-      "type": "stat"
+      "options": { "displayMode": "basic", "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "showUnfilled": true, "valueMode": "text" },
+      "targets": [{ "refId": "A", "expr": "max by (corpus) (tribrid_corpus_chunks)", "legendFormat": "{{corpus}}", "instant": true }],
+      "title": "Indexed chunks by corpus",
+      "type": "bargauge"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "mimir"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        }
-      },
+      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "Graph entities in each corpus's active graph generation, refreshed at most every 5 minutes. A corpus without a graph has no bar.",
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0, "min": 0, "noValue": "No data: no per-corpus graph size reported since the API began emitting them", "color": { "mode": "fixed", "fixedColor": "blue" } } },
       "gridPos": { "h": 7, "w": 8, "x": 8, "y": 16 },
       "id": 6,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": ["lastNotNull"],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "targets": [
-        {
-          "expr": "max_over_time(tribrid_graph_entities_current[1h])",
-          "legendFormat": "entities"
-        }
-      ],
-      "title": "Graph Entities (current)",
-      "type": "stat"
+      "options": { "displayMode": "basic", "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "showUnfilled": true, "valueMode": "text" },
+      "targets": [{ "refId": "A", "expr": "max by (corpus) (tribrid_corpus_graph_entities)", "legendFormat": "{{corpus}}", "instant": true }],
+      "title": "Graph entities by corpus",
+      "type": "bargauge"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "mimir"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        }
-      },
+      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "Entity-to-entity relationships in each corpus's active graph generation, refreshed at most every 5 minutes. A corpus without a graph has no bar.",
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0, "min": 0, "noValue": "No data: no per-corpus graph size reported since the API began emitting them", "color": { "mode": "fixed", "fixedColor": "blue" } } },
       "gridPos": { "h": 7, "w": 8, "x": 16, "y": 16 },
       "id": 7,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": ["lastNotNull"],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "targets": [
-        {
-          "expr": "max_over_time(tribrid_graph_relationships_current[1h])",
-          "legendFormat": "relationships"
-        }
-      ],
-      "title": "Graph Relationships (current)",
-      "type": "stat"
+      "options": { "displayMode": "basic", "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "showUnfilled": true, "valueMode": "text" },
+      "targets": [{ "refId": "A", "expr": "max by (corpus) (tribrid_corpus_graph_relationships)", "legendFormat": "{{corpus}}", "instant": true }],
+      "title": "Graph relationships by corpus",
+      "type": "bargauge"
     }
   ],
-  "refresh": "10s",
+  "refresh": "30s",
   "schemaVersion": 38,
   "style": "dark",
   "tags": ["tribrid", "rag", "overview"],
-  "templating": {
-    "list": []
-  },
-  "time": {
-    "from": "now-1h",
-    "to": "now"
-  },
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
   "timepicker": {},
   "timezone": "",
   "title": "TriBrid Overview",
   "uid": "tribrid-overview",
-  "version": 1,
+  "version": 2,
   "weekStart": ""
 }

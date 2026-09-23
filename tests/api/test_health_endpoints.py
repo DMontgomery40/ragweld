@@ -1,6 +1,9 @@
 """Tests for health endpoints."""
 
+import http.server
+import json
 import os
+import threading
 
 import pytest
 from httpx import AsyncClient
@@ -189,3 +192,86 @@ async def test_ready_fails_closed_when_the_local_server_serves_the_wrong_model(c
     assert vllm_dependency["ok"] is False
     assert "mismatch" in vllm_dependency["error"]
     assert "serving Qwen/stale-model" in vllm_dependency["error"]
+
+
+def _serve_laya_health(payload: dict[str, object]) -> http.server.ThreadingHTTPServer:
+    """A real throwaway HTTP server that answers GET /health like laya-serve."""
+    body = json.dumps(payload).encode()
+
+    class _LayaHealthHandler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802 - http.server API
+            if self.path != "/health":
+                self.send_response(404)
+                self.end_headers()
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args: object) -> None:
+            return
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _LayaHealthHandler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("provider", "laya", "expected"),
+    [
+        # TypeSafe selected: Laya is not a dependency, even when it is down.
+        ("typesafe", "down", None),
+        ("laya", {"status": "ok", "loaded": ["english"], "device": "cpu"}, True),
+        # A listener with no resident checkpoint cannot answer a decision.
+        ("laya", {"status": "ok", "loaded": [], "device": "cpu"}, False),
+        ("laya", "down", False),
+    ],
+)
+async def test_ready_lists_laya_only_while_it_is_the_system_one_provider(
+    client: AsyncClient,
+    provider: str,
+    laya: object,
+    expected: bool | None,
+) -> None:
+    server: http.server.ThreadingHTTPServer | None = None
+    laya_url = "http://127.0.0.1:1"
+    if isinstance(laya, dict):
+        server = _serve_laya_health(laya)
+        laya_url = f"http://127.0.0.1:{server.server_address[1]}"
+
+    baseline = await client.get("/api/config")
+    assert baseline.status_code == 200
+    config = baseline.json()
+    previous = dict(config["system_one"])
+    config["system_one"].update({"provider": provider, "laya_base_url": laya_url})
+    assert (await client.put("/api/config", json=config)).status_code == 200
+    try:
+        response = await client.get("/api/ready")
+    finally:
+        restored = (await client.get("/api/config")).json()
+        restored["system_one"] = previous
+        assert (await client.put("/api/config", json=restored)).status_code == 200
+        if server is not None:
+            server.shutdown()
+            server.server_close()
+
+    payload = response.json()
+    dependencies = payload["dependencies"]
+    assert payload["ready"] is all(dependency["ok"] for dependency in dependencies.values())
+    assert response.status_code == (200 if payload["ready"] else 503)
+    if expected is None:
+        assert "laya" not in dependencies
+        return
+    dependency = dependencies["laya"]
+    assert dependency["ok"] is expected
+    if expected:
+        assert dependency["info"] == {"status": "reachable", "loaded": ["english"]}
+        assert dependency["error"] is None
+    else:
+        assert payload["ready"] is False
+        assert response.status_code == 503
+        assert dependency["error"] == "Laya System One service is unavailable."
+        assert "system_one.provider to typesafe" in dependency["operator_hint"]

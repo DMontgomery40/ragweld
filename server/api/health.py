@@ -17,6 +17,7 @@ from server.models.tribrid_config_model import (
     CorpusScope,
     HealthServiceStatus,
     HealthStatus,
+    ReadinessDependencyName,
     ReadinessDependencyStatus,
     ReadinessStatus,
     TriBridConfig,
@@ -105,7 +106,8 @@ async def health_check() -> HealthStatus:
 async def readiness_check(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> ReadinessStatus | JSONResponse:
     """Readiness probe.
 
-    Returns dependency status for Postgres, Neo4j, LiteLLM, and vLLM.
+    Returns dependency status for Postgres, Neo4j, LiteLLM, and vLLM, plus Laya while
+    system_one.provider is laya.
     If a corpus is specified via query params (repo_id/corpus_id), checks the
     configured Neo4j database for that corpus as well.
     """
@@ -255,17 +257,44 @@ async def readiness_check(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> ReadinessSt
                 vllm_status.error = "vLLM model serving is unavailable."
                 vllm_status.operator_hint = "Start the host local-model server (./start.sh) on chat.vllm.default_model and wait for model loading to complete, or disable chat.vllm on hosts that do not serve a local model."
 
+    dependencies: dict[ReadinessDependencyName, ReadinessDependencyStatus] = {
+        "postgres": postgres,
+        "neo4j": neo4j_status,
+        "litellm": litellm_status,
+        "vllm": vllm_status,
+        "index_manifests": manifests,
+    }
+
+    # System One: the self-hosted Laya is a dependency only while it is the selected provider.
+    # Its /health answers once a checkpoint is resident; /v1/systemone is never probed here
+    # because it queues behind inference.
+    if cfg.system_one.provider == "laya":
+        laya_status = ReadinessDependencyStatus()
+        try:
+            laya_url = str(cfg.system_one.laya_base_url).strip().rstrip("/")
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                response = await client.get(f"{laya_url}/health")
+                response.raise_for_status()
+                payload = response.json()
+            loaded = payload.get("loaded") if isinstance(payload, dict) else None
+            if not isinstance(loaded, list) or not loaded:
+                raise RuntimeError("Laya has no checkpoint loaded")
+            laya_status.ok = True
+            laya_status.info = {"status": "reachable", "loaded": [str(name) for name in loaded]}
+        except Exception:
+            ready = False
+            laya_status.error = "Laya System One service is unavailable."
+            laya_status.operator_hint = (
+                "Start the managed laya service and wait for its checkpoint to load, "
+                "or set system_one.provider to typesafe."
+            )
+        dependencies["laya"] = laya_status
+
     status = ReadinessStatus(
         ready=ready,
         corpus_id=corpus_id,
         corpus_error=corpus_error,
-        dependencies={
-            "postgres": postgres,
-            "neo4j": neo4j_status,
-            "litellm": litellm_status,
-            "vllm": vllm_status,
-            "index_manifests": manifests,
-        },
+        dependencies=dependencies,
     )
     if ready:
         return status

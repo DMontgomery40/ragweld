@@ -8,6 +8,20 @@ services:
     environment:
       ALLOY_FARO_CORS_ORIGIN: "https://ragweld.dtmont.com"
 
+  alertmanager:
+    # The Discord webhook is an owner-only secret (0600, runtime user) that the image's
+    # default `nobody` user cannot read. Running as the runtime uid instead would lose
+    # write access to the existing nobody-owned notification-log/silence volume, so the
+    # container runs as root (as cloudflared does) and reads the file read-only.
+    user: "0:0"
+    volumes:
+      - type: bind
+        source: /etc/ragweld/alertmanager-discord-webhook
+        target: /etc/ragweld/alertmanager-discord-webhook
+        read_only: true
+        bind:
+          create_host_path: false
+
   langfuse:
     env_file: !override
       - path: /etc/ragweld/langfuse.env

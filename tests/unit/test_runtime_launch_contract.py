@@ -4,9 +4,11 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -400,18 +402,257 @@ def test_prometheus_scrapes_clean_start_data_and_generation_targets() -> None:
     scrape_configs = payload["scrape_configs"]
     jobs = {config["job_name"]: config for config in scrape_configs}
 
-    assert set(jobs) == {"prometheus", "ragweld-api-host", "postgres", "litellm", "vllm"}
+    assert set(jobs) == {"prometheus", "ragweld-api-host", "postgres", "litellm", "vllm", "laya"}
+    # Laya always runs beside the platform, so it is scraped statically on the Compose
+    # network (its own /metrics); the alert, not the scrape, is gated on use.
+    assert jobs["laya"]["metrics_path"] == "/metrics"
+    assert jobs["laya"]["static_configs"] == [{"targets": ["laya:8000"]}]
     api_targets = jobs["ragweld-api-host"]["static_configs"][0]["targets"]
     assert api_targets == ["host.docker.internal:58012"]
     assert jobs["litellm"]["metrics_path"] == "/metrics"
     assert jobs["litellm"]["static_configs"][0]["targets"] == ["litellm:4000"]
     assert jobs["vllm"]["metrics_path"] == "/metrics"
-    # The local-model server is a host process; Prometheus (in the VM) scrapes
-    # it through the Docker host gateway.
-    assert jobs["vllm"]["static_configs"][0]["targets"] == ["host.docker.internal:58080"]
+    # The local-model server is a host process that runs only when the launcher runs
+    # that lane, so its target is discovered from a file the launcher writes (file_sd),
+    # never listed statically: a static target is `up == 0` forever on a host without
+    # the lane and keeps RagweldLocalModelDown firing.
+    assert "static_configs" not in jobs["vllm"]
+    assert jobs["vllm"]["file_sd_configs"] == [{"files": ["/etc/prometheus/targets/vllm.json"]}]
 
     compose = _compose_config("docker-compose.yml")
-    assert "--web.enable-remote-write-receiver" in compose["services"]["prometheus"]["command"]
+    prometheus = compose["services"]["prometheus"]
+    assert "--web.enable-remote-write-receiver" in prometheus["command"]
+    targets_mount = _volume_for_target(prometheus, "/etc/prometheus/targets")
+    assert targets_mount.get("read_only") is True
+    assert Path(targets_mount["source"]).resolve() == (ROOT / ".ragweld-runtime" / "prometheus-targets").resolve()
+    lifecycle = (ROOT / "scripts" / "runtime_lifecycle.sh").read_text(encoding="utf-8")
+    assert 'RAGWELD_PROMETHEUS_TARGETS_DIR="${ROOT_DIR}/.ragweld-runtime/prometheus-targets"' in lifecycle
+    assert 'RAGWELD_LOCAL_MODEL_TARGETS_FILE="${RAGWELD_PROMETHEUS_TARGETS_DIR}/vllm.json"' in lifecycle
+
+
+def _lifecycle_shell(repo: Path, script: str) -> subprocess.CompletedProcess[str]:
+    return _run("bash", "-c", f'set -euo pipefail; ROOT_DIR="$PWD"; source scripts/runtime_lifecycle.sh; {script}', cwd=repo)
+
+
+def test_local_model_scrape_target_exists_only_while_the_lane_is_published(tmp_path: Path) -> None:
+    repo = _materialize_start_sh_repo(tmp_path)
+    targets_file = repo / ".ragweld-runtime" / "prometheus-targets" / "vllm.json"
+
+    published = _lifecycle_shell(repo, "publish_local_model_scrape_target 58080")
+    assert published.returncode == 0, published.stderr
+    assert json.loads(targets_file.read_text(encoding="utf-8")) == [{"targets": ["host.docker.internal:58080"]}]
+    # Prometheus reads the mount as `nobody`, while the lifecycle umask is 077.
+    assert stat.S_IMODE(targets_file.parent.stat().st_mode) == 0o755
+    assert stat.S_IMODE(targets_file.stat().st_mode) == 0o644
+
+    # Idempotent in both directions: withdrawing twice, or with no file, is not an error.
+    for _ in range(2):
+        withdrawn = _lifecycle_shell(repo, "withdraw_local_model_scrape_target")
+        assert withdrawn.returncode == 0, withdrawn.stderr
+        assert not targets_file.exists()
+
+
+def test_start_without_the_local_model_withdraws_a_stale_target_and_dry_run_touches_nothing(tmp_path: Path) -> None:
+    repo = _materialize_start_sh_repo(tmp_path)
+    targets_file = repo / ".ragweld-runtime" / "prometheus-targets" / "vllm.json"
+    assert _lifecycle_shell(repo, "publish_local_model_scrape_target 58080").returncode == 0
+
+    dry = _run("bash", "start.sh", "--check", "--no-docker", "--no-backend", "--no-frontend", "--no-local-model", cwd=repo)
+    assert dry.returncode == 0, dry.stdout + dry.stderr
+    assert "Would withdraw the stale local-model scrape target" in dry.stdout
+    assert targets_file.exists(), "--check must not change the scrape target"
+
+    dry_with_model = _run("bash", "start.sh", "--check", "--no-docker", "--no-backend", "--no-frontend", cwd=repo)
+    assert dry_with_model.returncode == 0, dry_with_model.stdout + dry_with_model.stderr
+    assert "Would publish the local-model scrape target" in dry_with_model.stdout
+
+    # A real launch (nothing to start) still withdraws the stale target. The Langfuse
+    # secrets file is pre-created so the launcher does not generate one here.
+    (repo / "infra").mkdir()
+    (repo / "infra" / "langfuse.env").write_text("# test\n", encoding="utf-8")
+    real = _run("bash", "start.sh", "--no-docker", "--no-backend", "--no-frontend", "--no-local-model", cwd=repo)
+    assert real.returncode == 0, real.stdout + real.stderr
+    assert not targets_file.exists()
+
+
+LAYA_DIR = ROOT / "infra" / "laya"
+
+
+def _laya_pins() -> dict[str, str]:
+    pins: dict[str, str] = {}
+    for raw_line in (LAYA_DIR / "requirements.txt").read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        name, separator, version = line.partition("==")
+        assert separator and version, f"unpinned Laya requirement: {line}"
+        pins[name.strip().lower()] = version.strip()
+    return pins
+
+
+def test_laya_image_is_pinned_cpu_only_and_runs_unprivileged() -> None:
+    pins = _laya_pins()
+    assert pins["laya"] == "0.3.11"
+    # CPU wheels only: a CUDA torch would drag in gigabytes of GPU libraries LXC100 cannot use.
+    assert pins["torch"].endswith("+cpu")
+    assert not [name for name in pins if name.startswith(("nvidia-", "triton", "cuda"))]
+    assert "prometheus-client" in pins and "fastapi" in pins and "uvicorn" in pins
+
+    dockerfile = (LAYA_DIR / "Dockerfile").read_text(encoding="utf-8")
+    assert [line for line in dockerfile.splitlines() if line.startswith("FROM ")] == [
+        "FROM python:3.12.14-slim-bookworm"
+    ]
+    assert "--extra-index-url https://download.pytorch.org/whl/cpu -r /tmp/requirements.txt" in dockerfile
+    assert "HF_HOME=/var/lib/laya/hf" in dockerfile
+    assert re.search(r"^USER laya$", dockerfile, re.MULTILINE)
+    assert 'CMD ["python", "/opt/laya/ragweld_laya_serve.py"]' in dockerfile
+
+
+def test_laya_service_is_capped_loopback_managed_and_cache_backed() -> None:
+    config = _compose_config("docker-compose.yml")
+    laya = config["services"]["laya"]
+    environment = laya["environment"]
+
+    assert laya["image"] == f"ragweld-laya:{_laya_pins()['laya']}"
+    assert Path(laya["build"]["context"]).resolve() == LAYA_DIR.resolve()
+    # A locally built image: never pulled from a registry under that name.
+    assert laya["pull_policy"] == "never"
+    # Loopback only, on the port system_one.laya_base_url names; promtail ships its logs.
+    assert laya["labels"]["io.ragweld.managed"] == "true"
+    assert laya["ports"] == [
+        {"mode": "ingress", "host_ip": "127.0.0.1", "target": 8000, "published": "58180", "protocol": "tcp"}
+    ]
+    assert environment["LAYA_HOST"] == "0.0.0.0"
+    assert environment["LAYA_PORT"] == "8000"
+    assert laya["restart"] == "unless-stopped"
+
+    # A hard memory cap with no swap headroom (swap would push the pressure onto the host),
+    # and torch threads equal to the CPU limit.
+    assert int(laya["mem_limit"]) == 4 * 1024**3
+    assert int(laya["memswap_limit"]) == int(laya["mem_limit"])
+    cpus = float(laya["cpus"])
+    assert cpus == 4
+    for key in ("LAYA_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
+        assert int(environment[key]) == int(cpus), key
+    assert environment["LAYA_DEVICE"] == "cpu"
+
+    # One resident checkpoint. The entrypoint refuses a list and never reads LAYA_PRELOAD,
+    # whose upstream default builds every checkpoint.
+    assert environment["LAYA_MODELS"] == "english"
+    assert "LAYA_PRELOAD" not in environment
+    assert "LAYA_AUTO_TASK" not in environment
+
+    # Weights download once into a named volume at HF_HOME.
+    cache = _volume_for_target(laya, environment["HF_HOME"])
+    assert cache["type"] == "volume"
+    assert cache["source"] == "laya_hf_cache"
+    assert "laya_hf_cache" in config["volumes"]
+
+    # Healthy means a checkpoint is loaded, not merely a listener.
+    probe = " ".join(laya["healthcheck"]["test"])
+    assert "http://127.0.0.1:8000/health" in probe and "loaded" in probe
+
+    # Nothing waits on Laya: it is optional and must never gate another service's start.
+    for name, service in config["services"].items():
+        assert "laya" not in (service.get("depends_on") or {}), name
+
+
+def test_laya_checkpoint_and_port_are_operator_env_values() -> None:
+    config = _compose_config("docker-compose.yml", env={"LAYA_CHECKPOINT": "multilingual", "LAYA_HTTP_PORT": "58190"})
+    laya = config["services"]["laya"]
+    assert laya["environment"]["LAYA_MODELS"] == "multilingual"
+    assert laya["ports"] == [
+        {"mode": "ingress", "host_ip": "127.0.0.1", "target": 8000, "published": "58190", "protocol": "tcp"}
+    ]
+
+
+_LAYA_PIN_PROBE = r"""
+import sys
+
+sys.path.insert(0, "/opt/laya")
+import ragweld_laya_serve as serve
+
+for bad in ("", "english,multilingual", "nope"):
+    try:
+        serve.configured_checkpoint({"LAYA_MODELS": bad})
+    except SystemExit:
+        pass
+    else:
+        raise AssertionError(f"accepted LAYA_MODELS={bad!r}")
+assert serve.configured_checkpoint({"LAYA_MODELS": " English "}) == "english"
+
+questions = {"q": {"type": "noul", "instructions": "Is this about billing?"}}
+router = serve.build_router("english", preload=False)
+assert router.max_loaded == 1, router.max_loaded
+for state in (
+    {"text": "Mein Konto wurde zweimal belastet, bitte erstatten Sie den doppelten Betrag."},
+    {"text": "私のアカウントに二重請求がありました。返金してください。"},
+):
+    decision = router.route(state, questions)
+    assert decision["model"] == "english", decision
+    assert decision["repo"] == "convaiinnovations/laya", decision
+    assert decision["reason"].startswith("pinned to english (automatic routing chose multilingual"), decision
+assert router.route({"text": "I was charged twice for March."}, questions)["model"] == "english"
+assert router.route({"text": "I was charged twice."}, questions, model="english")["model"] == "english"
+try:
+    router.route({"text": "I was charged twice."}, questions, model="multilingual")
+except ValueError as exc:
+    assert "only the 'english' checkpoint" in str(exc), exc
+else:
+    raise AssertionError("an explicit request for a second checkpoint was accepted")
+assert router.loaded == [], router.loaded
+
+multilingual = serve.build_router("multilingual", preload=False)
+decision = multilingual.route({"text": "I was charged twice for March."}, questions)
+assert decision["model"] == "multilingual", decision
+assert decision["repo"] == "convaiinnovations/laya/multilingual", decision
+
+# The per-request question cap (a 64-question batch was OOM-killed under the 4 GiB cap).
+from fastapi.testclient import TestClient
+
+app = serve.create_app(router)
+state = {"passage": "Armstrong took semi-automatic control of Eagle to avoid a boulder field."}
+too_many = {f"q{i}": {"type": "noul", "instructions": f"Does the passage state fact {i}?"} for i in range(serve.MAX_QUESTIONS_PER_REQUEST + 1)}
+answer = TestClient(app).post("/v1/systemone", json={"state": state, "questions": too_many})
+assert answer.status_code == 413, (answer.status_code, answer.text)
+import laya.serve as laya_serve
+laya_serve._check_request_limits(state, dict(list(too_many.items())[: serve.MAX_QUESTIONS_PER_REQUEST]))
+assert TestClient(app).get("/metrics").text.count("process_resident_memory_bytes") >= 1
+print("laya-pin-ok")
+"""
+
+
+def test_laya_entrypoint_pins_one_checkpoint_against_the_pinned_laya(tmp_path: Path) -> None:
+    """Runs the working-tree entrypoint inside the built image (real laya, no weights, no network).
+
+    RAGWELD_LAYA_IMAGE_TESTS=1 runs it on LXC100 after `docker compose build laya`
+    (RAGWELD_LAYA_IMAGE overrides the image tag).
+    """
+    from tests.service_requirements import _strict_mode
+
+    if os.environ.get("RAGWELD_LAYA_IMAGE_TESTS") != "1":
+        if _strict_mode():
+            pytest.fail("Strict Laya acceptance requires RAGWELD_LAYA_IMAGE_TESTS=1")
+        pytest.skip("Laya entrypoint acceptance requires RAGWELD_LAYA_IMAGE_TESTS=1 and the built image on LXC")
+    assert sys.platform == "linux" and shutil.which("docker"), "Laya entrypoint acceptance requires LXC Docker"
+    image = os.environ.get("RAGWELD_LAYA_IMAGE") or f"ragweld-laya:{_laya_pins()['laya']}"
+    probe = tmp_path / "probe.py"
+    probe.write_text(_LAYA_PIN_PROBE, encoding="utf-8")
+    # File mounts (pytest's tmp dir is owner-only); the image runs as its `laya` user.
+    probe.chmod(0o644)
+    result = subprocess.run(
+        [
+            "docker", "run", "--rm", "--network", "none", "--memory", "512m", "--cpus", "1",
+            "--mount", f"type=bind,src={LAYA_DIR / 'ragweld_laya_serve.py'},dst=/opt/laya/ragweld_laya_serve.py,readonly",
+            "--mount", f"type=bind,src={probe},dst=/tmp/probe.py,readonly",
+            image, "python", "/tmp/probe.py",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "laya-pin-ok" in result.stdout
 
 
 def test_prometheus_forwards_to_mimir_and_routes_alerts_to_alertmanager() -> None:
@@ -444,11 +685,422 @@ def test_prometheus_forwards_to_mimir_and_routes_alerts_to_alertmanager() -> Non
     # end; the target-down rules cover the serving/data-plane jobs.
     assert "RagweldWatchdog" in alert_names
     assert {"RagweldApiDown", "RagweldGatewayDown", "RagweldLocalModelDown", "RagweldPostgresDown"} <= alert_names
+    assert {
+        "RagweldGatewayFailedRequestRatioHigh",
+        "RagweldGatewayTtftSlow",
+        "RagweldGatewayKeyBudgetLow",
+        "RagweldSearchFailures",
+        "RagweldSearchStageErrors",
+        "RagweldRerankerErrors",
+        "RagweldIndexRunFailed",
+    } <= alert_names
+    expressions = [str(rule["expr"]) for group in rules["groups"] for rule in group["rules"] if "alert" in rule]
+    assert all("clamp_min(" not in expr and "vector(0)" not in expr for expr in expressions)
+    # Every gateway-quality rule leaves out the local lane, whose health has its own rule.
+    gateway_rules = [
+        str(rule["expr"])
+        for group in rules["groups"]
+        for rule in group["rules"]
+        if rule.get("alert") in {"RagweldGatewayFailedRequestRatioHigh", "RagweldGatewayTtftSlow"}
+    ]
+    assert gateway_rules and all('requested_model!="ragweld-local"' in expr for expr in gateway_rules)
 
     compose = _compose_config("docker-compose.yml", "infra/docker-compose.observability.yml")
     prometheus = compose["services"]["prometheus"]
     rules_mount = _volume_for_target(prometheus, "/etc/prometheus/prometheus-rules.yml")
     assert Path(rules_mount["source"]).resolve() == (ROOT / "infra" / "prometheus-rules.yml").resolve()
+
+
+def _receivers_in(route: dict[str, Any]) -> Iterator[str]:
+    if route.get("receiver"):
+        yield str(route["receiver"])
+    for child in route.get("routes") or []:
+        yield from _receivers_in(child)
+
+
+def test_alertmanager_routes_to_discord_from_a_secret_file_and_parks_the_watchdog() -> None:
+    import yaml
+
+    source = (ROOT / "infra" / "alertmanager.yml").read_text(encoding="utf-8")
+    # Webhook URLs are secrets: only file references may live in the repo.
+    assert not re.search(r"https?://", source)
+    payload = yaml.safe_load(source)
+    route = payload["route"]
+    assert route["receiver"] == "discord"
+    assert any(
+        child["receiver"] == "null" and child["matchers"] == ['alertname="RagweldWatchdog"']
+        for child in route["routes"]
+    )
+    receivers = {receiver["name"]: receiver for receiver in payload["receivers"]}
+    assert set(receivers["null"]) == {"name"}
+    assert receivers["discord"]["discord_configs"] == [
+        {"webhook_url_file": "/etc/ragweld/alertmanager-discord-webhook", "send_resolved": True}
+    ]
+    # Slack is ready but never routed until the operator switches it on.
+    assert receivers["slack"]["slack_configs"] == [
+        {"api_url_file": "/etc/ragweld/alertmanager-slack-webhook", "send_resolved": True}
+    ]
+    assert "slack" not in set(_receivers_in(route))
+
+    compose = _compose_config("docker-compose.yml", "infra/docker-compose.observability.yml", PROXMOX_PRODUCTION_COMPOSE)
+    alertmanager = compose["services"]["alertmanager"]
+    # webhook_url_file for Discord is rejected by v0.27 ("no discord webhook URL provided").
+    version = re.search(r":v(\d+)\.(\d+)\.(\d+)$", alertmanager["image"])
+    assert version and (int(version.group(1)), int(version.group(2))) >= (0, 28), alertmanager["image"]
+    # The secret is 0600 runtime-user owned; the image's `nobody` cannot read it.
+    assert alertmanager["user"] == "0:0"
+    secret = _volume_for_target(alertmanager, "/etc/ragweld/alertmanager-discord-webhook")
+    assert secret["source"] == "/etc/ragweld/alertmanager-discord-webhook"
+    assert secret["read_only"] is True
+    assert secret["bind"]["create_host_path"] is False
+    start_runtime = (ROOT / "deploy" / "proxmox" / "start-runtime.sh").read_text(encoding="utf-8")
+    assert '  "alertmanager-discord-webhook"\n' in start_runtime.split("readonly REQUIRED_SECRET_FILES=(", 1)[1].split(")", 1)[0]
+
+
+def test_alert_rules_fire_on_real_problems_and_never_on_the_disabled_local_lane(tmp_path: Path) -> None:
+    """Real PromQL engine (promtool on the pinned Prometheus image), no reimplemented rules.
+
+    RAGWELD_DASHBOARD_QUERY_TESTS=1 runs it on LXC100, which has Docker and the image.
+    """
+    import yaml
+
+    from tests.service_requirements import _strict_mode
+
+    if os.environ.get("RAGWELD_DASHBOARD_QUERY_TESTS") != "1":
+        if _strict_mode():
+            pytest.fail("Strict rule acceptance requires RAGWELD_DASHBOARD_QUERY_TESTS=1")
+        pytest.skip("Real alert-rule acceptance requires RAGWELD_DASHBOARD_QUERY_TESTS=1 on LXC")
+    assert sys.platform == "linux" and shutil.which("docker"), "Alert-rule acceptance requires LXC Docker"
+
+    up = [
+        {"series": 'up{job="ragweld-api-host"}', "values": "1x40"},
+        {"series": 'up{job="litellm"}', "values": "1x40"},
+        {"series": 'up{job="postgres"}', "values": "1x40"},
+    ]
+    watchdog = [{"exp_labels": {"severity": "none"}, "exp_annotations": {
+        "summary": "Alerting pipeline watchdog",
+        "description": "This alert is always firing. If it is missing from Alertmanager, Prometheus rule evaluation or alert delivery is broken.",
+    }}]
+
+    def quiet(*names: str, at: str = "30m") -> list[dict[str, Any]]:
+        return [{"eval_time": at, "alertname": name, "exp_alerts": []} for name in names]
+
+    total = "litellm_proxy_total_requests_metric_total"
+    failed = "litellm_proxy_failed_requests_metric_total"
+    ttft = "litellm_llm_api_time_to_first_token_metric"
+    tests = [
+        {
+            # Local lane off: no vllm target, so no series and no alert; idle gateway is quiet.
+            "interval": "1m",
+            "input_series": up + [
+                {"series": f'{total}{{requested_model="z-ai.glm-5.3-flash"}}', "values": "0x40"},
+                # An unlimited key reports +Inf.
+                {"series": 'litellm_remaining_api_key_budget_metric{hashed_api_key="k"}', "values": " ".join(["Inf"] * 41)},
+            ],
+            "alert_rule_test": [{"eval_time": "30m", "alertname": "RagweldWatchdog", "exp_alerts": watchdog}]
+            + quiet("RagweldLocalModelDown", "RagweldGatewayFailedRequestRatioHigh", "RagweldGatewayKeyBudgetLow"),
+        },
+        {
+            # Local lane running and down: the alert fires.
+            "interval": "1m",
+            "input_series": up + [{"series": 'up{job="vllm",instance="host.docker.internal:58080"}', "values": "0x40"}],
+            "alert_rule_test": [
+                {
+                    "eval_time": "10m",
+                    "alertname": "RagweldLocalModelDown",
+                    "exp_alerts": [
+                        {
+                            "exp_labels": {"severity": "warning", "job": "vllm", "instance": "host.docker.internal:58080"},
+                            "exp_annotations": {
+                                "summary": "Local model server is not being scraped",
+                                "description": "The local-model lane is running on this host but its vllm-metal server has been unreachable for 5 minutes. Local generation requests fail until it is restarted.",
+                            },
+                        }
+                    ],
+                }
+            ],
+        },
+        {
+            # Only the disabled local alias fails, and cloud traffic succeeds without a
+            # failure series ever existing: no gateway alert.
+            "interval": "1m",
+            "input_series": up + [
+                {"series": f'{total}{{requested_model="ragweld-local"}}', "values": "0+2x40"},
+                {"series": f'{failed}{{requested_model="ragweld-local"}}', "values": "0+2x40"},
+                {"series": f'{total}{{requested_model="openai.gpt-5.6-luna"}}', "values": "0+1x40"},
+            ],
+            "alert_rule_test": quiet("RagweldGatewayFailedRequestRatioHigh"),
+        },
+        {
+            # Half of the cloud requests fail at volume: the ratio alert fires.
+            "interval": "1m",
+            "input_series": up + [
+                {"series": f'{total}{{requested_model="z-ai.glm-5.3-flash"}}', "values": "0+2x40"},
+                {"series": f'{failed}{{requested_model="z-ai.glm-5.3-flash"}}', "values": "0+1x40"},
+            ],
+            "alert_rule_test": [
+                {
+                    "eval_time": "30m",
+                    "alertname": "RagweldGatewayFailedRequestRatioHigh",
+                    "exp_alerts": [
+                        {
+                            "exp_labels": {"severity": "warning"},
+                            "exp_annotations": {
+                                "summary": "More than 20% of gateway requests are failing",
+                                "description": "Over the last 10 minutes more than 20% of LiteLLM proxy requests (at least 5 requests) returned a failure to the client. Check the Gateway & Serving dashboard (deployment failures by exception) and the provider's status.",
+                            },
+                        }
+                    ],
+                }
+            ],
+        },
+        {
+            # Streams whose first chunk lands between 30 s and 45 s fire the TTFT alert for
+            # that model only; the same stall on ragweld-local does not.
+            "interval": "1m",
+            "input_series": up
+            + [
+                {"series": f'{ttft}_bucket{{requested_model="{model}",le="{le}"}}', "values": values}
+                for model in ("z-ai.glm-5.3-flash", "ragweld-local")
+                for le, values in (("1.0", "0x40"), ("30.0", "0x40"), ("45.0", "0+1x40"), ("+Inf", "0+1x40"))
+            ]
+            + [
+                {"series": f'{ttft}_count{{requested_model="{model}"}}', "values": "0+1x40"}
+                for model in ("z-ai.glm-5.3-flash", "ragweld-local")
+            ],
+            "alert_rule_test": [
+                {
+                    "eval_time": "30m",
+                    "alertname": "RagweldGatewayTtftSlow",
+                    "exp_alerts": [
+                        {
+                            "exp_labels": {"severity": "warning", "requested_model": "z-ai.glm-5.3-flash"},
+                            "exp_annotations": {
+                                "summary": "Gateway time to first token p95 above 30 s for z-ai.glm-5.3-flash",
+                                "description": "The p95 time to the first streamed chunk for z-ai.glm-5.3-flash has been above 30 seconds over 15 minutes (at least 3 streamed requests). Users see a stalled answer. Check the provider and consider another model.",
+                            },
+                        }
+                    ],
+                }
+            ],
+        },
+        {
+            # A reranker error and an index failure each alert; flat counters stay quiet.
+            "interval": "1m",
+            "input_series": up + [
+                {"series": 'tribrid_reranker_errors_total{mode="cloud"}', "values": "0x20 1x20"},
+                {"series": 'tribrid_reranker_errors_total{mode="learning"}', "values": "0x40"},
+                {"series": "tribrid_index_errors_total", "values": "0x20 1x20"},
+                {"series": 'tribrid_search_stage_errors_total{stage="rerank"}', "values": "0x40"},
+                {"series": "tribrid_search_errors_total", "values": "0x40"},
+                {"series": 'litellm_remaining_api_key_budget_metric{hashed_api_key="k"}', "values": "3x40"},
+            ],
+            "alert_rule_test": [
+                {
+                    "eval_time": "25m",
+                    "alertname": "RagweldGatewayKeyBudgetLow",
+                    "exp_alerts": [
+                        {
+                            "exp_labels": {"severity": "warning", "hashed_api_key": "k"},
+                            "exp_annotations": {
+                                "summary": "Gateway API key budget almost spent",
+                                "description": "A LiteLLM API key has less than $5 of budget left (3.00). Requests fail once it reaches zero.",
+                            },
+                        }
+                    ],
+                },
+                {
+                    "eval_time": "25m",
+                    "alertname": "RagweldRerankerErrors",
+                    "exp_alerts": [
+                        {
+                            "exp_labels": {"severity": "warning", "mode": "cloud"},
+                            "exp_annotations": {
+                                "summary": "Reranker (cloud) is failing",
+                                "description": "The cloud reranker raised errors in the last 15 minutes; affected searches return un-reranked results.",
+                            },
+                        }
+                    ],
+                },
+                {
+                    "eval_time": "25m",
+                    "alertname": "RagweldIndexRunFailed",
+                    "exp_alerts": [
+                        {
+                            "exp_labels": {"severity": "warning"},
+                            "exp_annotations": {
+                                "summary": "An indexing run failed",
+                                "description": "At least one indexing run ended in error in the last 30 minutes. Open the corpus's index run history for the failing stage.",
+                            },
+                        }
+                    ],
+                },
+            ]
+            + quiet("RagweldSearchStageErrors", "RagweldSearchFailures", at="25m"),
+        },
+        {
+            # Laya down while System One runs on TypeSafe: nothing is using Laya, no alert.
+            "interval": "1m",
+            "input_series": up + [
+                {"series": 'up{job="laya",instance="laya:8000"}', "values": "0x40"},
+                {"series": 'tribrid_system_one_requests_total{provider="typesafe",outcome="ok"}', "values": "0+1x40"},
+            ],
+            "alert_rule_test": quiet("RagweldLayaDown", at="10m") + quiet("RagweldLayaDown"),
+        },
+        {
+            # Laya up and serving provider=laya traffic: quiet.
+            "interval": "1m",
+            "input_series": up + [
+                {"series": 'up{job="laya",instance="laya:8000"}', "values": "1x40"},
+                {"series": 'tribrid_system_one_requests_total{provider="laya",outcome="ok"}', "values": "0+3x40"},
+            ],
+            "alert_rule_test": quiet("RagweldLayaDown", at="10m"),
+        },
+        {
+            # Laya down while Ragweld sends it requests (they fail): the alert fires.
+            "interval": "1m",
+            "input_series": up + [
+                {"series": 'up{job="laya",instance="laya:8000"}', "values": "0x40"},
+                {"series": 'tribrid_system_one_requests_total{provider="laya",outcome="error"}', "values": "0+2x40"},
+            ],
+            "alert_rule_test": [
+                {
+                    "eval_time": "10m",
+                    "alertname": "RagweldLayaDown",
+                    "exp_alerts": [
+                        {
+                            "exp_labels": {"severity": "warning", "job": "laya", "instance": "laya:8000"},
+                            "exp_annotations": {
+                                "summary": "Laya (local System One) is down while Ragweld is using it",
+                                "description": "system_one.provider=laya requests were sent in the last 30 minutes, but the Laya container has not answered a scrape for 5 minutes. System One decisions fail until it is back.",
+                            },
+                        }
+                    ],
+                }
+            ],
+        },
+        {
+            # 2 of 10 chats fail at the gateway while half are client disconnects: 20% errors,
+            # the disconnects excluded from the numerator but not the denominator. Fires.
+            "interval": "1m",
+            "input_series": up + [
+                {"series": 'tribrid_chat_requests_total{model="m1",outcome="ok"}', "values": "0+3x40"},
+                {"series": 'tribrid_chat_requests_total{model="m1",outcome="gateway_error"}', "values": "0+2x40"},
+                {"series": 'tribrid_chat_requests_total{model="m1",outcome="client_disconnect"}', "values": "0+5x40"},
+            ],
+            "alert_rule_test": [
+                {
+                    "eval_time": "30m",
+                    "alertname": "RagweldChatErrorRatioHigh",
+                    "exp_alerts": [
+                        {
+                            "exp_labels": {"severity": "warning"},
+                            "exp_annotations": {
+                                "summary": "More than 10% of chat requests are failing",
+                                "description": "Over the last 10 minutes more than 10% of chat requests (at least 5) ended in a retrieval error, gateway error or timeout. Check the Chat dashboard (requests by outcome) and the API logs.",
+                            },
+                        }
+                    ],
+                }
+            ],
+        },
+        {
+            # 70% client disconnects and no error series at all: quiet. Idle latency
+            # and feedback counters stay quiet too.
+            "interval": "1m",
+            "input_series": up + [
+                {"series": 'tribrid_chat_requests_total{model="m1",outcome="ok"}', "values": "0+3x40"},
+                {"series": 'tribrid_chat_requests_total{model="m1",outcome="client_disconnect"}', "values": "0+7x40"},
+                {"series": 'tribrid_feedback_events_total{signal="thumbsdown",surface="chat"}', "values": "0x40"},
+            ],
+            "alert_rule_test": quiet("RagweldChatErrorRatioHigh", "RagweldChatFirstTextSlow", "RagweldThumbsDownShareHigh"),
+        },
+        {
+            # Every chat fails, but one per 10 minutes is under the 5-request floor: quiet.
+            "interval": "1m",
+            "input_series": up + [
+                {"series": 'tribrid_chat_requests_total{model="m1",outcome="timeout"}', "values": "0x9 1x10 2x10 3x10"},
+            ],
+            "alert_rule_test": quiet("RagweldChatErrorRatioHigh"),
+        },
+        {
+            # m1's first text lands between 60 s and 90 s, m2's under 60 s: only m1 fires.
+            "interval": "1m",
+            "input_series": up
+            + [
+                {"series": f'tribrid_chat_time_to_first_text_seconds_bucket{{model="{model}",le="{le}"}}', "values": values}
+                for model, slow in (("m1", True), ("m2", False))
+                for le, values in (
+                    ("30.0", "0x40"),
+                    ("60.0", "0x40" if slow else "0+1x40"),
+                    ("90.0", "0+1x40"),
+                    ("+Inf", "0+1x40"),
+                )
+            ]
+            + [
+                {"series": f'tribrid_chat_time_to_first_text_seconds_count{{model="{model}"}}', "values": "0+1x40"}
+                for model in ("m1", "m2")
+            ],
+            "alert_rule_test": [
+                {
+                    "eval_time": "30m",
+                    "alertname": "RagweldChatFirstTextSlow",
+                    "exp_alerts": [
+                        {
+                            "exp_labels": {"severity": "warning", "model": "m1"},
+                            "exp_annotations": {
+                                "summary": "Chat time to first text p95 above 60 s for m1",
+                                "description": "The p95 time from sending a chat to its first answer text on m1 has been above 60 seconds over 15 minutes (at least 3 answers). Users wait a minute or more before any answer appears. Check the provider and the Chat dashboard.",
+                            },
+                        }
+                    ],
+                }
+            ],
+        },
+        {
+            # Chat: a thumbs-down every minute and no thumbs-up fires for chat. Search: 3
+            # thumbs-down in the hour is under the 5-vote floor, so search stays quiet.
+            "interval": "1m",
+            "input_series": up + [
+                {"series": 'tribrid_feedback_events_total{signal="thumbsdown",surface="chat"}', "values": "0+1x70"},
+                {"series": 'tribrid_feedback_events_total{signal="thumbsup",surface="chat"}', "values": "0x70"},
+                {"series": 'tribrid_feedback_events_total{signal="thumbsdown",surface="search"}', "values": "0x40 1x10 2x10 3x10"},
+            ],
+            "alert_rule_test": [
+                {
+                    "eval_time": "65m",
+                    "alertname": "RagweldThumbsDownShareHigh",
+                    "exp_alerts": [
+                        {
+                            "exp_labels": {"severity": "warning", "surface": "chat"},
+                            "exp_annotations": {
+                                "summary": "Most chat thumbs votes in the last hour are thumbs-down",
+                                "description": "More than half of the chat thumbs votes in the last hour (at least 5 votes) were thumbs-down. Review recent answers and their feedback.",
+                            },
+                        }
+                    ],
+                }
+            ],
+        },
+    ]
+    rules_path = tmp_path / "rules.yml"
+    rules_path.write_text((ROOT / "infra" / "prometheus-rules.yml").read_text(encoding="utf-8"), encoding="utf-8")
+    spec = {"rule_files": ["/fixtures/rules.yml"], "evaluation_interval": "1m", "tests": tests}
+    (tmp_path / "tests.yml").write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
+    result = subprocess.run(
+        [
+            "docker", "run", "--rm", "--network", "none", "--memory", "128m", "--cpus", "0.5",
+            "--entrypoint", "/bin/promtool",
+            # File mounts: pytest's tmp dir is owner-only, and promtool runs as `nobody`.
+            "--mount", f"type=bind,src={rules_path},dst=/fixtures/rules.yml,readonly",
+            "--mount", f"type=bind,src={tmp_path / 'tests.yml'},dst=/fixtures/tests.yml,readonly",
+            "prom/prometheus:v2.45.0", "test", "rules", "/fixtures/tests.yml",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_a3_fabric_services_are_managed_loopback_and_volume_backed() -> None:

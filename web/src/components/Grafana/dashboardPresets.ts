@@ -15,18 +15,39 @@ export const GRAFANA_DASHBOARD_PRESETS: GrafanaDashboardPreset[] = [
     description: 'Landing dashboard for active incidents, SLO breaches, and recent operational change context.',
   },
   {
+    id: 'chat',
+    label: 'Chat',
+    uid: 'ragweld-chat',
+    slug: 'chat',
+    description: 'Chat outcomes, error ratio, time to first text, duration, cost, tokens, feedback, and Recall gate decisions.',
+  },
+  {
     id: 'gateway-serving',
     label: 'Gateway & Serving',
     uid: 'ragweld-gateway-serving',
     slug: 'gateway-serving',
-    description: 'LiteLLM routing, vLLM serving, and runtime latency/error signals.',
+    description: 'LiteLLM traffic, failures, time to first token, reasoning share, and deployment health.',
   },
   {
     id: 'retrieval-indexing-graph',
     label: 'Retrieval/Indexing/Graph',
     uid: 'ragweld-retrieval-indexing-graph',
     slug: 'retrieval-indexing-graph',
-    description: 'Qdrant vector-lane health, indexing generation truth, and graph-parity signals.',
+    description: 'Retrieval latency by leg, graph traversal and rerank, semantic cache, and index size per corpus.',
+  },
+  {
+    id: 'tribrid-overview',
+    label: 'TriBrid Overview',
+    uid: 'tribrid-overview',
+    slug: 'tribrid-overview',
+    description: 'Retrieval latency, rate and success, latency by leg with rerank, and index size per corpus.',
+  },
+  {
+    id: 'tribrid-rag-metrics',
+    label: 'TriBridRAG Metrics',
+    uid: 'tribrid-rag-metrics',
+    slug: 'tribridrag-metrics',
+    description: 'Every search and indexing stage: latency, errors, throughput, and runs.',
   },
   {
     id: 'training-workflow',
@@ -57,18 +78,11 @@ export const GRAFANA_DASHBOARD_PRESETS: GrafanaDashboardPreset[] = [
     description: 'Frontend telemetry and Faro/RUM command surface.',
   },
   {
-    id: 'codex-session-ingest',
-    label: 'Codex Session Ingest',
-    uid: 'codex-session-ingest',
-    slug: 'codex-session-ingest',
-    description: 'Legacy ingest telemetry retained as a supporting dashboard.',
-  },
-  {
     id: 'reranker-training',
     label: 'Reranker Training',
     uid: 'reranker-training',
     slug: 'reranker-training',
-    description: 'Legacy reranker training board retained during the broader workflow cutover.',
+    description: 'Learning Reranker training runs, evaluations, promotions, and inference latency.',
   },
 ];
 

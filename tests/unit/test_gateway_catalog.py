@@ -152,12 +152,24 @@ def test_rendered_config_has_no_retries_or_fallbacks_and_is_file_authoritative()
         "num_retries": 0,
         "fallbacks": [],
         "context_window_fallbacks": [],
+        "prometheus_latency_buckets": [
+            0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0,
+            15.0, 30.0, 45.0, 60.0, 90.0, 120.0, 180.0, 300.0, 600.0,
+        ],
         "callbacks": ["prometheus", "langfuse_otel"],
         "custom_prometheus_metadata_labels": ["metadata.lane"],
         "turn_off_message_logging": True,
         "require_auth_for_metrics_endpoint": False,
         "include_cost_in_streaming_usage": True,
     }
+    # The proxy applies litellm_settings in order and the Prometheus logger reads the
+    # buckets when `callbacks` constructs it, so the buckets must come first.
+    settings_order = list(config["litellm_settings"])
+    assert settings_order.index("prometheus_latency_buckets") < settings_order.index("callbacks")
+    buckets = config["litellm_settings"]["prometheus_latency_buckets"]
+    assert buckets == sorted(buckets) and buckets[-1] == 600.0
+    # Every chat-contract bound (plan 2026-09-23) exists, so gateway and chat tails line up.
+    assert {0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 15.0, 30.0, 45.0, 60.0, 90.0, 120.0, 180.0, 300.0, 600.0} <= set(buckets)
     assert config["router_settings"] == {
         "default_fallbacks": [],
         "num_retries": 0, "retry_policy": None, "model_group_retry_policy": {},

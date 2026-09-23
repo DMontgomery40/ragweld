@@ -111,6 +111,9 @@ services:
     volumes:
       - ./infra/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./infra/prometheus-rules.yml:/etc/prometheus/prometheus-rules.yml:ro
+      # file_sd targets written by the launcher (scripts/runtime_lifecycle.sh): the
+      # local-model scrape target exists only while that lane runs.
+      - ./.ragweld-runtime/prometheus-targets:/etc/prometheus/targets:ro
       - prometheus_data:/prometheus
     depends_on:
       - postgres-exporter
@@ -245,6 +248,47 @@ services:
       retries: 30
       start_period: 15s
 
+  # Laya (Convai Innovations, Apache-2.0): the local/offline System One provider behind
+  # system_one.provider=laya (system_one.laya_base_url, 127.0.0.1:58180). It runs on the CPU
+  # with one resident checkpoint (LAYA_MODELS; the entrypoint refuses to load a second one)
+  # under a hard memory cap with no swap, because the host is shared with the API and every
+  # store. Built from infra/laya; weights download once into laya_hf_cache.
+  laya:
+    build:
+      context: ./infra/laya
+    image: ragweld-laya:0.3.11
+    # Local build only (`docker compose build laya`); never looked up on a registry.
+    pull_policy: never
+    labels:
+      io.ragweld.managed: "true"
+    restart: unless-stopped
+    environment:
+      LAYA_HOST: "0.0.0.0"
+      LAYA_PORT: "8000"
+      LAYA_DEVICE: cpu
+      # Exactly one of english | multilingual | typed-decisions.
+      LAYA_MODELS: ${LAYA_CHECKPOINT:-english}
+      # Torch threads match the CPU limit below; more threads than CPUs only adds contention.
+      LAYA_THREADS: "4"
+      OMP_NUM_THREADS: "4"
+      MKL_NUM_THREADS: "4"
+      HF_HOME: /var/lib/laya/hf
+    mem_limit: 4g
+    memswap_limit: 4g
+    cpus: 4
+    ports:
+      - "127.0.0.1:${LAYA_HTTP_PORT:-58180}:8000"
+    volumes:
+      - laya_hf_cache:/var/lib/laya/hf
+    healthcheck:
+      # /health answers only after the checkpoint is built (the server binds after loading).
+      test: ["CMD", "python", "-c", "import json, urllib.request; health = json.load(urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)); raise SystemExit(0 if health.get('loaded') else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      # The first start downloads about 0.8 GB of weights before it binds.
+      start_period: 300s
+
   api:
     build:
       context: .
@@ -296,3 +340,4 @@ volumes:
   grafana_data:
   prometheus_data:
   loki_data:
+  laya_hf_cache:

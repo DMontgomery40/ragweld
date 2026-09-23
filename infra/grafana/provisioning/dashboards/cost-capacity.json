@@ -63,14 +63,14 @@
           "refId": "A"
         }
       ],
-      "title": "Gateway spend \u2014 selected range",
+      "title": "Gateway spend — selected range",
       "description": "Reported gateway spend over the selected range. By default this is midnight UTC to now; historical or custom selections use their actual boundaries. Prometheus increase adjusts counter resets and extrapolates between scrapes; this is not an exact billing ledger.",
       "type": "stat"
     },
     {
       "id": 8,
       "type": "stat",
-      "title": "Gateway tokens \u2014 selected range",
+      "title": "Gateway tokens — selected range",
       "datasource": {
         "type": "prometheus",
         "uid": "mimir"
@@ -145,14 +145,14 @@
           "refId": "A"
         }
       ],
-      "title": "Gateway spend \u2014 7 days to selected end",
+      "title": "Gateway spend — 7 days to selected end",
       "type": "stat",
       "description": "Rolling seven-day counter increase ending at the selected end time, including when viewing history. Missing series are unavailable, not zero spend."
     },
     {
       "id": 9,
       "type": "stat",
-      "title": "Gateway tokens \u2014 7 days to selected end",
+      "title": "Gateway tokens — 7 days to selected end",
       "datasource": {
         "type": "prometheus",
         "uid": "mimir"
@@ -233,7 +233,7 @@
     {
       "id": 10,
       "type": "bargauge",
-      "title": "Gateway spend by model / lane \u2014 selected range",
+      "title": "Gateway spend by model / lane — selected range",
       "datasource": {
         "type": "prometheus",
         "uid": "mimir"
@@ -277,7 +277,7 @@
     {
       "id": 11,
       "type": "bargauge",
-      "title": "Gateway tokens by model / lane \u2014 selected range",
+      "title": "Gateway tokens by model / lane — selected range",
       "datasource": {
         "type": "prometheus",
         "uid": "mimir"
@@ -337,7 +337,9 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "reqps"
+          "unit": "reqps",
+          "noValue": "No data: API not scraped",
+          "decimals": 2
         }
       },
       "gridPos": {
@@ -367,8 +369,9 @@
           "legendFormat": "requests/s"
         }
       ],
-      "title": "Traffic Load",
-      "type": "stat"
+      "title": "Retrieval traffic (5m)",
+      "type": "stat",
+      "description": "Retrievals per second over the last 5 minutes."
     },
     {
       "datasource": {
@@ -377,7 +380,14 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "short",
+          "decimals": 0,
+          "min": 0,
+          "noValue": "No data: no per-corpus index size reported since the API began emitting them",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
         }
       },
       "gridPos": {
@@ -388,10 +398,8 @@
       },
       "id": 2,
       "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
+        "displayMode": "basic",
+        "orientation": "horizontal",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
@@ -399,16 +407,20 @@
           "fields": "",
           "values": false
         },
-        "textMode": "auto"
+        "showUnfilled": true,
+        "valueMode": "text"
       },
       "targets": [
         {
-          "expr": "max_over_time(tribrid_chunks_indexed_current[1h])",
-          "legendFormat": "chunks"
+          "refId": "A",
+          "expr": "max by (corpus) (tribrid_corpus_chunks)",
+          "legendFormat": "{{corpus}}",
+          "instant": true
         }
       ],
-      "title": "Indexed Footprint",
-      "type": "stat"
+      "title": "Indexed chunks by corpus",
+      "type": "bargauge",
+      "description": "Chunk rows indexed in each corpus now, refreshed from the registry at most every 5 minutes."
     },
     {
       "datasource": {
@@ -417,7 +429,19 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "s"
+          "unit": "s",
+          "noValue": "No data: API not scraped",
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "No traffic"
+                }
+              }
+            }
+          ]
         }
       },
       "gridPos": {
@@ -443,24 +467,26 @@
       },
       "targets": [
         {
+          "refId": "A",
           "expr": "histogram_quantile(0.95, sum by (le) (rate(tribrid_search_latency_seconds_bucket[5m])))",
           "legendFormat": "p95"
         }
       ],
-      "title": "Latency Under Load",
-      "type": "stat"
+      "title": "Retrieval latency p95 (5m)",
+      "type": "stat",
+      "description": "p95 end-to-end retrieval latency over the last 5 minutes."
     },
     {
       "id": 12,
       "type": "stat",
-      "title": "Native trace export errors \u2014 logged batches",
+      "title": "Native trace export errors — logged batches",
       "datasource": {
         "type": "loki",
         "uid": "loki"
       },
       "gridPos": {
         "h": 6,
-        "w": 24,
+        "w": 12,
         "x": 0,
         "y": 32
       },
@@ -509,6 +535,85 @@
       },
       "title": "Operator Notes",
       "type": "text"
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "Gateway budget remaining",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 32
+      },
+      "description": "Budget LiteLLM has left on each API key and user. Unlimited means no budget is set there; provider-side caps (for example an OpenRouter weekly limit) are not visible to the gateway.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 2,
+          "noValue": "No data: gateway not scraped",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "Infinity": {
+                  "text": "Unlimited",
+                  "index": 0
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 5
+              },
+              {
+                "color": "green",
+                "value": 20
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "min by (hashed_api_key) (litellm_remaining_api_key_budget_metric)",
+          "legendFormat": "key {{hashed_api_key}}",
+          "instant": true
+        },
+        {
+          "refId": "B",
+          "expr": "min by (user) (litellm_remaining_user_budget_metric)",
+          "legendFormat": "user {{user}}",
+          "instant": true
+        }
+      ]
     }
   ],
   "refresh": "10s",

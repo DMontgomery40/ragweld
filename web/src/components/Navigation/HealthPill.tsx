@@ -19,6 +19,7 @@ const DEP_LABELS: Record<string, string> = {
   litellm: 'LiteLLM',
   vllm: 'vLLM',
   index_manifests: 'Index manifests',
+  laya: 'Laya (System One)',
 };
 
 function depLabel(key: string): string {

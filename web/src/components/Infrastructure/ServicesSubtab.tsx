@@ -61,6 +61,12 @@ const SERVICE_GROUPS: Array<{
     services: ['litellm'],
   },
   {
+    title: 'System One decisions',
+    description:
+      'Laya answers typed decisions (Choice, Noul, Score) on this host when system_one.provider is laya. It runs on the CPU with one checkpoint and a 4 GiB memory cap.',
+    services: ['laya'],
+  },
+  {
     title: 'Vector store',
     description: 'Qdrant holds the dense + sparse vectors for every corpus on the Haystack/Docling/Qdrant retrieval lane.',
     services: ['qdrant'],
@@ -101,6 +107,7 @@ const SERVICE_LABELS: Record<RagweldDockerService, string> = {
   cloudflared: 'Cloudflare Tunnel',
   alloy: 'Grafana Alloy',
   litellm: 'LiteLLM Gateway',
+  laya: 'Laya System One',
   qdrant: 'Qdrant Vector Store',
   mlflow: 'MLflow Tracking',
   flyte: 'Flyte Control Plane',

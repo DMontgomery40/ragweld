@@ -2,6 +2,59 @@
     admin off
     auto_https off
     default_bind 127.0.0.1
+    # Everything that is not an access log (proxy/handler errors, startup): same JSON on
+    # stderr, with the same header and credential-parameter redaction as (access_log).
+    log default {
+        output stderr
+        format filter {
+            wrap json
+            fields {
+                request>headers delete
+                request>uri query {
+                    replace token REDACTED
+                    replace code REDACTED
+                    replace state REDACTED
+                    replace session_state REDACTED
+                    replace id_token REDACTED
+                    replace access_token REDACTED
+                    replace refresh_token REDACTED
+                    replace client_secret REDACTED
+                    replace api_key REDACTED
+                }
+            }
+        }
+    }
+}
+
+# JSON access log on stderr, one line per request, for every site. Promtail ships the
+# caddy container's stderr to Loki (compose_service="caddy"), where the On-call proxy
+# 5xx panels read it. Request and response headers are dropped: they carry the Authelia
+# identity headers, client IPs from Cloudflare and (redacted) cookies, and nothing the
+# panels need. Query parameters that carry credentials (Authelia reset/verification
+# tokens, OIDC codes and state on the Langfuse callback) are replaced before the line
+# is written.
+(access_log) {
+    log {
+        output stderr
+        format filter {
+            wrap json
+            fields {
+                request>headers delete
+                resp_headers delete
+                request>uri query {
+                    replace token REDACTED
+                    replace code REDACTED
+                    replace state REDACTED
+                    replace session_state REDACTED
+                    replace id_token REDACTED
+                    replace access_token REDACTED
+                    replace refresh_token REDACTED
+                    replace client_secret REDACTED
+                    replace api_key REDACTED
+                }
+            }
+        }
+    }
 }
 
 (require_owner) {
@@ -24,18 +77,21 @@
 }
 
 http://auth.ragweld.com:58000 {
+    import access_log
     reverse_proxy 127.0.0.1:59091 {
         header_up X-Forwarded-Proto https
     }
 }
 
 http://ragweld-auth.dtmont.com:58000 {
+    import access_log
     reverse_proxy 127.0.0.1:59091 {
         header_up X-Forwarded-Proto https
     }
 }
 
 http://me.ragweld.com:58000 {
+    import access_log
     import require_owner_except_faro
     handle /api/* {
         reverse_proxy 127.0.0.1:58012
@@ -64,6 +120,7 @@ http://me.ragweld.com:58000 {
 }
 
 http://ragweld.dtmont.com:58000 {
+    import access_log
     import require_owner_except_faro
     handle /api/* {
         reverse_proxy 127.0.0.1:58012
@@ -102,41 +159,49 @@ http://ragweld.dtmont.com:58000 {
 }
 
 http://grafana.ragweld.com:58000 {
+    import access_log
     import require_owner
     reverse_proxy 127.0.0.1:3301
 }
 
 http://ragweld-grafana.dtmont.com:58000 {
+    import access_log
     import require_owner
     reverse_proxy 127.0.0.1:3301
 }
 
 http://langfuse.ragweld.com:58000 {
+    import access_log
     import require_owner
     reverse_proxy 127.0.0.1:53000
 }
 
 http://ragweld-langfuse.dtmont.com:58000 {
+    import access_log
     import require_owner
     reverse_proxy 127.0.0.1:53000
 }
 
 http://mlflow.ragweld.com:58000 {
+    import access_log
     import require_owner
     reverse_proxy 127.0.0.1:55500
 }
 
 http://ragweld-mlflow.dtmont.com:58000 {
+    import access_log
     import require_owner
     reverse_proxy 127.0.0.1:55500
 }
 
 http://flyte.ragweld.com:58000 {
+    import access_log
     import require_owner
     reverse_proxy 127.0.0.1:30080
 }
 
 http://ragweld-flyte.dtmont.com:58000 {
+    import access_log
     import require_owner
     reverse_proxy 127.0.0.1:30080
 }

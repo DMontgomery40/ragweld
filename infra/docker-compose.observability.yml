@@ -62,7 +62,7 @@ services:
       - pyroscope_data:/data
 
   alertmanager:
-    image: ${ALERTMANAGER_IMAGE:-prom/alertmanager:v0.27.0}
+    image: ${ALERTMANAGER_IMAGE:-prom/alertmanager:v0.28.1}
     labels:
       io.ragweld.managed: "true"
     command:

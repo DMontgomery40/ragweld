@@ -30,6 +30,7 @@ DRY_RUN=0
 BACKEND_PID=""
 FRONTEND_PID=""
 LOCAL_MODEL_PID=""
+LOCAL_MODEL_TARGET_PUBLISHED=0
 
 usage() {
   cat <<'EOF'
@@ -201,6 +202,9 @@ cleanup() {
   fi
   if [[ -n "$LOCAL_MODEL_PID" ]]; then
     stop_owned_process_exact "local-model" "$ROOT_DIR" "$LOCAL_MODEL_PID"
+  fi
+  if [[ "$LOCAL_MODEL_TARGET_PUBLISHED" == "1" ]]; then
+    withdraw_local_model_scrape_target
   fi
   release_lifecycle_lock
   return 0
@@ -385,6 +389,24 @@ fi
 
 if [[ "$NATIVE_POSTGRES" == "1" && "$DRY_RUN" == "0" ]]; then
   wait_for_native_postgres
+fi
+
+# The vllm scrape target exists only while this launcher runs the local-model lane
+# (scripts/runtime_lifecycle.sh). Published before Compose starts Prometheus; a stale
+# target from an earlier run is withdrawn when the lane is off.
+if [[ "$START_LOCAL_MODEL" == "1" ]]; then
+  if [[ "$DRY_RUN" == "1" ]]; then
+    log "Would publish the local-model scrape target to ${RAGWELD_LOCAL_MODEL_TARGETS_FILE}"
+  else
+    publish_local_model_scrape_target "$LOCAL_MODEL_PORT"
+    LOCAL_MODEL_TARGET_PUBLISHED=1
+  fi
+elif [[ -e "$RAGWELD_LOCAL_MODEL_TARGETS_FILE" ]]; then
+  if [[ "$DRY_RUN" == "1" ]]; then
+    log "Would withdraw the stale local-model scrape target at ${RAGWELD_LOCAL_MODEL_TARGETS_FILE}"
+  else
+    withdraw_local_model_scrape_target
+  fi
 fi
 
 # Launch the local-model server first so the ~15 GiB weight load overlaps the

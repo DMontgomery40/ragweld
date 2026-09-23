@@ -61,6 +61,30 @@ runtime_pid_file() {
   printf '%s/%s.pid\n' "$RAGWELD_RUNTIME_DIR" "$1"
 }
 
+# Prometheus discovers the local-model (vllm) scrape target through file_sd
+# (infra/prometheus.yml reads /etc/prometheus/targets/vllm.json, which docker-compose.yml
+# mounts from this directory). The target is listed only while a launcher runs the
+# local-model lane, so a runtime that does not serve it -- production starts with
+# --no-local-model -- has no `up{job="vllm"}` series and RagweldLocalModelDown cannot
+# fire. The path is fixed, not derived from RAGWELD_RUNTIME_DIR, because the mount is.
+readonly RAGWELD_PROMETHEUS_TARGETS_DIR="${ROOT_DIR}/.ragweld-runtime/prometheus-targets"
+readonly RAGWELD_LOCAL_MODEL_TARGETS_FILE="${RAGWELD_PROMETHEUS_TARGETS_DIR}/vllm.json"
+
+publish_local_model_scrape_target() {
+  local port="$1"
+  mkdir -p "$RAGWELD_PROMETHEUS_TARGETS_DIR"
+  # Prometheus reads the mount as `nobody`; the lifecycle umask is 077.
+  chmod 0755 "$RAGWELD_PROMETHEUS_TARGETS_DIR"
+  printf '[{"targets": ["host.docker.internal:%s"]}]\n' "$port" >"${RAGWELD_LOCAL_MODEL_TARGETS_FILE}.tmp"
+  chmod 0644 "${RAGWELD_LOCAL_MODEL_TARGETS_FILE}.tmp"
+  mv -f "${RAGWELD_LOCAL_MODEL_TARGETS_FILE}.tmp" "$RAGWELD_LOCAL_MODEL_TARGETS_FILE"
+}
+
+withdraw_local_model_scrape_target() {
+  [[ -e "$RAGWELD_LOCAL_MODEL_TARGETS_FILE" ]] || return 0
+  rm -f "$RAGWELD_LOCAL_MODEL_TARGETS_FILE"
+}
+
 write_owned_pid() {
   local kind="$1"
   local pid="$2"

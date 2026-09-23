@@ -9,8 +9,9 @@
   "panels": [
     {
       "datasource": { "type": "prometheus", "uid": "mimir" },
-      "fieldConfig": { "defaults": { "unit": "reqps" } },
-      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 0 },
+      "description": "LiteLLM proxy requests per second over the last 5 minutes, for the selected model aliases.",
+      "fieldConfig": { "defaults": { "unit": "reqps", "decimals": 2, "noValue": "No data: gateway not scraped" } },
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
       "id": 1,
       "options": {
         "colorMode": "value",
@@ -20,35 +21,28 @@
         "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
         "textMode": "auto"
       },
-      "targets": [{ "expr": "sum(rate(litellm_proxy_total_requests_metric_total[5m]))", "legendFormat": "requests/s" }],
-      "title": "LiteLLM Traffic",
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(litellm_proxy_total_requests_metric_total{requested_model=~\"$model\"}[5m]))", "legendFormat": "requests/s" }
+      ],
+      "title": "Gateway traffic (5m)",
       "type": "stat"
     },
     {
       "datasource": { "type": "prometheus", "uid": "mimir" },
-      "fieldConfig": { "defaults": { "unit": "s" } },
-      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 0 },
+      "description": "p95 of end-to-end gateway request latency across the selected time range.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "No data: gateway not scraped",
+          "mappings": [{ "type": "special", "options": { "match": "nan", "result": { "text": "No traffic" } } }],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 30 }, { "color": "red", "value": 90 }] }
+        }
+      },
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 },
       "id": 2,
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
-        "textMode": "auto"
-      },
-      "targets": [{ "expr": "histogram_quantile(0.95, sum by (le) (rate(litellm_request_total_latency_metric_bucket[5m])))", "legendFormat": "p95" }],
-      "title": "LiteLLM Latency (p95)",
-      "type": "stat"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "mimir" },
-      "fieldConfig": { "defaults": { "unit": "percentunit" } },
-      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 0 },
-      "id": 3,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
@@ -56,70 +50,448 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(litellm_proxy_failed_requests_metric_total[5m])) / clamp_min(sum(rate(litellm_proxy_total_requests_metric_total[5m])), 1)",
-          "legendFormat": "error rate"
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (increase(litellm_request_total_latency_metric_bucket{requested_model=~\"$model\"}[$__range])))",
+          "legendFormat": "p95",
+          "instant": true
         }
       ],
-      "title": "LiteLLM Error Rate",
+      "title": "Request latency p95 (selected range)",
       "type": "stat"
     },
     {
       "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "Failed / total gateway requests across the selected time range. A request that never reached the gateway is not counted here.",
       "fieldConfig": {
         "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineWidth": 2,
-            "showPoints": "never",
-            "spanNulls": false
-          },
-          "unit": "short"
+          "unit": "percentunit",
+          "decimals": 1,
+          "noValue": "No data: gateway not scraped",
+          "mappings": [{ "type": "special", "options": { "match": "nan", "result": { "text": "No traffic" } } }],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 0.05 }, { "color": "red", "value": 0.2 }] }
         }
       },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 6 },
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 0 },
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(sum(increase(litellm_proxy_failed_requests_metric_total{requested_model=~\"$model\"}[$__range])) or on() (0 * sum(increase(litellm_proxy_total_requests_metric_total{requested_model=~\"$model\"}[$__range])))) / sum(increase(litellm_proxy_total_requests_metric_total{requested_model=~\"$model\"}[$__range]))",
+          "legendFormat": "failed ratio",
+          "instant": true
+        }
+      ],
+      "title": "Failed request ratio (selected range)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "Requests the gateway is serving right now (all models).",
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0, "noValue": "No data: gateway not scraped" } },
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 0 },
       "id": 4,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [{ "refId": "A", "expr": "sum(litellm_in_flight_requests)", "legendFormat": "in flight" }],
+      "title": "In-flight requests",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "p95 time from request to the first streamed chunk, per model alias, across the selected range. For reasoning models the first chunk is a reasoning token, not answer text.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "No streamed requests in range",
+          "min": 0,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 10 }, { "color": "red", "value": 30 }] }
+        }
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 6 },
+      "id": 5,
+      "options": {
+        "displayMode": "basic",
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, requested_model) (increase(litellm_llm_api_time_to_first_token_metric_bucket{requested_model=~\"$model\"}[$__range])))",
+          "legendFormat": "{{requested_model}}",
+          "instant": true
+        }
+      ],
+      "title": "Time to first token p95 by model (selected range)",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "p95 end-to-end gateway latency per model alias across the selected range.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "No requests in range",
+          "min": 0,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 30 }, { "color": "red", "value": 90 }] }
+        }
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 6 },
+      "id": 6,
+      "options": {
+        "displayMode": "basic",
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, requested_model) (increase(litellm_request_total_latency_metric_bucket{requested_model=~\"$model\"}[$__range])))",
+          "legendFormat": "{{requested_model}}",
+          "instant": true
+        }
+      ],
+      "title": "Request latency p95 by model (selected range)",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "Reasoning tokens as a share of all output tokens, per model alias, across the selected range. A high share means most billed output and most time-to-first-token is spent thinking.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 0,
+          "noValue": "No completions in range",
+          "min": 0,
+          "max": 1,
+          "mappings": [{ "type": "special", "options": { "match": "nan", "result": { "text": "No output tokens" } } }],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 0.5 }, { "color": "orange", "value": 0.8 }] }
+        }
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 6 },
+      "id": 7,
+      "options": {
+        "displayMode": "basic",
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (requested_model) (increase(litellm_output_reasoning_tokens_metric_total{requested_model=~\"$model\"}[$__range])) / sum by (requested_model) (increase(litellm_output_tokens_metric_total{requested_model=~\"$model\"}[$__range]))",
+          "legendFormat": "{{requested_model}}",
+          "instant": true
+        }
+      ],
+      "title": "Reasoning share of output tokens (selected range)",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "Rolling 15-minute p95 per model alias: time to first streamed chunk (TTFT) and end-to-end latency. Gaps mean no requests in that window.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 0, "lineWidth": 2, "showPoints": "auto", "spanNulls": false },
+          "unit": "s",
+          "noValue": "No requests in range"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
+      "id": 8,
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true, "calcs": ["max", "lastNotNull"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, requested_model) (rate(litellm_llm_api_time_to_first_token_metric_bucket{requested_model=~\"$model\"}[15m])))",
+          "legendFormat": "{{requested_model}} TTFT p95"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le, requested_model) (rate(litellm_request_total_latency_metric_bucket{requested_model=~\"$model\"}[15m])))",
+          "legendFormat": "{{requested_model}} total p95"
+        }
+      ],
+      "title": "Latency over time (rolling 15m p95)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "Rolling 15-minute p95 of the time a request waits in the gateway queue and of the gateway's own processing overhead. Both should stay far below the upstream model latency.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 0, "lineWidth": 2, "showPoints": "auto", "spanNulls": false },
+          "unit": "s",
+          "noValue": "No requests in range"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
+      "id": 9,
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true, "calcs": ["max", "lastNotNull"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(litellm_request_queue_time_seconds_bucket{requested_model=~\"$model\"}[15m])))",
+          "legendFormat": "queue p95"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(litellm_overhead_latency_metric_bucket{model_group=~\"$model\"}[15m])))",
+          "legendFormat": "gateway overhead p95"
+        }
+      ],
+      "title": "Queue time and gateway overhead (rolling 15m p95)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "Upstream deployment failures per 5 minutes by model alias and exception. Counters restart at zero when the gateway restarts.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "bars", "fillOpacity": 60, "lineWidth": 1, "showPoints": "never", "spanNulls": false, "stacking": { "mode": "normal", "group": "A" } },
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "No deployment failures since the gateway started"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 22 },
+      "id": 10,
+      "interval": "5m",
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true, "calcs": ["sum"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (requested_model, exception_class, exception_status) (increase(litellm_deployment_failure_responses_total{requested_model=~\"$model\"}[5m]))",
+          "legendFormat": "{{requested_model}} {{exception_class}} {{exception_status}}"
+        }
+      ],
+      "title": "Deployment failures by model and exception",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "LiteLLM's own health state per upstream deployment. ragweld-local is left out: the local-model lane is off by design on this host and is covered by the Local model lane panel.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No data: gateway not scraped",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "Healthy", "color": "green", "index": 0 },
+                "1": { "text": "Partial outage", "color": "orange", "index": 1 },
+                "2": { "text": "Outage", "color": "red", "index": 2 }
+              }
+            }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }, { "color": "red", "value": 2 }] }
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 22 },
+      "id": 11,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (litellm_model_name) (litellm_deployment_state{litellm_model_name!=\"ragweld-local\"})",
+          "legendFormat": "{{litellm_model_name}}"
+        }
+      ],
+      "title": "Deployment health",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "Requests running and waiting on the host local-model server. Present only while the launcher runs the local-model lane.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2, "showPoints": "never", "spanNulls": false },
+          "unit": "short",
+          "noValue": "Local-model lane not running on this host"
+        }
+      },
+      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 30 },
+      "id": 12,
       "options": {
         "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true },
         "tooltip": { "mode": "multi", "sort": "desc" }
       },
       "targets": [
-        { "expr": "sum(vllm:num_requests_running)", "legendFormat": "running" },
-        { "expr": "sum(vllm:num_requests_waiting)", "legendFormat": "waiting" }
+        { "refId": "A", "expr": "sum(vllm:num_requests_running)", "legendFormat": "running" },
+        { "refId": "B", "expr": "sum(vllm:num_requests_waiting)", "legendFormat": "waiting" }
       ],
-      "title": "vLLM Request Concurrency",
+      "title": "Local model lane (vLLM) concurrency",
       "type": "timeseries"
     },
     {
-      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 14 },
-      "id": 5,
-      "options": {
-        "content": "## Gateway and Serving\nThis dashboard reads the metrics emitted by the live LiteLLM and vLLM services.\n\nCheck `up{job=\"litellm\"}` and `up{job=\"vllm\"}` before interpreting request rate, latency, errors, or serving concurrency. The OpenRouter smoke alias is explicit and never a fallback.",
-        "mode": "markdown"
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 37 },
+      "id": 13,
+      "panels": [],
+      "title": "System One",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "Whether Prometheus reaches the Laya container. Laya always runs, and carries traffic only while system_one.provider is laya.",
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Laya is not scraped on this host",
+          "mappings": [{ "type": "value", "options": { "0": { "text": "Down", "color": "red", "index": 1 }, "1": { "text": "Up", "color": "green", "index": 0 } } }],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+        }
       },
-      "title": "Operator Notes",
-      "type": "text"
+      "gridPos": { "h": 7, "w": 6, "x": 0, "y": 38 },
+      "id": 14,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        { "refId": "A", "expr": "max(up{job=\"laya\"})", "legendFormat": "laya" }
+      ],
+      "title": "Laya (local System One)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "Resident memory of the Laya process against its 4 GiB hard cap (no swap). With the English checkpoint loaded it sits near 2.2 GiB.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "decimals": 2,
+          "noValue": "Laya is not scraped on this host",
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 3221225472 }, { "color": "red", "value": 3865470566 }] }
+        }
+      },
+      "gridPos": { "h": 7, "w": 6, "x": 6, "y": 38 },
+      "id": 15,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        { "refId": "A", "expr": "max(process_resident_memory_bytes{job=\"laya\"})", "legendFormat": "resident memory" }
+      ],
+      "title": "Laya memory (cap 4 GiB)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "System One decision requests per second sent by Ragweld, per provider (typesafe or laya) and outcome.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 0, "lineWidth": 2, "showPoints": "auto", "spanNulls": false },
+          "unit": "reqps",
+          "noValue": "No System One requests in range"
+        }
+      },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 38 },
+      "id": 16,
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true, "calcs": ["max", "lastNotNull"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        { "refId": "A", "expr": "sum by (provider, outcome) (rate(tribrid_system_one_requests_total[5m]))", "legendFormat": "{{provider}} {{outcome}}" }
+      ],
+      "title": "System One requests by provider and outcome",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "Rolling 15-minute p95 of each System One request as Ragweld sees it, per provider, beside Laya's own forward-pass time. The gap between the two Laya lines is time spent waiting for Laya's single inference worker. Gaps mean no requests in that window.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 0, "lineWidth": 2, "showPoints": "auto", "spanNulls": false },
+          "unit": "s",
+          "noValue": "No System One requests in range"
+        }
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 45 },
+      "id": 17,
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true, "calcs": ["max", "lastNotNull"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, provider) (rate(tribrid_system_one_latency_seconds_bucket[15m])))", "legendFormat": "{{provider}} request p95" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(laya_inference_seconds_bucket{outcome=\"ok\"}[15m])))", "legendFormat": "laya forward pass p95" }
+      ],
+      "title": "System One latency (rolling 15m p95)",
+      "type": "timeseries"
     }
   ],
-  "refresh": "10s",
+  "refresh": "30s",
   "schemaVersion": 38,
   "style": "dark",
   "tags": ["ragweld", "observability", "gateway", "serving"],
   "templating": {
     "list": [
-      { "name": "corpus_id", "label": "Corpus", "type": "textbox", "query": "*", "current": { "text": "*", "value": "*" } },
-      { "name": "run_id", "label": "Run", "type": "textbox", "query": "*", "current": { "text": "*", "value": "*" } },
-      { "name": "model", "label": "Model", "type": "textbox", "query": "*", "current": { "text": "*", "value": "*" } },
-      { "name": "provider", "label": "Provider", "type": "textbox", "query": "*", "current": { "text": "*", "value": "*" } },
-      { "name": "prompt_set", "label": "Prompt Set", "type": "textbox", "query": "current", "current": { "text": "current", "value": "current" } },
-      { "name": "workflow_id", "label": "Workflow", "type": "textbox", "query": "*", "current": { "text": "*", "value": "*" } }
+      {
+        "name": "model",
+        "label": "Model alias",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "mimir" },
+        "definition": "label_values(litellm_proxy_total_requests_metric_total, requested_model)",
+        "query": "label_values(litellm_proxy_total_requests_metric_total, requested_model)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*",
+        "current": { "selected": true, "text": ["All"], "value": ["$__all"] },
+        "options": [],
+        "sort": 1,
+        "hide": 0
+      }
     ]
   },
-  "time": { "from": "now-1h", "to": "now" },
+  "time": { "from": "now-6h", "to": "now" },
   "timepicker": {},
   "timezone": "",
   "title": "Gateway & Serving",
   "uid": "ragweld-gateway-serving",
-  "version": 1,
+  "version": 2,
   "weekStart": ""
 }

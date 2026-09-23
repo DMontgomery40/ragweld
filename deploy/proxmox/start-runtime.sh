@@ -39,12 +39,20 @@ readonly PRODUCTION_SERVICES=(
   "authelia"
   "caddy"
 )
+# Started after the platform and never part of its `--wait` set: Laya (the offline System One
+# provider) is only load-bearing while system_one.provider=laya, and a missing image, a weight
+# download or an out-of-memory restart must not stop the platform from booting. Its image is
+# built at deploy time (`docker compose ... build laya`); the launcher never builds.
+readonly BEST_EFFORT_SERVICES=(
+  "laya"
+)
 readonly REQUIRED_SECRET_FILES=(
   "tribrid_config.json"
   "runtime.env"
   "litellm.env"
   "langfuse.env"
   "langfuse-oidc-client-secret"
+  "alertmanager-discord-webhook"
   "authelia/session-secret"
   "authelia/storage-encryption-key"
   "authelia/oidc-hmac-secret"
@@ -231,15 +239,28 @@ main() {
   export RAGWELD_RUNTIME_UID="$EXPECTED_UID"
   export RAGWELD_RUNTIME_GID="$EXPECTED_GID"
 
+  # Prometheus bind-mounts this directory for the local-model scrape target (file_sd).
+  # Create it as the runtime user before Compose runs, or Docker creates it root-owned.
+  # Production never publishes a target into it: start.sh runs with --no-local-model.
+  mkdir -p "$ROOT_DIR/.ragweld-runtime/prometheus-targets"
+  chmod 0755 "$ROOT_DIR/.ragweld-runtime/prometheus-targets"
+
   compose_args=(docker compose --project-name ragweld)
   for file_path in "${COMPOSE_FILES[@]}"; do
     compose_args+=(-f "$file_path")
   done
   "${compose_args[@]}" run --rm --no-deps authelia \
     authelia validate-config --config /config/configuration.yml
+  local best_effort_args=("${compose_args[@]}" up -d --no-build "${BEST_EFFORT_SERVICES[@]}")
   compose_args+=(up -d --wait)
   compose_args+=("${services[@]}")
   "${compose_args[@]}"
+
+  if ! "${best_effort_args[@]}"; then
+    echo "WARNING: ${BEST_EFFORT_SERVICES[*]} did not start; the platform starts without it." \
+      "Build it with: docker compose --project-name ragweld -f docker-compose.yml build ${BEST_EFFORT_SERVICES[*]}." \
+      "system_one.provider=laya fails closed until Laya runs." >&2
+  fi
 
   exec ./start.sh --no-docker --no-local-model --no-frontend
 }

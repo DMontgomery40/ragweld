@@ -82,57 +82,61 @@ def build_workbench_links() -> list[ObservabilityWorkbenchLink]:
     ]
 
 
-_DEFAULT_VARIABLES = [
-    ObservabilityDashboardVariable(
-        id="corpus_id",
-        label="Corpus",
-        kind="textbox",
-        default_value="*",
-        description="Corpus or repo scope for the dashboard.",
-    ),
-    ObservabilityDashboardVariable(
-        id="run_id",
-        label="Run",
-        kind="textbox",
-        default_value="*",
-        description="Eval, benchmark, or workflow run identifier.",
-    ),
-    ObservabilityDashboardVariable(
-        id="model",
-        label="Model",
-        kind="textbox",
-        default_value="*",
-        description="Served or benchmarked model identifier.",
-    ),
-    ObservabilityDashboardVariable(
-        id="provider",
-        label="Provider",
-        kind="textbox",
-        default_value="*",
-        description="Gateway/provider route for traffic or benchmark slices.",
-    ),
-    ObservabilityDashboardVariable(
-        id="prompt_set",
-        label="Prompt Set",
-        kind="textbox",
-        default_value="current",
-        description="Prompt-set lineage version or alias.",
-    ),
-    ObservabilityDashboardVariable(
-        id="workflow_id",
-        label="Workflow",
-        kind="textbox",
-        default_value="*",
-        description="Workflow identifier for Flyte or training runs.",
-    ),
-    ObservabilityDashboardVariable(
+def _time_range_variable(raw: dict[str, object] | None) -> ObservabilityDashboardVariable:
+    time_block = (raw or {}).get("time")
+    start = str(time_block.get("from") or "") if isinstance(time_block, dict) else ""
+    if start == "now/d":
+        default_value = "today"
+    elif start.startswith("now-"):
+        default_value = start[len("now-") :]
+    else:
+        default_value = start or "1h"
+    return ObservabilityDashboardVariable(
         id="time_range",
         label="Time Range",
         kind="time_range",
-        default_value="1h",
+        default_value=default_value,
         description="Grafana time range for the dashboard view.",
-    ),
-]
+    )
+
+
+def _dashboard_variables(raw: dict[str, object] | None) -> list[ObservabilityDashboardVariable]:
+    """The template variables the provisioned dashboard actually declares, plus its time range.
+
+    Read from the dashboard JSON so the catalog can never advertise a filter the panels do
+    not apply. A Grafana `query` variable has no kind of its own in the catalog contract; it
+    is reported as `custom` (a choice list) whose choices Grafana loads from its definition.
+    """
+
+    templating = (raw or {}).get("templating")
+    items = templating.get("list") if isinstance(templating, dict) else None
+    variables: list[ObservabilityDashboardVariable] = []
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, dict) or not str(item.get("name") or "").strip():
+            continue
+        grafana_type = str(item.get("type") or "textbox")
+        raw_current = item.get("current")
+        current_value = raw_current.get("value") if isinstance(raw_current, dict) else None
+        if isinstance(current_value, list):
+            current_value = current_value[0] if current_value else ""
+        default_value = "All" if current_value in ("$__all", None, "") and item.get("includeAll") else str(current_value or "")
+        definition = str(item.get("definition") or item.get("query") or "").strip()
+        values: list[str] = []
+        if grafana_type == "custom":
+            values = [part.strip() for part in str(item.get("query") or "").split(",") if part.strip()]
+        variables.append(
+            ObservabilityDashboardVariable(
+                id=str(item["name"]),
+                label=str(item.get("label") or item["name"]),
+                kind="textbox" if grafana_type == "textbox" else "custom",
+                default_value=default_value or "*",
+                description=str(item.get("description") or "").strip()
+                or (f"Choices from {definition}." if grafana_type == "query" and definition else None),
+                values=values,
+            )
+        )
+    variables.append(_time_range_variable(raw))
+    return variables
 
 _DASHBOARD_MANIFEST: tuple[dict[str, object], ...] = (
     {
@@ -147,6 +151,17 @@ _DASHBOARD_MANIFEST: tuple[dict[str, object], ...] = (
         "workbench_paths": ["/grafana?subtab=overview", "/grafana?subtab=incidents", "/infrastructure?subtab=monitoring"],
     },
     {
+        "id": "chat",
+        "file_name": "chat.json",
+        "title": "Chat",
+        "uid": "ragweld-chat",
+        "slug": "chat",
+        "category": "runtime",
+        "default": False,
+        "description": "Chat requests by outcome and error ratio, time to first event and first text, duration, spend and cost per chat, tokens and reasoning share, feedback, and Recall gate decisions.",
+        "workbench_paths": ["/grafana?subtab=dashboards", "/chat?subtab=ui"],
+    },
+    {
         "id": "gateway_serving",
         "file_name": "gateway-serving.json",
         "title": "Gateway & Serving",
@@ -154,7 +169,7 @@ _DASHBOARD_MANIFEST: tuple[dict[str, object], ...] = (
         "slug": "gateway-serving",
         "category": "runtime",
         "default": False,
-        "description": "LiteLLM routing, vLLM serving, request latency, errors, and gateway/provider health.",
+        "description": "LiteLLM traffic, failures, time to first token, reasoning share, queue and overhead latency, deployment health, and the local-model lane when it runs.",
         "workbench_paths": ["/grafana?subtab=dashboards", "/benchmark"],
     },
     {
@@ -165,8 +180,30 @@ _DASHBOARD_MANIFEST: tuple[dict[str, object], ...] = (
         "slug": "retrieval-indexing-graph",
         "category": "retrieval",
         "default": False,
-        "description": "Haystack, Docling, Qdrant, indexing export, and graph-parity operator signals.",
+        "description": "Retrieval traffic and latency by leg, graph traversal and rerank, semantic cache outcomes, and index size per corpus.",
         "workbench_paths": ["/rag?subtab=indexing", "/rag?subtab=retrieval", "/rag?subtab=graph"],
+    },
+    {
+        "id": "tribrid_overview",
+        "file_name": "tribrid_overview.json",
+        "title": "TriBrid Overview",
+        "uid": "tribrid-overview",
+        "slug": "tribrid-overview",
+        "category": "retrieval",
+        "default": False,
+        "description": "Retrieval latency, rate and success, latency by leg with rerank, and index size per corpus.",
+        "workbench_paths": ["/grafana?subtab=overview"],
+    },
+    {
+        "id": "tribrid_rag_metrics",
+        "file_name": "rag-metrics.json",
+        "title": "TriBridRAG Metrics",
+        "uid": "tribrid-rag-metrics",
+        "slug": "tribridrag-metrics",
+        "category": "retrieval",
+        "default": False,
+        "description": "Every search and indexing stage's latency and errors, index throughput, runs, and index size per corpus.",
+        "workbench_paths": ["/grafana?subtab=dashboards"],
     },
     {
         "id": "training_workflow",
@@ -178,6 +215,17 @@ _DASHBOARD_MANIFEST: tuple[dict[str, object], ...] = (
         "default": False,
         "description": "Flyte, MLflow, Unsloth, and training workflow state for the Learning Agent lane.",
         "workbench_paths": ["/rag?subtab=learning-agent", "/grafana?subtab=overview"],
+    },
+    {
+        "id": "reranker_training",
+        "file_name": "reranker-training.json",
+        "title": "Reranker Training",
+        "uid": "reranker-training",
+        "slug": "reranker-training",
+        "category": "training",
+        "default": False,
+        "description": "Learning Reranker training runs, stage and step latency, triplets, evaluations, promotions, and inference latency.",
+        "workbench_paths": ["/grafana?subtab=dashboards"],
     },
     {
         "id": "eval_benchmark_prompt_regressions",
@@ -264,7 +312,7 @@ def build_observability_catalog(config: TriBridConfig) -> ObservabilityCatalogRe
                 category=str(item["category"]),
                 default=bool(item["default"]),
                 tags=tags,
-                variables=list(_DEFAULT_VARIABLES),
+                variables=_dashboard_variables(raw),
                 links=_links_for_dashboard(config, uid=uid, slug=slug, title=title),
                 workbench_links=[
                     workbench_by_path[path]

@@ -1,0 +1,347 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "Chat requests that finished in the selected range, any outcome.",
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0, "noValue": "No data: no chat requests since the API began emitting chat metrics" } },
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 },
+      "id": 1,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [{ "refId": "A", "expr": "sum(increase(tribrid_chat_requests_total[$__range]))", "legendFormat": "requests", "instant": true }],
+      "title": "Chat requests (selected range)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "Retrieval errors, gateway errors and timeouts over all chat requests in the selected range. A client disconnect (tab closed, stream stopped) is not an error.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1,
+          "noValue": "No data: no chat requests since the API began emitting chat metrics",
+          "mappings": [{ "type": "special", "options": { "match": "nan", "result": { "text": "No traffic" } } }],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 0.02 }, { "color": "red", "value": 0.1 }] }
+        }
+      },
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 0 },
+      "id": 2,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(sum(increase(tribrid_chat_requests_total{outcome!~\"ok|client_disconnect\"}[$__range])) or on() (0 * sum(increase(tribrid_chat_requests_total[$__range])))) / sum(increase(tribrid_chat_requests_total[$__range]))",
+          "legendFormat": "error ratio",
+          "instant": true
+        }
+      ],
+      "title": "Chat error ratio, excluding client disconnects (selected range)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "p95 time from a streaming chat request to its first answer text, all models. Reasoning and status events do not count.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 1,
+          "noValue": "No data: no streamed chat answer since the API began emitting chat metrics",
+          "mappings": [{ "type": "special", "options": { "match": "nan", "result": { "text": "No traffic" } } }],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 20 }, { "color": "red", "value": 60 }] }
+        }
+      },
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 0 },
+      "id": 3,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [{ "refId": "A", "expr": "histogram_quantile(0.95, sum by (le) (increase(tribrid_chat_time_to_first_text_seconds_bucket[$__range])))", "legendFormat": "p95", "instant": true }],
+      "title": "Chat time to first text p95 (selected range)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "Chat generation cost in the selected range, from each request's cost summary. Requests whose cost is unavailable add 0.",
+      "fieldConfig": { "defaults": { "unit": "currencyUSD", "decimals": 2, "noValue": "No data: no chat requests since the API began emitting chat metrics" } },
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 0 },
+      "id": 4,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [{ "refId": "A", "expr": "sum(increase(tribrid_chat_cost_usd_total[$__range]))", "legendFormat": "spend", "instant": true }],
+      "title": "Chat spend (selected range)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "Finished chat requests per minute by outcome: ok, retrieval_error, gateway_error, timeout, client_disconnect.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 0, "lineWidth": 2, "showPoints": "auto", "spanNulls": false, "stacking": { "mode": "none" } },
+          "unit": "short",
+          "noValue": "No data: no chat requests since the API began emitting chat metrics"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 5 },
+      "id": 5,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [{ "refId": "A", "expr": "sum by (outcome) (rate(tribrid_chat_requests_total[5m])) * 60", "legendFormat": "{{outcome}}" }],
+      "title": "Chat requests per minute by outcome",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "p95 of request start to terminal event or stream end, by outcome, over a rolling 15 minutes. Timeouts sit at the timeout; client disconnects at the moment the browser left.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 0, "lineWidth": 2, "showPoints": "auto", "spanNulls": false, "stacking": { "mode": "none" } },
+          "unit": "s",
+          "noValue": "No data: no chat requests since the API began emitting chat metrics"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 5 },
+      "id": 6,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [{ "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, outcome) (rate(tribrid_chat_duration_seconds_bucket[15m])))", "legendFormat": "{{outcome}} p95" }],
+      "title": "Chat duration p95 by outcome (rolling 15m)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "Streaming chat: request start to the first SSE event, which is when the response headers go out. p50 and p95 by gateway alias over a rolling 15 minutes.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 0, "lineWidth": 2, "showPoints": "auto", "spanNulls": false, "stacking": { "mode": "none" } },
+          "unit": "s",
+          "noValue": "No data: no streamed chat since the API began emitting chat metrics"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 13 },
+      "id": 7,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.5, sum by (le, model) (rate(tribrid_chat_time_to_first_event_seconds_bucket[15m])))", "legendFormat": "{{model}} p50" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le, model) (rate(tribrid_chat_time_to_first_event_seconds_bucket[15m])))", "legendFormat": "{{model}} p95" }
+      ],
+      "title": "Chat time to first SSE event (headers sent) p50 and p95 by model (rolling 15m)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "Streaming chat: request start to the first answer text delta (reasoning and status do not count). p50 and p95 by gateway alias over a rolling 15 minutes. A request that fails before any text is only in the outcome panels.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 0, "lineWidth": 2, "showPoints": "auto", "spanNulls": false, "stacking": { "mode": "none" } },
+          "unit": "s",
+          "noValue": "No data: no streamed chat answer since the API began emitting chat metrics"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 13 },
+      "id": 8,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.5, sum by (le, model) (rate(tribrid_chat_time_to_first_text_seconds_bucket[15m])))", "legendFormat": "{{model}} p50" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le, model) (rate(tribrid_chat_time_to_first_text_seconds_bucket[15m])))", "legendFormat": "{{model}} p95" }
+      ],
+      "title": "Chat time to first text p50 and p95 by model (rolling 15m)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "Chat cost in USD over the trailing hour at each point, by gateway alias. Requests whose cost is unavailable add 0.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 0, "lineWidth": 2, "showPoints": "auto", "spanNulls": false, "stacking": { "mode": "none" } },
+          "unit": "currencyUSD",
+          "decimals": 3,
+          "noValue": "No data: no chat requests since the API began emitting chat metrics"
+        }
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 21 },
+      "id": 9,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [{ "refId": "A", "expr": "sum by (model) (increase(tribrid_chat_cost_usd_total[1h]))", "legendFormat": "{{model}}" }],
+      "title": "Chat spend per hour by model (USD, trailing hour)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "Chat cost divided by chat requests for each gateway alias in the selected range. Failed requests count as requests; unavailable costs add 0.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 4,
+          "min": 0,
+          "noValue": "No data: no chat requests since the API began emitting chat metrics",
+          "mappings": [{ "type": "special", "options": { "match": "nan", "result": { "text": "No requests" } } }],
+          "color": { "mode": "fixed", "fixedColor": "blue" }
+        }
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 21 },
+      "id": 10,
+      "options": { "displayMode": "basic", "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "showUnfilled": true, "valueMode": "text" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (model) (increase(tribrid_chat_cost_usd_total[$__range])) / sum by (model) (increase(tribrid_chat_requests_total[$__range]))",
+          "legendFormat": "{{model}}",
+          "instant": true
+        }
+      ],
+      "title": "Cost per chat request by model (selected range)",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "Reasoning tokens as a share of output tokens for each gateway alias in the selected range. Output tokens already include reasoning, so this is at most 100%.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 0,
+          "min": 0,
+          "max": 1,
+          "noValue": "No data: no chat tokens since the API began emitting chat metrics",
+          "mappings": [{ "type": "special", "options": { "match": "nan", "result": { "text": "No output tokens" } } }],
+          "color": { "mode": "fixed", "fixedColor": "purple" }
+        }
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 21 },
+      "id": 11,
+      "options": { "displayMode": "basic", "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "showUnfilled": true, "valueMode": "text" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(sum by (model) (increase(tribrid_chat_tokens_total{kind=\"reasoning\"}[$__range])) or (0 * sum by (model) (increase(tribrid_chat_tokens_total{kind=\"output\"}[$__range])))) / sum by (model) (increase(tribrid_chat_tokens_total{kind=\"output\"}[$__range]))",
+          "legendFormat": "{{model}}",
+          "instant": true
+        }
+      ],
+      "title": "Reasoning share of output tokens by model (selected range)",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "Chat gateway tokens per minute by kind. Output includes reasoning and reasoning is that subset, so the lines overlap: never add them.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 0, "lineWidth": 2, "showPoints": "auto", "spanNulls": false, "stacking": { "mode": "none" } },
+          "unit": "short",
+          "noValue": "No data: no chat tokens since the API began emitting chat metrics"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 29 },
+      "id": 12,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [{ "refId": "A", "expr": "sum by (kind) (rate(tribrid_chat_tokens_total[5m])) * 60", "legendFormat": "{{kind}}" }],
+      "title": "Chat tokens per minute by kind (output includes reasoning)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "Feedback events recorded in the selected range, by signal and surface (chat, search).",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "min": 0,
+          "noValue": "No feedback recorded in range",
+          "color": { "mode": "fixed", "fixedColor": "blue" }
+        }
+      },
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 29 },
+      "id": 13,
+      "options": { "displayMode": "basic", "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "showUnfilled": true, "valueMode": "text" },
+      "targets": [{ "refId": "A", "expr": "sum by (signal, surface) (increase(tribrid_feedback_events_total[$__range])) > 0", "legendFormat": "{{signal}} ({{surface}})", "instant": true }],
+      "title": "Feedback events by signal and surface (selected range)",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "Thumbs-down votes over all thumbs votes (up and down) in the selected range, chat and search together.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 0,
+          "noValue": "No data: no feedback since the API began emitting feedback metrics",
+          "mappings": [{ "type": "special", "options": { "match": "nan", "result": { "text": "No thumbs votes" } } }],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 0.25 }, { "color": "red", "value": 0.5 }] }
+        }
+      },
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 29 },
+      "id": 14,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(sum(increase(tribrid_feedback_events_total{signal=\"thumbsdown\"}[$__range])) or on() (0 * sum(increase(tribrid_feedback_events_total{signal=~\"thumbsup|thumbsdown\"}[$__range])))) / sum(increase(tribrid_feedback_events_total{signal=~\"thumbsup|thumbsdown\"}[$__range]))",
+          "legendFormat": "thumbs-down share",
+          "instant": true
+        }
+      ],
+      "title": "Thumbs-down share of thumbs votes (selected range)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "Recall gate decisions in the selected range by the intensity it chose: skip, light, standard or deep.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "min": 0,
+          "noValue": "No Recall gate decision in range",
+          "color": { "mode": "fixed", "fixedColor": "green" }
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 37 },
+      "id": 15,
+      "options": { "displayMode": "basic", "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "showUnfilled": true, "valueMode": "text" },
+      "targets": [{ "refId": "A", "expr": "sum by (intensity) (increase(tribrid_recall_gate_decisions_total[$__range])) > 0", "legendFormat": "{{intensity}}", "instant": true }],
+      "title": "Recall gate decisions by intensity (selected range)",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "mimir" },
+      "description": "Recall gate decisions in the selected range by the gate rule that decided them.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "min": 0,
+          "noValue": "No Recall gate decision in range",
+          "color": { "mode": "fixed", "fixedColor": "green" }
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 37 },
+      "id": 16,
+      "options": { "displayMode": "basic", "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "showUnfilled": true, "valueMode": "text" },
+      "targets": [{ "refId": "A", "expr": "sum by (reason) (increase(tribrid_recall_gate_decisions_total[$__range])) > 0", "legendFormat": "{{reason}}", "instant": true }],
+      "title": "Recall gate decisions by rule (selected range)",
+      "type": "bargauge"
+    },
+    {
+      "gridPos": { "h": 5, "w": 24, "x": 0, "y": 45 },
+      "id": 17,
+      "options": {
+        "content": "## Chat\nMeasured by the API for every chat request, labelled by gateway alias (`model`). The **error ratio** counts retrieval errors, gateway errors and timeouts; a client disconnect is not an error. The time-to-first panels come from streaming chat, and **time to first text** ignores reasoning and status events. **Output tokens include reasoning tokens**, so never add the two series. Cost comes from each request's cost summary; a request with no available cost adds 0. Browser-side journey timings are on the Frontend/RUM dashboard.",
+        "mode": "markdown"
+      },
+      "title": "Operator Notes",
+      "type": "text"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["ragweld", "observability", "chat"],
+  "templating": { "list": [] },
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": {},
+  "timezone": "",
+  "title": "Chat",
+  "uid": "ragweld-chat",
+  "version": 1,
+  "weekStart": ""
+}

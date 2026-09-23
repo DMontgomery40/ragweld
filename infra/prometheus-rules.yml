@@ -3,7 +3,8 @@ groups:
     rules:
       # Always firing (severity none). Its presence in Alertmanager proves the
       # Prometheus -> Alertmanager delivery pipe without destabilizing anything;
-      # its absence means rule evaluation or delivery is broken.
+      # its absence means rule evaluation or delivery is broken. Alertmanager
+      # routes it to a receiver with no integration, so it never pages.
       - alert: RagweldWatchdog
         expr: vector(1)
         labels:
@@ -34,6 +35,9 @@ groups:
           summary: LiteLLM gateway is not being scraped
           description: The generation gateway has been down for 2 minutes.
 
+      # Gated on the lane: the vllm job's target exists only while the launcher
+      # runs the local-model lane (file_sd, see infra/prometheus.yml). With the
+      # lane off there is no `up{job="vllm"}` series, so this cannot fire.
       - alert: RagweldLocalModelDown
         expr: up{job="vllm"} == 0
         for: 5m
@@ -42,8 +46,26 @@ groups:
         annotations:
           summary: Local model server is not being scraped
           description: >-
-            The host vllm-metal server has been down for 5 minutes. Local
-            generation requests will fail until it is restarted.
+            The local-model lane is running on this host but its vllm-metal
+            server has been unreachable for 5 minutes. Local generation requests
+            fail until it is restarted.
+
+      # Gated on use: Laya always runs, but it only matters while
+      # system_one.provider=laya, which the operator can switch live. A boot-time
+      # file_sd target would go stale on a live switch, so the rule instead needs
+      # Ragweld to have sent Laya requests in the last 30 minutes. A down Laya
+      # with provider=typesafe shows on the Gateway & Serving dashboard only.
+      - alert: RagweldLayaDown
+        expr: up{job="laya"} == 0 and on() sum(increase(tribrid_system_one_requests_total{provider="laya"}[30m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Laya (local System One) is down while Ragweld is using it
+          description: >-
+            system_one.provider=laya requests were sent in the last 30 minutes,
+            but the Laya container has not answered a scrape for 5 minutes.
+            System One decisions fail until it is back.
 
       - alert: RagweldPostgresDown
         expr: up{job="postgres"} == 0
@@ -53,3 +75,159 @@ groups:
         annotations:
           summary: Postgres exporter is not being scraped
           description: The Postgres metrics exporter has been down for 2 minutes.
+
+  - name: ragweld-gateway
+    rules:
+      # ragweld-local is excluded: the gateway lists it even when the local lane
+      # is off, and the lane's health is RagweldLocalModelDown's job. The volume
+      # floor keeps one failed request out of one from paging.
+      - alert: RagweldGatewayFailedRequestRatioHigh
+        expr: |
+          (
+            sum(rate(litellm_proxy_failed_requests_metric_total{requested_model!="ragweld-local"}[10m]))
+            or on() (0 * sum(rate(litellm_proxy_total_requests_metric_total{requested_model!="ragweld-local"}[10m])))
+          )
+          / sum(rate(litellm_proxy_total_requests_metric_total{requested_model!="ragweld-local"}[10m]))
+          > 0.2
+          and on() sum(increase(litellm_proxy_total_requests_metric_total{requested_model!="ragweld-local"}[10m])) >= 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: More than 20% of gateway requests are failing
+          description: >-
+            Over the last 10 minutes more than 20% of LiteLLM proxy requests
+            (at least 5 requests) returned a failure to the client. Check the
+            Gateway & Serving dashboard (deployment failures by exception) and
+            the provider's status.
+
+      # LiteLLM times the FIRST streamed chunk, which for reasoning models is a
+      # reasoning token, not answer text; chat time-to-first-text is Phase 2.
+      - alert: RagweldGatewayTtftSlow
+        expr: |
+          histogram_quantile(0.95, sum by (le, requested_model) (rate(litellm_llm_api_time_to_first_token_metric_bucket{requested_model!="ragweld-local"}[15m]))) > 30
+          and on(requested_model) sum by (requested_model) (increase(litellm_llm_api_time_to_first_token_metric_count{requested_model!="ragweld-local"}[15m])) >= 3
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Gateway time to first token p95 above 30 s for {{ $labels.requested_model }}'
+          description: >-
+            The p95 time to the first streamed chunk for {{ $labels.requested_model }}
+            has been above 30 seconds over 15 minutes (at least 3 streamed requests).
+            Users see a stalled answer. Check the provider and consider another model.
+
+      # Tune the threshold to the key's budget; an unlimited key reports +Inf.
+      - alert: RagweldGatewayKeyBudgetLow
+        expr: litellm_remaining_api_key_budget_metric < 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Gateway API key budget almost spent
+          description: >-
+            A LiteLLM API key has less than $5 of budget left
+            ({{ $value | printf "%.2f" }}). Requests fail once it reaches zero.
+
+  - name: ragweld-retrieval
+    rules:
+      - alert: RagweldSearchFailures
+        expr: sum(increase(tribrid_search_errors_total[10m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: Retrieval requests are failing
+          description: >-
+            At least one tri-brid retrieval (search, chat, benchmark or MCP)
+            raised an error in the last 10 minutes. Check the API logs for the
+            fusion-lane exception.
+
+      - alert: RagweldSearchStageErrors
+        expr: sum by (stage) (increase(tribrid_search_stage_errors_total[10m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Retrieval stage {{ $labels.stage }} is failing'
+          description: >-
+            The {{ $labels.stage }} stage raised errors in the last 10 minutes.
+            Searches still answer from the remaining legs, with degraded recall.
+
+      - alert: RagweldRerankerErrors
+        expr: sum by (mode) (increase(tribrid_reranker_errors_total[15m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Reranker ({{ $labels.mode }}) is failing'
+          description: >-
+            The {{ $labels.mode }} reranker raised errors in the last 15 minutes;
+            affected searches return un-reranked results.
+
+  - name: ragweld-indexing
+    rules:
+      - alert: RagweldIndexRunFailed
+        expr: sum(increase(tribrid_index_errors_total[30m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: An indexing run failed
+          description: >-
+            At least one indexing run ended in error in the last 30 minutes.
+            Open the corpus's index run history for the failing stage.
+
+  # Chat metric contract: docs/exec-plans/active/observability-chat-telemetry-2026-09-23.md.
+  # A client disconnect (closed tab, stopped stream) is the user's choice, not an error.
+  - name: ragweld-chat
+    rules:
+      - alert: RagweldChatErrorRatioHigh
+        expr: |
+          (
+            sum(rate(tribrid_chat_requests_total{outcome!~"ok|client_disconnect"}[10m]))
+            or on() (0 * sum(rate(tribrid_chat_requests_total[10m])))
+          )
+          / sum(rate(tribrid_chat_requests_total[10m]))
+          > 0.1
+          and on() sum(increase(tribrid_chat_requests_total[10m])) >= 5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: More than 10% of chat requests are failing
+          description: >-
+            Over the last 10 minutes more than 10% of chat requests (at least 5)
+            ended in a retrieval error, gateway error or timeout. Check the Chat
+            dashboard (requests by outcome) and the API logs.
+
+      # A request that fails before any answer text never reaches this histogram;
+      # RagweldChatErrorRatioHigh covers those.
+      - alert: RagweldChatFirstTextSlow
+        expr: |
+          histogram_quantile(0.95, sum by (le, model) (rate(tribrid_chat_time_to_first_text_seconds_bucket[15m]))) > 60
+          and on(model) sum by (model) (increase(tribrid_chat_time_to_first_text_seconds_count[15m])) >= 3
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Chat time to first text p95 above 60 s for {{ $labels.model }}'
+          description: >-
+            The p95 time from sending a chat to its first answer text on
+            {{ $labels.model }} has been above 60 seconds over 15 minutes (at least
+            3 answers). Users wait a minute or more before any answer appears.
+            Check the provider and the Chat dashboard.
+
+      - alert: RagweldThumbsDownShareHigh
+        expr: |
+          (
+            sum by (surface) (increase(tribrid_feedback_events_total{signal="thumbsdown"}[1h]))
+            or (0 * sum by (surface) (increase(tribrid_feedback_events_total{signal="thumbsup"}[1h])))
+          )
+          / sum by (surface) (increase(tribrid_feedback_events_total{signal=~"thumbsup|thumbsdown"}[1h]))
+          > 0.5
+          and on(surface) sum by (surface) (increase(tribrid_feedback_events_total{signal=~"thumbsup|thumbsdown"}[1h])) >= 5
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Most {{ $labels.surface }} thumbs votes in the last hour are thumbs-down'
+          description: >-
+            More than half of the {{ $labels.surface }} thumbs votes in the last
+            hour (at least 5 votes) were thumbs-down. Review recent answers and
+            their feedback.
