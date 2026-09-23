@@ -6,12 +6,16 @@
  * Real app, real API, real LiteLLM, real OpenRouter spend (one small request).
  * No request interception, no placeholder queries.
  */
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import type { ChatModelInfo, ChatModelsResponse } from '../../../src/types/generated';
 
 const API_BASE = process.env.GATEWAY_API_BASE_URL ?? 'http://127.0.0.1:58012/api';
 const CORPUS_ID = process.env.GATEWAY_E2E_CORPUS_ID ?? 'epstein-files-1';
 const PAID_ALIAS = process.env.GATEWAY_E2E_PAID_ALIAS ?? 'openai.gpt-5.4-mini';
+const RERANK_ALIAS = process.env.GATEWAY_E2E_RERANK_ALIAS ?? 'openai.gpt-6-luna';
 const REAL_QUESTION =
   process.env.GATEWAY_E2E_QUESTION ??
   'Which flights or plane management did Jeffrey Epstein discuss with Barry Cohen in October 2017?';
@@ -170,5 +174,56 @@ test.describe('generation gateway catalog in the Chat picker', () => {
     await expect(citation).toBeVisible();
     await expect(citation).toHaveAttribute('href', /^https:\/\//);
     await expect(citation).toHaveAttribute('target', '_blank');
+  });
+
+  test('the reranker gateway picker says "Choose a model" until an alias is chosen, never showing one it has not selected', async ({
+    page,
+    request,
+  }) => {
+    const models = await fetchChatModels(page);
+    const alias = models.find((row) => row.id === RERANK_ALIAS);
+    expect(alias, `${RERANK_ALIAS} must be served by the gateway`).toBeTruthy();
+
+    // A throwaway corpus whose reranker has no cloud model yet: the state every new corpus
+    // starts in. Nothing here applies a change, so only this corpus is ever written.
+    const corpusId = `pytest_rerank_picker_${Date.now().toString(36)}`;
+    const corpusDir = mkdtempSync(path.join(os.tmpdir(), 'ragweld-rerank-picker-'));
+    writeFileSync(
+      path.join(corpusDir, 'apollo-11-eva.md'),
+      '# Apollo 11 EVA\n\nThe surface exploration was concluded in the allotted time of 2-1/2 hours.\n',
+      'utf-8'
+    );
+    const created = await request.post(`${API_BASE}/corpora`, {
+      data: { corpus_id: corpusId, name: corpusId, path: corpusDir },
+    });
+    expect(created.ok(), `POST /api/corpora (${corpusId}) -> ${created.status()}`).toBe(true);
+    try {
+      const reset = await request.patch(`${API_BASE}/config/reranking?corpus_id=${encodeURIComponent(corpusId)}`, {
+        data: { reranker_mode: 'none', reranker_cloud_provider: 'litellm', reranker_cloud_model: '' },
+      });
+      expect(reset.ok(), `PATCH /api/config/reranking -> ${reset.status()}`).toBe(true);
+
+      await page.goto(`rag?subtab=reranker&corpus=${encodeURIComponent(corpusId)}`, { waitUntil: 'domcontentloaded' });
+      await page.getByTestId('reranker-mode-cloud').click();
+      const picker = page.getByTestId('reranker-cloud-model');
+      await expect(picker).toBeEnabled({ timeout: 60_000 });
+      const shown = () =>
+        picker.evaluate((node) => {
+          const select = node as HTMLSelectElement;
+          const option = select.selectedOptions[0];
+          return { value: select.value, optionValue: option?.value ?? null, text: option?.textContent?.trim() ?? null };
+        });
+
+      expect(await shown()).toEqual({ value: '', optionValue: '', text: 'Choose a model' });
+      await expect(picker).toHaveAttribute('aria-invalid', 'true');
+
+      await picker.selectOption(RERANK_ALIAS);
+      expect(await shown()).toEqual({ value: RERANK_ALIAS, optionValue: RERANK_ALIAS, text: String(alias?.display_name) });
+      await expect(picker).toHaveAttribute('aria-invalid', 'false');
+    } finally {
+      const removed = await request.delete(`${API_BASE}/corpora/${encodeURIComponent(corpusId)}`);
+      expect([200, 204, 404]).toContain(removed.status());
+      rmSync(corpusDir, { recursive: true, force: true });
+    }
   });
 });

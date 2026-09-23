@@ -57,6 +57,13 @@ export function ModelPicker({
         <option value={value} disabled>Unavailable alias: {value}</option>
       ) : null}
       {hasModels && allowEmpty ? <option value="">Use default alias</option> : null}
+      {/* With no option matching an empty value the browser would show the first alias as
+          if it were chosen; say instead that nothing is. */}
+      {hasModels && !value && !allowEmpty ? (
+        <option value="" disabled>
+          Choose a model
+        </option>
+      ) : null}
       {groups.map(({ group, models: groupModels }) => (
         <optgroup key={group} label={`${group} (${groupModels.length})`} data-testid={`model-picker-group-${group}`}>
           {groupModels.map((model) => {
