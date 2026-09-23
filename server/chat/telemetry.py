@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 import httpx
 
@@ -31,6 +31,7 @@ from server.observability.metrics import (
     CHAT_REQUESTS_TOTAL,
     CHAT_TIME_TO_FIRST_EVENT_SECONDS,
     CHAT_TIME_TO_FIRST_TEXT_SECONDS,
+    CHAT_TOKEN_KINDS,
     CHAT_TOKENS_TOTAL,
 )
 from server.retrieval.gateway_reranker import reasoning_tokens_spent
@@ -40,6 +41,30 @@ from server.retrieval.gateway_reranker import reasoning_tokens_spent
 UNRESOLVED_MODEL_LABEL = "unresolved"
 
 ChatPhase = Literal["retrieval", "generation"]
+
+_OUTCOMES: tuple[RunOutcome, ...] = get_args(RunOutcome)
+_COST_SOURCES: tuple[str, ...] = get_args(TraceCostSummary.model_fields["cost_source"].annotation)
+
+
+def prime_chat_series(model: str) -> None:
+    """Create every chat series of `model` at 0 (idempotent).
+
+    A labelled series appears in `/metrics` when its child is created. Created and
+    incremented between two scrapes, its first sample is already 1, and `rate()` /
+    `increase()` never count that request: the first chat, or the first error, of an alias
+    after a restart would be invisible on every dashboard and alert. Creating the children
+    as soon as the request's alias is known, well before a chat finishes, gives Prometheus
+    a 0 sample to count from.
+    """
+    for outcome in _OUTCOMES:
+        CHAT_REQUESTS_TOTAL.labels(model=model, outcome=outcome)
+        CHAT_DURATION_SECONDS.labels(model=model, outcome=outcome)
+    CHAT_TIME_TO_FIRST_EVENT_SECONDS.labels(model=model)
+    CHAT_TIME_TO_FIRST_TEXT_SECONDS.labels(model=model)
+    for cost_source in _COST_SOURCES:
+        CHAT_COST_USD_TOTAL.labels(model=model, cost_source=cost_source)
+    for kind in CHAT_TOKEN_KINDS:
+        CHAT_TOKENS_TOTAL.labels(model=model, kind=kind)
 
 
 def chat_model_label(*, request: ChatRequest, config: TriBridConfig) -> str:
@@ -74,6 +99,14 @@ class ChatRunTelemetry:
     cost: TraceCostSummary | None = None
     generation_error: BaseException | None = None
     outcome: RunOutcome | None = None
+
+    def __post_init__(self) -> None:
+        prime_chat_series(self.model)
+
+    def bind_model(self, model: str) -> None:
+        """Label the request with its alias once the config resolves it."""
+        self.model = model
+        prime_chat_series(model)
 
     def begin_generation(self) -> None:
         """Retrieval and prompt assembly are done; from here a failure is the generation lane's

@@ -218,7 +218,7 @@ async def chat(request: ChatRequest, response: Response) -> ChatResponse:
     except BaseException as exc:
         telemetry.finish(telemetry.classify(exc))
         raise
-    telemetry.model = chat_model_label(request=request, config=config)
+    telemetry.bind_model(chat_model_label(request=request, config=config))
 
     _validate_chat_images(list(request.images or []), config.chat.multimodal)
 
@@ -534,7 +534,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
     except BaseException as exc:
         telemetry.finish(telemetry.classify(exc))
         raise
-    telemetry.model = chat_model_label(request=request, config=config)
+    telemetry.bind_model(chat_model_label(request=request, config=config))
 
     _validate_chat_images(list(request.images or []), config.chat.multimodal)
 

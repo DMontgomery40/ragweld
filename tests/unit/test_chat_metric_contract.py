@@ -107,6 +107,55 @@ def test_label_vocabularies_match_the_contract() -> None:
     assert set(get_args(TraceCostSummary.model_fields["cost_source"].annotation)) == cost_sources
 
 
+def test_a_request_creates_every_series_of_its_alias_at_zero_before_it_finishes() -> None:
+    """rate()/increase() only count increments after a series' first sample, so a series
+    created and incremented between two scrapes loses that event (the first chat, or first
+    error, of an alias after a restart). Every series of the alias must exist at 0 from the
+    moment the request knows its alias, and only `finish()` may move one."""
+    from server.chat.telemetry import UNRESOLVED_MODEL_LABEL, ChatRunTelemetry
+
+    model = "pytest.prime-probe-alias"  # emitted by no other test in this process
+    cost_sources = get_args(TraceCostSummary.model_fields["cost_source"].annotation)
+
+    def samples() -> dict[tuple[str, str], float | None]:
+        values: dict[tuple[str, str], float | None] = {}
+        for outcome in get_args(RunOutcome):
+            labels = {"model": model, "outcome": outcome}
+            values[("requests", outcome)] = REGISTRY.get_sample_value("tribrid_chat_requests_total", labels)
+            values[("duration", outcome)] = REGISTRY.get_sample_value("tribrid_chat_duration_seconds_count", labels)
+        for name in ("tribrid_chat_time_to_first_event_seconds_count", "tribrid_chat_time_to_first_text_seconds_count"):
+            values[(name, "")] = REGISTRY.get_sample_value(name, {"model": model})
+        for source in cost_sources:
+            values[("cost", source)] = REGISTRY.get_sample_value(
+                "tribrid_chat_cost_usd_total", {"model": model, "cost_source": source}
+            )
+        for kind in metrics.CHAT_TOKEN_KINDS:
+            values[("tokens", kind)] = REGISTRY.get_sample_value(
+                "tribrid_chat_tokens_total", {"model": model, "kind": kind}
+            )
+        return values
+
+    assert all(value is None for value in samples().values()), "the probe alias must be unused"
+
+    telemetry = ChatRunTelemetry(model=UNRESOLVED_MODEL_LABEL)
+    telemetry.bind_model(model)
+    primed = samples()
+    assert primed and all(value == 0.0 for value in primed.values()), primed
+
+    telemetry.mark_event()
+    telemetry.mark_text()
+    telemetry.finish("gateway_error")
+    after = samples()
+    moved = {key for key, value in after.items() if value != primed[key]}
+    assert moved == {
+        ("requests", "gateway_error"),
+        ("duration", "gateway_error"),
+        ("tribrid_chat_time_to_first_event_seconds_count", ""),
+        ("tribrid_chat_time_to_first_text_seconds_count", ""),
+    }, moved
+    assert after[("requests", "gateway_error")] == 1.0
+
+
 def test_feedback_route_accepts_exactly_the_contract_signals() -> None:
     """The route validates against the same tuple the counter is labelled with."""
     from server.api import feedback

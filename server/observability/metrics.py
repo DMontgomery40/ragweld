@@ -1000,7 +1000,8 @@ for _outcome in _RERANKER_PROMOTION_OUTCOMES:
     RERANKER_PROMOTIONS_TOTAL.labels(outcome=_outcome)
 
 # Feedback labels are closed vocabularies, so every series exists (at 0) from process start.
-# The chat series are keyed by gateway alias and appear with the first request per alias.
+# The chat series are keyed by gateway alias; server.chat.telemetry.prime_chat_series creates
+# them at 0 when a request's alias is known, before its first increment.
 for _signal in FEEDBACK_SIGNALS:
     for _surface in ("chat", "search"):
         FEEDBACK_EVENTS_TOTAL.labels(signal=_signal, surface=_surface)
