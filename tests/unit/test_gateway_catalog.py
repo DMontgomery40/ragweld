@@ -423,7 +423,7 @@ def test_gateway_upstream_for_alias_reads_the_warmed_snapshot_and_fails_closed()
     alias's LiteLLM upstream, so the lookup must answer from the warmed snapshot (event-loop
     safe) and refuse an alias the catalog does not serve rather than guess a protocol."""
     warm_gateway_catalog(CATALOG_PATH)
-    assert gateway_upstream_for_alias("openai.gpt-5.6-luna", CATALOG_PATH) == "openrouter/openai/gpt-5.6-luna"
+    assert gateway_upstream_for_alias("openai.gpt-6-luna", CATALOG_PATH) == "openrouter/openai/gpt-6-luna"
     assert gateway_upstream_for_alias("ragweld-local", CATALOG_PATH).startswith("openai/")
     with pytest.raises(RuntimeError, match="not in the loaded generation catalog"):
         gateway_upstream_for_alias("nope.not-an-alias", CATALOG_PATH)
