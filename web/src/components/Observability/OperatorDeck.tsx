@@ -60,6 +60,11 @@ function toneFromLoki(status: LokiStatus | null): SurfaceTone {
   return status.reachable ? 'good' : 'warn';
 }
 
+/** Eval accuracy as a percentage; null (no informative entry scored) is "n/a", never 0%. */
+function evalPct(value: number | null | undefined): string {
+  return value == null ? 'n/a' : `${(Number(value) * 100).toFixed(1)}%`;
+}
+
 function toneFromEval(summary: EvalObservabilitySummaryResponse | null): SurfaceTone {
   if (!summary || !summary.latest_run_id) return 'dim';
   if (Number(summary.regressed_count || 0) > 0 || Number(summary.top1_accuracy?.absolute_delta || 0) < 0) return 'bad';
@@ -479,7 +484,7 @@ export function ObservabilityOperatorDeck({
             <div className="obs-card-title">Eval Regression Surface</div>
             <div className="obs-card-metric">
               {evalSummary?.latest_run_id
-                ? `top1 ${(Number(evalSummary.top1_accuracy?.current_value || 0) * 100).toFixed(1)}%`
+                ? `top1 ${evalPct(evalSummary.top1_accuracy?.current_value)}`
                 : 'No eval run yet'}
             </div>
             <p className="obs-card-detail">
@@ -668,8 +673,9 @@ export function ObservabilityOperatorDeck({
                   <>
                     <div className="obs-evidence-mono">{evalSummary.latest_run_id}</div>
                     <div className="obs-evidence-copy">
-                      top1={(Number(evalSummary.top1_accuracy?.current_value || 0) * 100).toFixed(1)}% · topk=
-                      {(Number(evalSummary.topk_accuracy?.current_value || 0) * 100).toFixed(1)}%
+                      top1={evalPct(evalSummary.top1_accuracy?.current_value)} · topk=
+                      {evalPct(evalSummary.topk_accuracy?.current_value)}
+                      {evalSummary.uninformative_questions ? ` · uninformative=${evalSummary.uninformative_questions}/${evalSummary.total_questions}` : ''}
                     </div>
                     <div className="obs-evidence-copy">
                       delta_top1={Number(evalSummary.top1_accuracy?.absolute_delta || 0).toFixed(3)} · regressed=

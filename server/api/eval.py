@@ -5,7 +5,6 @@ import json
 import math
 import re
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from time import perf_counter
@@ -26,8 +25,8 @@ from server.chat.handler import ChatGenerationError
 from server.chat.prompt_builder import get_system_prompt
 from server.chat.provider_router import select_provider_route
 from server.config_redaction import redact_run_record, redacted_config_snapshot
+from server.db.postgres import PostgresClient
 from server.dependency_errors import DependencyUnavailableError
-from server.evaluation.path_match import path_matches
 from server.evaluation.promptfoo_runner import (
     PromptfooTest,
     PromptfooUnavailableError,
@@ -37,6 +36,14 @@ from server.evaluation.promptfoo_runner import (
 )
 from server.evaluation.ragas_runner import RagasSample, RagasUnavailableError, score_samples
 from server.evaluation.ragas_runner import preflight as ragas_preflight
+from server.evaluation.scoring import (
+    EntryScore,
+    EvalCutoffs,
+    HeadlineMetrics,
+    aggregate_entry_scores,
+    build_expectations,
+    score_entry,
+)
 from server.lineage import (
     attach_refs_to_current_bundle,
     capture_eval_run_version,
@@ -56,6 +63,7 @@ from server.models.eval import (
     EvalTestRequest,
 )
 from server.models.tribrid_config_model import (
+    ChunkMatch,
     CorpusScope,
     EvalAnalysisArtifact,
     EvalAnalyzeComparisonRequest,
@@ -138,10 +146,6 @@ def latest_run_for_repo(repo_id: str) -> EvalRun | None:
     return candidates[0]
 
 
-def _path_matches(expected: str, actual: str) -> bool:
-    return path_matches(expected, actual)
-
-
 def _dedupe_preserve_order(items: list[str]) -> list[str]:
     out: list[str] = []
     seen: set[str] = set()
@@ -158,35 +162,25 @@ def _vector_leg_enabled(cfg: Any) -> bool:
     return not getattr(getattr(cfg, "indexing", None), "skip_dense", False)
 
 
-def _recall_at_k(expected: list[str], retrieved: list[str], k: int) -> float:
-    if not expected:
-        return 0.0
-    top = retrieved[:k]
-    matched = sum(1 for exp in expected if any(_path_matches(exp, r) for r in top))
-    return float(matched) / float(len(expected))
+def _eval_cutoffs(cfg: Any, final_k: int) -> EvalCutoffs:
+    return EvalCutoffs(
+        final_k=max(1, int(final_k)),
+        recall_at_5=int(cfg.evaluation.recall_at_5_k),
+        recall_at_10=int(cfg.evaluation.recall_at_10_k),
+        recall_at_20=int(cfg.evaluation.recall_at_20_k),
+        precision_at_5=int(cfg.evaluation.precision_at_5_k),
+        ndcg_at_10=int(cfg.evaluation.ndcg_at_10_k),
+    )
 
 
-def _precision_at_k(expected: list[str], retrieved: list[str], k: int) -> float:
-    if k <= 0:
-        return 0.0
-    top = retrieved[:k]
-    hits = sum(1 for r in top if any(_path_matches(exp, r) for exp in expected))
-    return float(hits) / float(k)
-
-
-def _ndcg_at_k(expected: list[str], retrieved: list[str], k: int) -> float:
-    if k <= 0:
-        return 0.0
-    top = retrieved[:k]
-    rels = [1.0 if any(_path_matches(exp, r) for exp in expected) else 0.0 for r in top]
-    dcg = 0.0
-    for i, rel in enumerate(rels):
-        dcg += rel / math.log2(i + 2)
-    ideal_hits = min(len(expected), k)
-    if ideal_hits <= 0:
-        return 0.0
-    idcg = sum(1.0 / math.log2(i + 2) for i in range(ideal_hits))
-    return float(dcg / idcg) if idcg > 0 else 0.0
+async def _indexed_file_paths(cfg: Any, repo_id: str) -> list[str]:
+    """The corpus's indexed documents: what decides whether a file-only expectation can discriminate."""
+    pg = PostgresClient(cfg.indexing.postgres_url)
+    await pg.connect()
+    try:
+        return await pg.list_indexed_file_paths(repo_id)
+    finally:
+        await pg.disconnect()
 
 
 def _percentile(values: list[float], p: float) -> float:
@@ -200,75 +194,76 @@ def _percentile(values: list[float], p: float) -> float:
     return float(xs[idx])
 
 
-@dataclass(frozen=True)
-class _EntryScores:
-    reciprocal_rank: float
-    recall5: float
-    recall10: float
-    recall20: float
-    prec5: float
-    ndcg10: float
-
-
 def _score_entry(
     entry: EvalDatasetItem,
-    matches: list[Any],
+    matches: list[ChunkMatch],
     *,
-    final_k: int,
-    eval_k: int,
-    cfg: Any,
+    cutoffs: EvalCutoffs,
+    corpus_paths: list[str],
     latency_ms: float,
     debug: dict[str, Any] | None = None,
-) -> tuple[EvalResult, _EntryScores]:
-    """Score one dataset entry against its retrieval results (shared by the POST and SSE eval paths)."""
-    k_recall5 = int(cfg.evaluation.recall_at_5_k)
-    k_recall10 = int(cfg.evaluation.recall_at_10_k)
-    k_recall20 = int(cfg.evaluation.recall_at_20_k)
-    k_prec5 = int(cfg.evaluation.precision_at_5_k)
-    k_ndcg10 = int(cfg.evaluation.ndcg_at_10_k)
-
-    retrieved_paths = _dedupe_preserve_order([m.file_path for m in matches if m.file_path])
-    expected_paths = list(entry.expected_paths or [])
-    top_paths = retrieved_paths[:final_k] if final_k > 0 else retrieved_paths
-    docs = [
-        EvalDoc(file_path=m.file_path, start_line=m.start_line, score=float(m.score), source=m.source)
-        for m in matches[: max(1, final_k)]
-        if m.file_path
-    ]
-
-    rr = 0.0
-    for i, rp in enumerate(retrieved_paths, start=1):
-        if any(_path_matches(exp, rp) for exp in expected_paths):
-            rr = 1.0 / float(i)
-            break
-    top1_hit = bool(top_paths) and any(_path_matches(exp, top_paths[0]) for exp in expected_paths)
-    topk_hit = any(any(_path_matches(exp, rp) for exp in expected_paths) for rp in top_paths)
-    scores = _EntryScores(
-        reciprocal_rank=rr,
-        recall5=_recall_at_k(expected_paths, retrieved_paths, k=k_recall5),
-        recall10=_recall_at_k(expected_paths, retrieved_paths, k=k_recall10),
-        recall20=_recall_at_k(expected_paths, retrieved_paths, k=k_recall20),
-        prec5=_precision_at_k(expected_paths, retrieved_paths, k=k_prec5),
-        ndcg10=_ndcg_at_k(expected_paths, retrieved_paths, k=k_ndcg10),
+) -> tuple[EvalResult, EntryScore]:
+    """Score one entry through the shared chunk-level scorer (POST, SSE and /eval/test all call this)."""
+    ranked = [m for m in matches if m.file_path]
+    score = score_entry(
+        build_expectations(entry.expected_paths, entry.expected_locations),
+        ranked,
+        cutoffs=cutoffs,
+        corpus_paths=corpus_paths,
     )
+    top_chunks = ranked[: cutoffs.final_k]
+    docs = [
+        EvalDoc(
+            file_path=m.file_path,
+            start_line=m.start_line,
+            end_line=m.end_line,
+            page_start=m.provenance.page_start if m.provenance is not None else None,
+            page_end=m.provenance.page_end if m.provenance is not None else None,
+            score=float(m.score),
+            source=m.source,
+            match=kind,
+        )
+        for m, kind in zip(top_chunks, score.matches, strict=False)
+    ]
+    top_paths = _dedupe_preserve_order([m.file_path for m in top_chunks])
     result = EvalResult(
         entry_id=entry.entry_id,
         question=entry.question,
-        retrieved_paths=retrieved_paths,
-        expected_paths=expected_paths,
+        retrieved_paths=_dedupe_preserve_order([m.file_path for m in ranked]),
+        expected_paths=list(entry.expected_paths or []),
+        expected_locations=list(entry.expected_locations or []),
         top_paths=top_paths,
         top1_path=top_paths[:1],
-        top1_hit=top1_hit,
-        topk_hit=topk_hit,
-        reciprocal_rank=rr,
-        recall=_recall_at_k(expected_paths, retrieved_paths, k=len(retrieved_paths) if retrieved_paths else eval_k),
+        top1_hit=score.top1_hit,
+        topk_hit=score.topk_hit,
+        uninformative=score.uninformative,
+        reciprocal_rank=score.reciprocal_rank,
+        recall=score.recall,
         latency_ms=latency_ms,
         duration_secs=latency_ms / 1000.0,
         docs=docs,
         debug=dict(debug or {}),
         expected_answer=(str(entry.expected_answer).strip() or None) if entry.expected_answer else None,
     )
-    return result, scores
+    return result, score
+
+
+def _run_metrics(
+    headline: HeadlineMetrics, latencies: list[float], ragas_means: dict[str, float]
+) -> EvalMetrics:
+    """The run's EvalMetrics from the shared aggregate (POST and SSE both build them here)."""
+    return EvalMetrics(
+        mrr=headline.mrr,
+        recall_at_5=headline.recall_at_5,
+        recall_at_10=headline.recall_at_10,
+        recall_at_20=headline.recall_at_20,
+        precision_at_5=headline.precision_at_5,
+        ndcg_at_10=headline.ndcg_at_10,
+        map_at_5=headline.map_at_5,
+        latency_p50_ms=_percentile(latencies, 0.50),
+        latency_p95_ms=_percentile(latencies, 0.95),
+        ragas=ragas_means,
+    )
 
 
 def _load_run(run_id: str) -> EvalRun:
@@ -435,20 +430,12 @@ async def evaluate_dataset_entries(
 
     final_k = int(cfg.retrieval.eval_final_k)
     use_multi = cfg.retrieval.eval_multi
-    k_recall5 = int(cfg.evaluation.recall_at_5_k)
-    k_recall10 = int(cfg.evaluation.recall_at_10_k)
-    k_recall20 = int(cfg.evaluation.recall_at_20_k)
-    k_prec5 = int(cfg.evaluation.precision_at_5_k)
-    k_ndcg10 = int(cfg.evaluation.ndcg_at_10_k)
-    # Ensure we retrieve enough results to compute all configured metrics.
-    eval_k = max(int(final_k), k_recall5, k_recall10, k_recall20, k_prec5, k_ndcg10)
+    cutoffs = _eval_cutoffs(cfg, final_k)
+    # Retrieve enough chunks to compute every configured metric.
+    eval_k = cutoffs.retrieval_k
+    corpus_paths = await _indexed_file_paths(cfg, repo_id)
 
-    rr_vals: list[float] = []
-    recall5_vals: list[float] = []
-    recall10_vals: list[float] = []
-    recall20_vals: list[float] = []
-    prec5_vals: list[float] = []
-    ndcg10_vals: list[float] = []
+    entry_scores: list[EntryScore] = []
     latencies: list[float] = []
 
     results: list[EvalResult] = []
@@ -469,12 +456,11 @@ async def evaluate_dataset_entries(
         )
         latency_ms = (perf_counter() - t0) * 1000.0
         latencies.append(latency_ms)
-        result_item, scores = _score_entry(
+        result_item, score = _score_entry(
             entry,
             matches,
-            final_k=final_k,
-            eval_k=eval_k,
-            cfg=cfg,
+            cutoffs=cutoffs,
+            corpus_paths=corpus_paths,
             latency_ms=latency_ms,
             debug=getattr(fusion, "last_debug", None) or {},
         )
@@ -490,36 +476,19 @@ async def evaluate_dataset_entries(
             )
             ragas_samples.append(sample)
 
-        rr_vals.append(scores.reciprocal_rank)
-        recall5_vals.append(scores.recall5)
-        recall10_vals.append(scores.recall10)
-        recall20_vals.append(scores.recall20)
-        prec5_vals.append(scores.prec5)
-        ndcg10_vals.append(scores.ndcg10)
+        entry_scores.append(score)
         results.append(result_item.model_copy(update={"generated_answer": generated_answer}))
 
     ragas_means: dict[str, float] = {}
     if ragas_enabled:
         ragas_means = await _apply_ragas_scores(cfg, results, ragas_samples)
 
-    metrics = EvalMetrics(
-        mrr=float(sum(rr_vals) / len(rr_vals)) if rr_vals else 0.0,
-        recall_at_5=float(sum(recall5_vals) / len(recall5_vals)) if recall5_vals else 0.0,
-        recall_at_10=float(sum(recall10_vals) / len(recall10_vals)) if recall10_vals else 0.0,
-        recall_at_20=float(sum(recall20_vals) / len(recall20_vals)) if recall20_vals else 0.0,
-        precision_at_5=float(sum(prec5_vals) / len(prec5_vals)) if prec5_vals else 0.0,
-        ndcg_at_10=float(sum(ndcg10_vals) / len(ndcg10_vals)) if ndcg10_vals else 0.0,
-        latency_p50_ms=_percentile(latencies, 0.50),
-        latency_p95_ms=_percentile(latencies, 0.95),
-        ragas=ragas_means,
-    )
+    headline = aggregate_entry_scores(entry_scores)
+    metrics = _run_metrics(headline, latencies, ragas_means)
 
     completed_at = datetime.now(UTC)
     run_id = f"{repo_id}__{completed_at.strftime('%Y%m%d_%H%M%S')}"
     duration_secs = float((completed_at - started_at).total_seconds())
-    total = len(results)
-    top1_hits = sum(1 for r in results if r.top1_hit)
-    topk_hits = sum(1 for r in results if r.topk_hit)
 
     # One helper builds both snapshot forms, already redacted, so no call site can
     # withhold the credential from one and leak it through the other (M-89).
@@ -530,11 +499,12 @@ async def evaluate_dataset_entries(
         dataset_id=dataset_id,
         config_snapshot=_snapshot[0],
         config=_snapshot[1],
-        total=total,
-        top1_hits=top1_hits,
-        topk_hits=topk_hits,
-        top1_accuracy=float(top1_hits / total) if total else 0.0,
-        topk_accuracy=float(topk_hits / total) if total else 0.0,
+        total=headline.total,
+        uninformative_count=headline.uninformative,
+        top1_hits=headline.top1_hits,
+        topk_hits=headline.topk_hits,
+        top1_accuracy=headline.top1_accuracy,
+        topk_accuracy=headline.topk_accuracy,
         duration_secs=duration_secs,
         use_multi=use_multi,
         final_k=final_k,
@@ -594,13 +564,8 @@ async def test_eval_entry(request: EvalTestRequest) -> EvalResult:
     fusion = TriBridFusion()
 
     final_k = int(request.final_k) if request.final_k is not None else int(cfg.retrieval.eval_final_k)
-    final_k = max(1, final_k)
-    k_recall5 = int(cfg.evaluation.recall_at_5_k)
-    k_recall10 = int(cfg.evaluation.recall_at_10_k)
-    k_recall20 = int(cfg.evaluation.recall_at_20_k)
-    k_prec5 = int(cfg.evaluation.precision_at_5_k)
-    k_ndcg10 = int(cfg.evaluation.ndcg_at_10_k)
-    eval_k = max(int(final_k), k_recall5, k_recall10, k_recall20, k_prec5, k_ndcg10)
+    cutoffs = _eval_cutoffs(cfg, final_k)
+    corpus_paths = await _indexed_file_paths(cfg, repo_id)
 
     t0 = perf_counter()
     matches = await fusion.search(
@@ -610,50 +575,24 @@ async def test_eval_entry(request: EvalTestRequest) -> EvalResult:
         include_vector=_vector_leg_enabled(cfg),
         include_sparse=True,
         include_graph=True,
-        top_k=eval_k,
+        top_k=cutoffs.retrieval_k,
     )
     latency_ms = (perf_counter() - t0) * 1000.0
 
-    retrieved_paths = _dedupe_preserve_order([m.file_path for m in matches if m.file_path])
-    expected_paths = list(request.expected_paths or [])
-    top_paths = retrieved_paths[:final_k]
-
-    docs = [
-        EvalDoc(
-            file_path=m.file_path,
-            start_line=m.start_line,
-            score=float(m.score),
-            source=m.source,
-        )
-        for m in matches[:final_k]
-        if m.file_path
-    ]
-
-    rr = 0.0
-    for i, rp in enumerate(retrieved_paths, start=1):
-        if any(_path_matches(exp, rp) for exp in expected_paths):
-            rr = 1.0 / float(i)
-            break
-
-    top1_hit = bool(top_paths) and any(_path_matches(exp, top_paths[0]) for exp in expected_paths)
-    topk_hit = any(any(_path_matches(exp, rp) for exp in expected_paths) for rp in top_paths)
-    recall = _recall_at_k(expected_paths, retrieved_paths, k=len(retrieved_paths) if retrieved_paths else eval_k)
-
-    return EvalResult(
+    entry = EvalDatasetItem(
         entry_id="adhoc",
         question=request.question,
-        retrieved_paths=retrieved_paths,
-        expected_paths=expected_paths,
-        top_paths=top_paths,
-        top1_path=top_paths[:1],
-        top1_hit=top1_hit,
-        topk_hit=topk_hit,
-        reciprocal_rank=rr,
-        recall=recall,
-        latency_ms=latency_ms,
-        duration_secs=latency_ms / 1000.0,
-        docs=docs,
+        expected_paths=list(request.expected_paths or []),
+        expected_locations=list(request.expected_locations or []),
     )
+    result, _score = _score_entry(
+        entry,
+        matches,
+        cutoffs=cutoffs,
+        corpus_paths=corpus_paths,
+        latency_ms=latency_ms,
+    )
+    return result
 
 
 _PROMPTFOO_RUNS_DIR = _RUNS_DIR / "promptfoo"
@@ -775,6 +714,7 @@ async def list_eval_runs(
                     topk_accuracy=float(run.topk_accuracy),
                     mrr=float(run.metrics.mrr) if run.metrics else None,
                     total=total,
+                    uninformative_count=int(run.uninformative_count),
                     duration_secs=float(run.duration_secs),
                     has_config=bool(run.config),
                     bundle_id=run.bundle_id,
@@ -892,24 +832,15 @@ async def eval_run_stream(
 
             fusion = TriBridFusion()
 
-            rr_vals: list[float] = []
-            recall5_vals: list[float] = []
-            recall10_vals: list[float] = []
-            recall20_vals: list[float] = []
-            prec5_vals: list[float] = []
-            ndcg10_vals: list[float] = []
+            entry_scores: list[EntryScore] = []
             latencies: list[float] = []
             results: list[EvalResult] = []
 
-            from datetime import UTC, datetime
             started_at = datetime.now(UTC)
 
-            k_recall5 = int(cfg.evaluation.recall_at_5_k)
-            k_recall10 = int(cfg.evaluation.recall_at_10_k)
-            k_recall20 = int(cfg.evaluation.recall_at_20_k)
-            k_prec5 = int(cfg.evaluation.precision_at_5_k)
-            k_ndcg10 = int(cfg.evaluation.ndcg_at_10_k)
-            eval_k = max(int(run_final_k), k_recall5, k_recall10, k_recall20, k_prec5, k_ndcg10)
+            cutoffs = _eval_cutoffs(cfg, run_final_k)
+            eval_k = cutoffs.retrieval_k
+            corpus_paths = await _indexed_file_paths(cfg, repo_id)
 
             for idx, entry in enumerate(entries, start=1):
                 if await request.is_disconnected():
@@ -934,12 +865,11 @@ async def eval_run_stream(
                 )
                 latency_ms = (perf_counter() - t0) * 1000.0
                 latencies.append(latency_ms)
-                result_item, scores = _score_entry(
+                result_item, score = _score_entry(
                     entry,
                     matches,
-                    final_k=int(run_final_k),
-                    eval_k=eval_k,
-                    cfg=cfg,
+                    cutoffs=cutoffs,
+                    corpus_paths=corpus_paths,
                     latency_ms=latency_ms,
                     debug=getattr(fusion, "last_debug", None) or {},
                 )
@@ -963,12 +893,7 @@ async def eval_run_stream(
                     )
                     ragas_samples.append(sample)
 
-                rr_vals.append(scores.reciprocal_rank)
-                recall5_vals.append(scores.recall5)
-                recall10_vals.append(scores.recall10)
-                recall20_vals.append(scores.recall20)
-                prec5_vals.append(scores.prec5)
-                ndcg10_vals.append(scores.ndcg10)
+                entry_scores.append(score)
                 results.append(result_item.model_copy(update={"generated_answer": generated_answer}))
 
                 _EVAL_STATUS["progress"] = idx
@@ -1009,25 +934,12 @@ async def eval_run_stream(
                         ) from exc
                 ragas_means = _attach_ragas_scores(cfg, results, per_entry_scores)
 
-            metrics = EvalMetrics(
-                mrr=float(sum(rr_vals) / len(rr_vals)) if rr_vals else 0.0,
-                recall_at_5=float(sum(recall5_vals) / len(recall5_vals)) if recall5_vals else 0.0,
-                recall_at_10=float(sum(recall10_vals) / len(recall10_vals)) if recall10_vals else 0.0,
-                recall_at_20=float(sum(recall20_vals) / len(recall20_vals)) if recall20_vals else 0.0,
-                precision_at_5=float(sum(prec5_vals) / len(prec5_vals)) if prec5_vals else 0.0,
-                ndcg_at_10=float(sum(ndcg10_vals) / len(ndcg10_vals)) if ndcg10_vals else 0.0,
-                latency_p50_ms=_percentile(latencies, 0.50),
-                latency_p95_ms=_percentile(latencies, 0.95),
-                ragas=ragas_means,
-            )
+            headline = aggregate_entry_scores(entry_scores)
+            metrics = _run_metrics(headline, latencies, ragas_means)
 
             completed_at = datetime.now(UTC)
             run_id = f"{repo_id}__{completed_at.strftime('%Y%m%d_%H%M%S')}"
             duration_secs = float((completed_at - started_at).total_seconds())
-            top1_hits = sum(1 for r in results if r.top1_hit)
-            topk_hits = sum(1 for r in results if r.topk_hit)
-            top1_accuracy = float(top1_hits / total) if total else 0.0
-            topk_accuracy = float(topk_hits / total) if total else 0.0
 
             # One helper builds both snapshot forms, already redacted, so no call site can
             # withhold the credential from one and leak it through the other (M-89).
@@ -1038,11 +950,12 @@ async def eval_run_stream(
                 dataset_id="default",
                 config_snapshot=_snapshot[0],
                 config=_snapshot[1],
-                total=total,
-                top1_hits=top1_hits,
-                topk_hits=topk_hits,
-                top1_accuracy=top1_accuracy,
-                topk_accuracy=topk_accuracy,
+                total=headline.total,
+                uninformative_count=headline.uninformative,
+                top1_hits=headline.top1_hits,
+                topk_hits=headline.topk_hits,
+                top1_accuracy=headline.top1_accuracy,
+                topk_accuracy=headline.topk_accuracy,
                 duration_secs=duration_secs,
                 use_multi=run_use_multi,
                 final_k=run_final_k,
@@ -1080,8 +993,10 @@ async def eval_run_stream(
                     {
                         "type": "log",
                         "message": (
-                            f"Complete: top1={top1_hits}/{total}, topk={topk_hits}/{total}, "
-                            f"mrr={metrics.mrr:.4f}, duration={duration_secs:.2f}s"
+                            f"Complete: top1={headline.top1_hits}/{headline.scored}, "
+                            f"topk={headline.topk_hits}/{headline.scored}, "
+                            f"mrr={metrics.mrr:.4f}, uninformative={headline.uninformative}/{headline.total}, "
+                            f"duration={duration_secs:.2f}s"
                         ),
                     }
                 )

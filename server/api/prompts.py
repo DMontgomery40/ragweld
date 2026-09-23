@@ -71,7 +71,6 @@ def _build_prompts_payload(cfg: TriBridConfig) -> PromptsResponse:
         "lightweight_chunk_summaries": "Lightweight Chunk Summaries",
         "code_enrichment": "Code Enrichment",
         "semantic_kg_extraction": "Semantic KG Extraction",
-        "synthetic_judge": "Synthetic Judge",
         "synthetic_generator": "Synthetic Generator",
         "gateway_rerank": "Gateway Reranker",
     }

@@ -239,8 +239,11 @@ export const EvalAnalysisTab: React.FC = () => {
   // Format run label for dropdown
   const formatRunLabel = (run: EvalRunMeta) => {
     const date = run.run_id.replace(/^(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})$/, '$1-$2-$3 $4:$5');
-    const accuracy = (run.topk_accuracy * 100).toFixed(1);
-    return `${date} — ${accuracy}% (${run.total} questions)`;
+    const uninformative = run.uninformative_count ?? 0;
+    const scored = Math.max(0, run.total - uninformative);
+    const accuracy = scored > 0 ? `${(run.topk_accuracy * 100).toFixed(1)}%` : 'n/a';
+    const excluded = uninformative > 0 ? `, ${uninformative} uninformative` : '';
+    return `${date} — ${accuracy} (${run.total} questions${excluded})`;
   };
 
   // Helper components for analysis subtab states

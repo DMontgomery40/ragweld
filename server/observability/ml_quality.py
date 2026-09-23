@@ -10,7 +10,6 @@ from typing import Any
 
 from server.api.dataset import _dataset_path_for_corpus, _load_dataset
 from server.config import load_config
-from server.evaluation.path_match import path_matches
 from server.lineage import current_bundle, ensure_current_bundle, list_bundles, load_bundle
 from server.models.eval import EvalRun
 from server.models.tribrid_config_model import (
@@ -47,7 +46,14 @@ class LatestQualityValues:
     eval_top1_accuracy: float | None = None
     eval_topk_accuracy: float | None = None
     promptfoo_pass_ratio: float | None = None
+    # Mean over the calls that succeeded: a failed call's latency is how long it took to
+    # fail, not a model latency. None when no call of the newest run succeeded.
     benchmark_average_latency_ms: float | None = None
+    # When each newest run completed (Unix seconds, from the run's own record), so a panel
+    # can say how old the "latest" number is.
+    eval_last_run_timestamp_s: float | None = None
+    promptfoo_last_run_timestamp_s: float | None = None
+    benchmark_last_run_timestamp_s: float | None = None
 
 
 def configured_benchmark_runs_dir() -> Path:
@@ -122,8 +128,11 @@ def latest_quality_values(
         eval_dir if eval_dir is not None else _EVAL_RUNS_DIR,
         lambda path: EvalRun.model_validate(json.loads(path.read_text(encoding="utf-8"))),
     )
-    eval_top1 = float(run.top1_accuracy) if run is not None else None
-    eval_topk = float(run.topk_accuracy) if run is not None else None
+    # A run whose every entry was uninformative has no headline accuracy; the absent
+    # series is the honest answer, never a vacuous 100% (or a fake 0%).
+    scored = run is not None and _scored_entries(run) > 0
+    eval_top1 = float(run.top1_accuracy) if run is not None and scored else None
+    eval_topk = float(run.topk_accuracy) if run is not None and scored else None
 
     promptfoo = _parse_newest(
         "promptfoo",
@@ -142,21 +151,27 @@ def latest_quality_values(
         lambda path: BenchmarkRun.model_validate(json.loads(path.read_text(encoding="utf-8"))),
     )
     benchmark_latency: float | None = None
+    benchmark_completed_s: float | None = None
     if benchmark is not None:
-        latencies = [float(item.latency_ms) for item in (benchmark.results or []) if item.latency_ms is not None]
+        latencies = [
+            float(item.latency_ms)
+            for item in (benchmark.results or [])
+            if item.latency_ms is not None and not str(item.error or "").strip()
+        ]
         if latencies:
             benchmark_latency = sum(latencies) / len(latencies)
+        completed_ms = int(benchmark.ended_at_ms or benchmark.started_at_ms or 0)
+        benchmark_completed_s = completed_ms / 1000.0 if completed_ms > 0 else None
 
     return LatestQualityValues(
         eval_top1_accuracy=eval_top1,
         eval_topk_accuracy=eval_topk,
         promptfoo_pass_ratio=promptfoo_ratio,
         benchmark_average_latency_ms=benchmark_latency,
+        eval_last_run_timestamp_s=run.completed_at.timestamp() if run is not None else None,
+        promptfoo_last_run_timestamp_s=promptfoo.completed_at.timestamp() if promptfoo is not None else None,
+        benchmark_last_run_timestamp_s=benchmark_completed_s,
     )
-
-
-def _path_matches(expected: str, actual: str) -> bool:
-    return path_matches(expected, actual)
 
 
 def _metric_delta(current_value: float | None, previous_value: float | None) -> ObservabilityMetricDelta:
@@ -277,23 +292,17 @@ def _current_bundle(repo_id: str, config: TriBridConfig) -> LineageBundle | None
         return None
 
 
-def _map_at_k(run: EvalRun, k: int = 5) -> float | None:
-    if not run.results:
+def _scored_entries(run: EvalRun) -> int:
+    """Entries that count toward the run's headline metrics (uninformative ones are excluded)."""
+    return int(run.total or len(run.results)) - int(run.uninformative_count)
+
+
+def _headline(run: EvalRun | None, value: Callable[[EvalRun], float | None]) -> float | None:
+    """A run's headline metric, or None when the run is absent or scored no informative entry."""
+    if run is None or _scored_entries(run) <= 0:
         return None
-    average_precisions: list[float] = []
-    for result in run.results:
-        expected = list(result.expected_paths or [])
-        if not expected:
-            average_precisions.append(0.0)
-            continue
-        hits = 0
-        score = 0.0
-        for index, candidate in enumerate(list(result.retrieved_paths or [])[:k], start=1):
-            if any(_path_matches(exp, candidate) for exp in expected):
-                hits += 1
-                score += hits / float(index)
-        average_precisions.append(score / float(min(len(expected), k)))
-    return _mean(average_precisions)
+    raw = value(run)
+    return float(raw) if raw is not None else None
 
 
 def build_eval_observability_summary(config: TriBridConfig, repo_id: str | None) -> EvalObservabilitySummaryResponse:
@@ -317,7 +326,7 @@ def build_eval_observability_summary(config: TriBridConfig, repo_id: str | None)
         previous_by_entry = {str(item.entry_id): item for item in previous.results}
         for latest_result in latest.results:
             prev = previous_by_entry.get(str(latest_result.entry_id))
-            if prev is None:
+            if prev is None or latest_result.uninformative or prev.uninformative:
                 continue
             latest_rr = float(latest_result.reciprocal_rank or 0.0)
             previous_rr = float(prev.reciprocal_rank or 0.0)
@@ -335,10 +344,19 @@ def build_eval_observability_summary(config: TriBridConfig, repo_id: str | None)
     latest_prompt_set = _bundle_prompt_set(repo_id, latest.bundle_id)
     previous_prompt_set = _bundle_prompt_set(repo_id, previous.bundle_id if previous is not None else None)
 
+    latest_top1 = _headline(latest, lambda run: run.top1_accuracy)
+    previous_top1 = _headline(previous, lambda run: run.top1_accuracy)
     hint = "Latest eval run is fresh."
-    if previous is None:
+    if _scored_entries(latest) <= 0:
+        hint = (
+            "Every question in the latest eval run was uninformative (its expected file is the whole corpus). "
+            "Add page or line locations to the eval dataset so retrieval can be scored."
+        )
+    elif previous is None:
         hint = "Only one eval run is present. Run a second eval to unlock regression comparison."
-    elif regressed > improved or (latest.top1_accuracy < previous.top1_accuracy):
+    elif regressed > improved or (
+        latest_top1 is not None and previous_top1 is not None and latest_top1 < previous_top1
+    ):
         hint = "Eval quality regressed. Open Eval Analysis and inspect the changed questions and prompt/config lineage."
     elif freshness_minutes is not None and freshness_minutes > 24 * 60:
         hint = "Eval baseline is stale. Re-run Eval Analysis before trusting the current prompt/config state."
@@ -351,25 +369,28 @@ def build_eval_observability_summary(config: TriBridConfig, repo_id: str | None)
         latest_completed_at=latest.completed_at,
         freshness_minutes=freshness_minutes,
         total_questions=int(latest.total or len(latest.results)),
+        uninformative_questions=int(latest.uninformative_count),
         ai_comparison_ready=previous is not None,
-        top1_accuracy=_metric_delta(float(latest.top1_accuracy), float(previous.top1_accuracy) if previous is not None else None),
-        topk_accuracy=_metric_delta(float(latest.topk_accuracy), float(previous.topk_accuracy) if previous is not None else None),
-        mrr=_metric_delta(float(latest.metrics.mrr), float(previous.metrics.mrr) if previous is not None else None),
+        top1_accuracy=_metric_delta(latest_top1, previous_top1),
+        topk_accuracy=_metric_delta(
+            _headline(latest, lambda run: run.topk_accuracy), _headline(previous, lambda run: run.topk_accuracy)
+        ),
+        mrr=_metric_delta(_headline(latest, lambda run: run.metrics.mrr), _headline(previous, lambda run: run.metrics.mrr)),
         ndcg_at_10=_metric_delta(
-            float(latest.metrics.ndcg_at_10),
-            float(previous.metrics.ndcg_at_10) if previous is not None else None,
+            _headline(latest, lambda run: run.metrics.ndcg_at_10),
+            _headline(previous, lambda run: run.metrics.ndcg_at_10),
         ),
         map_at_5=_metric_delta(
-            _map_at_k(latest, 5),
-            _map_at_k(previous, 5) if previous is not None else None,
+            _headline(latest, lambda run: run.metrics.map_at_5),
+            _headline(previous, lambda run: run.metrics.map_at_5),
         ),
         recall_at_5=_metric_delta(
-            float(latest.metrics.recall_at_5),
-            float(previous.metrics.recall_at_5) if previous is not None else None,
+            _headline(latest, lambda run: run.metrics.recall_at_5),
+            _headline(previous, lambda run: run.metrics.recall_at_5),
         ),
         recall_at_10=_metric_delta(
-            float(latest.metrics.recall_at_10),
-            float(previous.metrics.recall_at_10) if previous is not None else None,
+            _headline(latest, lambda run: run.metrics.recall_at_10),
+            _headline(previous, lambda run: run.metrics.recall_at_10),
         ),
         improved_count=improved,
         regressed_count=regressed,

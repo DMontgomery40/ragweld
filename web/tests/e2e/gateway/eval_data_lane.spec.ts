@@ -141,7 +141,6 @@ test.describe('eval data lane surfaces', () => {
         provider: 'grounded_qa',
         recipe: 'full_stack',
         generator_model: 'litellm:openai.gpt-5.6-luna',
-        judge_model: 'litellm:openai.gpt-5.6-luna',
       },
       artifacts: [
         {

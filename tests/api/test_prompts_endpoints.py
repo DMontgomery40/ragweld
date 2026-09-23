@@ -28,7 +28,9 @@ async def test_prompts_list_update_reset(client, tmp_path) -> None:
 
         assert "main_rag_chat" in prompts
         assert "eval_analysis" in prompts
-        assert "synthetic_judge" in prompts
+        assert "synthetic_generator" in prompts
+        # The synthetic LLM judge was replaced by System One Nouls; its prompt is gone.
+        assert "synthetic_judge" not in prompts
         assert "semantic_kg_extraction" in prompts
         # Legacy base+suffix chat prompt composition was removed (M-101/E-53); only the
         # four state prompts remain exposed.
@@ -42,14 +44,14 @@ async def test_prompts_list_update_reset(client, tmp_path) -> None:
 
         assert "main_rag_chat" in meta
         assert "eval_analysis" in meta
-        assert "synthetic_judge" in meta
+        assert "synthetic_generator" in meta
         assert "semantic_kg_extraction" in meta
         assert "chat.system_prompt_base" not in meta
         assert "chat.system_prompt_rag_suffix" not in meta
         assert "chat.system_prompt_recall_suffix" not in meta
         assert "chat.system_prompt_direct" in meta
 
-        synthetic_meta = meta["synthetic_judge"]
+        synthetic_meta = meta["synthetic_generator"]
         assert synthetic_meta.get("category") == "evaluation"
 
         # Chat prompts are read-only in this tab and should include a link to Chat Settings.

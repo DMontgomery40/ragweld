@@ -11,9 +11,120 @@ import { useUIHelpers } from '@/hooks/useUIHelpers';
 import { confirmDialog } from '@/components/ui/confirmDialog';
 import { useActiveRepo } from '@/stores';
 import type { EvalDatasetItem } from '@/types/generated';
+import {
+  EMPTY_DRAFT,
+  buildExpectedLocations,
+  draftsFromLocations,
+  formatLocation,
+  locationFor,
+  parseExpectedPaths,
+  type LocationDraft,
+} from './evalLocations';
 
 interface QuestionManagerProps {
   className?: string;
+}
+
+const LOCATION_HINT =
+  'Optional: pin each path to the pages (PDF) or lines (text, code) that hold the answer. ' +
+  'A whole-file path cannot fail on a single-document corpus, so it is reported as uninformative.';
+
+const fieldStyle: React.CSSProperties = {
+  padding: '6px 8px',
+  background: 'var(--input-bg)',
+  border: '1px solid var(--line)',
+  borderRadius: '4px',
+  color: 'var(--fg)',
+  fontSize: '13px',
+};
+
+interface LocationEditorProps {
+  paths: string[];
+  drafts: Record<string, LocationDraft>;
+  onChange: (path: string, draft: LocationDraft) => void;
+  testIdPrefix: string;
+}
+
+/** One row per expected path: whole file, or a page/line span. */
+const LocationEditor: React.FC<LocationEditorProps> = ({ paths, drafts, onChange, testIdPrefix }) => {
+  if (paths.length === 0) return null;
+  return (
+    <div data-testid={`${testIdPrefix}-locations`} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+      {paths.map((path, index) => {
+        const draft = drafts[path] ?? EMPTY_DRAFT;
+        const unitLabel = draft.unit === 'page' ? 'page' : 'line';
+        return (
+          <div
+            key={path}
+            data-testid={`${testIdPrefix}-location-${index}`}
+            style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' }}
+          >
+            <span
+              style={{
+                fontFamily: 'monospace',
+                fontSize: '12px',
+                color: 'var(--fg)',
+                minWidth: '120px',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                flex: '1 1 160px',
+              }}
+              title={path}
+            >
+              {path}
+            </span>
+            <select
+              aria-label={`Location for ${path}`}
+              data-testid={`${testIdPrefix}-location-unit-${index}`}
+              value={draft.unit}
+              onChange={(e) => onChange(path, { ...draft, unit: e.target.value as LocationDraft['unit'] })}
+              style={fieldStyle}
+            >
+              <option value="">Whole file</option>
+              <option value="page">Pages</option>
+              <option value="line">Lines</option>
+            </select>
+            {draft.unit ? (
+              <>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  aria-label={`First ${unitLabel} for ${path}`}
+                  data-testid={`${testIdPrefix}-location-start-${index}`}
+                  placeholder={`first ${unitLabel}`}
+                  value={draft.start}
+                  onChange={(e) => onChange(path, { ...draft, start: e.target.value })}
+                  style={{ ...fieldStyle, width: '96px' }}
+                />
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  aria-label={`Last ${unitLabel} for ${path}`}
+                  data-testid={`${testIdPrefix}-location-end-${index}`}
+                  placeholder={`last ${unitLabel}`}
+                  value={draft.end}
+                  onChange={(e) => onChange(path, { ...draft, end: e.target.value })}
+                  style={{ ...fieldStyle, width: '96px' }}
+                />
+              </>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+function describeExpected(entry: EvalDatasetItem): string {
+  return (entry.expected_paths ?? [])
+    .map((path) => {
+      const location = locationFor(entry.expected_locations, path);
+      return location ? `${path} (${formatLocation(location)})` : path;
+    })
+    .join(', ');
 }
 
 export const QuestionManager: React.FC<QuestionManagerProps> = ({ className = '' }) => {
@@ -34,10 +145,15 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ className = ''
   const [newQuestion, setNewQuestion] = useState('');
   const [newPaths, setNewPaths] = useState('');
   const [newAnswer, setNewAnswer] = useState('');
+  const [newDrafts, setNewDrafts] = useState<Record<string, LocationDraft>>({});
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editQuestion, setEditQuestion] = useState('');
   const [editPaths, setEditPaths] = useState('');
   const [editAnswer, setEditAnswer] = useState('');
+  const [editDrafts, setEditDrafts] = useState<Record<string, LocationDraft>>({});
+
+  const newPathList = parseExpectedPaths(newPaths);
+  const editPathList = parseExpectedPaths(editPaths);
 
   useEffect(() => {
     refreshEntries();
@@ -53,14 +169,16 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ className = ''
       return;
     }
 
-    const expectedChunks = newPaths
-      .split(',')
-      .map(p => p.trim())
-      .filter(p => p);
+    const { locations, error: locationError } = buildExpectedLocations(newPathList, newDrafts);
+    if (locationError) {
+      showToast(locationError, 'error');
+      return;
+    }
 
     const result = await addEntry({
       question: newQuestion,
-      expected_paths: expectedChunks,
+      expected_paths: newPathList,
+      expected_locations: locations,
       expected_answer: newAnswer.trim() || undefined,
     });
 
@@ -68,19 +186,22 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ className = ''
       setNewQuestion('');
       setNewPaths('');
       setNewAnswer('');
+      setNewDrafts({});
       showToast('Entry added', 'success');
     }
   };
 
   const handleUpdateEntry = async (entryId: string) => {
-    const expectedChunks = editPaths
-      .split(',')
-      .map(p => p.trim())
-      .filter(p => p);
+    const { locations, error: locationError } = buildExpectedLocations(editPathList, editDrafts);
+    if (locationError) {
+      showToast(locationError, 'error');
+      return;
+    }
 
     const result = await updateEntry(entryId, {
       question: editQuestion,
-      expected_paths: expectedChunks,
+      expected_paths: editPathList,
+      expected_locations: locations,
       expected_answer: editAnswer.trim() || undefined,
     });
 
@@ -116,6 +237,7 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ className = ''
     setEditingId(entry.entry_id);
     setEditQuestion(entry.question);
     setEditPaths(entry.expected_paths?.join(', ') || '');
+    setEditDrafts(draftsFromLocations(entry.expected_locations));
     setEditAnswer(entry.expected_answer || '');
   };
 
@@ -123,6 +245,7 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ className = ''
     setEditingId(null);
     setEditQuestion('');
     setEditPaths('');
+    setEditDrafts({});
     setEditAnswer('');
   };
 
@@ -180,6 +303,8 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ className = ''
           <input
             type="text"
             placeholder="Expected paths (comma-separated)"
+            aria-label="Expected paths"
+            data-testid="eval-new-expected-paths"
             value={newPaths}
             onChange={(e) => setNewPaths(e.target.value)}
             style={{
@@ -190,6 +315,16 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ className = ''
               color: 'var(--fg)',
             }}
           />
+
+          <LocationEditor
+            paths={newPathList}
+            drafts={newDrafts}
+            onChange={(path, draft) => setNewDrafts((prev) => ({ ...prev, [path]: draft }))}
+            testIdPrefix="eval-new"
+          />
+          <div data-testid="eval-location-hint" style={{ fontSize: '11.5px', color: 'var(--fg-muted)' }}>
+            {LOCATION_HINT}
+          </div>
 
           <textarea
             placeholder="Expected answer (optional — the rubric the Promptfoo grader scores against)"
@@ -302,6 +437,8 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ className = ''
                       value={editPaths}
                       onChange={(e) => setEditPaths(e.target.value)}
                       placeholder="Expected paths (comma-separated)"
+                      aria-label="Expected paths"
+                      data-testid="eval-edit-expected-paths"
                       style={{
                         padding: '8px',
                         background: 'var(--input-bg)',
@@ -309,6 +446,12 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ className = ''
                         borderRadius: '4px',
                         color: 'var(--fg)',
                       }}
+                    />
+                    <LocationEditor
+                      paths={editPathList}
+                      drafts={editDrafts}
+                      onChange={(path, draft) => setEditDrafts((prev) => ({ ...prev, [path]: draft }))}
+                      testIdPrefix="eval-edit"
                     />
                     <textarea
                       value={editAnswer}
@@ -364,8 +507,8 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ className = ''
                         {entry.question}
                       </div>
                       {entry.expected_paths && entry.expected_paths.length > 0 && (
-                        <div style={{ fontSize: '11.5px', color: 'var(--fg-muted)' }}>
-                          Expected paths: {entry.expected_paths.join(', ')}
+                        <div data-testid="eval-entry-expected" style={{ fontSize: '11.5px', color: 'var(--fg-muted)' }}>
+                          Expected: {describeExpected(entry)}
                         </div>
                       )}
                       {entry.expected_answer && entry.expected_answer.trim() ? (

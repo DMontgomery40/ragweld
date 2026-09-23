@@ -170,6 +170,7 @@ class TestSearchModels:
             source="vector",
         )
         resp = SearchResponse(
+            event_id="9f0c4d1e-search-run",
             query="test query",
             matches=[match],
             fusion_method="rrf",

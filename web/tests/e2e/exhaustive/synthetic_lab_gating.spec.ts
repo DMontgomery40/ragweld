@@ -30,7 +30,6 @@ test('Synthetic Lab: a failed run cannot be promoted and is not a dead end', asy
         provider: 'grounded_qa',
         recipe: 'eval_dataset',
         generator_model: `litellm:${EXHAUSTIVE_CHAT_MODEL}`,
-        judge_model: `litellm:${EXHAUSTIVE_CHAT_MODEL}`,
         max_source_chunks: 10,
         max_pairs: 10,
         pairs_per_source: 1,

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
+from typing import Literal
 
 from server.models.chat_config import (
     RecallFusionOverrides,
@@ -9,6 +11,7 @@ from server.models.chat_config import (
     RecallPlan,
     RecallSignals,
 )
+from server.observability.metrics import RECALL_GATE_DECISIONS_TOTAL
 
 # -----------------------------------------------------------------------------
 # Pattern banks (compiled once). Keep these cheap: no network, no embeddings.
@@ -103,7 +106,31 @@ def extract_recall_signals(
     )
 
 
-def classify_for_recall(
+# The rule that decided a Recall plan: the `reason` label of
+# `tribrid_recall_gate_decisions_total`. Low-cardinality by construction (one value per rule).
+RecallGateRule = Literal[
+    "disabled_default",
+    "user_override",
+    "greeting",
+    "ack",
+    "explicit_reference",
+    "topic_followup",
+    "standalone_question",
+    "rag_active",
+    "short_question",
+    "short_statement",
+    "first_message",
+    "default",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class RecallDecision:
+    plan: RecallPlan
+    rule: RecallGateRule
+
+
+def decide_recall(
     *,
     message: str,
     conversation_turn: int,
@@ -111,10 +138,10 @@ def classify_for_recall(
     rag_corpora_active: bool,
     config: RecallGateConfig,
     user_override: RecallIntensity | None = None,
-) -> RecallPlan:
-    """Decide whether and how to query Recall for this message.
+) -> RecallDecision:
+    """Decide whether and how to query Recall for this message, and which rule decided it.
 
-    Returns a RecallPlan with intensity and per-message overrides.
+    Pure: no metrics. `classify_for_recall` is the counted entry point the chat lane uses.
     NOTE: This only gates Recall (chat memory). RAG corpora are always queried when checked.
     """
 
@@ -127,11 +154,14 @@ def classify_for_recall(
 
     # Gate disabled: always query Recall at default intensity.
     if not config.enabled:
-        return _build_recall_plan(
-            config.default_intensity,
-            signals,
-            config,
-            reason="Recall gate disabled — using default intensity.",
+        return RecallDecision(
+            _build_recall_plan(
+                config.default_intensity,
+                signals,
+                config,
+                reason="Recall gate disabled — using default intensity.",
+            ),
+            "disabled_default",
         )
 
     # User override: honor it.
@@ -143,57 +173,63 @@ def classify_for_recall(
             reason=f"User override: {user_override.value}",
         )
         plan.user_override = True
-        return plan
+        return RecallDecision(plan, "user_override")
 
     # Rule 1: Greetings → skip Recall.
     if config.skip_greetings and signals.is_greeting:
-        return RecallPlan(
-            intensity=RecallIntensity.skip,
-            signals=signals,
-            reason="Greeting — skipping Recall.",
+        return RecallDecision(
+            RecallPlan(intensity=RecallIntensity.skip, signals=signals, reason="Greeting — skipping Recall."),
+            "greeting",
         )
 
     # Rule 2: Acknowledgments → skip Recall.
     if config.skip_greetings and signals.is_acknowledgment:
-        return RecallPlan(
-            intensity=RecallIntensity.skip,
-            signals=signals,
-            reason="Acknowledgment — skipping Recall.",
+        return RecallDecision(
+            RecallPlan(intensity=RecallIntensity.skip, signals=signals, reason="Acknowledgment — skipping Recall."),
+            "ack",
         )
 
     # Rule 3: Explicit recall trigger → deep.
     if config.deep_on_explicit_reference and signals.is_recall_trigger:
-        return _build_recall_plan(
-            RecallIntensity.deep,
-            signals,
-            config,
-            reason="Explicit past reference — deep Recall query.",
-            recency_override=config.deep_recency_weight,
+        return RecallDecision(
+            _build_recall_plan(
+                RecallIntensity.deep,
+                signals,
+                config,
+                reason="Explicit past reference — deep Recall query.",
+                recency_override=config.deep_recency_weight,
+            ),
+            "explicit_reference",
         )
 
     # Rule 4: Definite article implies shared context → standard.
     if signals.has_definite_article and signals.conversation_turn > 0:
-        return _build_recall_plan(
-            RecallIntensity.standard,
-            signals,
-            config,
-            reason="Definite article implies shared context — standard Recall.",
+        return RecallDecision(
+            _build_recall_plan(
+                RecallIntensity.standard,
+                signals,
+                config,
+                reason="Definite article implies shared context — standard Recall.",
+            ),
+            "topic_followup",
         )
 
     # Rule 5: Standalone question → skip Recall.
     if config.skip_standalone_questions and signals.is_standalone_question:
-        return RecallPlan(
-            intensity=RecallIntensity.skip,
-            signals=signals,
-            reason="Standalone question — skipping Recall.",
+        return RecallDecision(
+            RecallPlan(intensity=RecallIntensity.skip, signals=signals, reason="Standalone question — skipping Recall."),
+            "standalone_question",
         )
 
     # Rule 6: Skip when RAG is active (optional).
     if config.skip_when_rag_active and signals.rag_corpora_active:
-        return RecallPlan(
-            intensity=RecallIntensity.skip,
-            signals=signals,
-            reason="RAG corpora active — skipping Recall per config.",
+        return RecallDecision(
+            RecallPlan(
+                intensity=RecallIntensity.skip,
+                signals=signals,
+                reason="RAG corpora active — skipping Recall per config.",
+            ),
+            "rag_active",
         )
 
     # Rule 7: Short questions → light (sparse-only).
@@ -204,38 +240,76 @@ def classify_for_recall(
         and not signals.is_recall_trigger
         and not signals.is_standalone_question
     ):
-        return _build_recall_plan(
-            RecallIntensity.light,
-            signals,
-            config,
-            reason="Short question — light Recall check.",
+        return RecallDecision(
+            _build_recall_plan(
+                RecallIntensity.light,
+                signals,
+                config,
+                reason="Short question — light Recall check.",
+            ),
+            "short_question",
         )
 
     # Rule 8: Short non-question → light.
     if signals.token_count <= config.skip_max_tokens and not signals.is_question:
-        return _build_recall_plan(
-            RecallIntensity.light,
-            signals,
-            config,
-            reason="Short statement — light Recall check.",
+        return RecallDecision(
+            _build_recall_plan(
+                RecallIntensity.light,
+                signals,
+                config,
+                reason="Short statement — light Recall check.",
+            ),
+            "short_statement",
         )
 
     # Rule 9: First message → default intensity.
     if signals.conversation_turn == 0:
-        return _build_recall_plan(
-            config.default_intensity,
-            signals,
-            config,
-            reason=f"First message — {config.default_intensity.value} Recall.",
+        return RecallDecision(
+            _build_recall_plan(
+                config.default_intensity,
+                signals,
+                config,
+                reason=f"First message — {config.default_intensity.value} Recall.",
+            ),
+            "first_message",
         )
 
     # Fallback: default intensity.
-    return _build_recall_plan(
-        config.default_intensity,
-        signals,
-        config,
-        reason="No specific pattern — default Recall intensity.",
+    return RecallDecision(
+        _build_recall_plan(
+            config.default_intensity,
+            signals,
+            config,
+            reason="No specific pattern — default Recall intensity.",
+        ),
+        "default",
     )
+
+
+def classify_for_recall(
+    *,
+    message: str,
+    conversation_turn: int,
+    last_recall_had_results: bool,
+    rag_corpora_active: bool,
+    config: RecallGateConfig,
+    user_override: RecallIntensity | None = None,
+) -> RecallPlan:
+    """Decide the Recall plan for one chat message and count the decision
+    (`tribrid_recall_gate_decisions_total{intensity,reason}`)."""
+
+    decision = decide_recall(
+        message=message,
+        conversation_turn=conversation_turn,
+        last_recall_had_results=last_recall_had_results,
+        rag_corpora_active=rag_corpora_active,
+        config=config,
+        user_override=user_override,
+    )
+    RECALL_GATE_DECISIONS_TOTAL.labels(
+        intensity=RecallIntensity(decision.plan.intensity).value, reason=decision.rule
+    ).inc()
+    return decision.plan
 
 
 def _build_recall_plan(

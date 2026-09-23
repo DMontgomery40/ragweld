@@ -253,6 +253,27 @@ def test_upgrade_raw_config_replaces_the_retired_kg_extraction_prompt_default() 
     assert "{schema}" in cfg.system_prompts.semantic_kg_extraction
 
 
+@pytest.mark.parametrize("edited", [False, True])
+def test_the_retired_synthetic_llm_judge_is_stripped_from_stored_configs(edited: bool) -> None:
+    """System One Nouls replaced the synthetic LLM judge: a stored judge prompt (the shipped
+    default or an operator's own text) and the judge's sampling knobs are dead keys. The corpus
+    upgrade strips and reports them; the global loader drops them too."""
+    historical = (Path(__file__).parents[1] / "fixtures" / "synthetic_judge_pre_basic_logic.txt").read_text()
+    stored = historical + "\n- Prefer questions about flight operations." if edited else historical
+    raw = {
+        "system_prompts": {"synthetic_judge": stored},
+        "synthetic": {"judge": {"temperature": 0.0, "max_tokens": 400, "reader_question_min": 0.8}},
+    }
+    cfg, changed, migrated = _upgrade_raw_config(raw)
+    assert changed is True
+    assert {"system_prompts.synthetic_judge", "synthetic.judge.temperature", "synthetic.judge.max_tokens"} <= set(migrated)
+    dumped = cfg.model_dump(mode="json")
+    assert "synthetic_judge" not in dumped["system_prompts"]
+    assert dumped["synthetic"]["judge"] == {"reader_question_min": 0.8, "answer_supported_min": 0.7}
+    global_cfg = TriBridConfig.model_validate(_strip_removed_keys({"system_prompts": {"synthetic_judge": stored}}))
+    assert "synthetic_judge" not in global_cfg.model_dump(mode="json")["system_prompts"]
+
+
 def test_upgrade_raw_config_keeps_an_operator_edited_kg_extraction_prompt() -> None:
     edited = "My rules. {schema} {examples} {text}"
     cfg, _changed, migrated = _upgrade_raw_config(

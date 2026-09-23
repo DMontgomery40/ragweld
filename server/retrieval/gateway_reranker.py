@@ -85,6 +85,38 @@ def rerank_request_fields(route_upstream: str) -> dict[str, Any]:
     )
 
 
+# Upstreams that honour a strict JSON-schema ``response_format`` through OpenRouter. Without it
+# the listwise verdict is free text parsed after the fact: on 2026-09-23 openai.gpt-6-luna
+# returned unparseable JSON on 1 of 25 real rerank calls, and a parse failure fails the whole
+# request closed. Other providers keep the prompt-only contract until measured.
+STRUCTURED_OUTPUT_UPSTREAM_PREFIXES: tuple[str, ...] = (f"{OPENROUTER_UPSTREAM_PREFIX}openai/",)
+
+
+def rerank_response_format(route_upstream: str, ids: list[str]) -> dict[str, Any] | None:
+    """Strict ``{"scores": [{id, score}]}`` schema over exactly ``ids``, or None if unsupported."""
+    upstream = str(route_upstream or "").strip()
+    if not ids or not upstream.startswith(STRUCTURED_OUTPUT_UPSTREAM_PREFIXES):
+        return None
+    entry = {
+        "type": "object",
+        "properties": {
+            "id": {"type": "string", "enum": [str(cid) for cid in ids]},
+            "score": {"type": "number", "minimum": SCORE_MIN, "maximum": SCORE_MAX},
+        },
+        "required": ["id", "score"],
+        "additionalProperties": False,
+    }
+    schema = {
+        "type": "object",
+        "properties": {
+            "scores": {"type": "array", "items": entry, "minItems": len(ids), "maxItems": len(ids)},
+        },
+        "required": ["scores"],
+        "additionalProperties": False,
+    }
+    return {"type": "json_schema", "json_schema": {"name": "rerank_scores", "strict": True, "schema": schema}}
+
+
 def reasoning_tokens_spent(usage: Mapping[str, Any] | None) -> int:
     """Reasoning tokens reported in OpenAI-style ``usage.completion_tokens_details``."""
     details = usage.get("completion_tokens_details") if isinstance(usage, Mapping) else None
@@ -163,12 +195,17 @@ def parse_rerank_scores(text: str, ids: list[str]) -> list[float]:
     def _reject_constant(name: str) -> float:
         raise ValueError(f"non-finite JSON constant {name!r}")
 
+    # Decode the FIRST complete JSON value and ignore anything after it: on 2026-09-23 a
+    # schema-conforming verdict from openai.gpt-6-luna arrived followed by trailing text
+    # ("Extra data"), which slicing to the last bracket turned into a failed request. The
+    # bijection and finiteness checks below still reject every malformed verdict.
+    decoder = json.JSONDecoder(parse_constant=_reject_constant)
     try:
         if object_start >= 0 and (array_start < 0 or object_start < array_start):
-            payload = json.loads(stripped[object_start : stripped.rfind("}") + 1], parse_constant=_reject_constant)
+            payload, _end = decoder.raw_decode(stripped, object_start)
             payload = payload.get("scores") if isinstance(payload, dict) else None
         elif array_start >= 0:
-            payload = json.loads(stripped[array_start : stripped.rfind("]") + 1], parse_constant=_reject_constant)
+            payload, _end = decoder.raw_decode(stripped, array_start)
         else:
             raise GatewayRerankParseError("reranker output contained no JSON array")
     except (json.JSONDecodeError, ValueError) as exc:
@@ -217,7 +254,11 @@ async def score_candidates(
     system, user_message = build_rerank_messages(query, docs, ids, system_prompt=system_prompt)
     alias = str(route.model)
     max_tokens = rerank_output_budget(len(docs))
-    body_fields = rerank_request_fields(gateway_upstream_for_alias(alias))
+    upstream = gateway_upstream_for_alias(alias)
+    body_fields = rerank_request_fields(upstream)
+    response_format = rerank_response_format(upstream, ids)
+    if response_format is not None:
+        body_fields = {**body_fields, "response_format": response_format}
     try:
         result = await generate_chat_text(
             route=route,

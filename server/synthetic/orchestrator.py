@@ -354,15 +354,19 @@ async def _evaluate_quality_gate(
         )
 
     gate_results = eval_run.results[:gate_size]
-    total = max(1, len(gate_results))
-    top1_accuracy = sum(1 for r in gate_results if r.top1_hit) / total
-    topk_accuracy = sum(1 for r in gate_results if r.topk_hit) / total
-    mrr = sum(float(r.reciprocal_rank) for r in gate_results) / total
-    passed = bool(top1_accuracy >= top1_min)
+    # Uninformative entries (expectations that any chunk would satisfy) cannot pass a gate.
+    scored_results = [r for r in gate_results if not r.uninformative]
+    uninformative = len(gate_results) - len(scored_results)
+    total = max(1, len(scored_results))
+    top1_accuracy = sum(1 for r in scored_results if r.top1_hit) / total
+    topk_accuracy = sum(1 for r in scored_results if r.topk_hit) / total
+    mrr = sum(float(r.reciprocal_rank) for r in scored_results) / total
+    passed = bool(scored_results) and bool(top1_accuracy >= top1_min)
     artifacts_payloads["quality_eval_json"] = {
         "run_id": run_id,
         "corpus_id": repo_id,
         "sample_size": gate_size,
+        "uninformative": uninformative,
         "entries_evaluated": len(eval_run.results),
         "top1_accuracy": float(top1_accuracy),
         "topk_accuracy": float(topk_accuracy),
@@ -381,8 +385,13 @@ async def _evaluate_quality_gate(
         reason = (
             f"Quality gate failed: top1={float(top1_accuracy):.3f} "
             f"< threshold={top1_min:.3f} "
-            f"(sample={gate_size})"
+            f"(sample={gate_size}, uninformative={uninformative})"
         )
+        if not scored_results:
+            reason = (
+                f"Quality gate failed: every sampled entry was uninformative "
+                f"(sample={gate_size}); rows need page/line locations to be scored"
+            )
         summary.quality_failure_reason = reason
         return False, reason, eval_run
 
