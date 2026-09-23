@@ -37,6 +37,7 @@ from server.gateway_catalog import (
     serialize_catalog,
     write_catalog_trio,
 )
+from server.model_policy import ensure_model_allowed
 from server.runtime_capabilities import apply_selection_metadata_to_catalog
 
 OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
@@ -89,6 +90,7 @@ class RefreshStats:
     skipped_router: int = 0
     skipped_missing_context: int = 0
     skipped_invalid_alias: int = 0
+    skipped_blocked_model: int = 0
     skipped_superseded: int = 0
     duplicate_feed_ids: int = 0
     rows_pricing_tiered: int = 0
@@ -229,6 +231,11 @@ def normalize_openrouter_rows(rows: list[dict[str, Any]], stats: RefreshStats | 
             # Meta-routers resolve to a different model per request; the
             # answer's lineage would not name the model that produced it.
             stats.skipped_router += 1
+            continue
+        try:
+            ensure_model_allowed(model_id)
+        except ValueError:
+            stats.skipped_blocked_model += 1
             continue
         if model_id in normalized:
             stats.duplicate_feed_ids += 1
@@ -375,7 +382,25 @@ def _refresh_litellm_reranker_rows(
         for model_id, feed in feed_models.items()
         if re.fullmatch(r"openai/gpt-[0-9]+(?:\.[0-9]+)*-luna", model_id)
     ]
+    reranker_rows = [
+        row
+        for row in preserved
+        if str(row.get("provider") or "").lower() == "litellm" and _components(row) == {"RERANK"}
+    ]
+    if not reranker_rows:
+        return preserved
     if not luna_candidates:
+        retained_aliases = {gateway_alias_for_openrouter_id(model_id) for model_id in feed_models}
+        stale_aliases = sorted(
+            str(row.get("model") or "")
+            for row in reranker_rows
+            if str(row.get("model") or "") not in retained_aliases
+        )
+        if stale_aliases:
+            raise RuntimeError(
+                "cannot migrate preserved LiteLLM reranker row: no retained OpenAI Luna route; "
+                f"stale aliases={stale_aliases}"
+            )
         return preserved
     latest_luna = max(
         luna_candidates,

@@ -24,8 +24,10 @@ def test_refresh_removes_the_entire_blocked_family_and_keeps_unrelated_fours() -
     blocked = ["openai/gpt-4", "openai/gpt-4-turbo", "openai/gpt-4o-mini",
                "openai/gpt-4o-2024-08-06", "openai/gpt-4.1-nano:batch"]
     allowed = ["openai/gpt-5.6-luna", "anthropic/claude-sonnet-4.5", "meta-llama/llama-4-maverick"]
-    normalized = normalize_openrouter_rows([_feed_row(model) for model in blocked + allowed])
+    stats = RefreshStats()
+    normalized = normalize_openrouter_rows([_feed_row(model) for model in blocked + allowed], stats)
     assert set(normalized) == set(allowed)
+    assert stats.skipped_blocked_model == len(blocked)
 
 
 def test_refresh_keeps_only_the_latest_openai_gpt_generation() -> None:
@@ -192,6 +194,7 @@ def test_normalize_keeps_every_text_route_including_variants_and_counts_every_sk
         + stats.skipped_non_text
         + stats.skipped_missing_context
         + stats.skipped_invalid_alias
+        + stats.skipped_blocked_model
         + stats.skipped_superseded
     )
     assert accounted == 10, "every feed row is either normalized or counted as a skip"
@@ -369,6 +372,34 @@ def test_refresh_migrates_the_preserved_litellm_reranker_to_latest_luna_pricing(
     assert "openai.gpt-6-luna" in reranker["notes"]
     assert stats.preserved_rows == 2
     assert changed is True
+
+
+def test_refresh_fails_closed_when_latest_generation_has_no_luna_reranker_route() -> None:
+    catalog = {
+        "currency": "USD",
+        "sources": [],
+        "models": [
+            _local_row(),
+            {
+                "provider": "litellm",
+                "family": "gpt-6-luna",
+                "model": "openai.gpt-6-luna",
+                "components": ["RERANK"],
+                "unit": "1k_tokens",
+                "context": 1_050_000,
+                "input_per_1k": 0.0001,
+                "output_per_1k": 0.0005,
+                "display_name": "Current Luna reranker",
+            },
+        ],
+    }
+
+    with pytest.raises(RuntimeError, match="no retained OpenAI Luna route"):
+        build_refreshed_catalog(
+            catalog,
+            [_feed_row("openai/gpt-6-luna"), _feed_row("openai/gpt-7-astra")],
+            as_of_date="2026-09-23",
+        )
 
 
 def test_refresh_removes_routes_that_left_the_feed_and_is_idempotent() -> None:
