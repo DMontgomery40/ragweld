@@ -11,9 +11,11 @@ Design goals:
 
 from __future__ import annotations
 
+import asyncio
 import time
-from collections.abc import Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 
 from prometheus_client import (
@@ -25,6 +27,11 @@ from prometheus_client import (
     generate_latest,
 )
 from prometheus_client.core import GaugeMetricFamily
+
+# Long-tail buckets (seconds) shared by every latency histogram that can see a stall: the
+# chat contract's own buckets (docs/exec-plans/active/observability-chat-telemetry-2026-09-23.md)
+# go to 600 s, and retrieval histograms that used to stop at 10 s hid 60-120 s stalls.
+_LONG_TAIL_BUCKETS = (15.0, 30.0, 45.0, 60.0, 90.0, 120.0, 180.0, 300.0, 600.0)
 
 # --------------------------------------------------------------------------------------
 # Core request/search metrics
@@ -59,6 +66,7 @@ SEARCH_LATENCY_SECONDS = Histogram(
         2.5,
         5.0,
         10.0,
+        *_LONG_TAIL_BUCKETS,
     ),
 )
 
@@ -78,6 +86,8 @@ VECTOR_LEG_LATENCY_SECONDS = Histogram(
         1.0,
         2.5,
         5.0,
+        10.0,
+        *_LONG_TAIL_BUCKETS,
     ),
 )
 
@@ -96,6 +106,9 @@ SPARSE_LEG_LATENCY_SECONDS = Histogram(
         0.5,
         1.0,
         2.5,
+        5.0,
+        10.0,
+        *_LONG_TAIL_BUCKETS,
     ),
 )
 
@@ -114,6 +127,7 @@ GRAPH_LEG_LATENCY_SECONDS = Histogram(
         2.5,
         5.0,
         10.0,
+        *_LONG_TAIL_BUCKETS,
     ),
 )
 
@@ -140,6 +154,7 @@ SEARCH_STAGE_LATENCY_SECONDS = Histogram(
         2.5,
         5.0,
         10.0,
+        *_LONG_TAIL_BUCKETS,
     ),
 )
 
@@ -223,6 +238,85 @@ SEMANTIC_CACHE_SEMANTIC_SIMILARITY = Histogram(
 )
 
 # --------------------------------------------------------------------------------------
+# Chat metrics: the chat metric contract
+# --------------------------------------------------------------------------------------
+#
+# Binding contract: docs/exec-plans/active/observability-chat-telemetry-2026-09-23.md
+# ("Chat metric contract"); tests/unit/test_chat_metric_contract.py parses that table and
+# fails when this block drifts from it. `model` is always a gateway alias from the catalog
+# (or `unresolved`), never a raw override, so its cardinality is bounded by data/models.json.
+
+CHAT_LATENCY_BUCKETS = (0.25, 0.5, 1.0, 2.0, 4.0, 8.0, *_LONG_TAIL_BUCKETS)
+CHAT_TOKEN_KINDS = ("input", "output", "reasoning")
+FEEDBACK_SIGNALS = (
+    "thumbsup",
+    "thumbsdown",
+    "click",
+    "note",
+    "star1",
+    "star2",
+    "star3",
+    "star4",
+    "star5",
+)
+
+CHAT_REQUESTS_TOTAL = Counter(
+    "tribrid_chat_requests_total",
+    "Chat requests by gateway alias and outcome (ok, retrieval_error, gateway_error, timeout, "
+    "cancelled, client_disconnect). A prompt that does not fit the alias's window counts as "
+    "gateway_error; chat has no server-side stop, so an early close is client_disconnect.",
+    ["model", "outcome"],
+)
+
+CHAT_TIME_TO_FIRST_EVENT_SECONDS = Histogram(
+    "tribrid_chat_time_to_first_event_seconds",
+    "Streaming chat: request start to the first SSE event (the `status` event, or a cached "
+    "answer), which is when the response headers go out.",
+    ["model"],
+    buckets=CHAT_LATENCY_BUCKETS,
+)
+
+CHAT_TIME_TO_FIRST_TEXT_SECONDS = Histogram(
+    "tribrid_chat_time_to_first_text_seconds",
+    "Streaming chat: request start to the first answer text delta (reasoning and status do not count).",
+    ["model"],
+    buckets=CHAT_LATENCY_BUCKETS,
+)
+
+CHAT_DURATION_SECONDS = Histogram(
+    "tribrid_chat_duration_seconds",
+    "Chat request start to its terminal event or stream end, by alias and outcome.",
+    ["model", "outcome"],
+    buckets=CHAT_LATENCY_BUCKETS,
+)
+
+CHAT_COST_USD_TOTAL = Counter(
+    "tribrid_chat_cost_usd_total",
+    "Chat generation cost in USD from the per-request cost summary, by cost source "
+    "(provider = gateway-reported, catalog = estimate, unavailable = adds 0).",
+    ["model", "cost_source"],
+)
+
+CHAT_TOKENS_TOTAL = Counter(
+    "tribrid_chat_tokens_total",
+    "Chat gateway tokens by kind. `output` is the provider's completion count, which includes "
+    "reasoning tokens where the provider bills them as completion; `reasoning` is that subset.",
+    ["model", "kind"],
+)
+
+FEEDBACK_EVENTS_TOTAL = Counter(
+    "tribrid_feedback_events_total",
+    "Feedback events recorded by POST /api/feedback, by signal and surface (chat, search).",
+    ["signal", "surface"],
+)
+
+RECALL_GATE_DECISIONS_TOTAL = Counter(
+    "tribrid_recall_gate_decisions_total",
+    "Recall gate decisions by chosen intensity and the gate rule that decided it.",
+    ["intensity", "reason"],
+)
+
+# --------------------------------------------------------------------------------------
 # Reranker metrics (inference-time)
 # --------------------------------------------------------------------------------------
 #
@@ -258,6 +352,31 @@ RERANKER_LATENCY_SECONDS = Histogram(
     "Reranker latency in seconds (local/learning/cloud).",
     ["mode"],
     buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0),
+)
+
+# --------------------------------------------------------------------------------------
+# System One metrics (typed judgments over POST /v1/systemone: reranker, synthetic judge)
+# --------------------------------------------------------------------------------------
+#
+# One observation per System One call (retries included), labelled by backend only.
+# The chat contract's buckets start at 0.25 s; a hosted Jev call measured 0.1-0.3 s on
+# LXC100 (2026-09-23), so two sub-quarter-second buckets lead them. Laya on LXC100's CPU
+# took about 0.25 s for a short state and about 4 s for a full 512-token chunk.
+SYSTEM_ONE_OUTCOMES = ("ok", "rate_limited", "http_error", "unavailable", "timeout", "invalid_response")
+SYSTEM_ONE_LATENCY_BUCKETS = (0.05, 0.1, *CHAT_LATENCY_BUCKETS)
+
+SYSTEM_ONE_REQUESTS_TOTAL = Counter(
+    "tribrid_system_one_requests_total",
+    "System One calls by backend (typesafe, laya) and final outcome (ok, rate_limited, "
+    "http_error, unavailable, timeout, invalid_response), after retries.",
+    ["provider", "outcome"],
+)
+
+SYSTEM_ONE_LATENCY_SECONDS = Histogram(
+    "tribrid_system_one_latency_seconds",
+    "System One call latency in seconds, retries and backoff included, by backend.",
+    ["provider"],
+    buckets=SYSTEM_ONE_LATENCY_BUCKETS,
 )
 
 RERANKER_TRAIN_RUNS_TOTAL = Counter(
@@ -474,8 +593,24 @@ class LatestMLQualityCollector:
             ),
             (
                 "tribrid_benchmark_last_avg_latency_ms",
-                "Mean per-model latency (ms) of the most recently persisted benchmark run.",
+                "Mean latency (ms) of the successful model calls in the most recently persisted "
+                "benchmark run (failed calls excluded; absent when none succeeded).",
                 values.benchmark_average_latency_ms,
+            ),
+            (
+                "tribrid_eval_last_run_timestamp_seconds",
+                "Completion time (Unix seconds) of the most recently persisted eval run.",
+                values.eval_last_run_timestamp_s,
+            ),
+            (
+                "tribrid_promptfoo_last_run_timestamp_seconds",
+                "Completion time (Unix seconds) of the most recently persisted Promptfoo run.",
+                values.promptfoo_last_run_timestamp_s,
+            ),
+            (
+                "tribrid_benchmark_last_run_timestamp_seconds",
+                "Completion time (Unix seconds) of the most recently persisted benchmark run.",
+                values.benchmark_last_run_timestamp_s,
             ),
         ):
             if value is None:
@@ -571,6 +706,170 @@ GRAPH_RELATIONSHIPS_CURRENT = Gauge(
 
 
 # --------------------------------------------------------------------------------------
+# Per-corpus index size (scrape-time, cached)
+# --------------------------------------------------------------------------------------
+#
+# The one deliberate exception to "no corpus labels": corpora are operator-created and
+# few, and a per-corpus size is exactly what the stat panels need. The counts come from
+# the index-stats sources (Postgres chunk rows, the active generation's Neo4j graph) and
+# are cached: a scrape only reads the cache and, when it is older than the TTL, starts
+# one background refresh. Runtime-managed internal corpora (`meta.system_kind`, e.g.
+# Recall) are excluded.
+
+CORPUS_SIZE_CACHE_TTL_S = 300.0
+# A refresh that has not finished in this long is abandoned; the next scrape retries.
+CORPUS_SIZE_REFRESH_TIMEOUT_S = 60.0
+
+
+@dataclass(frozen=True, slots=True)
+class CorpusIndexSize:
+    """One corpus's size. Graph counts are None when unknown (no graph generation, or the
+    graph store did not answer): the series is then absent rather than a false zero."""
+
+    corpus_id: str
+    chunks: int
+    graph_entities: int | None = None
+    graph_relationships: int | None = None
+
+
+async def load_corpus_index_sizes() -> list[CorpusIndexSize]:
+    """Read every operator corpus's size: one Postgres aggregate plus one light Neo4j count
+    per corpus whose active generation has a graph."""
+    from server.config import load_config
+    from server.db.neo4j import Neo4jClient
+    from server.db.postgres import PostgresClient
+    from server.indexing.generations import generation_from_corpus_row, graph_repo_id_of
+
+    cfg = load_config()
+    pg = PostgresClient(cfg.indexing.postgres_url, schema_mode="control")
+    await pg.connect()
+    try:
+        corpora = [row for row in await pg.list_corpora() if not (row.get("meta") or {}).get("system_kind")]
+        chunk_counts = await pg.count_chunks_by_corpus()
+    finally:
+        await pg.disconnect()
+
+    sizes: list[CorpusIndexSize] = []
+    for row in corpora:
+        corpus_id = str(row["repo_id"])
+        entities: int | None = None
+        relationships: int | None = None
+        try:
+            graph_repo_id = graph_repo_id_of(generation_from_corpus_row(row))
+        except Exception:
+            graph_repo_id = None  # tombstoned or corrupt manifest: graph size unknown
+        if graph_repo_id:
+            neo4j = Neo4jClient(
+                cfg.graph_storage.neo4j_uri,
+                cfg.graph_storage.neo4j_user,
+                cfg.graph_storage.resolve_password(),
+                database=cfg.graph_storage.resolve_database(corpus_id),
+            )
+            try:
+                await neo4j.connect()
+                entities, relationships = await neo4j.get_graph_size(graph_repo_id)
+            except Exception:
+                entities, relationships = None, None
+            finally:
+                try:
+                    await neo4j.disconnect()
+                except Exception:
+                    pass
+        sizes.append(
+            CorpusIndexSize(
+                corpus_id=corpus_id,
+                chunks=int(chunk_counts.get(corpus_id, 0)),
+                graph_entities=entities,
+                graph_relationships=relationships,
+            )
+        )
+    return sizes
+
+
+class CorpusIndexSizeCollector:
+    """`tribrid_corpus_chunks`, `tribrid_corpus_graph_entities` and
+    `tribrid_corpus_graph_relationships`, labelled by corpus.
+
+    `collect()` runs on the event loop at every scrape and never queries a store: it serves
+    the last snapshot. `schedule_refresh()` (called by the `/metrics` route) starts one
+    background reload when the snapshot is older than `ttl_s`. A failed reload clears the
+    snapshot, so an unreadable registry reads as "no data", not as the last good numbers.
+    """
+
+    def __init__(
+        self,
+        *,
+        loader: Callable[[], Awaitable[list[CorpusIndexSize]]] = load_corpus_index_sizes,
+        ttl_s: float = CORPUS_SIZE_CACHE_TTL_S,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._loader = loader
+        self._ttl_s = float(ttl_s)
+        self._clock = clock
+        self._snapshot: tuple[CorpusIndexSize, ...] = ()
+        self._fetched_at: float | None = None
+        self._refresh_task: asyncio.Task[None] | None = None
+        self.refresh_count = 0
+
+    def is_stale(self) -> bool:
+        return self._fetched_at is None or (self._clock() - self._fetched_at) >= self._ttl_s
+
+    async def refresh(self) -> None:
+        """Reload now (the background task's body; tests await it directly)."""
+        self.refresh_count += 1
+        try:
+            sizes = await asyncio.wait_for(self._loader(), timeout=CORPUS_SIZE_REFRESH_TIMEOUT_S)
+        except Exception:
+            sizes = []
+        self._snapshot = tuple(sizes)
+        self._fetched_at = self._clock()
+
+    def schedule_refresh(self) -> asyncio.Task[None] | None:
+        """Start one background refresh if the snapshot is stale and none is running."""
+        if not self.is_stale():
+            return None
+        if self._refresh_task is not None and not self._refresh_task.done():
+            return self._refresh_task
+        self._refresh_task = asyncio.get_running_loop().create_task(self.refresh())
+        return self._refresh_task
+
+    def collect(self) -> Iterator[GaugeMetricFamily]:
+        snapshot = self._snapshot
+        chunks = GaugeMetricFamily(
+            "tribrid_corpus_chunks", "Indexed chunk rows per corpus (cached up to 5 min).", labels=["corpus"]
+        )
+        entities = GaugeMetricFamily(
+            "tribrid_corpus_graph_entities",
+            "Graph entities in the corpus's active generation (cached up to 5 min).",
+            labels=["corpus"],
+        )
+        relationships = GaugeMetricFamily(
+            "tribrid_corpus_graph_relationships",
+            "Entity-to-entity relationships in the corpus's active generation (cached up to 5 min).",
+            labels=["corpus"],
+        )
+        for size in snapshot:
+            chunks.add_metric([size.corpus_id], float(size.chunks))
+            if size.graph_entities is not None:
+                entities.add_metric([size.corpus_id], float(size.graph_entities))
+            if size.graph_relationships is not None:
+                relationships.add_metric([size.corpus_id], float(size.graph_relationships))
+        for family in (chunks, entities, relationships):
+            if family.samples:
+                yield family
+
+    def describe(self) -> Iterator[GaugeMetricFamily]:
+        # Registration must not call collect(): names only, so registering never reads a store.
+        yield GaugeMetricFamily("tribrid_corpus_chunks", "", labels=["corpus"])
+        yield GaugeMetricFamily("tribrid_corpus_graph_entities", "", labels=["corpus"])
+        yield GaugeMetricFamily("tribrid_corpus_graph_relationships", "", labels=["corpus"])
+
+
+CORPUS_INDEX_SIZES = CorpusIndexSizeCollector()
+REGISTRY.register(CORPUS_INDEX_SIZES)
+
+
+# --------------------------------------------------------------------------------------
 # Pre-initialize labelled metrics
 # --------------------------------------------------------------------------------------
 #
@@ -608,8 +907,6 @@ _INDEX_STAGES = (
     "postgres_upsert_chunks",
     "qdrant_write_chunks",
     "generation_commit",
-    "neo4j_upsert_document_chunks",
-    "neo4j_upsert_semantic_graph",
     "semantic_kg",
 )
 
@@ -701,6 +998,12 @@ for _outcome in _RERANKER_MINE_OUTCOMES:
 
 for _outcome in _RERANKER_PROMOTION_OUTCOMES:
     RERANKER_PROMOTIONS_TOTAL.labels(outcome=_outcome)
+
+# Feedback labels are closed vocabularies, so every series exists (at 0) from process start.
+# The chat series are keyed by gateway alias and appear with the first request per alias.
+for _signal in FEEDBACK_SIGNALS:
+    for _surface in ("chat", "search"):
+        FEEDBACK_EVENTS_TOTAL.labels(signal=_signal, surface=_surface)
 
 
 @contextmanager

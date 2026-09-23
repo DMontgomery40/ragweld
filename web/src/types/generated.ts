@@ -947,10 +947,30 @@ export interface EvalDoc {
   file_path: string;
   /** Optional start line for the retrieved span */
   start_line?: number | null; // default: None
+  /** End line of the retrieved span */
+  end_line?: number | null; // default: None
+  /** First page of the retrieved span (paged documents) */
+  page_start?: number | null; // default: None
+  /** Last page of the retrieved span (paged documents) */
+  page_end?: number | null; // default: None
   /** Retrieval score (post-fusion) */
   score: number;
   /** Retrieval source (vector/sparse/graph) */
   source?: string | null; // default: None
+  /** How this chunk scored: location = overlaps an expected page/line span (hit); file = in an expected file that has no location (hit); outside_location = expected file, wrong span; no_page_provenance = expected file with a page span but the chunk carries no page data; none = not an expected file. */
+  match?: "location" | "file" | "outside_location" | "no_page_provenance" | "none"; // default: "none"
+}
+
+/** Where inside one expected file the answer lives: a page range (paged documents) or a line range.  A retrieved chunk satisfies the expectation only when it comes from ``path`` and its page span (PDF provenance) or line span overlaps ``start..end`` (inclusive, 1-based). */
+export interface EvalExpectedLocation {
+  /** The expected path this location refines (one of expected_paths) */
+  path: string;
+  /** page = document pages (PDF provenance); line = source/markdown lines */
+  unit: "page" | "line";
+  /** First page or line of the expected span (1-based, inclusive) */
+  start: number;
+  /** Last page or line of the expected span (1-based, inclusive) */
+  end: number;
 }
 
 /** Aggregated retrieval metrics from an evaluation run. */
@@ -967,6 +987,8 @@ export interface EvalMetrics {
   precision_at_5: number;
   /** NDCG at top 10 */
   ndcg_at_10: number;
+  /** Mean average precision over the top 5 chunks (None on runs scored before chunk-level scoring) */
+  map_at_5?: number | null; // default: None
   /** 50th percentile latency in ms */
   latency_p50_ms: number;
   /** 95th percentile latency in ms */
@@ -985,14 +1007,18 @@ export interface EvalResult {
   retrieved_paths: string[];
   /** File paths that should have been retrieved */
   expected_paths: string[];
-  /** Top retrieved file paths (ranked, truncated for UI) */
+  /** Page/line spans the entry expected, per expected path */
+  expected_locations?: EvalExpectedLocation[];
+  /** Files of the top final-k retrieved chunks (ranked, de-duplicated, for display) */
   top_paths?: string[];
   /** Top-1 retrieved file path (0 or 1 items) */
   top1_path?: string[];
-  /** Whether top-1 contained any expected path */
+  /** Whether the top-1 chunk satisfied an expectation */
   top1_hit?: boolean; // default: False
-  /** Whether top-k contained any expected path */
+  /** Whether any of the top final-k chunks satisfied an expectation */
   topk_hit?: boolean; // default: False
+  /** True when the expectations cannot discriminate (no expectations, or file-only expectations covering every indexed document); the entry is excluded from the run's headline metrics. */
+  uninformative?: boolean; // default: False
   /** Reciprocal rank for this entry */
   reciprocal_rank: number;
   /** Recall for this entry */
@@ -1025,6 +1051,8 @@ export interface EvalRunMeta {
   mrr?: number | null; // default: None
   /** Total questions evaluated */
   total: number;
+  /** Entries excluded from headline metrics (expectations cannot discriminate) */
+  uninformative_count?: number; // default: 0
   /** Total run duration (seconds) */
   duration_secs: number;
   /** Whether config snapshot is present */
@@ -1065,6 +1093,17 @@ export interface EvaluationConfig {
   ragas_judge_timeout_s?: number; // default: 600
   /** Output token budget for eval judges: the Ragas judge alias and the Promptfoo llm-rubric grader. Independent of chat.max_tokens because faithfulness statement lists and reasoning-capable aliases need more room than a chat answer; a truncated verdict fails the run closed. */
   judge_max_tokens?: number; // default: 4096
+}
+
+/** Public error detail (HTTP 409): the rated event failed or was aborted, so it has no answer to rate. */
+export interface FeedbackEventNotAnsweredDetail {
+  code?: "feedback_event_not_answered"; // default: "feedback_event_not_answered"
+  /** The rated event */
+  event_id: string;
+  /** How the event ended (never ok) */
+  outcome: "ok" | "retrieval_error" | "gateway_error" | "timeout" | "cancelled" | "client_disconnect";
+  /** Stable, non-sensitive summary */
+  message: string;
 }
 
 /** Public error detail (HTTP 409) when indexing.figures.vision_model cannot be used. */
@@ -2845,7 +2884,7 @@ export interface SyntheticConfig {
   quality_gate?: SyntheticQualityGateConfig;
   /** LLM generation parameters for synthetic pipeline */
   generator?: SyntheticGeneratorConfig;
-  /** LLM judge parameters for synthetic curation */
+  /** System One judge thresholds for synthetic curation */
   judge?: SyntheticJudgeConfig;
 }
 
@@ -2861,18 +2900,18 @@ export interface SyntheticGeneratorConfig {
   evidence_quote_max_chars?: number; // default: 200
   /** Max characters for expected answer field */
   expected_answer_max_chars?: number; // default: 400
-  /** Max lines of source chunk content sent as context to generator/judge */
+  /** Max lines of source chunk content sent as context to the generator */
   source_excerpt_max_lines?: number; // default: 80
-  /** Concurrent generator/judge requests sent to the LiteLLM gateway per synthetic run. Forced to 1 when the selected alias is the single-stream local vLLM serving row. */
+  /** Concurrent generator requests sent to the LiteLLM gateway per synthetic run. Forced to 1 when the selected alias is the single-stream local vLLM serving row. */
   concurrency?: number; // default: 4
 }
 
-/** LLM judge parameters for synthetic curation. */
+/** System One curation of generated eval rows (the backend is ``system_one``).  Every grounded row is judged with typed Noul questions; a row is kept only when each gated noul (the probability of yes) reaches its minimum. */
 export interface SyntheticJudgeConfig {
-  /** Temperature for synthetic judge LLM calls */
-  temperature?: number; // default: 0.0
-  /** Max tokens for judge LLM response */
-  max_tokens?: number; // default: 400
+  /** Minimum probability that a real reader would ask the question about the document's subject (not cover, title-page, report-number or filename trivia, and understandable without the source) */
+  reader_question_min?: number; // default: 0.7
+  /** Minimum probability that the located evidence quote, not the file name or path, supports the expected answer to the question */
+  answer_supported_min?: number; // default: 0.7
 }
 
 /** Quality gate thresholds for synthetic data evaluation. */
@@ -2903,13 +2942,12 @@ export interface SyntheticRunStartRequest {
   max_source_chunks?: number | null; // default: 300
   max_pairs?: number | null; // default: 200
   pairs_per_source?: number | null; // default: 2
+  /** Judge every grounded row with System One (system_one) and keep it only when its nouls reach synthetic.judge's minimums. */
   curate_enabled?: boolean; // default: True
-  curate_threshold?: number; // default: 7.0
   include_expected_answer?: boolean; // default: True
   include_tags?: boolean; // default: True
   seed?: number | null; // default: 1337
   generator_model: string;
-  judge_model: string;
 }
 
 export interface SyntheticRunSummary {
@@ -2920,13 +2958,18 @@ export interface SyntheticRunSummary {
   items_rejected_ungrounded?: number; // default: 0
   /** Rows dropped for unparseable output, self-referential questions, or exceeding configured limits. */
   items_rejected_malformed?: number; // default: 0
-  /** Grounded rows handed to the judge. */
+  /** Grounded rows judged by System One. */
   items_curated_in?: number; // default: 0
-  /** Rows kept after the judge. */
+  /** Rows kept after the System One judge. */
   items_curated_out?: number; // default: 0
   /** Reranker triplets mined from the quality-gate retrieval results (triplets/full_stack recipes). */
   triplets_mined?: number; // default: 0
-  avg_judge_score?: number | null; // default: None
+  /** Mean probability, over judged rows, that a real reader would ask the question. */
+  mean_reader_question_noul?: number | null; // default: None
+  /** Mean probability, over judged rows, that the located evidence supports the expected answer. */
+  mean_answer_supported_noul?: number | null; // default: None
+  /** Mean probability, over judged rows, that the question copies distinctive cue words that let a keyword search find the answer (reported, not gated). */
+  mean_answer_cued_noul?: number | null; // default: None
   quality_top1_accuracy?: number | null; // default: None
   quality_topk_accuracy?: number | null; // default: None
   quality_mrr?: number | null; // default: None
@@ -2946,6 +2989,24 @@ export interface SyntheticUnreadableRun {
   corpus_id?: string | null; // default: None
 }
 
+/** Which System One endpoint answers Ragweld's typed judgments, and how it is called. */
+export interface SystemOneConfig {
+  /** System One backend: 'typesafe' calls TypeSafe's hosted Jev (TYPESAFE_API_KEY); 'laya' calls a self-hosted laya-serve (offline, no credential). Both speak POST /v1/systemone. */
+  provider?: "typesafe" | "laya"; // default: "typesafe"
+  /** API root of the TypeSafe endpoint used when provider='typesafe'. */
+  typesafe_base_url?: string; // default: "https://api.typesafe.ai"
+  /** API root of the self-hosted laya-serve used when provider='laya'. */
+  laya_base_url?: string; // default: "http://127.0.0.1:58180"
+  /** Model named in every request. TypeSafe needs a Jev model id (jev-latest). laya-serve honours a checkpoint name (english, multilingual, typed-decisions) and routes any other value by language. */
+  model?: string; // default: "jev-latest"
+  /** Total budget per System One call in seconds, including retries after 408/429/5xx. */
+  timeout_s?: number; // default: 30.0
+  /** Concurrent System One requests one caller (a rerank, a synthetic run) keeps in flight. TypeSafe allows 1,200 requests per minute per key. */
+  max_concurrency?: number; // default: 16
+  /** Retries after a 408, 429 or 5xx (including 529 Overloaded) or a connection failure; 0 disables. */
+  max_retries?: number; // default: 3
+}
+
 /** System prompts for LLM interactions - affects RAG pipeline behavior.  These prompts control how LLMs behave during query processing, code analysis, and result generation. Changes here can significantly impact RAG accuracy. */
 export interface SystemPromptsConfig {
   /** Main conversational AI system prompt for answering database questions */
@@ -2962,8 +3023,6 @@ export interface SystemPromptsConfig {
   semantic_kg_extraction?: string; // default: "You are a top-tier algorithm designed for extra..."
   /** Analyze eval regressions with skeptical approach - avoid false explanations */
   eval_analysis?: string; // default: "You are an expert RAG (Retrieval-Augmented Gene..."
-  /** Judge prompt for synthetic eval row curation and quality filtering */
-  synthetic_judge?: string; // default: "You are a strict evaluator for synthetic retrie..."
   /** Generator prompt for grounded synthetic eval rows. Tokens {num_pairs}, {question_max_chars}, {expected_answer_max_chars} and {evidence_quote_max_chars} are filled from the request and synthetic.generator. */
   synthetic_generator?: string; // default: "You write retrieval-evaluation questions for a ..."
   /** System prompt for the LiteLLM-gateway listwise reranker (reranking.reranker_cloud_provider=litellm). */
@@ -4078,6 +4137,8 @@ export interface EvalDatasetItem {
   question: string;
   /** File paths that should be retrieved (relative or absolute) */
   expected_paths: string[];
+  /** Optional page/line span per expected path. A path with a location is only hit by a chunk overlapping that span; a path without one is hit by any chunk of the file. */
+  expected_locations?: EvalExpectedLocation[];
   /** Expected answer if testing generation */
   expected_answer?: string | null;
   /** Verbatim span of the expected document that supports the answer (grounding provenance written by the grounded_qa provider; empty for hand-written rows). */
@@ -4103,6 +4164,8 @@ export interface EvalObservabilitySummaryResponse {
   freshness_minutes?: number | null;
   /** Question count for the latest eval run. */
   total_questions?: number;
+  /** Latest-run questions excluded from the headline metrics (expectations cannot discriminate). */
+  uninformative_questions?: number;
   /** Whether a comparison-ready pair of runs exists for AI analysis. */
   ai_comparison_ready?: boolean;
   top1_accuracy?: ObservabilityMetricDelta;
@@ -4152,13 +4215,15 @@ export interface EvalRun {
   config?: Record<string, unknown>;
   /** Total questions evaluated */
   total?: number;
-  /** Count of top-1 hits */
+  /** Entries excluded from headline metrics because their expectations cannot discriminate */
+  uninformative_count?: number;
+  /** Count of top-1 hits among scored (informative) entries */
   top1_hits?: number;
-  /** Count of top-k hits */
+  /** Count of top-k hits among scored (informative) entries */
   topk_hits?: number;
-  /** Top-1 accuracy */
+  /** Top-1 accuracy over scored entries (total - uninformative_count) */
   top1_accuracy?: number;
-  /** Top-k accuracy */
+  /** Top-k accuracy over scored entries (total - uninformative_count) */
   topk_accuracy?: number;
   /** Total run duration (seconds) */
   duration_secs?: number;
@@ -4200,22 +4265,33 @@ export interface EvalTestRequest {
   question: string;
   /** Expected file paths to retrieve */
   expected_paths: string[];
+  /** Optional page/line span per expected path (same contract as EvalDatasetItem) */
+  expected_locations?: EvalExpectedLocation[];
   /** Optional override for multi-query */
   use_multi?: boolean | null;
   /** Optional override for final-k */
   final_k?: number | null;
 }
 
-/** Request payload for POST /api/feedback.  Supports: - Learning reranker feedback correlation: event_id + signal (+ optional doc_id/note) - UI meta feedback: rating (+ optional comment/timestamp/context) */
+/** FastAPI response envelope for feedback on a failed or aborted event (HTTP 409). */
+export interface FeedbackEventNotAnsweredResponse {
+  detail: FeedbackEventNotAnsweredDetail;
+}
+
+/** Request payload for POST /api/feedback.  Supports: - Event feedback: event_id + signal (+ optional doc_id/note/chunk_ids/surface) - UI meta feedback: rating (+ optional comment/timestamp/context) */
 export interface FeedbackRequest {
   /** Event id returned by chat/search for correlation */
   event_id?: string | null;
-  /** Feedback signal (thumbsup|thumbsdown|click|noclick|note|star1..star5) */
+  /** Feedback signal (thumbsup|thumbsdown|click|note|star1..star5) */
   signal?: string | null;
   /** Document id/path (for click-based signals) */
   doc_id?: string | null;
   /** Optional freeform note */
   note?: string | null;
+  /** chunk_id of each chunk the rated answer cited (chat sources or search matches) */
+  chunk_ids?: string[];
+  /** Where the rated event happened. Optional when the event's query record is known (its kind is used); required otherwise */
+  surface?: "chat" | "search" | null;
   /** 1-5 star rating */
   rating?: number | null;
   /** Optional comment */
@@ -5137,6 +5213,8 @@ export interface SearchRequest {
 
 /** Response from tri-brid search. */
 export interface SearchResponse {
+  /** Correlation id of this search (its run id); POST /api/feedback with this event_id and surface=search to rate the results */
+  event_id: string;
   /** The original query */
   query: string;
   /** Ranked list of matching chunks */
@@ -5265,6 +5343,7 @@ export interface TriBridConfig {
   system_prompts?: SystemPromptsConfig;
   mcp?: MCPConfig;
   synthetic?: SyntheticConfig;
+  system_one?: SystemOneConfig;
   docker?: DockerConfig;
   document_viewer?: DocumentViewerConfig;
 }

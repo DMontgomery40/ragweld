@@ -4,8 +4,8 @@ This module follows the `runtime_gateway.py` pattern: domain-specific Pydantic
 models defined here, re-exported through `tribrid_config_model.py` so the type
 generation chain stays intact.
 
-Covers: quality gate config and generator/judge LLM parameters. Generator and
-judge failures fail the run; there is no fallback to record.
+Covers: quality gate config, generator LLM parameters and the System One judge
+thresholds. Generator and judge failures fail the run; there is no fallback to record.
 """
 
 from __future__ import annotations
@@ -67,33 +67,43 @@ class SyntheticGeneratorConfig(BaseModel):
         default=80,
         ge=10,
         le=500,
-        description="Max lines of source chunk content sent as context to generator/judge",
+        description="Max lines of source chunk content sent as context to the generator",
     )
     concurrency: int = Field(
         default=4,
         ge=1,
         le=16,
         description=(
-            "Concurrent generator/judge requests sent to the LiteLLM gateway per synthetic run. "
+            "Concurrent generator requests sent to the LiteLLM gateway per synthetic run. "
             "Forced to 1 when the selected alias is the single-stream local vLLM serving row."
         ),
     )
 
 
 class SyntheticJudgeConfig(BaseModel):
-    """LLM judge parameters for synthetic curation."""
+    """System One curation of generated eval rows (the backend is ``system_one``).
 
-    temperature: float = Field(
-        default=0.0,
+    Every grounded row is judged with typed Noul questions; a row is kept only when each
+    gated noul (the probability of yes) reaches its minimum.
+    """
+
+    reader_question_min: float = Field(
+        default=0.7,
         ge=0.0,
-        le=2.0,
-        description="Temperature for synthetic judge LLM calls",
+        le=1.0,
+        description=(
+            "Minimum probability that a real reader would ask the question about the document's subject "
+            "(not cover, title-page, report-number or filename trivia, and understandable without the source)"
+        ),
     )
-    max_tokens: int = Field(
-        default=400,
-        ge=100,
-        le=4000,
-        description="Max tokens for judge LLM response",
+    answer_supported_min: float = Field(
+        default=0.7,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Minimum probability that the located evidence quote, not the file name or path, supports the "
+            "expected answer to the question"
+        ),
     )
 
 
@@ -110,5 +120,5 @@ class SyntheticConfig(BaseModel):
     )
     judge: SyntheticJudgeConfig = Field(
         default_factory=SyntheticJudgeConfig,
-        description="LLM judge parameters for synthetic curation",
+        description="System One judge thresholds for synthetic curation",
     )

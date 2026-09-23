@@ -189,6 +189,13 @@
         "server/api/documents.py",
         "server/services/pdf_render.py"
       ]
+    },
+    "system_one": {
+      "disposition": "runtime_effect",
+      "evidence": [
+        "server/system_one/client.py",
+        "server/synthetic/providers/grounded_qa_provider.py"
+      ]
     }
   },
   "overrides": {},

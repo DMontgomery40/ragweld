@@ -6768,6 +6768,14 @@
             "description": "Expected answer if testing generation",
             "title": "Expected Answer"
           },
+          "expected_locations": {
+            "description": "Optional page/line span per expected path. A path with a location is only hit by a chunk overlapping that span; a path without one is hit by any chunk of the file.",
+            "items": {
+              "$ref": "#/components/schemas/EvalExpectedLocation"
+            },
+            "title": "Expected Locations",
+            "type": "array"
+          },
           "expected_paths": {
             "description": "File paths that should be retrieved (relative or absolute)",
             "items": {
@@ -6800,10 +6808,59 @@
       "EvalDoc": {
         "description": "Lightweight scored retrieval doc for eval drill-down.",
         "properties": {
+          "end_line": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "End line of the retrieved span",
+            "title": "End Line"
+          },
           "file_path": {
             "description": "Retrieved file path",
             "title": "File Path",
             "type": "string"
+          },
+          "match": {
+            "default": "none",
+            "description": "How this chunk scored: location = overlaps an expected page/line span (hit); file = in an expected file that has no location (hit); outside_location = expected file, wrong span; no_page_provenance = expected file with a page span but the chunk carries no page data; none = not an expected file.",
+            "enum": [
+              "location",
+              "file",
+              "outside_location",
+              "no_page_provenance",
+              "none"
+            ],
+            "title": "Match",
+            "type": "string"
+          },
+          "page_end": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Last page of the retrieved span (paged documents)",
+            "title": "Page End"
+          },
+          "page_start": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "First page of the retrieved span (paged documents)",
+            "title": "Page Start"
           },
           "score": {
             "description": "Retrieval score (post-fusion)",
@@ -6842,6 +6899,46 @@
         "title": "EvalDoc",
         "type": "object"
       },
+      "EvalExpectedLocation": {
+        "description": "Where inside one expected file the answer lives: a page range (paged documents) or a line range.\n\nA retrieved chunk satisfies the expectation only when it comes from ``path`` and its\npage span (PDF provenance) or line span overlaps ``start..end`` (inclusive, 1-based).",
+        "properties": {
+          "end": {
+            "description": "Last page or line of the expected span (1-based, inclusive)",
+            "minimum": 1.0,
+            "title": "End",
+            "type": "integer"
+          },
+          "path": {
+            "description": "The expected path this location refines (one of expected_paths)",
+            "minLength": 1,
+            "title": "Path",
+            "type": "string"
+          },
+          "start": {
+            "description": "First page or line of the expected span (1-based, inclusive)",
+            "minimum": 1.0,
+            "title": "Start",
+            "type": "integer"
+          },
+          "unit": {
+            "description": "page = document pages (PDF provenance); line = source/markdown lines",
+            "enum": [
+              "page",
+              "line"
+            ],
+            "title": "Unit",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "unit",
+          "start",
+          "end"
+        ],
+        "title": "EvalExpectedLocation",
+        "type": "object"
+      },
       "EvalMetrics": {
         "description": "Aggregated retrieval metrics from an evaluation run.",
         "properties": {
@@ -6856,6 +6953,20 @@
             "minimum": 0.0,
             "title": "Latency P95 Ms",
             "type": "number"
+          },
+          "map_at_5": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Mean average precision over the top 5 chunks (None on runs scored before chunk-level scoring)",
+            "title": "Map At 5"
           },
           "mrr": {
             "description": "Mean Reciprocal Rank",
@@ -7091,6 +7202,13 @@
             "minimum": 0.0,
             "title": "Total Questions",
             "type": "integer"
+          },
+          "uninformative_questions": {
+            "default": 0,
+            "description": "Latest-run questions excluded from the headline metrics (expectations cannot discriminate).",
+            "minimum": 0.0,
+            "title": "Uninformative Questions",
+            "type": "integer"
           }
         },
         "title": "EvalObservabilitySummaryResponse",
@@ -7177,6 +7295,14 @@
             "description": "The dataset entry's expected answer at evaluation time (kept with the trace for triplet mining).",
             "title": "Expected Answer"
           },
+          "expected_locations": {
+            "description": "Page/line spans the entry expected, per expected path",
+            "items": {
+              "$ref": "#/components/schemas/EvalExpectedLocation"
+            },
+            "title": "Expected Locations",
+            "type": "array"
+          },
           "expected_paths": {
             "description": "File paths that should have been retrieved",
             "items": {
@@ -7240,7 +7366,7 @@
           },
           "top1_hit": {
             "default": false,
-            "description": "Whether top-1 contained any expected path",
+            "description": "Whether the top-1 chunk satisfied an expectation",
             "title": "Top1 Hit",
             "type": "boolean"
           },
@@ -7253,7 +7379,7 @@
             "type": "array"
           },
           "top_paths": {
-            "description": "Top retrieved file paths (ranked, truncated for UI)",
+            "description": "Files of the top final-k retrieved chunks (ranked, de-duplicated, for display)",
             "items": {
               "type": "string"
             },
@@ -7262,8 +7388,14 @@
           },
           "topk_hit": {
             "default": false,
-            "description": "Whether top-k contained any expected path",
+            "description": "Whether any of the top final-k chunks satisfied an expectation",
             "title": "Topk Hit",
+            "type": "boolean"
+          },
+          "uninformative": {
+            "default": false,
+            "description": "True when the expectations cannot discriminate (no expectations, or file-only expectations covering every indexed document); the entry is excluded from the run's headline metrics.",
+            "title": "Uninformative",
             "type": "boolean"
           }
         },
@@ -7395,7 +7527,7 @@
           },
           "top1_accuracy": {
             "default": 0.0,
-            "description": "Top-1 accuracy",
+            "description": "Top-1 accuracy over scored entries (total - uninformative_count)",
             "maximum": 1.0,
             "minimum": 0.0,
             "title": "Top1 Accuracy",
@@ -7403,14 +7535,14 @@
           },
           "top1_hits": {
             "default": 0,
-            "description": "Count of top-1 hits",
+            "description": "Count of top-1 hits among scored (informative) entries",
             "minimum": 0.0,
             "title": "Top1 Hits",
             "type": "integer"
           },
           "topk_accuracy": {
             "default": 0.0,
-            "description": "Top-k accuracy",
+            "description": "Top-k accuracy over scored entries (total - uninformative_count)",
             "maximum": 1.0,
             "minimum": 0.0,
             "title": "Topk Accuracy",
@@ -7418,7 +7550,7 @@
           },
           "topk_hits": {
             "default": 0,
-            "description": "Count of top-k hits",
+            "description": "Count of top-k hits among scored (informative) entries",
             "minimum": 0.0,
             "title": "Topk Hits",
             "type": "integer"
@@ -7428,6 +7560,13 @@
             "description": "Total questions evaluated",
             "minimum": 0.0,
             "title": "Total",
+            "type": "integer"
+          },
+          "uninformative_count": {
+            "default": 0,
+            "description": "Entries excluded from headline metrics because their expectations cannot discriminate",
+            "minimum": 0.0,
+            "title": "Uninformative Count",
             "type": "integer"
           },
           "use_multi": {
@@ -7526,6 +7665,13 @@
             "minimum": 0.0,
             "title": "Total",
             "type": "integer"
+          },
+          "uninformative_count": {
+            "default": 0,
+            "description": "Entries excluded from headline metrics (expectations cannot discriminate)",
+            "minimum": 0.0,
+            "title": "Uninformative Count",
+            "type": "integer"
           }
         },
         "required": [
@@ -7562,6 +7708,14 @@
       "EvalTestRequest": {
         "description": "Request payload for testing a single eval_dataset entry.",
         "properties": {
+          "expected_locations": {
+            "description": "Optional page/line span per expected path (same contract as EvalDatasetItem)",
+            "items": {
+              "$ref": "#/components/schemas/EvalExpectedLocation"
+            },
+            "title": "Expected Locations",
+            "type": "array"
+          },
           "expected_paths": {
             "description": "Expected file paths to retrieve",
             "items": {
@@ -7724,9 +7878,74 @@
         "title": "EvaluationConfig",
         "type": "object"
       },
-      "FeedbackRequest": {
-        "description": "Request payload for POST /api/feedback.\n\nSupports:\n- Learning reranker feedback correlation: event_id + signal (+ optional doc_id/note)\n- UI meta feedback: rating (+ optional comment/timestamp/context)",
+      "FeedbackEventNotAnsweredDetail": {
+        "description": "Public error detail (HTTP 409): the rated event failed or was aborted, so it has no answer to rate.",
         "properties": {
+          "code": {
+            "const": "feedback_event_not_answered",
+            "default": "feedback_event_not_answered",
+            "title": "Code",
+            "type": "string"
+          },
+          "event_id": {
+            "description": "The rated event",
+            "title": "Event Id",
+            "type": "string"
+          },
+          "message": {
+            "description": "Stable, non-sensitive summary",
+            "title": "Message",
+            "type": "string"
+          },
+          "outcome": {
+            "description": "How the event ended (never ok)",
+            "enum": [
+              "ok",
+              "retrieval_error",
+              "gateway_error",
+              "timeout",
+              "cancelled",
+              "client_disconnect"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "outcome",
+          "message"
+        ],
+        "title": "FeedbackEventNotAnsweredDetail",
+        "type": "object"
+      },
+      "FeedbackEventNotAnsweredResponse": {
+        "description": "FastAPI response envelope for feedback on a failed or aborted event (HTTP 409).",
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/FeedbackEventNotAnsweredDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "FeedbackEventNotAnsweredResponse",
+        "type": "object"
+      },
+      "FeedbackRequest": {
+        "description": "Request payload for POST /api/feedback.\n\nSupports:\n- Event feedback: event_id + signal (+ optional doc_id/note/chunk_ids/surface)\n- UI meta feedback: rating (+ optional comment/timestamp/context)",
+        "properties": {
+          "chunk_ids": {
+            "description": "chunk_id of each chunk the rated answer cited (chat sources or search matches)",
+            "items": {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 200,
+            "title": "Chunk Ids",
+            "type": "array"
+          },
           "comment": {
             "anyOf": [
               {
@@ -7810,8 +8029,24 @@
                 "type": "null"
               }
             ],
-            "description": "Feedback signal (thumbsup|thumbsdown|click|noclick|note|star1..star5)",
+            "description": "Feedback signal (thumbsup|thumbsdown|click|note|star1..star5)",
             "title": "Signal"
+          },
+          "surface": {
+            "anyOf": [
+              {
+                "enum": [
+                  "chat",
+                  "search"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where the rated event happened. Optional when the event's query record is known (its kind is used); required otherwise",
+            "title": "Surface"
           },
           "timestamp": {
             "anyOf": [
@@ -14883,7 +15118,8 @@
                 "neo4j",
                 "litellm",
                 "vllm",
-                "index_manifests"
+                "index_manifests",
+                "laya"
               ]
             },
             "title": "Dependencies",
@@ -18112,6 +18348,11 @@
             "description": "Debug information if requested",
             "title": "Debug"
           },
+          "event_id": {
+            "description": "Correlation id of this search (its run id); POST /api/feedback with this event_id and surface=search to rate the results",
+            "title": "Event Id",
+            "type": "string"
+          },
           "fusion_method": {
             "description": "Fusion method used (rrf or weighted)",
             "title": "Fusion Method",
@@ -18142,6 +18383,7 @@
           }
         },
         "required": [
+          "event_id",
           "query",
           "matches",
           "fusion_method",
@@ -18510,7 +18752,7 @@
           },
           "judge": {
             "$ref": "#/components/schemas/SyntheticJudgeConfig",
-            "description": "LLM judge parameters for synthetic curation"
+            "description": "System One judge thresholds for synthetic curation"
           },
           "quality_gate": {
             "$ref": "#/components/schemas/SyntheticQualityGateConfig",
@@ -18587,7 +18829,7 @@
         "properties": {
           "concurrency": {
             "default": 4,
-            "description": "Concurrent generator/judge requests sent to the LiteLLM gateway per synthetic run. Forced to 1 when the selected alias is the single-stream local vLLM serving row.",
+            "description": "Concurrent generator requests sent to the LiteLLM gateway per synthetic run. Forced to 1 when the selected alias is the single-stream local vLLM serving row.",
             "maximum": 16.0,
             "minimum": 1.0,
             "title": "Concurrency",
@@ -18627,7 +18869,7 @@
           },
           "source_excerpt_max_lines": {
             "default": 80,
-            "description": "Max lines of source chunk content sent as context to generator/judge",
+            "description": "Max lines of source chunk content sent as context to the generator",
             "maximum": 500.0,
             "minimum": 10.0,
             "title": "Source Excerpt Max Lines",
@@ -18646,22 +18888,22 @@
         "type": "object"
       },
       "SyntheticJudgeConfig": {
-        "description": "LLM judge parameters for synthetic curation.",
+        "description": "System One curation of generated eval rows (the backend is ``system_one``).\n\nEvery grounded row is judged with typed Noul questions; a row is kept only when each\ngated noul (the probability of yes) reaches its minimum.",
         "properties": {
-          "max_tokens": {
-            "default": 400,
-            "description": "Max tokens for judge LLM response",
-            "maximum": 4000.0,
-            "minimum": 100.0,
-            "title": "Max Tokens",
-            "type": "integer"
-          },
-          "temperature": {
-            "default": 0.0,
-            "description": "Temperature for synthetic judge LLM calls",
-            "maximum": 2.0,
+          "answer_supported_min": {
+            "default": 0.7,
+            "description": "Minimum probability that the located evidence quote, not the file name or path, supports the expected answer to the question",
+            "maximum": 1.0,
             "minimum": 0.0,
-            "title": "Temperature",
+            "title": "Answer Supported Min",
+            "type": "number"
+          },
+          "reader_question_min": {
+            "default": 0.7,
+            "description": "Minimum probability that a real reader would ask the question about the document's subject (not cover, title-page, report-number or filename trivia, and understandable without the source)",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Reader Question Min",
             "type": "number"
           }
         },
@@ -19021,15 +19263,9 @@
         "properties": {
           "curate_enabled": {
             "default": true,
+            "description": "Judge every grounded row with System One (system_one) and keep it only when its nouls reach synthetic.judge's minimums.",
             "title": "Curate Enabled",
             "type": "boolean"
-          },
-          "curate_threshold": {
-            "default": 7.0,
-            "maximum": 10.0,
-            "minimum": 0.0,
-            "title": "Curate Threshold",
-            "type": "number"
           },
           "generator_model": {
             "minLength": 1,
@@ -19045,11 +19281,6 @@
             "default": true,
             "title": "Include Tags",
             "type": "boolean"
-          },
-          "judge_model": {
-            "minLength": 1,
-            "title": "Judge Model",
-            "type": "string"
           },
           "max_pairs": {
             "anyOf": [
@@ -19131,8 +19362,7 @@
         },
         "required": [
           "repo_id",
-          "generator_model",
-          "judge_model"
+          "generator_model"
         ],
         "title": "SyntheticRunStartRequest",
         "type": "object"
@@ -19145,15 +19375,9 @@
           },
           "curate_enabled": {
             "default": true,
+            "description": "Judge every grounded row with System One (system_one) and keep it only when its nouls reach synthetic.judge's minimums.",
             "title": "Curate Enabled",
             "type": "boolean"
-          },
-          "curate_threshold": {
-            "default": 7.0,
-            "maximum": 10.0,
-            "minimum": 0.0,
-            "title": "Curate Threshold",
-            "type": "number"
           },
           "generator_model": {
             "minLength": 1,
@@ -19169,11 +19393,6 @@
             "default": true,
             "title": "Include Tags",
             "type": "boolean"
-          },
-          "judge_model": {
-            "minLength": 1,
-            "title": "Judge Model",
-            "type": "string"
           },
           "max_pairs": {
             "anyOf": [
@@ -19251,37 +19470,23 @@
         },
         "required": [
           "corpus_id",
-          "generator_model",
-          "judge_model"
+          "generator_model"
         ],
         "title": "SyntheticRunStartRequest",
         "type": "object"
       },
       "SyntheticRunSummary": {
         "properties": {
-          "avg_judge_score": {
-            "anyOf": [
-              {
-                "maximum": 10.0,
-                "minimum": 0.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Avg Judge Score"
-          },
           "items_curated_in": {
             "default": 0,
-            "description": "Grounded rows handed to the judge.",
+            "description": "Grounded rows judged by System One.",
             "minimum": 0.0,
             "title": "Items Curated In",
             "type": "integer"
           },
           "items_curated_out": {
             "default": 0,
-            "description": "Rows kept after the judge.",
+            "description": "Rows kept after the System One judge.",
             "minimum": 0.0,
             "title": "Items Curated Out",
             "type": "integer"
@@ -19306,6 +19511,48 @@
             "minimum": 0.0,
             "title": "Items Rejected Ungrounded",
             "type": "integer"
+          },
+          "mean_answer_cued_noul": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Mean probability, over judged rows, that the question copies distinctive cue words that let a keyword search find the answer (reported, not gated).",
+            "title": "Mean Answer Cued Noul"
+          },
+          "mean_answer_supported_noul": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Mean probability, over judged rows, that the located evidence supports the expected answer.",
+            "title": "Mean Answer Supported Noul"
+          },
+          "mean_reader_question_noul": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Mean probability, over judged rows, that a real reader would ask the question.",
+            "title": "Mean Reader Question Noul"
           },
           "quality_failure_reason": {
             "anyOf": [
@@ -19469,6 +19716,68 @@
         "title": "SyntheticUnreadableRun",
         "type": "object"
       },
+      "SystemOneConfig": {
+        "description": "Which System One endpoint answers Ragweld's typed judgments, and how it is called.",
+        "properties": {
+          "laya_base_url": {
+            "default": "http://127.0.0.1:58180",
+            "description": "API root of the self-hosted laya-serve used when provider='laya'.",
+            "minLength": 1,
+            "title": "Laya Base Url",
+            "type": "string"
+          },
+          "max_concurrency": {
+            "default": 16,
+            "description": "Concurrent System One requests one caller (a rerank, a synthetic run) keeps in flight. TypeSafe allows 1,200 requests per minute per key.",
+            "maximum": 64.0,
+            "minimum": 1.0,
+            "title": "Max Concurrency",
+            "type": "integer"
+          },
+          "max_retries": {
+            "default": 3,
+            "description": "Retries after a 408, 429 or 5xx (including 529 Overloaded) or a connection failure; 0 disables.",
+            "maximum": 8.0,
+            "minimum": 0.0,
+            "title": "Max Retries",
+            "type": "integer"
+          },
+          "model": {
+            "default": "jev-latest",
+            "description": "Model named in every request. TypeSafe needs a Jev model id (jev-latest). laya-serve honours a checkpoint name (english, multilingual, typed-decisions) and routes any other value by language.",
+            "minLength": 1,
+            "title": "Model",
+            "type": "string"
+          },
+          "provider": {
+            "default": "typesafe",
+            "description": "System One backend: 'typesafe' calls TypeSafe's hosted Jev (TYPESAFE_API_KEY); 'laya' calls a self-hosted laya-serve (offline, no credential). Both speak POST /v1/systemone.",
+            "enum": [
+              "typesafe",
+              "laya"
+            ],
+            "title": "Provider",
+            "type": "string"
+          },
+          "timeout_s": {
+            "default": 30.0,
+            "description": "Total budget per System One call in seconds, including retries after 408/429/5xx.",
+            "maximum": 120.0,
+            "minimum": 1.0,
+            "title": "Timeout S",
+            "type": "number"
+          },
+          "typesafe_base_url": {
+            "default": "https://api.typesafe.ai",
+            "description": "API root of the TypeSafe endpoint used when provider='typesafe'.",
+            "minLength": 1,
+            "title": "Typesafe Base Url",
+            "type": "string"
+          }
+        },
+        "title": "SystemOneConfig",
+        "type": "object"
+      },
       "SystemPromptsConfig": {
         "description": "System prompts for LLM interactions - affects RAG pipeline behavior.\n\nThese prompts control how LLMs behave during query processing, code analysis,\nand result generation. Changes here can significantly impact RAG accuracy.",
         "properties": {
@@ -19530,12 +19839,6 @@
             "default": "You write retrieval-evaluation questions for a document corpus.\n\nYou receive one source document (its file path and an excerpt). Produce exactly {num_pairs} question/answer rows grounded only in that excerpt.\n\nRules:\n- Every question must be self-contained: name the people, organisations, dates, subjects or identifiers a reader needs to find this document without seeing it. Never write \"this email\", \"the excerpt\", \"the document above\" or similar.\n- Every question must be answerable from the excerpt alone; expected_answer is short and factual.\n- evidence_quote must be an exact, verbatim substring of the excerpt (copy it character for character). Rows whose quote is not found verbatim are discarded.\n- Prefer questions whose answer would not appear in most other documents of the corpus.\n- Limits: question <= {question_max_chars} characters, expected_answer <= {expected_answer_max_chars} characters, evidence_quote <= {evidence_quote_max_chars} characters.\n\nOutput JSON only: a JSON array of objects with keys \"question\", \"expected_answer\", \"evidence_quote\". No markdown, no prose.",
             "description": "Generator prompt for grounded synthetic eval rows. Tokens {num_pairs}, {question_max_chars}, {expected_answer_max_chars} and {evidence_quote_max_chars} are filled from the request and synthetic.generator.",
             "title": "Synthetic Generator",
-            "type": "string"
-          },
-          "synthetic_judge": {
-            "default": "You are a strict evaluator for synthetic retrieval QA rows.\n\nYou receive:\n- question\n- expected_paths\n- expected_answer\n- source_file_path\n- source_excerpt\n\nDecide whether this row is useful for retrieval evaluation.\n\nScoring rubric (0-10):\n- 9-10: specific, answerable from source, unambiguous grounding\n- 7-8: mostly grounded, minor ambiguity\n- 4-6: weak grounding, generic wording, low discriminative value\n- 0-3: invalid, contradictory, not answerable from source, or not self-contained\n\nSelf-contained means a reader who has NOT seen the source can tell what the question is about:\nit names a person, organization, place, document title, date, number, address or quoted phrase.\nA question whose only content is a pronoun plus a predicate (\"What did he write?\", \"Where did\nthey go?\", \"\u5f7c\u306f\u4f55\u3092\u98df\u3079\u307e\u3057\u305f\u304b\uff1f\", \"\uadf8\ub294 \ubb34\uc5c7\uc744 \uc37c\ub098\uc694?\", \"\u05de\u05d4 \u05d4\u05d5\u05d0 \u05db\u05ea\u05d1 \u05e9\u05dd?\") or that refers to\n\"this email\" / \"the document\" / \"the text above\" is NOT self-contained, in any language: score 0-3.\n\nOutput JSON only:\n{\n  \"score\": 0.0,\n  \"keep\": false,\n  \"reason\": \"short reason\"\n}\n\nRules:\n- Keep reason concise (<200 chars)\n- Set keep=true only when score >= 7.0\n- Never output markdown or prose outside JSON",
-            "description": "Judge prompt for synthetic eval row curation and quality filtering",
-            "title": "Synthetic Judge",
             "type": "string"
           }
         },
@@ -20832,6 +21135,9 @@
           "synthetic": {
             "$ref": "#/components/schemas/SyntheticConfig"
           },
+          "system_one": {
+            "$ref": "#/components/schemas/SystemOneConfig"
+          },
           "system_prompts": {
             "$ref": "#/components/schemas/SystemPromptsConfig"
           },
@@ -20932,6 +21238,9 @@
           },
           "synthetic": {
             "$ref": "#/components/schemas/SyntheticConfig"
+          },
+          "system_one": {
+            "$ref": "#/components/schemas/SystemOneConfig"
           },
           "system_prompts": {
             "$ref": "#/components/schemas/SystemPromptsConfig"
@@ -22809,7 +23118,7 @@
     },
     "/api/chat/stream": {
       "post": {
-        "description": "Stream a chat response using Server-Sent Events.\n\nReturns SSE events with:\n- type: \"text\" - content chunks as they arrive\n- type: \"done\" - final event with sources\n- type: \"error\" - if something goes wrong",
+        "description": "Stream a chat response using Server-Sent Events.\n\nReturns SSE events with:\n- type: \"status\" - stage \"generating\" once retrieval is done and the prompt is accepted;\n  the response headers go out with it, so no proxy waits on the model's first token\n- type: \"thinking\" - the model's reasoning, when ui.chat_stream_include_thinking is on\n  (never persisted, cached or part of the answer)\n- type: \"text\" - content chunks as they arrive\n- type: \"done\" - final event with sources\n- type: \"error\" - if something goes wrong\nand \": keepalive\" SSE comments while the model is silent.",
         "operationId": "chat_stream_api_chat_stream_post",
         "requestBody": {
           "content": {
@@ -26072,7 +26381,7 @@
     },
     "/api/feedback": {
       "post": {
-        "description": "Record user feedback for a prior chat/search event.\n\nSupports two payload shapes:\n- Learning reranker feedback: {event_id, signal, doc_id?, note?}\n- UI meta feedback: {rating, comment?, timestamp?, context?}",
+        "description": "Record user feedback for a prior chat/search event, or UI meta feedback.\n\nSupports two payload shapes:\n- Event feedback: {event_id, signal, doc_id?, note?, chunk_ids?, surface?}. Refused (409)\n  when the event failed or was aborted; `surface` defaults to the event's own kind.\n- UI meta feedback: {rating, comment?, timestamp?, context?}",
         "operationId": "post_feedback_api_feedback_post",
         "parameters": [
           {
@@ -26144,6 +26453,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedbackEventNotAnsweredResponse"
+                }
+              }
+            },
+            "description": "The rated event failed or was aborted, so it has no answer to rate."
           },
           "422": {
             "content": {
@@ -30118,7 +30437,7 @@
     },
     "/api/ready": {
       "get": {
-        "description": "Readiness probe.\n\nReturns dependency status for Postgres, Neo4j, LiteLLM, and vLLM.\nIf a corpus is specified via query params (repo_id/corpus_id), checks the\nconfigured Neo4j database for that corpus as well.",
+        "description": "Readiness probe.\n\nReturns dependency status for Postgres, Neo4j, LiteLLM, and vLLM, plus Laya while\nsystem_one.provider is laya.\nIf a corpus is specified via query params (repo_id/corpus_id), checks the\nconfigured Neo4j database for that corpus as well.",
         "operationId": "readiness_check_api_ready_get",
         "parameters": [
           {
