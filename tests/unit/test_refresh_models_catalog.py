@@ -385,6 +385,32 @@ def test_refresh_replaces_provider_direct_generation_rows_and_preserves_embeddin
 
 
 def test_refresh_migrates_the_preserved_litellm_reranker_to_latest_luna_pricing() -> None:
+    other_rerankers = [
+        {
+            "provider": "litellm",
+            "family": "gemini-3-pro",
+            "model": "google.gemini-3-pro",
+            "components": ["RERANK"],
+            "unit": "1k_tokens",
+            "context": 1_000_000,
+            "display_name": "Gemini listwise reranker",
+            "selection_roles": ["reranker_cloud"],
+            "selection_status": "runtime_selectable",
+            "selection_reason": None,
+        },
+        {
+            "provider": "litellm",
+            "family": "gpt-6-sol",
+            "model": "openai.gpt-6-sol",
+            "components": ["RERANK"],
+            "unit": "1k_tokens",
+            "context": 256_000,
+            "display_name": "Sol listwise reranker",
+            "selection_roles": ["reranker_cloud"],
+            "selection_status": "runtime_selectable",
+            "selection_reason": None,
+        },
+    ]
     catalog = {
         "currency": "USD",
         "sources": [],
@@ -403,6 +429,7 @@ def test_refresh_migrates_the_preserved_litellm_reranker_to_latest_luna_pricing(
                 "selection_roles": ["reranker_cloud"],
                 "selection_status": "runtime_selectable",
             },
+            *other_rerankers,
         ],
     }
 
@@ -422,7 +449,9 @@ def test_refresh_migrates_the_preserved_litellm_reranker_to_latest_luna_pricing(
     assert reranker["input_per_1k"] == 0.0001
     assert reranker["output_per_1k"] == 0.0005
     assert "openai.gpt-6-luna" in reranker["notes"]
-    assert stats.preserved_rows == 2
+    for original in other_rerankers:
+        assert _find(merged, original["model"]) == original
+    assert stats.preserved_rows == 4
     assert changed is True
 
 

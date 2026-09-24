@@ -199,6 +199,7 @@ a gateway reranker, a confidence gate, hydration and a semantic cache.
 ## Runtime truthfulness guardrail
 
 - Do not describe a model/provider/strategy as supported merely because it appears in `data/models.json`.
+- Derive concrete production model aliases from `deploy/proxmox/render_config.py`; when those constants change, remove superseded aliases from operator-facing production pages in the same docs update.
 - For model selection surfaces, distinguish:
   - broad catalog candidate
   - runtime-selectable today

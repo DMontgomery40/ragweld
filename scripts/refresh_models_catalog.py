@@ -382,18 +382,20 @@ def _refresh_litellm_reranker_rows(
         for model_id, feed in feed_models.items()
         if re.fullmatch(r"openai/gpt-[0-9]+(?:\.[0-9]+)*-luna", model_id)
     ]
-    reranker_rows = [
+    luna_reranker_rows = [
         row
         for row in preserved
-        if str(row.get("provider") or "").lower() == "litellm" and _components(row) == {"RERANK"}
+        if str(row.get("provider") or "").lower() == "litellm"
+        and _components(row) == {"RERANK"}
+        and re.fullmatch(r"openai\.gpt-[0-9]+(?:\.[0-9]+)*-luna", str(row.get("model") or ""))
     ]
-    if not reranker_rows:
+    if not luna_reranker_rows:
         return preserved
     if not luna_candidates:
         retained_aliases = {gateway_alias_for_openrouter_id(model_id) for model_id in feed_models}
         stale_aliases = sorted(
             str(row.get("model") or "")
-            for row in reranker_rows
+            for row in luna_reranker_rows
             if str(row.get("model") or "") not in retained_aliases
         )
         if stale_aliases:
@@ -412,7 +414,7 @@ def _refresh_litellm_reranker_rows(
     refreshed: list[dict[str, Any]] = []
     for original in preserved:
         row = copy.deepcopy(original)
-        if str(row.get("provider") or "").lower() == "litellm" and _components(row) == {"RERANK"}:
+        if original in luna_reranker_rows:
             row.update(
                 family=family,
                 model=alias,
