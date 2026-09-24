@@ -95,23 +95,45 @@ Behavior:
 - No-op runs make no commit when nothing changed.
 - The refresh workflow stages all three regenerated files — `data/models.json`, `web/public/models.json`, and `infra/litellm-config.yaml` — in the same commit. A lockstep test in `tests/unit/test_gateway_catalog.py` fails when the checked-in gateway config does not match the catalog, so a refresh that stages only the JSON can no longer land on main with a stale alias config.
 
+!!! note "Production aliases are refreshed-and-guarded, not left behind"
+    The refresh derives the production aliases from `deploy/proxmox/render_config.py` in the same process (`production_aliases()` in `scripts/refresh_models_catalog.py`) and fails the refresh closed when it would drop any of them: a partial new OpenAI generation — a GPT-7 Luna landing in the feed before a GPT-7 Sol — must never publish a gateway config without the routes production uses. The reranker route is handled inside the refresh itself: the preserved LiteLLM `RERANK` row on the newest OpenAI Luna generation is migrated to the latest retained Luna id and re-priced from the feed (`_refresh_litellm_reranker_rows`), so the cloud reranker lane keeps a current, priced route across catalog churn. A refresh with no retained Luna route that still shows a stale LiteLLM reranker row fails with a named error instead of leaving the lane unroutable.
+
+!!! note "Blocked GPT-4-class rows are refused at feed time, not pruned later"
+    Feed rows for GPT-4, GPT-4o, GPT-4.1 and their variants are rejected during normalization (`ensure_model_allowed` in `scripts/refresh_models_catalog.py`), so a blocked model can never re-enter the catalog, the generated gateway config, or a picker — even as a batch-priced variant. The 2026-09-24 refresh carried this forward: it re-priced the two OpenAI GPT-6 Luna tiers, moved the preserved LiteLLM listwise reranker from the retired `openai.gpt-5.6-luna` to `openai.gpt-6-luna`, refreshed the remaining Anthropic generations (adding Claude Opus 5.5 and Claude Sonnet 5 with batch variants, dropping the superseded Opus 4.x, Sonnet 4.x, Fable 5 and Claude 3 Haiku rows), and added ByteDance Seed 1.6/2.0, Arcee Trinity, Baidu ERNIE 4.5 VL, Fireworks Ember-1, Cohere Command A+, and Dots Studio rows. Distinct OpenAI product families (`o3`, `o4-mini:batch`, `gpt-audio-mini`, `gpt-chat-latest`) are never pruned with the numbered GPT generations — only the newest numbered generation per wave survives.
+
 ## Example
 
 ```bash
 BASE=http://127.0.0.1:8012
 curl -sS "$BASE/api/models/by-type/GEN" | jq '.[0]'
-curl -sS "$BASE/api/models/providers" | jq .
-curl -sS -X POST "$BASE/api/models/upsert" \
-  -H 'content-type: application/json' \
-  -d '{
-    "provider":"openai",
-    "family":"gen",
-    "model":"gpt-4.1-mini",
-    "unit":"1k_tokens",
-    "input_per_1k":0.0003,
-    "output_per_1k":0.0012
-  }' | jq .
+curl -sS "$BASE/api/models/providers" | jq '.[0:4]'
 ```
+
+=== "GET a provider slice"
+    ```bash
+    curl -sS "$BASE/api/models/providers/openrouter" | jq '.[0] | {model, gateway_alias, selection_status}'
+    ```
+
+=== "POST /api/models/upsert (validated, atomic)"
+    ```bash
+    curl -sS -X POST "$BASE/api/models/upsert" \
+      -H 'content-type: application/json' \
+      -d '{
+        "provider":"openai",
+        "family":"gen",
+        "model":"openai/gpt-6-luna",
+        "gateway_alias":"openai.gpt-6-luna",
+        "gateway_upstream":"openrouter/openai/gpt-6-luna",
+        "unit":"1k_tokens",
+        "input_per_1k":0.0001,
+        "output_per_1k":0.0005,
+        "components":["GEN"],
+        "selection_status":"catalog_only"
+      }' | jq .
+    ```
+
+!!! tip "Use `runtime_selectable` only for wired roles"
+    `selection_status: "runtime_selectable"` is reserved for rows the runtime actually wires (`cohere` rerank rows carrying `selection_roles: ["reranker_cloud"]` are the current example, at $2.00 per 1k searches). Generation rows stay `catalog_only`: their pricing and context feed estimates, but runtime selection comes from authenticated LiteLLM aliases rendered into `infra/litellm-config.yaml`. Setting `runtime_selectable` on a generation row would advertise a lane the app cannot serve.
 
 ```mermaid
 flowchart LR
@@ -120,4 +142,7 @@ flowchart LR
     API --> Validate["Server capability validation"]
     Upsert["POST /api/models/upsert"] --> Catalog
     Upsert --> Mirror["web/public/models.json (mirror)"]
+    Refresh["scripts/refresh_models_catalog.py (daily feed refresh)"] --> Catalog
+    Refresh --> AliasCfg["infra/litellm-config.yaml (regenerated in lockstep)"]
+    Catalog --> Sel["selection_* metadata (catalog_only vs runtime_selectable)"]
 ```
