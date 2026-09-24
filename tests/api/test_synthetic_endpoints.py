@@ -210,7 +210,8 @@ async def test_synthetic_start_rejects_direct_provider_model(client) -> None:
             "corpus_id": corpus_id,
             "provider": "grounded_qa",
             "recipe": "eval_dataset",
-            "generator_model": "openai/gpt-5.6-luna",
+            "generator_model": "openai/gpt-6-luna",
+            "judge_model": "litellm:synthetic-quality",
         },
     )
     assert res.status_code == 422
@@ -401,7 +402,7 @@ async def test_synthetic_publish_endpoints_blocked_when_quality_gate_failed(clie
 async def test_synthetic_run_without_indexed_chunks_fails_closed_and_blocks_publish(client, tmp_path: Path) -> None:
     """A registered corpus with nothing indexed cannot generate rows: the run fails with the exact
     reason before any gateway call, writes no artifacts, and the quality-gated publish endpoints stay closed."""
-    model = "litellm:openai.gpt-5.6-luna"
+    model = "litellm:openai.gpt-6-luna"
 
     corpus_id = f"pytest_synth_gate_art_{uuid.uuid4().hex[:8]}"
     run_dir: Path | None = None
@@ -457,7 +458,8 @@ async def test_synthetic_start_refuses_an_unknown_corpus_instead_of_using_global
             "corpus_id": f"pytest_synth_missing_{uuid.uuid4().hex[:8]}",
             "provider": "grounded_qa",
             "recipe": "eval_dataset",
-            "generator_model": "litellm:openai.gpt-5.6-luna",
+            "generator_model": "litellm:openai.gpt-6-luna",
+            "judge_model": "litellm:openai.gpt-6-luna",
         },
     )
     assert res.status_code == 404, res.text

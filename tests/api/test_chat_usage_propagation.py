@@ -196,7 +196,7 @@ def _usage_config(base_url: str) -> TriBridConfig:
         update={
             "enabled": True,
             "base_url": base_url,
-            "default_model": "openai.gpt-5.6-terra",
+            "default_model": "openai.gpt-6-sol",
         }
     )
     chat = config.chat.model_copy(update={"litellm": litellm})

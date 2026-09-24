@@ -57,10 +57,10 @@ async def test_source_and_checkpoint_payloads_live_only_until_their_file_work_dr
     recovery_gateway.mode = "held-section"
     cfg = load_config().model_copy(deep=True)
     cfg.chat.litellm.base_url = recovery_gateway.base
-    cfg.chat.litellm.default_model = "openai.gpt-5.6-sol"
+    cfg.chat.litellm.default_model = "openai.gpt-6-sol"
     cfg.graph_indexing.enabled = True
     cfg.graph_indexing.build_code_graph = False
-    cfg.graph_indexing.semantic_kg_llm_model = "openai.gpt-5.6-sol"
+    cfg.graph_indexing.semantic_kg_llm_model = "openai.gpt-6-sol"
     cfg.graph_indexing.semantic_kg_reasoning_effort = "low"
     cfg.graph_storage.include_communities = False
     cfg.system_prompts.semantic_kg_extraction = recovery.PROMPT
@@ -82,7 +82,7 @@ async def test_source_and_checkpoint_payloads_live_only_until_their_file_work_dr
         corpus_id=repo, policy="semantic", created_at=datetime.now(UTC),
         input_fingerprint=await index_api.graph_schema_input_fingerprint(corpus, cfg),
         schema_hash=graph_schema_hash(schema), schema=schema,
-        sample=GraphSchemaSample(chunk_ids=[], chunk_hashes=[]), model_alias="openai.gpt-5.6-sol",
+        sample=GraphSchemaSample(chunk_ids=[], chunk_hashes=[]), model_alias="openai.gpt-6-sol",
     )
     await pg.set_graph_schema_proposal(repo, proposal)
     qdrant = QdrantChunkStore(cfg)
@@ -213,10 +213,10 @@ async def test_real_index_owner_persists_reusable_successes_then_promotes_only_c
     recovery_gateway.failing_section = {"mission-a.txt": 0, "mission-b.txt": 2}[last_relative]
     cfg = load_config().model_copy(deep=True)
     cfg.chat.litellm.base_url = recovery_gateway.base
-    cfg.chat.litellm.default_model = "openai.gpt-5.6-sol"
+    cfg.chat.litellm.default_model = "openai.gpt-6-sol"
     cfg.graph_indexing.enabled = True
     cfg.graph_indexing.build_code_graph = False
-    cfg.graph_indexing.semantic_kg_llm_model = "openai.gpt-5.6-sol"
+    cfg.graph_indexing.semantic_kg_llm_model = "openai.gpt-6-sol"
     cfg.graph_indexing.semantic_kg_reasoning_effort = "low"
     cfg.graph_storage.include_communities = False
     cfg.system_prompts.semantic_kg_extraction = recovery.PROMPT
@@ -236,7 +236,7 @@ async def test_real_index_owner_persists_reusable_successes_then_promotes_only_c
         corpus_id=repo, policy="semantic", created_at=datetime.now(UTC),
         input_fingerprint=await index_api.graph_schema_input_fingerprint(corpus, cfg),
         schema_hash=graph_schema_hash(schema), schema=schema,
-        sample=GraphSchemaSample(chunk_ids=[], chunk_hashes=[]), model_alias="openai.gpt-5.6-sol",
+        sample=GraphSchemaSample(chunk_ids=[], chunk_hashes=[]), model_alias="openai.gpt-6-sol",
     )
     await pg.set_graph_schema_proposal(repo, proposal)
     qdrant = QdrantChunkStore(cfg)

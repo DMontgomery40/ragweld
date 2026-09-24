@@ -29,7 +29,7 @@ class _ModelsHandler(BaseHTTPRequestHandler):
             {
                 "data": [
                     {"id": "ragweld-local"},
-                    {"id": "openai.gpt-5.4-mini"},
+                    {"id": "openai.gpt-6-luna"},
                     {"id": "ragweld-local"},
                 ]
             }
@@ -85,7 +85,7 @@ async def test_discovery_is_authenticated_litellm_only_and_deduplicated() -> Non
             LiteLLMConfig(enabled=True, base_url=base_url, default_model="ragweld-local")
         )
 
-    assert [row["id"] for row in rows] == ["ragweld-local", "openai.gpt-5.4-mini"]
+    assert [row["id"] for row in rows] == ["ragweld-local", "openai.gpt-6-luna"]
     assert {row["source"] for row in rows} == {"litellm"}
     assert _ModelsHandler.authorization == "Bearer gateway-key"
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -9,11 +10,13 @@ import yaml
 from scripts.refresh_models_catalog import (
     AUTO_PRICING_TIERED,
     AUTO_PRICING_UNKNOWN,
+    CATALOG_PATH,
     OPENROUTER_SOURCE_PREFIX,
     RefreshStats,
     build_gateway_row,
     build_refreshed_catalog,
     normalize_openrouter_rows,
+    production_aliases,
     serialize_catalog,
     write_catalog_files,
 )
@@ -24,8 +27,10 @@ def test_refresh_removes_the_entire_blocked_family_and_keeps_unrelated_fours() -
     blocked = ["openai/gpt-4", "openai/gpt-4-turbo", "openai/gpt-4o-mini",
                "openai/gpt-4o-2024-08-06", "openai/gpt-4.1-nano:batch"]
     allowed = ["openai/gpt-5.6-luna", "anthropic/claude-sonnet-4.5", "meta-llama/llama-4-maverick"]
-    normalized = normalize_openrouter_rows([_feed_row(model) for model in blocked + allowed])
+    stats = RefreshStats()
+    normalized = normalize_openrouter_rows([_feed_row(model) for model in blocked + allowed], stats)
     assert set(normalized) == set(allowed)
+    assert stats.skipped_blocked_model == len(blocked)
 
 
 def test_refresh_keeps_only_the_latest_openai_gpt_generation() -> None:
@@ -38,6 +43,11 @@ def test_refresh_keeps_only_the_latest_openai_gpt_generation() -> None:
         _feed_row("openai/gpt-6-luna:batch"),
         _feed_row("openai/gpt-5.4-image-2"),
         _feed_row("openai/gpt-oss-120b"),
+        # Distinct product families are never pruned with the numbered GPT generations.
+        _feed_row("openai/o3"),
+        _feed_row("openai/o4-mini:batch"),
+        _feed_row("openai/gpt-audio-mini"),
+        _feed_row("openai/gpt-chat-latest"),
     ]
 
     stats = RefreshStats()
@@ -49,6 +59,10 @@ def test_refresh_keeps_only_the_latest_openai_gpt_generation() -> None:
         "openai/gpt-6-luna:batch",
         "openai/gpt-5.4-image-2",
         "openai/gpt-oss-120b",
+        "openai/o3",
+        "openai/o4-mini:batch",
+        "openai/gpt-audio-mini",
+        "openai/gpt-chat-latest",
     }
     assert stats.skipped_superseded == 3
 
@@ -192,6 +206,7 @@ def test_normalize_keeps_every_text_route_including_variants_and_counts_every_sk
         + stats.skipped_non_text
         + stats.skipped_missing_context
         + stats.skipped_invalid_alias
+        + stats.skipped_blocked_model
         + stats.skipped_superseded
     )
     assert accounted == 10, "every feed row is either normalized or counted as a skip"
@@ -327,6 +342,136 @@ def test_refresh_replaces_provider_direct_generation_rows_and_preserves_embeddin
     )
     assert not changed_again
     assert repeated == merged
+
+
+def test_refresh_migrates_the_preserved_litellm_reranker_to_latest_luna_pricing() -> None:
+    other_rerankers = [
+        {
+            "provider": "litellm",
+            "family": "gemini-3-pro",
+            "model": "google.gemini-3-pro",
+            "components": ["RERANK"],
+            "unit": "1k_tokens",
+            "context": 1_000_000,
+            "display_name": "Gemini listwise reranker",
+            "selection_roles": ["reranker_cloud"],
+            "selection_status": "runtime_selectable",
+            "selection_reason": None,
+        },
+        {
+            "provider": "litellm",
+            "family": "gpt-6-sol",
+            "model": "openai.gpt-6-sol",
+            "components": ["RERANK"],
+            "unit": "1k_tokens",
+            "context": 256_000,
+            "display_name": "Sol listwise reranker",
+            "selection_roles": ["reranker_cloud"],
+            "selection_status": "runtime_selectable",
+            "selection_reason": None,
+        },
+    ]
+    catalog = {
+        "currency": "USD",
+        "sources": [],
+        "models": [
+            _local_row(),
+            {
+                "provider": "litellm",
+                "family": "gpt-5.6-luna",
+                "model": "openai.gpt-5.6-luna",
+                "components": ["RERANK"],
+                "unit": "1k_tokens",
+                "context": 1_050_000,
+                "input_per_1k": 0.0002,
+                "output_per_1k": 0.0012,
+                "display_name": "Retired Luna reranker",
+                "selection_roles": ["reranker_cloud"],
+                "selection_status": "runtime_selectable",
+            },
+            *other_rerankers,
+        ],
+    }
+
+    merged, stats, changed = build_refreshed_catalog(
+        catalog,
+        [
+            _feed_row("openai/gpt-5.6-luna", prompt="0.0000002", completion="0.0000012"),
+            _feed_row("openai/gpt-6-luna", prompt="0.0000001", completion="0.0000005"),
+        ],
+        as_of_date="2026-09-23",
+    )
+
+    reranker = _find(merged, "openai.gpt-6-luna")
+    assert reranker["provider"] == "litellm"
+    assert reranker["family"] == "gpt-6-luna"
+    assert reranker["context"] == 128000
+    assert reranker["input_per_1k"] == 0.0001
+    assert reranker["output_per_1k"] == 0.0005
+    assert "openai.gpt-6-luna" in reranker["notes"]
+    for original in other_rerankers:
+        assert _find(merged, original["model"]) == original
+    assert stats.preserved_rows == 4
+    assert changed is True
+
+
+def test_refresh_fails_closed_when_latest_generation_has_no_luna_reranker_route() -> None:
+    catalog = {
+        "currency": "USD",
+        "sources": [],
+        "models": [
+            _local_row(),
+            {
+                "provider": "litellm",
+                "family": "gpt-6-luna",
+                "model": "openai.gpt-6-luna",
+                "components": ["RERANK"],
+                "unit": "1k_tokens",
+                "context": 1_050_000,
+                "input_per_1k": 0.0001,
+                "output_per_1k": 0.0005,
+                "display_name": "Current Luna reranker",
+            },
+        ],
+    }
+
+    with pytest.raises(RuntimeError, match="no retained OpenAI Luna route"):
+        build_refreshed_catalog(
+            catalog,
+            [_feed_row("openai/gpt-6-luna"), _feed_row("openai/gpt-7-astra")],
+            as_of_date="2026-09-23",
+        )
+
+
+def test_refresh_fails_closed_when_a_partial_generation_would_drop_a_production_alias() -> None:
+    catalog = {"currency": "USD", "sources": [], "models": [_local_row()]}
+    current = [_feed_row("openai/gpt-6-sol"), _feed_row("openai/gpt-6-luna")]
+
+    refreshed, _, _ = build_refreshed_catalog(
+        catalog, current, as_of_date="2026-09-24", required_aliases=("openai.gpt-6-sol",)
+    )
+    assert _find(refreshed, "openai/gpt-6-sol")["gateway_alias"] == "openai.gpt-6-sol"
+
+    # GPT-7 Luna lands before GPT-7 Sol: pruning keeps only GPT-7, so GPT-6 Sol would vanish.
+    with pytest.raises(RuntimeError, match=r"routes production still uses: \['openai.gpt-6-sol'\]"):
+        build_refreshed_catalog(
+            catalog,
+            [*current, _feed_row("openai/gpt-7-luna")],
+            as_of_date="2026-09-24",
+            required_aliases=("openai.gpt-6-sol",),
+        )
+
+
+def test_refresh_guards_the_production_aliases_and_the_committed_catalog_routes_them() -> None:
+    from deploy.proxmox import render_config
+
+    assert production_aliases() == (
+        render_config.PRODUCTION_MODEL_ALIAS,
+        render_config.PRODUCTION_CHAT_MODEL_ALIAS,
+        render_config.PRODUCTION_VISION_MODEL_ALIAS,
+    )
+    routed = {row.get("gateway_alias") for row in _rows(json.loads(CATALOG_PATH.read_text(encoding="utf-8")))}
+    assert set(production_aliases()) <= routed
 
 
 def test_refresh_removes_routes_that_left_the_feed_and_is_idempotent() -> None:

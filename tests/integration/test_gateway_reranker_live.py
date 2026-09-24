@@ -38,13 +38,12 @@ _QUERY = "Which plane management company did Barry Cohen consider switching to f
 _CANDIDATES = 50
 # Reasoning-capable aliases from three provider families with different reasoning protocols
 # (OpenAI accepts effort "none"; Google only "minimal"; DeepSeek ignores anything but "none"),
-# plus the operator's configured non-reasoning reranker, which must keep answering with the
-# control attached.
+# plus Haiku with reasoning disabled, which must keep answering with the control attached.
 _ALIASES = [
-    "openai.gpt-5.6-luna",
+    "openai.gpt-6-luna",
     "google.gemini-3.7-flash",
     "deepseek.deepseek-v4-flash",
-    "openai.gpt-4.1-nano",
+    "anthropic.claude-haiku-4.5",
 ]
 # One request per alias; this bound only guards against a stalled OpenRouter provider. The
 # operator's reranking.reranker_timeout (30 s by default) stays the production bound.
@@ -79,9 +78,8 @@ def _real_candidates(cfg: TriBridConfig) -> list[str]:
 async def test_reasoning_capable_alias_scores_fifty_real_candidates(alias: str) -> None:
     warm_gateway_catalog()
     cfg = TriBridConfig()
-    skip_reason = await _gateway_serves(cfg, alias)
-    if skip_reason:
-        pytest.skip(skip_reason)
+    unavailable = await _gateway_serves(cfg, alias)
+    assert unavailable is None, unavailable
     docs = _real_candidates(cfg)
     route = resolve_rerank_route(cfg, alias)
 

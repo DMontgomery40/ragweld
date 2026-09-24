@@ -19,7 +19,7 @@ from server.gateway_reasoning import (
     ("upstream", "provider"),
     [
         ("openrouter/google/gemini-3.7-flash", "google"),
-        ("openrouter/openai/gpt-5.6-luna", "openai"),
+        ("openrouter/openai/gpt-6-luna", "openai"),
         ("openrouter/deepseek/deepseek-v4-flash:batch", "deepseek"),
         ("openai/ragweld-local", None),
         ("", None),
@@ -33,7 +33,7 @@ def test_openrouter_provider_is_the_segment_after_the_prefix(upstream: str, prov
     ("upstream", "effort"),
     [
         # Measured 2026-09-02 (50 real candidates each): "none" answers with zero reasoning tokens.
-        ("openrouter/openai/gpt-5.6-luna", "none"),
+        ("openrouter/openai/gpt-6-luna", "none"),
         ("openrouter/openai/gpt-4.1-nano", "none"),
         ("openrouter/deepseek/deepseek-v4-flash", "none"),
         ("openrouter/anthropic/claude-haiku-4.5", "none"),
@@ -65,7 +65,7 @@ def test_lowest_reasoning_effort_is_only_defined_for_openrouter_upstreams(upstre
     ("effort", "upstream", "expected"),
     [
         ("minimal", "openrouter/google/gemini-3.5-flash-lite", {"reasoning": {"effort": "minimal"}}),
-        ("none", "openrouter/openai/gpt-5.6-luna", {"reasoning": {"effort": "none"}}),
+        ("none", "openrouter/openai/gpt-6-luna", {"reasoning": {"effort": "none"}}),
         ("low", "openai/ragweld-local", {"reasoning_effort": "low"}),
     ],
 )
@@ -78,7 +78,7 @@ def test_reasoning_body_fields_use_the_upstreams_protocol(
 def test_reasoning_model_params_are_the_sdk_form_of_the_same_fields() -> None:
     """``OpenAILLM(model_params=...)`` sends keyword arguments; OpenRouter's native object
     only reaches the request body through ``extra_body``."""
-    assert reasoning_model_params(reasoning_effort="medium", route_upstream="openrouter/openai/gpt-5.6-luna") == {
+    assert reasoning_model_params(reasoning_effort="medium", route_upstream="openrouter/openai/gpt-6-luna") == {
         "temperature": 0,
         "extra_body": {"reasoning": {"effort": "medium"}},
     }
@@ -88,7 +88,7 @@ def test_reasoning_model_params_are_the_sdk_form_of_the_same_fields() -> None:
     }
 
 
-@pytest.mark.parametrize(("effort", "upstream"), [("", "openrouter/openai/gpt-5.6-luna"), ("low", ""), ("  ", "  ")])
+@pytest.mark.parametrize(("effort", "upstream"), [("", "openrouter/openai/gpt-6-luna"), ("low", ""), ("  ", "  ")])
 def test_reasoning_body_fields_refuse_a_missing_effort_or_upstream(effort: str, upstream: str) -> None:
     with pytest.raises(RuntimeError, match="effort|upstream"):
         reasoning_body_fields(reasoning_effort=effort, route_upstream=upstream)

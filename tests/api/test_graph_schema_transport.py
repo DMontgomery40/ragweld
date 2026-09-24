@@ -37,7 +37,7 @@ async def _create_corpus(client: AsyncClient, path: Path, gateway_url: str) -> s
     chat = await client.patch(f"/api/config/chat?corpus_id={corpus_id}", json={"litellm": {"base_url": gateway_url}})
     assert chat.status_code == 200, chat.text
     graph = await client.patch(f"/api/config/graph_indexing?corpus_id={corpus_id}", json={
-        "enabled": True, "build_code_graph": False, "semantic_kg_llm_model": "openai.gpt-5.6-sol",
+        "enabled": True, "build_code_graph": False, "semantic_kg_llm_model": "openai.gpt-6-sol",
     })
     assert graph.status_code == 200, graph.text
     return corpus_id

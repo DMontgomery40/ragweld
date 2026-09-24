@@ -22,8 +22,8 @@ def test_policy_blocks_model_family_in_all_identity_forms(model: str) -> None:
 
 
 @pytest.mark.parametrize("model", [
-    "", "ragweld-local", "openai.gpt-5.6-luna", "openai/gpt-6",
-    "anthropic/claude-sonnet-4.5", "meta-llama/llama-4-maverick",
+    "", "ragweld-local", "openai.gpt-6-luna", "openai/gpt-6",
+    "anthropic/claude-sonnet-5", "meta-llama/llama-4-maverick",
     "mlx-community/Qwen3.8-27B-4bit", "text-embedding-3-small", "rerank-v3.5",
 ])
 def test_policy_preserves_other_model_families(model: str) -> None:
@@ -73,7 +73,7 @@ def test_clean_config_requires_an_explicit_cloud_reranker_selection() -> None:
 def test_graph_extraction_sdk_refuses_blocked_routes(blocked_field: str) -> None:
     from server.indexing.graphrag_pipeline import semantic_extraction_llm
 
-    route = dict(route_model="openai.gpt-5.6-luna", route_upstream="openrouter/openai/gpt-5.6-luna")
+    route = dict(route_model="openai.gpt-6-luna", route_upstream="openrouter/openai/gpt-6-luna")
     route[blocked_field] = "openai.gpt-4o-mini"
     with pytest.raises(ValueError, match="GPT-4-class models are blocked"):
         semantic_extraction_llm(**route, route_base_url="http://127.0.0.1:1/v1",
@@ -85,8 +85,8 @@ def test_graph_extraction_sdk_refuses_blocked_routes(blocked_field: str) -> None
 async def test_schema_sdk_refuses_blocked_identity_before_sampling(blocked_field: str) -> None:
     from server.indexing.graphrag_schema import derive_graph_schema_proposal
 
-    route = dict(model_alias="openai.gpt-5.6-luna", route_model="openai.gpt-5.6-luna",
-                 route_upstream="openrouter/openai/gpt-5.6-luna")
+    route = dict(model_alias="openai.gpt-6-luna", route_model="openai.gpt-6-luna",
+                 route_upstream="openrouter/openai/gpt-6-luna")
     route[blocked_field] = "openai.gpt-4.1-mini"
     with pytest.raises(ValueError, match="GPT-4-class models are blocked"):
         await derive_graph_schema_proposal(**route, corpus_id="nasa-apollo-11", chunks=[],

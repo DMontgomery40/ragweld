@@ -35,16 +35,16 @@ async function providerState(request: APIRequestContext): Promise<{
 
 async function configureCorpus(request: APIRequestContext, target: ExhaustiveCorpus): Promise<void> {
   await patchCorpusConfigSection(request, target.corpusId, 'chat', {
-    litellm: { base_url: providerBase, default_model: 'openai.gpt-5.6-sol' },
+    litellm: { base_url: providerBase, default_model: 'openai.gpt-6-sol' },
   });
   await patchCorpusConfigSection(request, target.corpusId, 'graph_indexing', {
     enabled: true,
     build_code_graph: false,
-    semantic_kg_llm_model: 'openai.gpt-5.6-sol',
+    semantic_kg_llm_model: 'openai.gpt-6-sol',
   });
   const models = await request.get(`${API_BASE}/chat/models?corpus_id=${encodeURIComponent(target.corpusId)}`);
   expect(models.ok(), await models.text()).toBeTruthy();
-  expect(await models.text()).toContain('openai.gpt-5.6-sol');
+  expect(await models.text()).toContain('openai.gpt-6-sol');
 }
 
 async function openSettings(page: Page): Promise<void> {
@@ -345,7 +345,7 @@ test('proposal reasoning persists every supported choice and reaches the provide
     const after = await providerState(request);
     expect(after.received).toBe(before.received + 1);
     expect(after.last_reasoning_effort).toBe(choice);
-    expect(after.last_model).toBe('openai.gpt-5.6-sol');
+    expect(after.last_model).toBe('openai.gpt-6-sol');
     await expect(kgEffort).toHaveValue('medium');
   }
   await effort.scrollIntoViewIfNeeded();

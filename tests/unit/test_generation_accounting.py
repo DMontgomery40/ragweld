@@ -42,8 +42,8 @@ def accounting_gateway(mode: str) -> Iterator[str]:
         def do_POST(self) -> None:  # noqa: N802
             request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             usage = dict(USAGE)
-            billed = mode not in {"missing", "mixed", "provisional"} or request["model"] == "openai.gpt-5.6-luna"
-            if mode == "failed" and request["model"] != "openai.gpt-5.6-luna":
+            billed = mode not in {"missing", "mixed", "provisional"} or request["model"] == "openai.gpt-6-luna"
+            if mode == "failed" and request["model"] != "openai.gpt-6-luna":
                 self.send_response(503)
                 self.send_header("Content-Length", "0")
                 self.end_headers()
@@ -152,7 +152,7 @@ async def test_benchmark_persists_each_call_and_aggregates_without_last_writer_w
     try:
         with accounting_gateway(mode) as base_url, start_request_observation(config=cfg, route_name="benchmark", path="/api/benchmark/run", method="POST") as obs:
             os.environ.update(LITELLM_API_KEY="accounting-key", LITELLM_BASE_URL=base_url)
-            result = await run_benchmark(prompt=QUESTION, models=["openai.gpt-5.6-luna", "openai.gpt-5.4-mini"], config=cfg, repo_id="accounting-corpus" if corpus_scoped else None)
+            result = await run_benchmark(prompt=QUESTION, models=["openai.gpt-6-luna", "openai.gpt-6-astra"], config=cfg, repo_id="accounting-corpus" if corpus_scoped else None)
             assert obs is not None
             first, second = result.results
             assert first.usage is not None and first.usage["total_tokens"] == 120

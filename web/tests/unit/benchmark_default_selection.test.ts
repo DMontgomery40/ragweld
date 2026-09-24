@@ -35,7 +35,7 @@ const ORDERED: ChatModelInfo[] = [
   model('ragweld-local', 'ragweld', 'Ragweld local (self-hosted)'),
   model('aion-labs.aion-2.0', 'aion-labs', 'AionLabs: Aion-2.0'),
   model('aion-labs.aion-3.0', 'aion-labs', 'AionLabs: Aion-3.0'),
-  model('openai.gpt-5.6-luna', 'openai', 'OpenAI: GPT-5.6 Luna'),
+  model('openai.gpt-6-luna', 'openai', 'OpenAI: GPT-6 Luna'),
 ];
 
 function capabilities(enabled: boolean): RuntimeCapabilitiesResponse {
@@ -100,7 +100,7 @@ test('the lane alias comes from capabilities, not from a name baked into the pag
 test('selection honours the requested count, skips blank and duplicate values, and never pads', () => {
   const lane = localLaneState(capabilities(false), readiness(true, 'disabled by configuration'));
   const rows = [ORDERED[0], { ...ORDERED[1], override: '', id: '' }, ORDERED[2], ORDERED[2], ORDERED[3]];
-  assert.deepEqual(defaultBenchmarkSelection(rows, lane, { count: 3 }), ['litellm:aion-labs.aion-3.0', 'litellm:openai.gpt-5.6-luna']);
+  assert.deepEqual(defaultBenchmarkSelection(rows, lane, { count: 3 }), ['litellm:aion-labs.aion-3.0', 'litellm:openai.gpt-6-luna']);
   assert.deepEqual(defaultBenchmarkSelection([ORDERED[0]], lane, {}), []);
 });
 
@@ -111,8 +111,8 @@ test('selection honours the requested count, skips blank and duplicate values, a
 // display order.
 test('the answering alias is the first default, and display order fills the rest', () => {
   const lane = localLaneState(capabilities(false), readiness(false, 'disabled'));
-  assert.deepEqual(defaultBenchmarkSelection(ORDERED, lane, { answeringAlias: 'openai.gpt-5.6-luna' }), [
-    'litellm:openai.gpt-5.6-luna',
+  assert.deepEqual(defaultBenchmarkSelection(ORDERED, lane, { answeringAlias: 'openai.gpt-6-luna' }), [
+    'litellm:openai.gpt-6-luna',
     'litellm:aion-labs.aion-2.0',
   ]);
 });

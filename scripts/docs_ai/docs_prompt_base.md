@@ -199,6 +199,19 @@ a gateway reranker, a confidence gate, hydration and a semantic cache.
 ## Runtime truthfulness guardrail
 
 - Do not describe a model/provider/strategy as supported merely because it appears in `data/models.json`.
+- Derive concrete production model aliases from `deploy/proxmox/render_config.py`; when those constants change, remove superseded aliases from operator-facing production pages in the same docs update.
+- Never rename a model inside a historical measurement, dated run, incident record, or other past-tense evidence; retired aliases remain correct when they identify what actually ran.
+  A page that already names a different model than its source for such evidence is wrong: restore the source's id.
+  The reranker verdict-budget drive of 2026-09-02 ran on `openai.gpt-5.6-luna`; the 2026-09-23 trailing-text
+  parse incident ran on `openai.gpt-6-luna` (both recorded in `server/retrieval/gateway_reranker.py`).
+- Present a model id as current only when it is a route in `infra/litellm-config.yaml`.
+- Quote test defaults from the tests themselves: live graph integration tests default `GRAPH_E2E_KG_MODEL`
+  to `openai.gpt-6-luna`.
+- Document only configuration fields that exist in the Pydantic model. The Synthetic Lab judge is System One
+  (`system_one.provider` / `system_one.model`); there is no `judge_model` field.
+- The docs autopilot that writes these pages is `scripts/docs_ai/run_ci_autopilot.py` ->
+  `generate_docs_from_diff.py`, configured by `OPENROUTER_API_KEY` and `DOCS_AUTOPILOT_MODEL`
+  (default `z-ai/glm-5.3-flash`); `docs_autopilot_enhanced.py` and `bootstrap_docs.py` are local tools.
 - For model selection surfaces, distinguish:
   - broad catalog candidate
   - runtime-selectable today

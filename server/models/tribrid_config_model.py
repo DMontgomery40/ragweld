@@ -2101,7 +2101,7 @@ class ModelCatalogEntry(BaseModel):
     gateway_upstream: str | None = Field(
         default=None,
         description=(
-            "LiteLLM litellm_params.model for gateway_alias (for example openrouter/openai/gpt-5.4-mini "
+            "LiteLLM litellm_params.model for gateway_alias (for example openrouter/openai/gpt-6-luna "
             "openai/ragweld-local for the vLLM serving path, or openai/text-embedding-3-small for native embeddings)."
         ),
     )
@@ -4079,6 +4079,8 @@ class SyntheticRunStartRequest(BaseModel):
     include_tags: bool = Field(default=True)
 
     seed: int | None = Field(default=1337)
+    # The only model a run names. Rows are judged by System One (`system_one.provider` /
+    # `system_one.model`, see curate_enabled), not by a gateway model: there is no judge_model.
     generator_model: str = Field(min_length=1)
 
     @field_validator("generator_model")

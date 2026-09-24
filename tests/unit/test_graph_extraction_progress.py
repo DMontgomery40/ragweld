@@ -44,7 +44,7 @@ def telemetry(**updates: object) -> GraphExtractionTelemetry:
         "semantic_relationships": 0, "from_chunk_relationships": 0,
         "outcome_version": "checkpoint_v1", "progress_owner_run_id": RUN,
         "progress_sequence": 0, "reused_chunks": 0, "cancelled_chunks": 0,
-        "unfinished_chunks": 0, "llm_model_alias": "openai.gpt-5.6-sol",
+        "unfinished_chunks": 0, "llm_model_alias": "openai.gpt-6-sol",
         **updates,
     })
 
@@ -152,7 +152,7 @@ def test_latency_refuses_incomplete_or_invalid_internal_v1_measurements(changes:
     run = summary(extraction).model_copy(update={"status": "complete"})
     assert run.graph_metadata is not None
     run.graph_metadata.extraction = extraction.model_copy(update=changes)
-    assert _measured_semantic_kg_seconds_per_chunk(run, alias="openai.gpt-5.6-sol") is None
+    assert _measured_semantic_kg_seconds_per_chunk(run, alias="openai.gpt-6-sol") is None
 
 
 @pytest.mark.parametrize("updates", [
@@ -342,10 +342,10 @@ def test_measured_worker_latency_excludes_checkpoint_hits(reused: int) -> None:
     extraction = telemetry(selected_chunks=4, attempted_chunks=4, succeeded_chunks=4,
                            reused_chunks=reused, worker_seconds=12 * (4 - reused))
     run = summary(extraction).model_copy(update={"status": "complete"})
-    measured = _measured_semantic_kg_seconds_per_chunk(run, alias="openai.gpt-5.6-sol")
+    measured = _measured_semantic_kg_seconds_per_chunk(run, alias="openai.gpt-6-sol")
     assert measured == (12 if reused < 4 else None)
-    assert _measured_semantic_kg_seconds_per_chunk(run, alias="openai.gpt-5.6-luna") is None
-    assert _measured_semantic_kg_seconds_per_chunk(run.model_copy(update={"status": "error"}), alias="openai.gpt-5.6-sol") is None
+    assert _measured_semantic_kg_seconds_per_chunk(run, alias="openai.gpt-6-luna") is None
+    assert _measured_semantic_kg_seconds_per_chunk(run.model_copy(update={"status": "error"}), alias="openai.gpt-6-sol") is None
 
 
 @pytest.mark.parametrize("suffix", [".txt", ".md", ".pdf", ".parquet"])

@@ -74,7 +74,7 @@ def _contract(integration_id: str):
     raise AssertionError(f"no integration contract {integration_id!r}")
 
 
-async def _vllm_readiness(*, litellm_enabled: bool, chat_model: str = "openai.gpt-5.6-luna"):
+async def _vllm_readiness(*, litellm_enabled: bool, chat_model: str = "openai.gpt-6-luna"):
     config = TriBridConfig()
     config.chat.litellm.enabled = litellm_enabled
     config.chat.litellm.default_model = chat_model

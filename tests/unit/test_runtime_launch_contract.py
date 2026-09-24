@@ -777,7 +777,27 @@ def test_alertmanager_routes_to_discord_from_a_secret_file_and_parks_the_watchdo
     secret = _volume_for_target(alertmanager, "/etc/ragweld/alertmanager-discord-webhook")
     assert secret["source"] == "/etc/ragweld/alertmanager-discord-webhook"
     assert secret["read_only"] is True
-    assert secret["bind"]["create_host_path"] is False
+    # Older compose-go JSON encoders omit false booleans (the CI runner's does), current ones
+    # keep this opt-out: require it in the source file and reject a rendered true value.
+    class ComposeFileLoader(yaml.SafeLoader):
+        """The file as written; Compose merge tags (!override, !reset) keep their value."""
+
+    def tagged(loader: yaml.SafeLoader, _suffix: str, node: yaml.Node) -> Any:
+        if isinstance(node, yaml.MappingNode):
+            return loader.construct_mapping(node, deep=True)
+        if isinstance(node, yaml.SequenceNode):
+            return loader.construct_sequence(node, deep=True)
+        return loader.construct_scalar(node)  # type: ignore[arg-type]
+
+    ComposeFileLoader.add_multi_constructor("!", tagged)
+    declared = yaml.load((ROOT / PROXMOX_PRODUCTION_COMPOSE).read_text(encoding="utf-8"), Loader=ComposeFileLoader)  # noqa: S506 - SafeLoader subclass
+    [declared_secret] = [
+        volume
+        for volume in declared["services"]["alertmanager"]["volumes"]
+        if isinstance(volume, dict) and volume.get("target") == "/etc/ragweld/alertmanager-discord-webhook"
+    ]
+    assert declared_secret["bind"]["create_host_path"] is False
+    assert secret.get("bind", {}).get("create_host_path", False) is False
     start_runtime = (ROOT / "deploy" / "proxmox" / "start-runtime.sh").read_text(encoding="utf-8")
     assert '  "alertmanager-discord-webhook"\n' in start_runtime.split("readonly REQUIRED_SECRET_FILES=(", 1)[1].split(")", 1)[0]
 
@@ -853,7 +873,7 @@ def test_alert_rules_fire_on_real_problems_and_never_on_the_disabled_local_lane(
             "input_series": up + [
                 {"series": f'{total}{{requested_model="ragweld-local"}}', "values": "0+2x40"},
                 {"series": f'{failed}{{requested_model="ragweld-local"}}', "values": "0+2x40"},
-                {"series": f'{total}{{requested_model="openai.gpt-5.6-luna"}}', "values": "0+1x40"},
+                {"series": f'{total}{{requested_model="openai.gpt-6-luna"}}', "values": "0+1x40"},
             ],
             "alert_rule_test": quiet("RagweldGatewayFailedRequestRatioHigh"),
         },

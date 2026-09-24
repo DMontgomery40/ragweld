@@ -27,6 +27,11 @@ from server.gateway_catalog import OPENROUTER_UPSTREAM_PREFIX
 # So "none" is the floor everywhere except the providers whose endpoint declares reasoning
 # mandatory, which get the lowest effort they accept. An unmeasured provider that also
 # rejects "none" fails closed with that same typed HTTP 400 from the gateway.
+#
+# Why the reranker asks for that floor: in the same 2026-09-02 drive at the default effort,
+# openai.gpt-5.6-luna returned an empty or truncated score array in 1 of 3 runs at 50
+# candidates, and google.gemini-3.7-flash and deepseek.deepseek-v4-flash in every run. Those
+# ids name the models that were measured; they are history, not today's defaults.
 LOWEST_REASONING_EFFORT = "none"
 MANDATORY_REASONING_LOWEST_EFFORT: dict[str, str] = {"google": "minimal", "z-ai": "minimal"}
 

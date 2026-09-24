@@ -35,14 +35,14 @@ function recordingSink(): { sink: RumSink; calls: Call[] } {
 test('with RUM active, journeys go straight to the sink as duration measurements with their context', () => {
   const { sink, calls } = recordingSink();
   const rum = createRum(() => sink);
-  rum.measure('chat_send_to_first_text', 1234.6, { model: 'openai.gpt-5.6-luna', outcome: 'ok' });
+  rum.measure('chat_send_to_first_text', 1234.6, { model: 'openai.gpt-6-luna', outcome: 'ok' });
   rum.event('layout_shift', { region: 'chat-messages', phase: 'stream', value: '0.0123' });
   assert.deepEqual(calls, [
     {
       kind: 'measurement',
       type: 'chat_send_to_first_text',
       values: { duration_ms: 1235 },
-      context: { model: 'openai.gpt-5.6-luna', outcome: 'ok' },
+      context: { model: 'openai.gpt-6-luna', outcome: 'ok' },
     },
     { kind: 'event', name: 'layout_shift', attributes: { region: 'chat-messages', phase: 'stream', value: '0.0123' } },
   ]);

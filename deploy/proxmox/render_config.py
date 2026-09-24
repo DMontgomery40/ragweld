@@ -13,6 +13,7 @@ from server.models.tribrid_config_model import TriBridConfig
 
 PRODUCTION_MODEL_ALIAS = "openai.gpt-6-sol"
 PRODUCTION_CHAT_MODEL_ALIAS = "z-ai.glm-5.3-flash"
+PRODUCTION_VISION_MODEL_ALIAS = "anthropic.claude-sonnet-5"
 PRODUCTION_LONG_FORM_MAX_TOKENS = 16000
 PRODUCTION_EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
 PRODUCTION_GRAFANA_URL = "https://ragweld-grafana.dtmont.com"
@@ -80,7 +81,7 @@ def _apply_production_defaults(config: TriBridConfig) -> TriBridConfig:
     config.chat.max_tokens = PRODUCTION_LONG_FORM_MAX_TOKENS
     config.synthetic.generator.max_tokens = PRODUCTION_LONG_FORM_MAX_TOKENS
     config.chat.litellm.default_model = PRODUCTION_CHAT_MODEL_ALIAS
-    config.chat.multimodal.vision_model_override = PRODUCTION_MODEL_ALIAS
+    config.chat.multimodal.vision_model_override = PRODUCTION_VISION_MODEL_ALIAS
     config.chat.vllm.enabled = False
     config.embedding.embedding_backend = "provider"
     config.embedding.embedding_type = "huggingface"

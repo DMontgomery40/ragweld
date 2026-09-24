@@ -29,6 +29,7 @@ test.describe('eval data lane surfaces', () => {
     const runs = await page.request.get(`${API_BASE}/synthetic/runs?corpus_id=${encodeURIComponent(CORPUS_ID)}&limit=20`);
     expect(runs.ok(), `GET /api/synthetic/runs -> ${runs.status()}`).toBeTruthy();
     const payload = (await runs.json()) as SyntheticRunsResponse;
+    if (!payload.runs) throw new Error('GET /api/synthetic/runs omitted runs');
     const completedMeta = payload.runs.find((run) => run.status === 'completed' && run.provider === 'grounded_qa');
     // Precondition, not a skip: this spec proves the rendered panel against a real completed run.
     expect(completedMeta, `no completed grounded_qa run for ${CORPUS_ID}; run the Synthetic Lab first`).toBeTruthy();
@@ -36,6 +37,7 @@ test.describe('eval data lane surfaces', () => {
     expect(detail.ok(), `GET /api/synthetic/run/{id} -> ${detail.status()}`).toBeTruthy();
     const run = (await detail.json()) as SyntheticRun;
     const summary = run.summary;
+    if (!summary) throw new Error(`Synthetic run ${run.run_id} omitted its summary`);
     expect(summary.items_generated).toBeGreaterThan(0);
     expect(summary.items_curated_out).toBeGreaterThan(0);
 
@@ -70,7 +72,7 @@ test.describe('eval data lane surfaces', () => {
     await expect(providerSelect.locator('option[value="litellm"]')).toHaveCount(1);
     await providerSelect.selectOption('litellm');
     await expect(providerSelect).toHaveValue('litellm');
-    const modelSelect = page.locator('select').filter({ has: page.locator('option[value="openai.gpt-5.6-luna"]') }).first();
+    const modelSelect = page.locator('select').filter({ has: page.locator('option[value="openai.gpt-6-luna"]') }).first();
     await expect(modelSelect).toBeVisible();
     await expect(page.getByText('LITELLM_API_KEY')).toBeVisible();
   });
@@ -140,7 +142,7 @@ test.describe('eval data lane surfaces', () => {
         corpus_id: corpusId,
         provider: 'grounded_qa',
         recipe: 'full_stack',
-        generator_model: 'litellm:openai.gpt-5.6-luna',
+        generator_model: 'litellm:openai.gpt-6-luna',
       },
       artifacts: [
         {

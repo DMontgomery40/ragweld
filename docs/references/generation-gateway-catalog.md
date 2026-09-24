@@ -78,13 +78,13 @@ Browser picker <-- /api/chat/models <-- LiteLLM /v1/models (live) JOIN catalog r
 
 | OpenRouter id | alias | config/override form |
 |---|---|---|
-| `openai/gpt-5.4-mini` | `openai.gpt-5.4-mini` | `litellm:openai.gpt-5.4-mini` |
+| `openai/gpt-6-luna` | `openai.gpt-6-luna` | `litellm:openai.gpt-6-luna` |
 | `qwen/qwen3-coder:free` | `qwen.qwen3-coder.free` | `litellm:qwen.qwen3-coder.free` |
 | (vLLM) | `ragweld-local` | `litellm:ragweld-local` |
 
 Aliases never contain `/` or `:`; `validate_litellm_alias` keeps rejecting
-direct provider identifiers in config, so `gen_model: openai/gpt-5.4-mini` is
-still a validation error and `gen_model: openai.gpt-5.4-mini` is a gateway route.
+direct provider identifiers in config, so `gen_model: openai/gpt-6-luna` is
+still a validation error and `gen_model: openai.gpt-6-luna` is a gateway route.
 
 ## Refresh procedure
 

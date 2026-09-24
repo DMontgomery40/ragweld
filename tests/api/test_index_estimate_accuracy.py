@@ -51,7 +51,7 @@ async def test_run_quote_failure_is_saved_as_unavailable_without_replacing_actua
     cfg.graph_indexing.enabled = True
     cfg.graph_indexing.build_code_graph = False
     cfg.graph_indexing.semantic_kg_max_chunks = 1
-    cfg.graph_indexing.semantic_kg_llm_model = "openai.gpt-5.6-sol"
+    cfg.graph_indexing.semantic_kg_llm_model = "openai.gpt-6-sol"
     cfg.indexing.skip_dense = True
     root = tmp_path / "source"
     root.mkdir()

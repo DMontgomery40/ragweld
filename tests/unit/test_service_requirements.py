@@ -220,7 +220,7 @@ def test_model_gateway_requires_explicit_authenticated_configuration(env: dict[s
     (401, {"error": "unauthorized"}, False),
     (200, {"data": []}, False),
     (200, {"data": [{"id": "openai.gpt-4o"}]}, False),
-    (200, {"data": [{"id": "openai.gpt-5.6-sol"}]}, True),
+    (200, {"data": [{"id": "openai.gpt-6-sol"}]}, True),
     (200, ["not a model listing"], False),
     (200, b"{invalid-json", False),
 ])
@@ -251,7 +251,7 @@ def test_model_gateway_probe_checks_real_authenticated_model_listing(
         capability = probe_model_gateway({
             "LITELLM_BASE_URL": f"http://127.0.0.1:{server.server_port}/v1",
             "LITELLM_API_KEY": "fixture-key",
-            "GRAPH_E2E_KG_MODEL": "openai.gpt-5.6-sol",
+            "GRAPH_E2E_KG_MODEL": "openai.gpt-6-sol",
         })
         assert capability.available is available
         assert requests == [("/v1/models", "Bearer fixture-key")]
@@ -261,7 +261,7 @@ def test_model_gateway_probe_checks_real_authenticated_model_listing(
         for strict in (False, True):
             env = {**os.environ, "PYTHONPATH": str(ROOT),
                    "LITELLM_BASE_URL": f"http://127.0.0.1:{server.server_port}/v1",
-                   "LITELLM_API_KEY": "fixture-key", "GRAPH_E2E_KG_MODEL": "openai.gpt-5.6-sol"}
+                   "LITELLM_API_KEY": "fixture-key", "GRAPH_E2E_KG_MODEL": "openai.gpt-6-sol"}
             env.pop("RAGWELD_STRICT_INTEGRATION", None)
             if strict:
                 env["RAGWELD_STRICT_INTEGRATION"] = "1"

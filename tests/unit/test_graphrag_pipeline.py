@@ -150,7 +150,7 @@ def test_semantic_pipeline_refuses_an_incomplete_route_before_driver_use(
             route_model=model,
             route_base_url=base_url,
             route_api_key=api_key,
-            route_upstream="openrouter/openai/gpt-5.6-luna",
+            route_upstream="openrouter/openai/gpt-6-luna",
             max_concurrency=1,
             llm_timeout_s=30,
             reasoning_effort="medium",
@@ -182,15 +182,15 @@ async def test_semantic_extraction_llm_binds_the_operator_timeout_and_reasoning_
     must carry both: the timeout on its OpenAI clients, the effort in its model params.
     """
     llm = semantic_extraction_llm(
-        route_model="openai.gpt-5.6-luna",
+        route_model="openai.gpt-6-luna",
         route_base_url="http://127.0.0.1:54000/v1",
         route_api_key="not-a-real-key",
-        route_upstream="openrouter/openai/gpt-5.6-luna",
+        route_upstream="openrouter/openai/gpt-6-luna",
         llm_timeout_s=5,
         reasoning_effort="xhigh",
     )
     try:
-        assert llm.model_name == "openai.gpt-5.6-luna"
+        assert llm.model_name == "openai.gpt-6-luna"
         # OpenRouter upstream: the effort travels as OpenRouter's native reasoning object (D25).
         assert llm.model_params == {"temperature": 0, "extra_body": {"reasoning": {"effort": "xhigh"}}}
         assert float(llm.async_client.timeout) == 5.0
@@ -210,10 +210,10 @@ def test_semantic_extraction_llm_refuses_a_zero_timeout_or_blank_effort(
 ) -> None:
     with pytest.raises(RuntimeError, match="requires"):
         semantic_extraction_llm(
-            route_model="openai.gpt-5.6-luna",
+            route_model="openai.gpt-6-luna",
             route_base_url="http://127.0.0.1:54000/v1",
             route_api_key="not-a-real-key",
-            route_upstream="openrouter/openai/gpt-5.6-luna",
+            route_upstream="openrouter/openai/gpt-6-luna",
             llm_timeout_s=timeout_s,
             reasoning_effort=effort,
         )
@@ -454,10 +454,10 @@ def test_malformed_replacement_field_syntax_is_rejected_by_the_shared_helper(tem
 
 def test_semantic_extractor_carries_the_operator_template_and_structured_output() -> None:
     llm = semantic_extraction_llm(
-        route_model="openai.gpt-5.6-luna",
+        route_model="openai.gpt-6-luna",
         route_base_url="http://127.0.0.1:54000/v1",
         route_api_key="not-a-real-key",
-        route_upstream="openrouter/openai/gpt-5.6-luna",
+        route_upstream="openrouter/openai/gpt-6-luna",
         llm_timeout_s=30,
         reasoning_effort="medium",
     )
@@ -478,7 +478,7 @@ def test_semantic_extractor_carries_the_operator_template_and_structured_output(
             "openrouter/google/gemini-3.5-flash-lite",
             {"temperature": 0, "extra_body": {"reasoning": {"effort": "medium"}}},
         ),
-        ("openrouter/openai/gpt-5.6-luna", {"temperature": 0, "extra_body": {"reasoning": {"effort": "medium"}}}),
+        ("openrouter/openai/gpt-6-luna", {"temperature": 0, "extra_body": {"reasoning": {"effort": "medium"}}}),
         ("openai/ragweld-local", {"temperature": 0, "reasoning_effort": "medium"}),
     ],
 )

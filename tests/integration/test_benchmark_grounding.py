@@ -34,8 +34,8 @@ pytestmark = [
 _CORPUS_PATH = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "acceptance_corpus"
 _QUESTION = "How often is the salinity sensor calibrated?"
 _MODELS = [
-    os.environ.get("BENCHMARK_E2E_MODEL_A", "openai.gpt-5.6-luna"),
-    os.environ.get("BENCHMARK_E2E_MODEL_B", "openai.gpt-5.4-mini"),
+    os.environ.get("BENCHMARK_E2E_MODEL_A", "openai.gpt-6-luna"),
+    os.environ.get("BENCHMARK_E2E_MODEL_B", "openai.gpt-6-astra"),
 ]
 
 

@@ -84,8 +84,181 @@ class JevLintTests(unittest.TestCase):
         self.git("commit", "-qm", "change")
         self.write("src/a.py", "import json\n")
         names = self.lint.select_files(self.root, self.policy, base=base)
-        batches = self.lint.build_batches(self.root, names, self.policy, snapshot="HEAD")
+        batches = self.lint.build_batches(self.root, names, self.policy, snapshot="HEAD", base=base)
         self.assertEqual(batches[0]["files"][0]["content"], "import redis\n")
+        # The import context is read from the HEAD snapshot, never the unstaged repair.
+        self.assertEqual(batches[0]["files"][0]["imports"], "import redis")
+
+    def test_committed_scope_sends_only_changed_hunks_with_bounded_context(self):
+        original = "".join(f"line {number}\n" for number in range(1, 201))
+        self.write("src/a.py", original)
+        self.git("add", ".")
+        self.git("commit", "-qm", "base")
+        base = self.git("rev-parse", "HEAD").strip()
+        changed = original.replace("line 100\n", "import redis  # changed line\n")
+        self.write("src/a.py", changed)
+        self.git("add", ".")
+        self.git("commit", "-qm", "change")
+
+        batches = self.lint.build_batches(
+            self.root,
+            ["src/a.py"],
+            self.policy,
+            snapshot="HEAD",
+            base=base,
+            context_lines=2,
+        )
+
+        chunks = [source for batch in batches for source in batch["files"]]
+        self.assertEqual(len(chunks), 1)
+        self.assertEqual(chunks[0]["line"], 98)
+        self.assertEqual(chunks[0]["changed_lines"], [100])
+        self.assertIn("line 98\n", chunks[0]["content"])
+        self.assertIn("import redis  # changed line\n", chunks[0]["content"])
+        self.assertIn("line 102\n", chunks[0]["content"])
+        self.assertNotIn("line 1\n", chunks[0]["content"])
+
+        questions, _ = self.lint.build_questions(batches[0], self.policy)
+        self.assertIn("newly added lines [100]", next(iter(questions.values()))["instructions"])
+
+    def test_changed_hunks_preserve_increment_statements_and_line_numbers(self):
+        self.write("src/App.tsx", "let renderCount = 0;\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "base")
+        base = self.git("rev-parse", "HEAD").strip()
+        self.write("src/App.tsx", "let renderCount = 0;\n++renderCount;\nconst done = true;\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "change")
+
+        batches = self.lint.build_batches(
+            self.root, ["src/App.tsx"], self.policy, snapshot="HEAD", base=base, context_lines=0,
+        )
+
+        chunk = batches[0]["files"][0]
+        self.assertEqual(chunk["content"], "++renderCount;\nconst done = true;\n")
+        self.assertEqual(chunk["changed_lines"], [2, 3])
+
+    def test_file_scoped_rule_keeps_enclosing_control_flow(self):
+        original = "if (!ready) return null;\n" + "\n" * 30
+        self.write("src/App.tsx", original)
+        self.git("add", ".")
+        self.git("commit", "-qm", "base")
+        base = self.git("rev-parse", "HEAD").strip()
+        self.write("src/App.tsx", original + "useEffect(() => {}, []);\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "change")
+        self.policy["rules"][0].update(include=["src/*.tsx"], scope="file")
+
+        batches = self.lint.build_batches(
+            self.root, ["src/App.tsx"], self.policy, snapshot="HEAD", base=base, context_lines=2,
+        )
+
+        chunk = batches[0]["files"][0]
+        self.assertEqual(chunk["line"], 1)
+        self.assertNotIn("changed_lines", chunk)
+        self.assertIn("if (!ready) return null;", chunk["content"])
+        self.assertIn("useEffect(() => {}, []);", chunk["content"])
+
+    def test_split_hunk_sends_only_chunks_with_their_own_added_lines(self):
+        original = "".join(f"context line {number:04d} padded to a realistic width\n" for number in range(1, 401))
+        self.write("src/a.py", original)
+        self.git("add", ".")
+        self.git("commit", "-qm", "base")
+        base = self.git("rev-parse", "HEAD").strip()
+        self.write("src/a.py", original.replace("context line 0300 ", "import redis  # changed 0300 "))
+        self.git("add", ".")
+        self.git("commit", "-qm", "change")
+
+        # 200 context lines make one hunk far larger than a 2,000-character chunk.
+        batches = self.lint.build_batches(
+            self.root, ["src/a.py"], self.policy, snapshot="HEAD", base=base, context_lines=200, max_chars=4000,
+        )
+
+        chunks = [source for batch in batches for source in batch["files"]]
+        self.assertEqual([chunk["changed_lines"] for chunk in chunks], [[300]])
+        self.assertIn("import redis  # changed 0300", chunks[0]["content"])
+
+    def test_hunk_carries_the_files_imports_for_a_use_far_from_its_import(self):
+        original = "import os\nfrom langchain_openai import ChatOpenAI\n" + "".join(f"x{n} = {n}\n" for n in range(80))
+        self.write("src/a.py", original)
+        self.git("add", ".")
+        self.git("commit", "-qm", "base")
+        base = self.git("rev-parse", "HEAD").strip()
+        self.write("src/a.py", original + "llm = ChatOpenAI(model='m')\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "change")
+
+        batches = self.lint.build_batches(
+            self.root, ["src/a.py"], self.policy, snapshot="HEAD", base=base, context_lines=2,
+        )
+
+        chunk = batches[0]["files"][0]
+        self.assertNotIn("langchain_openai", chunk["content"])
+        self.assertEqual(chunk["imports"], "import os\nfrom langchain_openai import ChatOpenAI")
+        questions, _ = self.lint.build_questions(batches[0], self.policy)
+        self.assertIn("files[0].imports", next(iter(questions.values()))["instructions"])
+
+    def test_rules_choose_their_own_scope(self):
+        legacy = "export const LEGACY_LABEL = 'untouched';\n" + "".join(f"export const K{n} = {n};\n" for n in range(60))
+        component = "export function Panel() {\n  if (!ready) return null;\n" + "  const a = 1;\n" * 40 + "}\n"
+        self.write("src/App.tsx", legacy + component)
+        self.git("add", ".")
+        self.git("commit", "-qm", "base")
+        base = self.git("rev-parse", "HEAD").strip()
+        self.write("src/App.tsx", legacy + component.replace("}\n", "  useEffect(() => {}, []);\n}\n"))
+        self.git("add", ".")
+        self.git("commit", "-qm", "change")
+        self.policy["rules"] = [
+            {"id": "copy", "include": ["src/*.tsx"], "question": "Does displayed copy say ranker?"},
+            {"id": "hooks", "include": ["src/*.tsx"], "scope": "file", "question": "Is a hook called conditionally?"},
+        ]
+
+        batches = self.lint.build_batches(
+            self.root, ["src/App.tsx"], self.policy, snapshot="HEAD", base=base, context_lines=2,
+        )
+
+        hunk_batches = [b for b in batches if b["files"][0].get("scope") != "file"]
+        file_batches = [b for b in batches if b["files"][0].get("scope") == "file"]
+        self.assertEqual(len(hunk_batches), 1)
+        self.assertEqual(len(file_batches), 1)
+        self.assertEqual(hunk_batches[0]["files"][0]["changed_lines"], [104])
+        self.assertEqual({q.split("_", 1)[1] for q in self.lint.build_questions(hunk_batches[0], self.policy)[0]}, {"copy"})
+        self.assertEqual({q.split("_", 1)[1] for q in self.lint.build_questions(file_batches[0], self.policy)[0]}, {"hooks"})
+        # The file-scoped request holds the whole file, helpers the component calls included.
+        whole = file_batches[0]["files"][0]
+        self.assertEqual(whole["line"], 1)
+        self.assertIn("if (!ready) return null;", whole["content"])
+        self.assertIn("useEffect(() => {}, []);", whole["content"])
+        self.assertIn("LEGACY_LABEL", whole["content"])
+
+    def test_file_scope_keeps_a_declaration_whole_or_fails_closed(self):
+        helper = "export function loadRows() { fetch('/api/rows'); }\n"
+        padding = "// context\n" * 12000
+        component = "export function Panel() { loadRows(); return null; }\n"
+        self.policy["rules"][0].update(include=["src/*.tsx"], scope="file")
+        # Helper-before, helper-after and one large declaration must all fail closed,
+        # both for explicit paths and for a committed diff touching only the component.
+        for source in (helper + padding + component, component + padding + helper,
+                       "export function Panel() {\n" + padding + "return null; }\n"):
+            with self.subTest(source_start=source[:60]):
+                self.write("src/App.tsx", source)
+                self.git("add", ".")
+                self.git("commit", "-qm", "before")
+                base = self.git("rev-parse", "HEAD").strip()
+                self.write("src/App.tsx", source.replace("return null", "return <main />"))
+                self.git("add", ".")
+                self.git("commit", "-qm", "after")
+                for scope in ({}, {"snapshot": "HEAD", "base": base, "context_lines": 0}):
+                    with self.subTest(scope=scope), self.assertRaises(self.lint.LintError):
+                        self.lint.build_batches(self.root, ["src/App.tsx"], self.policy, **scope)
+
+    def test_unknown_rule_scope_is_rejected(self):
+        self.lint.validate_policy(self.policy)
+        self.policy["rules"][0]["scope"] = "file"
+        self.lint.validate_policy(self.policy)
+        self.policy["rules"][0]["scope"] = "files"
+        with self.assertRaises(self.lint.LintError):
+            self.lint.validate_policy(self.policy)
 
     def test_cloud_key_is_never_selected_for_custom_endpoint(self):
         for url in ["http://127.0.0.1:8080", "https://other.example", "https://api.typesafe.ai:8443", "https://api.typesafe.ai.evil.example"]:

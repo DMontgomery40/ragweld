@@ -81,8 +81,8 @@ def _chunks(count: int = 4, *, file_path: str = "A11_MissionReport.pdf") -> list
 
 
 def _route(base: str) -> dict[str, Any]:
-    return dict(route_model="openai.gpt-5.6-sol", route_base_url=base,
-                route_api_key="local-fixture-only", route_upstream="openrouter/openai/gpt-5.6-sol",
+    return dict(route_model="openai.gpt-6-sol", route_base_url=base,
+                route_api_key="local-fixture-only", route_upstream="openrouter/openai/gpt-6-sol",
                 reasoning_effort="low")
 
 
@@ -150,7 +150,7 @@ def recovery_gateway() -> Iterator[RecoveryGateway]:
                 graph["nodes"][0].pop("label")
             body = json.dumps({
                 "id": f"apollo-fixture-{section}", "object": "chat.completion", "created": 1,
-                "model": "openai.gpt-5.6-sol",
+                "model": "openai.gpt-6-sol",
                 "choices": [{"index": 0, "finish_reason": "stop", "message": {
                     "role": "assistant", "content": json.dumps(graph),
                 }}],

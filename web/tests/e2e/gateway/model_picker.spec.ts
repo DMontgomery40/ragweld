@@ -14,7 +14,7 @@ import type { ChatModelInfo, ChatModelsResponse } from '../../../src/types/gener
 
 const API_BASE = process.env.GATEWAY_API_BASE_URL ?? 'http://127.0.0.1:58012/api';
 const CORPUS_ID = process.env.GATEWAY_E2E_CORPUS_ID ?? 'epstein-files-1';
-const PAID_ALIAS = process.env.GATEWAY_E2E_PAID_ALIAS ?? 'openai.gpt-5.4-mini';
+const PAID_ALIAS = process.env.GATEWAY_E2E_PAID_ALIAS ?? 'openai.gpt-6-astra';
 const RERANK_ALIAS = process.env.GATEWAY_E2E_RERANK_ALIAS ?? 'openai.gpt-6-luna';
 const REAL_QUESTION =
   process.env.GATEWAY_E2E_QUESTION ??

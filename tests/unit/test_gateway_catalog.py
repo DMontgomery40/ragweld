@@ -99,7 +99,7 @@ def _openrouter_row(model_id: str, **overrides: Any) -> dict[str, Any]:
 @pytest.mark.parametrize(
     ("model_id", "alias"),
     [
-        ("openai/gpt-5.4-mini", "openai.gpt-5.4-mini"),
+        ("openai/gpt-6-luna", "openai.gpt-6-luna"),
         ("qwen/qwen3-coder:free", "qwen.qwen3-coder.free"),
         ("meta-llama/llama-4-maverick", "meta-llama.llama-4-maverick"),
         ("z-ai/glm-5.1", "z-ai.glm-5.1"),
@@ -113,21 +113,21 @@ def test_alias_derivation_is_slash_free_and_valid(model_id: str, alias: str) -> 
     assert "/" not in derived and ":" not in derived
 
 
-@pytest.mark.parametrize("model_id", ["", "gpt-5.4-mini", "~openai/gpt-latest", "/gpt", "openai/", "openrouter/auto", "openrouter/free"])
+@pytest.mark.parametrize("model_id", ["", "gpt-6-luna", "~openai/gpt-latest", "/gpt", "openai/", "openrouter/auto", "openrouter/free"])
 def test_alias_derivation_rejects_non_route_ids(model_id: str) -> None:
     with pytest.raises(GatewayCatalogError):
         gateway_alias_for_openrouter_id(model_id)
 
 
 def test_model_list_puts_local_serving_row_first_and_routes_openrouter_by_env_key() -> None:
-    catalog = {"models": [_openrouter_row("openai/gpt-5.4-mini"), _local_row(), _openrouter_row("anthropic/claude-sonnet-4.5")]}
+    catalog = {"models": [_openrouter_row("openai/gpt-6-luna"), _local_row(), _openrouter_row("anthropic/claude-sonnet-5")]}
 
     model_list = build_model_list(catalog)
 
     assert [row["model_name"] for row in model_list] == [
         LOCAL_GATEWAY_ALIAS,
-        "anthropic.claude-sonnet-4.5",
-        "openai.gpt-5.4-mini",
+        "anthropic.claude-sonnet-5",
+        "openai.gpt-6-luna",
     ]
     assert model_list[0]["litellm_params"] == {
         "model": "openai/ragweld-local",
@@ -137,7 +137,7 @@ def test_model_list_puts_local_serving_row_first_and_routes_openrouter_by_env_ke
         "api_key": "none",
     }
     assert model_list[1]["litellm_params"] == {
-        "model": "openrouter/anthropic/claude-sonnet-4.5",
+        "model": "openrouter/anthropic/claude-sonnet-5",
         "num_retries": 0,
         "max_retries": 0,
         "api_key": "os.environ/OPENROUTER_API_KEY",
@@ -145,7 +145,7 @@ def test_model_list_puts_local_serving_row_first_and_routes_openrouter_by_env_ke
 
 
 def test_rendered_config_has_no_retries_or_fallbacks_and_is_file_authoritative() -> None:
-    config = build_litellm_config({"models": [_local_row(), _openrouter_row("openai/gpt-5.4-mini")]})
+    config = build_litellm_config({"models": [_local_row(), _openrouter_row("openai/gpt-6-luna")]})
 
     assert config["litellm_settings"] == {
         "DEFAULT_MAX_RETRIES": 0,
@@ -180,18 +180,18 @@ def test_rendered_config_has_no_retries_or_fallbacks_and_is_file_authoritative()
         "master_key": "os.environ/LITELLM_MASTER_KEY", "store_model_in_db": False,
         "store_prompts_in_spend_logs": False, "disable_spend_logs": False,
     }
-    rendered = render_litellm_config({"models": [_local_row(), _openrouter_row("openai/gpt-5.4-mini")]})
+    rendered = render_litellm_config({"models": [_local_row(), _openrouter_row("openai/gpt-6-luna")]})
     assert rendered.startswith("# GENERATED from data/models.json")
     assert yaml.safe_load(rendered) == config
 
 
 def test_gateway_rows_expose_catalog_metadata_for_discovery_join() -> None:
-    rows = gateway_rows_by_alias({"models": [_local_row(), _openrouter_row("openai/gpt-5.4-mini")]})
+    rows = gateway_rows_by_alias({"models": [_local_row(), _openrouter_row("openai/gpt-6-luna")]})
 
-    paid = rows["openai.gpt-5.4-mini"]
+    paid = rows["openai.gpt-6-luna"]
     assert paid.provider == "openai"
-    assert paid.model == "openai/gpt-5.4-mini"
-    assert paid.display_name == "Display openai/gpt-5.4-mini"
+    assert paid.model == "openai/gpt-6-luna"
+    assert paid.display_name == "Display openai/gpt-6-luna"
     assert paid.context == 128000
     assert paid.input_per_1k == 0.001
     assert paid.output_per_1k == 0.002
@@ -230,7 +230,7 @@ def test_native_embedding_capacity_is_truthful_at_every_catalog_boundary(
 
 
 def test_embedding_routes_render_natively_but_generation_views_exclude_them(tmp_path: Path) -> None:
-    catalog = {"models": [_local_row(), _openrouter_row("openai/gpt-5.4-mini"), _embedding_row()]}
+    catalog = {"models": [_local_row(), _openrouter_row("openai/gpt-6-luna"), _embedding_row()]}
     rows = gateway_rows(catalog)
     embedding = next(row for row in rows if row.capability == "EMB")
     assert embedding.model == "text-embedding-3-small"
@@ -280,21 +280,21 @@ def _direct_gen_row() -> dict[str, Any]:
 @pytest.mark.parametrize(
     ("rows", "match"),
     [
-        ([_openrouter_row("openai/gpt-5.4-mini")], "exactly one ragweld-local"),
+        ([_openrouter_row("openai/gpt-6-luna")], "exactly one ragweld-local"),
         ([_local_row(), _local_row(model="Qwen/Other")], "duplicate gateway_alias"),
-        ([_local_row(), _openrouter_row("openai/gpt-5.4-mini", gateway_alias=LOCAL_GATEWAY_ALIAS)], "duplicate"),
-        ([_local_row(), _openrouter_row("openai/gpt-5.4-mini", gateway_alias="openai/gpt-5.4-mini")], "invalid gateway_alias"),
-        ([_local_row(), _openrouter_row("openai/gpt-5.4-mini", gateway_upstream=None)], "both be set"),
-        ([_local_row(), _openrouter_row("openai/gpt-5.4-mini", components=["EMB"])], "OpenAI embedding"),
+        ([_local_row(), _openrouter_row("openai/gpt-6-luna", gateway_alias=LOCAL_GATEWAY_ALIAS)], "duplicate"),
+        ([_local_row(), _openrouter_row("openai/gpt-6-luna", gateway_alias="openai/gpt-6-luna")], "invalid gateway_alias"),
+        ([_local_row(), _openrouter_row("openai/gpt-6-luna", gateway_upstream=None)], "both be set"),
+        ([_local_row(), _openrouter_row("openai/gpt-6-luna", components=["EMB"])], "OpenAI embedding"),
         ([_local_row(base_url=None)], "requires base_url"),
         ([_local_row(), _direct_gen_row()], "must be gateway-served"),
-        ([_local_row(), _openrouter_row("openai/gpt-5.4-mini", gateway_alias="anthropic.claude")], "does not match the model id"),
-        ([_local_row(), _openrouter_row("openai/gpt-5.4-mini", gateway_upstream="openrouter/meta-llama/llama-4")], "does not match the model id"),
-        ([_local_row(), _openrouter_row("openai/gpt-5.4-mini", provider="anthropic")], "provider must equal"),
-        ([_local_row(), _openrouter_row("openai/gpt-5.4-mini", gateway_upstream="openai/gpt-5.4-mini")], "must be openrouter/<id>"),
+        ([_local_row(), _openrouter_row("openai/gpt-6-luna", gateway_alias="anthropic.claude")], "does not match the model id"),
+        ([_local_row(), _openrouter_row("openai/gpt-6-luna", gateway_upstream="openrouter/meta-llama/llama-4")], "does not match the model id"),
+        ([_local_row(), _openrouter_row("openai/gpt-6-luna", provider="anthropic")], "provider must equal"),
+        ([_local_row(), _openrouter_row("openai/gpt-6-luna", gateway_upstream="openai/gpt-6-luna")], "must be openrouter/<id>"),
         ([_local_row(provider="openai")], "local serving row must be provider"),
-        ([_local_row(), _openrouter_row("openai/gpt-5.4-mini", context=-5)], "invalid catalog row"),
-        ([_local_row(), _openrouter_row("openai/gpt-5.4-mini", supports_vision="sometimes")], "invalid catalog row"),
+        ([_local_row(), _openrouter_row("openai/gpt-6-luna", context=-5)], "invalid catalog row"),
+        ([_local_row(), _openrouter_row("openai/gpt-6-luna", supports_vision="sometimes")], "invalid catalog row"),
         ([_local_row(), "not-an-object"], "models\\[1\\] is not an object"),
         ([_local_row(), {"provider": "openrouter", "family": "auto", "model": "openrouter/auto", "components": ["GEN"], "context": 1, "gateway_alias": "openrouter.auto", "gateway_upstream": "openrouter/openrouter/auto"}], "meta-router"),
     ],
@@ -312,10 +312,10 @@ def test_snapshot_is_memory_only_until_warmed_and_tracks_file_changes(tmp_path: 
     assert warm_gateway_catalog(target) == 1
     assert set(gateway_rows_snapshot(target)) == {LOCAL_GATEWAY_ALIAS}
 
-    target.write_text(json.dumps({"models": [_local_row(), _openrouter_row("openai/gpt-5.4-mini")]}), encoding="utf-8")
+    target.write_text(json.dumps({"models": [_local_row(), _openrouter_row("openai/gpt-6-luna")]}), encoding="utf-8")
     assert set(gateway_rows_snapshot(target)) == {LOCAL_GATEWAY_ALIAS}, "snapshot never touches disk"
     assert warm_gateway_catalog(target) == 2
-    assert "openai.gpt-5.4-mini" in gateway_rows_snapshot(target)
+    assert "openai.gpt-6-luna" in gateway_rows_snapshot(target)
 
 
 def test_load_catalog_rejects_non_object_roots(tmp_path: Path) -> None:
@@ -331,10 +331,10 @@ def test_write_catalog_trio_validates_before_writing_and_keeps_all_three_in_lock
     gateway = tmp_path / "infra" / "litellm-config.yaml"
 
     with pytest.raises(GatewayCatalogError):
-        write_catalog_trio({"models": [_openrouter_row("openai/gpt-5.4-mini")]}, canonical_path=canonical, mirror_path=mirror, litellm_config_path=gateway)
+        write_catalog_trio({"models": [_openrouter_row("openai/gpt-6-luna")]}, canonical_path=canonical, mirror_path=mirror, litellm_config_path=gateway)
     assert not canonical.exists() and not mirror.exists() and not gateway.exists(), "nothing is written on a contract violation"
 
-    catalog = {"models": [_local_row(), _openrouter_row("openai/gpt-5.4-mini")]}
+    catalog = {"models": [_local_row(), _openrouter_row("openai/gpt-6-luna")]}
     write_catalog_trio(catalog, canonical_path=canonical, mirror_path=mirror, litellm_config_path=gateway)
     assert json.loads(canonical.read_text(encoding="utf-8")) == json.loads(mirror.read_text(encoding="utf-8")) == catalog
     assert gateway.read_text(encoding="utf-8") == render_litellm_config(catalog)
@@ -402,8 +402,8 @@ def test_checked_in_catalog_serves_the_openrouter_route_set_through_the_gateway(
         "openai.text-embedding-3-small", "openai.text-embedding-3-large",
     }
     assert len(openrouter) == len(rows) - 1 - len(embeddings)
-    assert "openai.gpt-5.4-mini" in by_alias
-    assert by_alias["openai.gpt-5.4-mini"].upstream == "openrouter/openai/gpt-5.4-mini"
+    assert "openai.gpt-6-luna" in by_alias
+    assert by_alias["openai.gpt-6-luna"].upstream == "openrouter/openai/gpt-6-luna"
     assert all(row.alias == row.alias.lower() for row in rows)
     assert not any(row.provider == "openrouter" for row in rows), "meta-routers are not fixed models"
     assert all(row.context and row.context > 0 for row in rows if row.capability == "GEN")
@@ -421,7 +421,7 @@ def test_checked_in_catalog_serves_the_openrouter_route_set_through_the_gateway(
 
 @pytest.mark.parametrize("context", [None, 0])
 def test_gateway_rows_require_a_positive_context_window(context: int | None) -> None:
-    row = _openrouter_row("openai/gpt-5.4-mini")
+    row = _openrouter_row("openai/gpt-6-luna")
     if context is None:
         row.pop("context", None)
     else:
@@ -435,7 +435,7 @@ def test_gateway_upstream_for_alias_reads_the_warmed_snapshot_and_fails_closed()
     alias's LiteLLM upstream, so the lookup must answer from the warmed snapshot (event-loop
     safe) and refuse an alias the catalog does not serve rather than guess a protocol."""
     warm_gateway_catalog(CATALOG_PATH)
-    assert gateway_upstream_for_alias("openai.gpt-5.6-luna", CATALOG_PATH) == "openrouter/openai/gpt-5.6-luna"
+    assert gateway_upstream_for_alias("openai.gpt-6-luna", CATALOG_PATH) == "openrouter/openai/gpt-6-luna"
     assert gateway_upstream_for_alias("ragweld-local", CATALOG_PATH).startswith("openai/")
     with pytest.raises(RuntimeError, match="not in the loaded generation catalog"):
         gateway_upstream_for_alias("nope.not-an-alias", CATALOG_PATH)
@@ -476,12 +476,12 @@ def test_native_ledger_startup_keeps_enforced_migrations_and_private_payloads() 
 @pytest.mark.parametrize("overrides", [
     {"num_retries": 2}, {"max_retries": 2}, {"silent_model": "secondary"},
     {"retry_policy": {"RateLimitErrorRetries": 2}},
-    {"model_group_retry_policy": {"openai.gpt-5.4-mini": {"TimeoutErrorRetries": 2}}},
+    {"model_group_retry_policy": {"openai.gpt-6-luna": {"TimeoutErrorRetries": 2}}},
     {"fallbacks": ["secondary"]}, {"context_window_fallbacks": ["secondary"]},
     {"content_policy_fallbacks": ["secondary"]},
 ])
 def test_catalog_metadata_cannot_introduce_native_attempt_multiplicity(overrides: dict[str, object]) -> None:
-    remote = _openrouter_row("openai/gpt-5.4-mini")
+    remote = _openrouter_row("openai/gpt-6-luna")
     remote.update(overrides)
     remote["litellm_params"] = dict(overrides)
     config = build_litellm_config({"models": [_local_row(), remote]})

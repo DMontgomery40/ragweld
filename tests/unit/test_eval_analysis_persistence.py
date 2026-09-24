@@ -33,7 +33,7 @@ def _artifact(run_id: str, compare_run_id: str) -> EvalAnalysisArtifact:
         run_id=run_id,
         compare_run_id=compare_run_id,
         analysis=MARKDOWN,
-        model_used="openai.gpt-5.6-terra",
+        model_used="openai.gpt-6-sol",
         created_at=datetime.now(UTC),
     )
 
@@ -61,7 +61,7 @@ def test_analysis_round_trips_through_disk(tmp_path: Path) -> None:
         assert loaded is not None
         assert loaded.analysis == MARKDOWN
         assert loaded.compare_run_id == "corpus__20260830120000"
-        assert loaded.model_used == "openai.gpt-5.6-terra"
+        assert loaded.model_used == "openai.gpt-6-sol"
     finally:
         restore()
 
@@ -77,7 +77,7 @@ async def test_get_endpoint_serves_the_cached_analysis_without_a_gateway(tmp_pat
             "corpus__20260830120005", compare_run_id="corpus__20260830120000"
         )
         assert result.analysis == MARKDOWN
-        assert result.model_used == "openai.gpt-5.6-terra"
+        assert result.model_used == "openai.gpt-6-sol"
     finally:
         restore()
 

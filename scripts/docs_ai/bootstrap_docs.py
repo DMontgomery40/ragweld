@@ -9,7 +9,7 @@ Usage:
     python scripts/docs_ai/bootstrap_docs.py --list
     python scripts/docs_ai/bootstrap_docs.py --dry-run --page index
     python scripts/docs_ai/bootstrap_docs.py --page index --page retrieval/overview
-    python scripts/docs_ai/bootstrap_docs.py --all --model gpt-5.6-sol --verbosity high --reasoning-effort high
+    python scripts/docs_ai/bootstrap_docs.py --all --model gpt-6-sol --verbosity high --reasoning-effort high
 """
 import argparse
 import os
@@ -349,7 +349,7 @@ class DocBootstrapper:
 
     def __init__(
         self,
-        model: str = "gpt-5.6-sol",
+        model: str = "gpt-6-sol",
         max_tokens: int = 32000,
         *,
         verbosity: str = "high",
@@ -359,14 +359,14 @@ class DocBootstrapper:
         """Initialize with OpenAI client.
 
         Args:
-            model: OpenAI model to use (default: gpt-5.6-sol)
+            model: OpenAI model to use (default: gpt-6-sol)
             max_tokens: Maximum tokens for response (default: 32000)
-            verbosity: GPT-5 text verbosity hint (low|medium|high)
-            reasoning_effort: GPT-5 reasoning effort (minimal|low|medium|high)
+            verbosity: GPT-6 text verbosity hint (low|medium|high)
+            reasoning_effort: GPT-6 reasoning effort (minimal|low|medium|high)
             max_attempts: Max generation attempts per page (default: 2)
         """
-        if not self._is_gpt5_model(model):
-            raise ValueError(f"Only GPT-5 models are supported here (got: {model})")
+        if not self._is_current_gpt_model(model):
+            raise ValueError(f"Only current GPT-6 models are supported here (got: {model})")
 
         api_key = os.environ.get("OPENAI_API_KEY")
         self.client = OpenAI(api_key=api_key) if api_key else None
@@ -378,9 +378,9 @@ class DocBootstrapper:
         self.project_root = Path(__file__).parent.parent.parent
 
     @staticmethod
-    def _is_gpt5_model(model: str) -> bool:
+    def _is_current_gpt_model(model: str) -> bool:
         m = (model or "").strip().lower()
-        return m.startswith("gpt-5")
+        return m.startswith("gpt-6")
 
     def _validate_generated_markdown(self, page_key: str, content: str) -> list[str]:
         """Return a list of validation issues for generated markdown."""
@@ -539,7 +539,7 @@ INSTRUCTIONS:
                 "max_output_tokens": self.max_tokens,
                 "text": {"verbosity": self.verbosity},
             }
-            if self._is_gpt5_model(self.model):
+            if self._is_current_gpt_model(self.model):
                 kwargs["reasoning"] = {"effort": self.reasoning_effort}
 
             # Use the Responses API (required)
@@ -614,7 +614,7 @@ Examples:
   %(prog)s --page index                    # Generate index page
   %(prog)s --page index --page retrieval/overview       # Generate multiple
   %(prog)s --all                           # Generate all pages
-  %(prog)s --all --model gpt-5.6-terra     # Use specific model
+  %(prog)s --all --model gpt-6-sol           # Use specific model
         """
     )
 
@@ -642,8 +642,8 @@ Examples:
     )
     parser.add_argument(
         "--model",
-        default="gpt-5.6-sol",
-        help="OpenAI model to use (default: gpt-5.6-sol). Use GPT-5 series only."
+        default="gpt-6-sol",
+        help="OpenAI model to use (default: gpt-6-sol). Use the current GPT-6 series only."
     )
     parser.add_argument(
         "--max-tokens",
@@ -661,7 +661,7 @@ Examples:
         "--reasoning-effort",
         choices=["minimal", "low", "medium", "high"],
         default="high",
-        help="GPT-5 reasoning effort (default: high)"
+        help="GPT-6 reasoning effort (default: high)"
     )
     parser.add_argument(
         "--max-attempts",

@@ -14,7 +14,7 @@
     "tests/test_jev_lint.py",
     "tests/fixtures/*"
   ],
-  "context": "Lint source semantics. Formatting, import order, naming taste and line length are not violations. Consider executable behavior rather than keyword presence. Do not judge assertions about model quality as established without evidence. Ragweld uses generated public wire types from backend boundary schemas. Local UI/view types are allowed. Retrieval sources open in the Source viewer. Redis and LangChain wrappers are removed; LangGraph is allowed. Runtime model catalogs come from /api/models. Tests use real dependencies; a real HTTP PATCH is allowed. Existing tests may contain old mocks; judge actual newly selected source, not strings describing mocks.",
+  "context": "Lint source semantics. Formatting, import order, naming taste and line length are not violations. Consider executable behavior rather than keyword presence. Do not judge assertions about model quality as established without evidence. Ragweld uses generated public wire types from backend boundary schemas. Local UI/view types are allowed. Retrieval sources open in the Source viewer. Redis and LangChain wrappers are removed; LangGraph is allowed. Runtime model catalogs come from /api/models. Tests use real dependencies; a real HTTP PATCH is allowed. An in-process HTTP server exercising the real client transport and wire contract is allowed. Existing tests may contain old mocks; judge actual newly selected source, not strings describing mocks.",
   "rules": [
     {
       "id": "removed_dependency",
@@ -74,7 +74,7 @@
         "tests/*.py",
         ".tests/*.ts"
       ],
-      "question": "Does the test actually replace a production dependency with monkeypatch, unittest.mock, or a fabricated Playwright network response? Real client.patch HTTP calls and test fixtures containing sample code as strings are allowed."
+      "question": "Does the test actually replace a production dependency with monkeypatch, unittest.mock, or a fabricated Playwright network response? Real client.patch HTTP calls, in-process HTTP servers exercising real client transport and wire contracts, and test fixtures containing sample code as strings are allowed."
     },
     {
       "id": "static_catalog",
@@ -86,6 +86,7 @@
     },
     {
       "id": "conditional_hooks",
+      "scope": "file",
       "include": [
         "*/src/*.jsx",
         "*/src/*.tsx",
@@ -96,6 +97,7 @@
     },
     {
       "id": "render_side_effect",
+      "scope": "file",
       "include": [
         "*/src/*.jsx",
         "*/src/*.tsx",

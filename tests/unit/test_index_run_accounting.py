@@ -52,7 +52,7 @@ def _summary() -> IndexRunSummary:
 def _accounting(summary: IndexRunSummary) -> IndexRunAccounting:
     return IndexRunAccounting(
         session_id=summary.run_id, corpus_id=summary.repo_id, started_at=summary.started_at,
-        config_fingerprint="0" * 64, models={"semantic_kg": "openai.gpt-5.6-sol"},
+        config_fingerprint="0" * 64, models={"semantic_kg": "openai.gpt-6-sol"},
     )
 
 

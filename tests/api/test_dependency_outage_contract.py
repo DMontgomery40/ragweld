@@ -196,7 +196,7 @@ REQUESTS = [
     ("POST", "/api/feedback?corpus_id=missing", {"event_id": "outage-test", "signal": "thumbsup"}),
     ("POST", "/api/reranker/click?corpus_id=missing", {"event_id": "outage-click", "doc_id": "missing.md"}),
     ("POST", "/api/reranker/mine?corpus_id=missing", None),
-    ("POST", "/api/synthetic/run/start", {"corpus_id": "missing", "provider": "grounded_qa", "recipe": "eval_dataset", "generator_model": "litellm:openai.gpt-5.6-luna"}),
+    ("POST", "/api/synthetic/run/start", {"corpus_id": "missing", "provider": "grounded_qa", "recipe": "eval_dataset", "generator_model": "litellm:openai.gpt-6-luna", "judge_model": "litellm:openai.gpt-6-luna"}),
     ("GET", "/api/corpora/missing/documents/view?path=notes.md", None),
     ("GET", "/api/corpora/missing/documents/page?path=report.pdf&page=1", None),
     ("GET", "/api/corpora/missing/documents/raw?path=notes.md", None),

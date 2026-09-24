@@ -15,7 +15,7 @@ from tests.service_requirements import require_env
 pytestmark = [pytest.mark.requires_postgres, pytest.mark.asyncio]
 
 _APOLLO_SOURCE = Path("/srv/ragweld/corpora/nasa-apollo-11/A11_MissionReport.pdf")
-_MODEL = os.environ.get("GRAPH_E2E_KG_MODEL", "openai.gpt-5.6-luna")
+_MODEL = os.environ.get("GRAPH_E2E_KG_MODEL", "openai.gpt-6-luna")
 
 
 @pytest.mark.requires_model_gateway

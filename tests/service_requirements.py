@@ -255,7 +255,7 @@ def probe_model_gateway(
     values = os.environ if env is None else env
     base = str(values.get("LITELLM_BASE_URL") or "").strip().rstrip("/")
     key = str(values.get("LITELLM_API_KEY") or "").strip()
-    model = str(values.get("GRAPH_E2E_KG_MODEL") or "openai.gpt-5.6-luna").strip()
+    model = str(values.get("GRAPH_E2E_KG_MODEL") or "openai.gpt-6-luna").strip()
     if not base or not key:
         return ServiceCapability("Model gateway", False, "Model gateway not configured: LITELLM_BASE_URL and LITELLM_API_KEY are required")
     try:

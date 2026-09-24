@@ -22,7 +22,7 @@ export const API_BASE = process.env.EXHAUSTIVE_API_BASE_URL ?? 'http://127.0.0.1
 
 // Test/probe traffic goes to a cheap paid gateway alias, never the host-served
 // local model (operator rule after two machine crashes on 2026-08-22).
-export const EXHAUSTIVE_CHAT_MODEL = String(process.env.EXHAUSTIVE_CHAT_MODEL || '').trim() || 'openai.gpt-5.6-luna';
+export const EXHAUSTIVE_CHAT_MODEL = String(process.env.EXHAUSTIVE_CHAT_MODEL || '').trim() || 'openai.gpt-6-luna';
 
 const CORPUS_PREFIX = String(process.env.EXHAUSTIVE_CORPUS_PREFIX || '').trim() || 'ragweld-exhaustive';
 const INDEX_TIMEOUT_MS = Number(process.env.EXHAUSTIVE_INDEX_TIMEOUT_MS ?? 5 * 60 * 1000);

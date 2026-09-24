@@ -416,7 +416,7 @@ class TestStreamEndpoint:
         the terminal `done` event."""
         cfg = TriBridConfig()
         cfg.chat.litellm.enabled = True
-        cfg.chat.litellm.default_model = "openai.gpt-5.6-luna"
+        cfg.chat.litellm.default_model = "openai.gpt-6-luna"
         with slow_delta_gateway(delay_seconds=0.05) as base_url, gateway_env(base_url):
             cfg.chat.litellm.base_url = base_url
             set_config(cfg)
@@ -445,7 +445,7 @@ class TestStreamEndpoint:
     def _reasoning_config(*, include_thinking: bool, base_url: str) -> TriBridConfig:
         cfg = TriBridConfig()
         cfg.chat.litellm.enabled = True
-        cfg.chat.litellm.default_model = "openai.gpt-5.6-luna"
+        cfg.chat.litellm.default_model = "openai.gpt-6-luna"
         cfg.chat.litellm.base_url = base_url
         cfg.chat.recall.enabled = False
         cfg.semantic_cache.enabled = False  # every request must reach the (fake) model
@@ -558,7 +558,7 @@ class TestStreamEndpoint:
             cfg = load_config()
             cfg.chat.litellm.enabled = True
             cfg.chat.litellm.base_url = base_url
-            cfg.chat.litellm.default_model = "openai.gpt-5.6-luna"
+            cfg.chat.litellm.default_model = "openai.gpt-6-luna"
             cfg.chat.recall.enabled = False
             cfg.semantic_cache.enabled = False
             cfg.ui.chat_stream_include_thinking = False
@@ -609,7 +609,7 @@ class TestStreamEndpoint:
         question = "Which plane management company did Barry Cohen consider switching to?"
         cfg = TriBridConfig()
         cfg.chat.litellm.enabled = True
-        cfg.chat.litellm.default_model = "openai.gpt-5.6-luna"
+        cfg.chat.litellm.default_model = "openai.gpt-6-luna"
         with empty_stream_gateway() as base_url, gateway_env(base_url):
             cfg.chat.litellm.base_url = base_url
             set_config(cfg)
@@ -654,7 +654,7 @@ class TestStreamEndpoint:
             cfg = load_config()
             cfg.chat.litellm.enabled = True
             cfg.chat.litellm.base_url = base_url
-            cfg.chat.litellm.default_model = "openai.gpt-5.6-luna"
+            cfg.chat.litellm.default_model = "openai.gpt-6-luna"
             cfg.chat.recall.enabled = False
             cfg.semantic_cache.enabled = 0
             config_path = tmp_path / "tribrid_config.json"
@@ -712,7 +712,7 @@ class TestStreamEndpoint:
             cfg = load_config()
             cfg.chat.litellm.enabled = True
             cfg.chat.litellm.base_url = base_url
-            cfg.chat.litellm.default_model = "openai.gpt-5.6-luna"
+            cfg.chat.litellm.default_model = "openai.gpt-6-luna"
             cfg.chat.recall.enabled = False
             cfg.semantic_cache.enabled = 1
             cfg.semantic_cache.mode = "read_write"
@@ -812,7 +812,7 @@ class TestStreamEndpoint:
             cfg = load_config()
             cfg.chat.litellm.enabled = True
             cfg.chat.litellm.base_url = base_url
-            cfg.chat.litellm.default_model = "openai.gpt-5.6-luna"
+            cfg.chat.litellm.default_model = "openai.gpt-6-luna"
             cfg.chat.recall.enabled = False
             cfg.semantic_cache.enabled = 1
             cfg.semantic_cache.mode = "read_write"
@@ -891,7 +891,7 @@ class TestStreamEndpoint:
             pass
 
 
-_LUNA = "openai.gpt-5.6-luna"
+_LUNA = "openai.gpt-6-luna"
 _BARRY_COHEN_QUESTION = "Which plane management company did Barry Cohen consider switching to?"
 
 

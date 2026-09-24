@@ -297,7 +297,7 @@ async def test_models_upsert_gen_row_becomes_gateway_route_and_regenerates_litel
             "OpenRouter routes",
         ),
         (
-            {"provider": "anthropic", "model": "openai/gpt-5.4-mini", "family": "gen", "unit": "1k_tokens", "input_per_1k": 0.1, "output_per_1k": 0.2},
+            {"provider": "anthropic", "model": "openai/gpt-6-luna", "family": "gen", "unit": "1k_tokens", "input_per_1k": 0.1, "output_per_1k": 0.2},
             "provider to equal",
         ),
     ],
@@ -417,7 +417,7 @@ async def test_native_embedding_capacity_upserts_reject_false_capabilities_atomi
 @pytest.mark.asyncio
 @pytest.mark.parametrize("existing", [False, True])
 @pytest.mark.parametrize("payload,components", [
-    ({"provider": "openai", "model": "openai/gpt-5.6-sol", "family": "gen", "unit": "1k_tokens",
+    ({"provider": "openai", "model": "openai/gpt-6-sol", "family": "gen", "unit": "1k_tokens",
       "input_per_1k": 0.001, "output_per_1k": 0.002, "context": 128000}, ["GEN"]),
     ({"provider": "cohere", "model": "embed-v4.0", "family": "embed", "unit": "1k_tokens",
       "embed_per_1k": 0.0001, "dimensions": 1024}, ["EMB"]),
@@ -433,7 +433,7 @@ async def test_upsert_capability_selector_never_replaces_model_family(
     seed_row = {**payload, "family": expected_family, "components": components}
     if components == ["GEN"]:
         seed_row.update({
-            "gateway_alias": "openai.gpt-5.6-sol", "gateway_upstream": "openrouter/openai/gpt-5.6-sol",
+            "gateway_alias": "openai.gpt-6-sol", "gateway_upstream": "openrouter/openai/gpt-6-sol",
             "base_url": "https://openrouter.ai/api/v1",
         })
     seed = {"currency": "USD", "sources": [], "models": [_local_serving_row(), *([seed_row] if existing else [])]}

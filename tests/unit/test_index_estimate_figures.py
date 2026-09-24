@@ -29,8 +29,8 @@ from tests.fixtures.pdf_builder import apollo_figure_pages, build_pdf
 def test_cost_uses_catalog_prices_for_the_alias() -> None:
     cost = _estimate_figure_description_cost_usd(alias="z-ai.glm-5.3-flash", figures=100, max_completion_tokens=600)
     assert cost is not None and cost > 0
-    # input 1200 tokens/figure at $0.000075/1k + output 600 at $0.00025/1k, for 100 figures
-    assert abs(cost - (100 * (1.2 * 0.000075 + 0.6 * 0.00025))) < 1e-9
+    # input 1200 tokens/figure at $0.00015/1k + output 600 at $0.0005/1k, for 100 figures
+    assert abs(cost - (100 * (1.2 * 0.00015 + 0.6 * 0.0005))) < 1e-9
 
 
 def test_cost_is_zero_for_no_figures_and_none_for_unknown_alias() -> None:

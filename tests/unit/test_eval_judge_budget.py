@@ -32,7 +32,7 @@ def test_promptfoo_grader_uses_the_judge_budget_not_the_chat_budget() -> None:
     cfg = TriBridConfig()
     cfg.chat.max_tokens = 512
     cfg.evaluation.judge_max_tokens = 3000
-    cfg.evaluation.promptfoo_grader_model = "openai.gpt-5.6-luna"
+    cfg.evaluation.promptfoo_grader_model = "openai.gpt-6-luna"
     previous = os.environ.get("LITELLM_API_KEY")
     os.environ["LITELLM_API_KEY"] = "sk-ragweld-local"
     try:
@@ -53,7 +53,7 @@ def test_promptfoo_grader_uses_the_judge_budget_not_the_chat_budget() -> None:
         else:
             os.environ["LITELLM_API_KEY"] = previous
     grader = payload["defaultTest"]["options"]["provider"]
-    assert grader["id"] == "openai:chat:openai.gpt-5.6-luna"
+    assert grader["id"] == "openai:chat:openai.gpt-6-luna"
     assert grader["config"]["max_tokens"] == 3000
 
 
@@ -61,9 +61,9 @@ def test_evaluation_substrate_fields_round_trip_through_the_flat_config() -> Non
     cfg = TriBridConfig()
     cfg.evaluation.judge_max_tokens = 3000
     cfg.evaluation.ragas_enabled = True
-    cfg.evaluation.ragas_judge_model = "openai.gpt-5.6-luna"
+    cfg.evaluation.ragas_judge_model = "openai.gpt-6-luna"
     cfg.evaluation.ragas_metrics = ["faithfulness"]
-    cfg.evaluation.promptfoo_grader_model = "openai.gpt-5.4-mini"
+    cfg.evaluation.promptfoo_grader_model = "openai.gpt-6-astra"
     cfg.evaluation.ragas_judge_timeout_s = 120
 
     flat = cfg.to_flat_dict()
@@ -71,9 +71,9 @@ def test_evaluation_substrate_fields_round_trip_through_the_flat_config() -> Non
     rehydrated = TriBridConfig.from_flat_dict(flat)
     assert rehydrated.evaluation.judge_max_tokens == 3000
     assert rehydrated.evaluation.ragas_enabled is True
-    assert rehydrated.evaluation.ragas_judge_model == "openai.gpt-5.6-luna"
+    assert rehydrated.evaluation.ragas_judge_model == "openai.gpt-6-luna"
     assert rehydrated.evaluation.ragas_metrics == ["faithfulness"]
-    assert rehydrated.evaluation.promptfoo_grader_model == "openai.gpt-5.4-mini"
+    assert rehydrated.evaluation.promptfoo_grader_model == "openai.gpt-6-astra"
     assert rehydrated.evaluation.ragas_judge_timeout_s == 120
 
 
@@ -103,7 +103,7 @@ def test_promptfoo_rejects_retired_models_before_preflight(alias: str, use_defau
         _build_config(cfg, [], repo_id="policy-test")
 
 
-@pytest.mark.parametrize("alias", ["ragweld-local", "openai.gpt-5.4-mini", "openai.gpt-6-astra", "z-ai.glm-5.3-flash"])
+@pytest.mark.parametrize("alias", ["ragweld-local", "openai.gpt-6-luna", "openai.gpt-6-astra", "z-ai.glm-5.3-flash"])
 def test_evaluation_alias_policy_preserves_allowed_models(alias: str) -> None:
     cfg = TriBridConfig()
     cfg.chat.litellm.default_model = alias

@@ -61,8 +61,8 @@ def _catalog_snapshot() -> None:
     ("override", "expected_model"),
     [
         ("", "ragweld-local"),
-        ("openai.gpt-5.4-mini", "openai.gpt-5.4-mini"),
-        ("litellm:openai.gpt-5.4-mini", "openai.gpt-5.4-mini"),
+        ("openai.gpt-6-luna", "openai.gpt-6-luna"),
+        ("litellm:openai.gpt-6-luna", "openai.gpt-6-luna"),
     ],
 )
 def test_every_catalog_alias_resolves_one_litellm_route(override: str, expected_model: str) -> None:
@@ -84,11 +84,11 @@ def test_every_catalog_alias_resolves_one_litellm_route(override: str, expected_
 @pytest.mark.parametrize(
     "override",
     [
-        "openrouter:openai/gpt-5.4-mini",
+        "openrouter:openai/gpt-6-luna",
         "local:qwen3:8b",
         "ragweld:mlx-community/Qwen3-4B-Instruct-2507-4bit",
-        "openai/gpt-5.4-mini",
-        "anthropic/claude-sonnet-4",
+        "openai/gpt-6-luna",
+        "anthropic/claude-sonnet-5",
     ],
 )
 def test_direct_provider_identifiers_are_rejected(override: str) -> None:

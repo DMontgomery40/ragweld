@@ -39,10 +39,10 @@ def _catalog_row(alias: str) -> dict:
 
 
 def test_gateway_alias_resolves_catalog_pricing_when_gateway_returns_no_cost() -> None:
-    row = _catalog_row("openai.gpt-5.4-mini")
+    row = _catalog_row("openai.gpt-6-luna")
     summary = build_trace_cost_summary(
         provider="LiteLLM",
-        model="openai.gpt-5.4-mini",
+        model="openai.gpt-6-luna",
         usage={"prompt_tokens": 1000, "completion_tokens": 500},
         provider_cost_usd=None,
     )
@@ -81,7 +81,7 @@ def test_unknown_alias_is_reported_unavailable_not_guessed() -> None:
 def test_gateway_reported_cost_is_authoritative_over_catalog() -> None:
     summary = build_trace_cost_summary(
         provider="LiteLLM",
-        model="openai.gpt-5.4-mini",
+        model="openai.gpt-6-luna",
         usage={"prompt_tokens": 1000, "completion_tokens": 500},
         provider_cost_usd=0.0123,
     )

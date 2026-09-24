@@ -64,7 +64,7 @@ def census_gateway():
             if state["mode"] == "schema":
                 content = {"node_types": [{"label": "Thing", "properties": [{"name": "name", "type": "STRING"}]}], "relationship_types": [{"label": "CONNECTS"}], "patterns": [{"source": "Thing", "relationship": "CONNECTS", "target": "Thing"}], "constraints": []}
             body = json.dumps({"id": "fixture", "object": "chat.completion", "created": 1,
-                "model": "openai.gpt-5.6-sol", "choices": [{"index": 0, "finish_reason": "stop",
+                "model": "openai.gpt-6-sol", "choices": [{"index": 0, "finish_reason": "stop",
                 "message": {"role": "assistant", "content": json.dumps(content)}}],
                 "usage": {"prompt_tokens": 8, "completion_tokens": 6, "total_tokens": 14}}
                 if status == 200 else {"error": {"message": "synthetic rejection", "type": "rate_limit"}}).encode()
@@ -99,8 +99,8 @@ def scope_for(lane="semantic_kg"):
 
 
 def route(base):
-    return dict(route_model="openai.gpt-5.6-sol", route_base_url=base,
-                route_api_key="synthetic-only", route_upstream="openrouter/openai/gpt-5.6-sol",
+    return dict(route_model="openai.gpt-6-sol", route_base_url=base,
+                route_api_key="synthetic-only", route_upstream="openrouter/openai/gpt-6-sol",
                 reasoning_effort="low")
 
 
@@ -228,7 +228,7 @@ async def test_schema_dispatch_keeps_budget_and_retains_producer_until_cleanup(c
     task = asyncio.create_task(derive_graph_schema_proposal(
         corpus_id="synthetic", chunks=[Chunk(chunk_id="c", file_path="x.md", start_line=1,
             end_line=1, content="A synthetic thing.", token_count=4)],
-        model_alias="openai.gpt-5.6-sol", **route(base), input_fingerprint="b" * 64,
+        model_alias="openai.gpt-6-sol", **route(base), input_fingerprint="b" * 64,
         timeout_s=3, max_output_tokens=128, census_scope=scope))
     if cancel:
         assert await asyncio.to_thread(held.wait, 5)
@@ -314,14 +314,14 @@ async def test_census_identity_is_checked_before_graph_driver_or_gateway_use(cen
         # that identity. Corpus and lane remain independently checkable here.
         with pytest.raises(ValueError, match="census"):
             await derive_graph_schema_proposal(
-                corpus_id="synthetic", chunks=[], model_alias="openai.gpt-5.6-sol",
+                corpus_id="synthetic", chunks=[], model_alias="openai.gpt-6-sol",
                 **route(base), input_fingerprint="b" * 64, timeout_s=3,
                 max_output_tokens=128, census_scope=scope,
             )
     else:
         with pytest.raises(ValueError, match="nonempty chunk"):
             await derive_graph_schema_proposal(
-                corpus_id="synthetic", chunks=[], model_alias="openai.gpt-5.6-sol",
+                corpus_id="synthetic", chunks=[], model_alias="openai.gpt-6-sol",
                 **route(base), input_fingerprint="b" * 64, timeout_s=3,
                 max_output_tokens=128, census_scope=scope,
             )

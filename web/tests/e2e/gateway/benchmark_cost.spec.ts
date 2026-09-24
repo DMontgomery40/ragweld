@@ -26,16 +26,16 @@ test('saved benchmarks distinguish reported charges, estimates, and unknown tota
   const unknown: TraceCostSummary = { cost_source: 'unavailable', authoritative: false, estimated_cost_usd: null, detail: 'Run total unavailable because one call has no accounting.' };
   const runs: BenchmarkRun[] = [
     { run_id: `cost-reported-${Date.now()}`, prompt: 'How often is the salinity sensor calibrated? Reported-cost fixture.', cost_summary: reported, results: [
-      { model: 'openai.gpt-5.6-luna', response: 'Every 30 days.', cost_summary: reported },
+      { model: 'openai.gpt-6-luna', response: 'Every 30 days.', cost_summary: reported },
       { model: 'ragweld-local', response: 'Every 30 days.', cost_summary: { ...reported, estimated_cost_usd: 0 } },
     ] },
     { run_id: `cost-estimated-${Date.now()}`, prompt: 'How often is the salinity sensor calibrated? Estimated-cost fixture.', cost_summary: { ...estimate, estimated_cost_usd: 0.0025001234 }, results: [
-      { model: 'openai.gpt-5.6-luna', response: 'Every 30 days.', cost_summary: reported },
-      { model: 'openai.gpt-5.4-mini', response: 'Every 30 days.', cost_summary: estimate },
+      { model: 'openai.gpt-6-luna', response: 'Every 30 days.', cost_summary: reported },
+      { model: 'openai.gpt-6-astra', response: 'Every 30 days.', cost_summary: estimate },
     ] },
     { run_id: `cost-unknown-${Date.now()}`, prompt: 'How often is the salinity sensor calibrated? Partial-accounting fixture.', cost_summary: unknown, results: [
-      { model: 'openai.gpt-5.6-luna', response: '', error: 'No assistant content; reasoning consumed the output budget.', cost_summary: reported },
-      { model: 'openai.gpt-5.4-mini', response: '', error: 'Gateway request failed before accounting was returned.', cost_summary: null },
+      { model: 'openai.gpt-6-luna', response: '', error: 'No assistant content; reasoning consumed the output budget.', cost_summary: reported },
+      { model: 'openai.gpt-6-astra', response: '', error: 'Gateway request failed before accounting was returned.', cost_summary: null },
     ] },
   ].map((run) => ({
     ...run,

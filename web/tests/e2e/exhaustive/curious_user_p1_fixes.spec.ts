@@ -20,8 +20,8 @@ import {
 
 const REAL_QUESTION = 'How often is the salinity sensor calibrated?';
 const BENCHMARK_MODELS = [
-  process.env.BENCHMARK_E2E_MODEL_A ?? 'openai.gpt-5.6-luna',
-  process.env.BENCHMARK_E2E_MODEL_B ?? 'openai.gpt-5.4-mini',
+  process.env.BENCHMARK_E2E_MODEL_A ?? 'openai.gpt-6-luna',
+  process.env.BENCHMARK_E2E_MODEL_B ?? 'openai.gpt-6-astra',
 ];
 
 function trackRequests(page: Page, predicate: (url: string) => boolean): () => string[] {

@@ -30,7 +30,7 @@ class _ModelsHandler(BaseHTTPRequestHandler):
             {
                 "data": [
                     {"id": "ragweld-local"},
-                    {"id": "openai.gpt-5.4-mini"},
+                    {"id": "openai.gpt-6-luna"},
                     {"id": "openai.text-embedding-3-small"},
                     {"id": "openai.text-embedding-3-large"},
                     {"id": "hand-added-alias-not-in-catalog"},
@@ -90,8 +90,8 @@ async def test_chat_models_publish_only_catalog_backed_aliases(client: AsyncClie
 
     assert response.status_code == 200
     models = response.json()["models"]
-    assert [row["id"] for row in models] == ["ragweld-local", "openai.gpt-5.4-mini"]
-    assert [row["override"] for row in models] == ["litellm:ragweld-local", "litellm:openai.gpt-5.4-mini"]
+    assert [row["id"] for row in models] == ["ragweld-local", "openai.gpt-6-luna"]
+    assert [row["override"] for row in models] == ["litellm:ragweld-local", "litellm:openai.gpt-6-luna"]
     assert {row["source"] for row in models} == {"litellm"}
     assert {row["provider"] for row in models} == {"LiteLLM"}
     assert all(row["catalog_provider"] and row["catalog_model"] for row in models)
@@ -103,8 +103,8 @@ async def test_chat_models_publish_only_catalog_backed_aliases(client: AsyncClie
     assert local["supports_vision"] is False
 
     assert paid["catalog_provider"] == "openai"
-    assert paid["catalog_model"] == "openai/gpt-5.4-mini"
-    assert paid["display_name"] == "OpenAI: GPT-5.4 Mini"
+    assert paid["catalog_model"] == "openai/gpt-6-luna"
+    assert paid["display_name"] == "OpenAI: GPT-6 Luna"
     assert paid["context"] and paid["context"] > 0
     assert paid["input_per_1k"] and paid["input_per_1k"] > 0
     assert paid["output_per_1k"] and paid["output_per_1k"] > 0

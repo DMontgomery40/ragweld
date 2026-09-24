@@ -503,7 +503,7 @@ async def test_approved_schema_only_authorizes_the_registered_resolved_root(
     cfg = load_config().model_copy(deep=True)
     cfg.graph_indexing.enabled = True
     cfg.graph_indexing.build_code_graph = False
-    cfg.graph_indexing.semantic_kg_llm_model = "openai.gpt-5.6-luna"
+    cfg.graph_indexing.semantic_kg_llm_model = "openai.gpt-6-luna"
     cfg.indexing.figures.enabled = False
     pg = PostgresClient(cfg.indexing.postgres_url)
     await pg.connect()

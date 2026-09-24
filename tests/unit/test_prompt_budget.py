@@ -129,7 +129,6 @@ def test_images_are_charged_at_the_family_worst_case() -> None:
 # cap x the model's multiplier. None = no finite published maximum (dimension-dependent or refused).
 TILE_STANDARD_MAX = 85 + 8 * 170  # 1,445 (gpt-4o / gpt-4.1 / gpt-4-turbo)
 TILE_MINI_MAX = 2833 + 8 * 5667  # 48,169 (gpt-4o-mini)
-TILE_GPT5_MAX = 70 + 8 * 140  # 1,190 (gpt-5 family, tile-based)
 TILE_O_SERIES_MAX = 75 + 8 * 150  # 1,275 (o1 / o3, tile-based)
 HISTORICAL_OPENAI_DOCUMENTED_IMAGE_MAX: dict[str, int] = {
     "openai/gpt-4-turbo": TILE_STANDARD_MAX,
@@ -144,34 +143,9 @@ HISTORICAL_OPENAI_DOCUMENTED_IMAGE_MAX: dict[str, int] = {
     "openai/gpt-4o-mini-2024-07-18": TILE_MINI_MAX,
 }
 OPENAI_DOCUMENTED_IMAGE_MAX: dict[str, int | None] = {
-    "openai/gpt-5": TILE_GPT5_MAX,
     "openai/gpt-5-image": None,
     "openai/gpt-5-image-mini": None,
-    "openai/gpt-5-mini": math.ceil(1536 * 1.62),
-    "openai/gpt-5-nano": math.ceil(1536 * 2.46),
-    "openai/gpt-5-pro": TILE_GPT5_MAX,
-    "openai/gpt-5.1": math.ceil(1536 * 2.46),
-    "openai/gpt-5.1-codex": math.ceil(1536 * 2.46),
-    "openai/gpt-5.1-codex-max": math.ceil(1536 * 2.46),
-    "openai/gpt-5.1-codex-mini": math.ceil(1536 * 2.46),
-    "openai/gpt-5.2": math.ceil(1536 * 2.46),
-    "openai/gpt-5.2-chat": math.ceil(1536 * 2.46),
-    "openai/gpt-5.2-codex": math.ceil(1536 * 2.46),
-    "openai/gpt-5.2-pro": math.ceil(1536 * 2.46),
-    "openai/gpt-5.3-codex": math.ceil(1536 * 2.46),
-    "openai/gpt-5.4": math.ceil(2500 * 2.46),  # 2,500-patch high/auto ceiling
     "openai/gpt-5.4-image-2": None,
-    "openai/gpt-5.4-mini": math.ceil(1536 * 1.62),
-    "openai/gpt-5.4-nano": math.ceil(1536 * 2.46),
-    "openai/gpt-5.4-pro": math.ceil(2500 * 2.46),
-    "openai/gpt-5.5": math.ceil(10000 * 2.46),
-    "openai/gpt-5.5-pro": math.ceil(10000 * 2.46),
-    "openai/gpt-5.6-luna": None,  # uncapped: dimension-dependent
-    "openai/gpt-5.6-luna-pro": None,
-    "openai/gpt-5.6-sol": None,
-    "openai/gpt-5.6-sol-pro": None,
-    "openai/gpt-5.6-terra": None,
-    "openai/gpt-5.6-terra-pro": None,
     "openai/gpt-chat-latest": None,  # rolling pointer: no stable formula
     "openai/o1": TILE_O_SERIES_MAX,
     "openai/o1-pro": TILE_O_SERIES_MAX,
@@ -292,11 +266,13 @@ def test_catalog_vision_rows_resolve_a_bound_or_an_explicit_refusal_and_text_onl
         if row["provider"] == "anthropic":
             assert bound >= 4784
         bounded += 1
-    assert bounded > 200 and text_only > 150 and refused >= 3
+    gateway_rows = sum(1 for row in catalog["models"] if row.get("gateway_alias"))
+    assert bounded + text_only + refused == gateway_rows
+    assert bounded > 0 and text_only > 0 and refused > 0
 
 
 def test_family_bounds_are_never_below_the_documented_worst_cases() -> None:
-    assert image_tokens_for_attachment("anthropic", "anthropic/claude-sonnet-4", supports_vision=True) >= 4784
+    assert image_tokens_for_attachment("anthropic", "anthropic/claude-sonnet-5", supports_vision=True) >= 4784
     assert image_tokens_for_attachment("mistralai", "mistralai/pixtral-large", supports_vision=True) == IMAGE_TOKENS_DEFAULT
     assert text_factor_for_provider("anthropic") >= 1.5
     assert text_factor_for_provider("unknown-family") == TEXT_FACTOR_DEFAULT >= 1.5
@@ -311,20 +287,17 @@ def test_warmed_catalog_resolves_real_aliases_to_their_family_bounds() -> None:
     warm_gateway_catalog()
     with pytest.raises(ImageBoundError, match="does not accept image attachments"):
         image_tokens_for_alias("ragweld-local")  # text-only serving row
-    assert image_tokens_for_alias("openai.gpt-5-pro") == TILE_STANDARD_MAX
-    assert image_tokens_for_alias("openai.gpt-5.5") == math.ceil(10000 * 2.46)
-    assert image_tokens_for_alias("openai.gpt-5.4") == math.ceil(2500 * 2.46)
-    assert image_tokens_for_alias("openai.gpt-5.4-mini") == math.ceil(1536 * 2.46)
-    assert image_tokens_for_alias("openai.gpt-5.6-sol", size=(1024, 1024)) == math.ceil(1024 * 2.46)
-    assert image_tokens_for_alias("anthropic.claude-sonnet-4") >= 4784
+    with pytest.raises(ImageBoundError, match="no published finite image token bound"):
+        image_tokens_for_alias("openai.gpt-6-sol", size=(1024, 1024))
+    assert image_tokens_for_alias("anthropic.claude-sonnet-5") >= 4784
     local = plan_prompt_budget(alias="ragweld-local", system_prompt="s", user_message=QUESTION, max_tokens=512)
     assert local.context_window == LOCAL_WINDOW and local.text_factor == 1.1
     with pytest.raises(PromptBudgetError, match="does not accept image attachments"):
         plan_prompt_budget(alias="ragweld-local", system_prompt="s", user_message=QUESTION, max_tokens=512, image_sizes=[(64, 64)])
     with pytest.raises(PromptBudgetError, match="does not accept image attachments"):
         assert_prompt_within_window(alias="ragweld-local", system_prompt="s", user_message=QUESTION, max_tokens=512, image_sizes=[(64, 64)])
-    with pytest.raises(PromptBudgetError, match="follows the image dimensions"):
-        plan_prompt_budget(alias="openai.gpt-5.6-sol", system_prompt="s", user_message=QUESTION, max_tokens=512, image_sizes=[None])
+    with pytest.raises(PromptBudgetError, match="no published finite image token bound"):
+        plan_prompt_budget(alias="openai.gpt-6-sol", system_prompt="s", user_message=QUESTION, max_tokens=512, image_sizes=[None])
 
 
 def test_text_counts_carry_the_family_safety_factor() -> None:

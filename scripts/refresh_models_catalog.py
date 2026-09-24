@@ -37,6 +37,7 @@ from server.gateway_catalog import (
     serialize_catalog,
     write_catalog_trio,
 )
+from server.model_policy import ensure_model_allowed
 from server.runtime_capabilities import apply_selection_metadata_to_catalog
 
 OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
@@ -89,6 +90,7 @@ class RefreshStats:
     skipped_router: int = 0
     skipped_missing_context: int = 0
     skipped_invalid_alias: int = 0
+    skipped_blocked_model: int = 0
     skipped_superseded: int = 0
     duplicate_feed_ids: int = 0
     rows_pricing_tiered: int = 0
@@ -230,6 +232,11 @@ def normalize_openrouter_rows(rows: list[dict[str, Any]], stats: RefreshStats | 
             # answer's lineage would not name the model that produced it.
             stats.skipped_router += 1
             continue
+        try:
+            ensure_model_allowed(model_id)
+        except ValueError:
+            stats.skipped_blocked_model += 1
+            continue
         if model_id in normalized:
             stats.duplicate_feed_ids += 1
             continue
@@ -364,19 +371,104 @@ def _catalog_without_last_updated(catalog: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _refresh_litellm_reranker_rows(
+    preserved: list[dict[str, Any]],
+    feed_models: dict[str, FeedModel],
+) -> list[dict[str, Any]]:
+    """Keep the manual listwise reranker route on the retained Luna generation."""
+
+    luna_candidates = [
+        feed
+        for model_id, feed in feed_models.items()
+        if re.fullmatch(r"openai/gpt-[0-9]+(?:\.[0-9]+)*-luna", model_id)
+    ]
+    luna_reranker_rows = [
+        row
+        for row in preserved
+        if str(row.get("provider") or "").lower() == "litellm"
+        and _components(row) == {"RERANK"}
+        and re.fullmatch(r"openai\.gpt-[0-9]+(?:\.[0-9]+)*-luna", str(row.get("model") or ""))
+    ]
+    if not luna_reranker_rows:
+        return preserved
+    if not luna_candidates:
+        retained_aliases = {gateway_alias_for_openrouter_id(model_id) for model_id in feed_models}
+        stale_aliases = sorted(
+            str(row.get("model") or "")
+            for row in luna_reranker_rows
+            if str(row.get("model") or "") not in retained_aliases
+        )
+        if stale_aliases:
+            raise RuntimeError(
+                "cannot migrate preserved LiteLLM reranker row: no retained OpenAI Luna route; "
+                f"stale aliases={stale_aliases}"
+            )
+        return preserved
+    latest_luna = max(
+        luna_candidates,
+        key=lambda feed: _openai_frontier_version(feed.model_id) or (),
+    )
+    alias = gateway_alias_for_openrouter_id(latest_luna.model_id)
+    family = latest_luna.model_id.split("/", 1)[1]
+
+    refreshed: list[dict[str, Any]] = []
+    for original in preserved:
+        row = copy.deepcopy(original)
+        if original in luna_reranker_rows:
+            row.update(
+                family=family,
+                model=alias,
+                context=latest_luna.context,
+                display_name=f"LiteLLM gateway: {latest_luna.display_name} (listwise rerank)",
+                notes=(
+                    f"Listwise reranking through the LiteLLM gateway alias {alias}: one request per query "
+                    "carrying the top-N candidate snippets; scores 0-10 in candidate order. "
+                    "Billed at the alias' token prices."
+                ),
+            )
+            if latest_luna.has_full_pricing:
+                row["input_per_1k"] = latest_luna.input_per_1k
+                row["output_per_1k"] = latest_luna.output_per_1k
+            else:
+                row.pop("input_per_1k", None)
+                row.pop("output_per_1k", None)
+        refreshed.append(row)
+    return refreshed
+
+
+def production_aliases() -> tuple[str, ...]:
+    """The gateway aliases deploy/proxmox/render_config.py assigns to production."""
+    from deploy.proxmox.render_config import (
+        PRODUCTION_CHAT_MODEL_ALIAS,
+        PRODUCTION_MODEL_ALIAS,
+        PRODUCTION_VISION_MODEL_ALIAS,
+    )
+
+    return (PRODUCTION_MODEL_ALIAS, PRODUCTION_CHAT_MODEL_ALIAS, PRODUCTION_VISION_MODEL_ALIAS)
+
+
 def build_refreshed_catalog(
     catalog: dict[str, Any],
     feed_rows: list[dict[str, Any]],
     *,
     as_of_date: str,
+    required_aliases: tuple[str, ...] = (),
 ) -> tuple[dict[str, Any], RefreshStats, bool]:
-    """Replace every feed-owned GEN row with the current OpenRouter routes."""
+    """Replace every feed-owned GEN row with the current OpenRouter routes.
+
+    A refresh that would drop the route behind a ``required_aliases`` entry fails, as a
+    missing Luna reranker route does: a partial new generation (a GPT-7 Luna before a
+    GPT-7 Sol) must never publish a gateway config without the aliases production uses.
+    """
 
     stats = RefreshStats(total_feed_rows=len(feed_rows))
     feed_models = normalize_openrouter_rows(feed_rows, stats)
 
     existing_rows = _catalog_models(catalog)
-    preserved = [row for row in existing_rows if _preserved_row(row)]
+    preserved = _refresh_litellm_reranker_rows(
+        [row for row in existing_rows if _preserved_row(row)],
+        feed_models,
+    )
     replaced = [row for row in existing_rows if not _preserved_row(row)]
     previous_ids = {str(row.get("model") or "") for row in replaced if _is_openrouter_gateway_row(row)}
     stats.previous_gateway_rows = len(previous_ids)
@@ -397,6 +489,13 @@ def build_refreshed_catalog(
     merged["models"] = result_rows
     merged = apply_selection_metadata_to_catalog(merged)
     gateway_rows(merged)  # fail closed on alias collisions or a missing local serving row
+    routed = {str(row.get("gateway_alias") or "") for row in merged["models"] if isinstance(row, dict)}
+    dropped = sorted(alias for alias in required_aliases if alias not in routed)
+    if dropped:
+        raise RuntimeError(
+            f"refresh would remove routes production still uses: {dropped} "
+            "(deploy/proxmox/render_config.py); move those defaults to a retained route in the same change"
+        )
 
     candidate = copy.deepcopy(merged)
     candidate["sources"] = copy.deepcopy(catalog.get("sources", []))
@@ -471,6 +570,7 @@ def main(argv: list[str] | None = None) -> int:
             current_catalog,
             feed_rows,
             as_of_date=as_of_date,
+            required_aliases=production_aliases(),
         )
     except Exception as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

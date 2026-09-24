@@ -158,7 +158,7 @@ async def test_answer_stream_with_an_empty_provider_stream_fails_and_writes_no_c
             cfg = load_config()
             cfg.chat.litellm.enabled = True
             cfg.chat.litellm.base_url = base_url
-            cfg.chat.litellm.default_model = "openai.gpt-5.6-luna"
+            cfg.chat.litellm.default_model = "openai.gpt-6-luna"
             cfg.semantic_cache.enabled = 1
             cfg.semantic_cache.mode = "read_write"
             cfg.semantic_cache.min_query_chars = 1
@@ -214,7 +214,7 @@ async def test_a_failed_retrieval_is_a_typed_503_on_both_answer_routes_never_an_
     try:
         cfg = load_config()
         cfg.chat.litellm.enabled = True
-        cfg.chat.litellm.default_model = "openai.gpt-5.6-luna"
+        cfg.chat.litellm.default_model = "openai.gpt-6-luna"
         cfg.qdrant.url = "http://127.0.0.1:9"  # nothing listens on the discard port
         await pg.upsert_corpus_config_json(repo_id, cfg.model_dump(mode="serialization"))
         body = {**_request(repo_id), "include_vector": True, "include_sparse": True}
@@ -272,7 +272,7 @@ async def test_answer_stream_closed_on_done_has_its_cache_committed(tmp_path) ->
         cfg = load_config()
         cfg.chat.litellm.enabled = True
         cfg.chat.litellm.base_url = base_url
-        cfg.chat.litellm.default_model = "openai.gpt-5.6-luna"
+        cfg.chat.litellm.default_model = "openai.gpt-6-luna"
         cfg.semantic_cache.enabled = 1
         cfg.semantic_cache.mode = "read_write"
         cfg.semantic_cache.min_query_chars = 1

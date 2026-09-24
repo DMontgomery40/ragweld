@@ -127,7 +127,7 @@ def test_output_budget_doubles_the_most_verbose_measured_verdict_and_grows_per_c
 @pytest.mark.parametrize(
     ("upstream", "expected"),
     [
-        ("openrouter/openai/gpt-5.6-luna", {"reasoning": {"effort": "none"}}),
+        ("openrouter/openai/gpt-6-luna", {"reasoning": {"effort": "none"}}),
         ("openrouter/openai/gpt-4.1-nano", {"reasoning": {"effort": "none"}}),
         ("openrouter/deepseek/deepseek-v4-flash", {"reasoning": {"effort": "none"}}),
         ("openrouter/google/gemini-3.7-flash", {"reasoning": {"effort": "minimal"}}),
@@ -364,13 +364,13 @@ async def test_score_candidates_fails_typed_when_reasoning_truncated_the_verdict
     with _rerank_gateway() as base_url:
         with pytest.raises(GatewayRerankBudgetError, match="truncated score array") as excinfo:
             await score_candidates(
-                route=_route(base_url, "openai.gpt-5.6-luna", api_key=TRUNCATED_VERDICT_KEY),
+                route=_route(base_url, "openai.gpt-6-luna", api_key=TRUNCATED_VERDICT_KEY),
                 system_prompt="",
                 query=QUERY,
                 docs=DOCS,
                 timeout_s=10.0,
             )
-    assert "882" in str(excinfo.value) and "'openai.gpt-5.6-luna'" in str(excinfo.value)
+    assert "882" in str(excinfo.value) and "'openai.gpt-6-luna'" in str(excinfo.value)
     assert isinstance(excinfo.value.__cause__, GatewayRerankParseError)
 
 

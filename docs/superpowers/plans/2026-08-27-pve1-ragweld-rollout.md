@@ -1097,7 +1097,7 @@ Unauthenticated requests to `me`, `grafana`, `langfuse`, `mlflow`, and `flyte` h
 
 - [ ] **Step 5: Send one paid gateway smoke request**
 
-Use LiteLLM at `127.0.0.1:54000/v1`, model `openai.gpt-5.6-terra`, prompt `Reply with OK only.`, `temperature=0`, `max_tokens=8`, retry zero, and no fallback. Record response ID, resolved model, token usage, and cost only. Do not record the key or headers.
+Use LiteLLM at `127.0.0.1:54000/v1`, model `openai.gpt-6-sol`, prompt `Reply with OK only.`, `temperature=0`, `max_tokens=8`, retry zero, and no fallback. Record response ID, resolved model, token usage, and cost only. Do not record the key or headers.
 
 ```bash
 set -a
@@ -1106,7 +1106,7 @@ set +a
 curl -fsS --retry 0 http://127.0.0.1:54000/v1/chat/completions \
   -H "Authorization: Bearer ${LITELLM_API_KEY}" \
   -H 'Content-Type: application/json' \
-  -d '{"model":"openai.gpt-5.6-terra","messages":[{"role":"user","content":"Reply with OK only."}],"temperature":0,"max_tokens":8}' \
+  -d '{"model":"openai.gpt-6-sol","messages":[{"role":"user","content":"Reply with OK only."}],"temperature":0,"max_tokens":8}' \
   | jq '{id, model, usage, answer: .choices[0].message.content}'
 ```
 
