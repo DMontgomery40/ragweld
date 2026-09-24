@@ -47,18 +47,20 @@ _COST_SOURCES: tuple[str, ...] = get_args(TraceCostSummary.model_fields["cost_so
 
 
 def prime_chat_series(model: str) -> None:
-    """Create every chat series of `model` at 0 (idempotent).
+    """Create the chat series of `model` at 0 (idempotent).
 
     A labelled series appears in `/metrics` when its child is created. Created and
     incremented between two scrapes, its first sample is already 1, and `rate()` /
     `increase()` never count that request: the first chat, or the first error, of an alias
     after a restart would be invisible on every dashboard and alert. Creating the children
     as soon as the request's alias is known, well before a chat finishes, gives Prometheus
-    a 0 sample to count from.
+    a 0 sample to count from. The request counter is primed for every outcome (the error
+    ratio and its alert read it); the duration histogram, ~18 series per outcome, only for
+    `ok`, so an alias costs dozens of series rather than a hundred and more.
     """
     for outcome in _OUTCOMES:
         CHAT_REQUESTS_TOTAL.labels(model=model, outcome=outcome)
-        CHAT_DURATION_SECONDS.labels(model=model, outcome=outcome)
+    CHAT_DURATION_SECONDS.labels(model=model, outcome="ok")
     CHAT_TIME_TO_FIRST_EVENT_SECONDS.labels(model=model)
     CHAT_TIME_TO_FIRST_TEXT_SECONDS.labels(model=model)
     for cost_source in _COST_SOURCES:
@@ -100,10 +102,16 @@ class ChatRunTelemetry:
     generation_error: BaseException | None = None
     outcome: RunOutcome | None = None
 
+    def __post_init__(self) -> None:
+        # A request fails as `unresolved` before its alias is known (config load) or when
+        # the alias is not in the catalog, so its request counter is primed from the start.
+        # Only that counter: `unresolved` requests never reach the gateway, and zero cost,
+        # token or latency series for it would put an empty row on every per-model panel.
+        for outcome in _OUTCOMES:
+            CHAT_REQUESTS_TOTAL.labels(model=UNRESOLVED_MODEL_LABEL, outcome=outcome)
+
     def bind_model(self, model: str) -> None:
-        """Label the request with its alias once the config resolves it. Only resolved
-        aliases are primed: `unresolved` requests never reach the gateway, and zero series
-        for it would put a permanent empty row on every per-model panel."""
+        """Label the request with its alias once the config resolves it, priming its series."""
         self.model = model
         if model != UNRESOLVED_MODEL_LABEL:
             prime_chat_series(model)

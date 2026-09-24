@@ -193,11 +193,12 @@ test.describe('generation gateway catalog in the Chat picker', () => {
       '# Apollo 11 EVA\n\nThe surface exploration was concluded in the allotted time of 2-1/2 hours.\n',
       'utf-8'
     );
-    const created = await request.post(`${API_BASE}/corpora`, {
-      data: { corpus_id: corpusId, name: corpusId, path: corpusDir },
-    });
-    expect(created.ok(), `POST /api/corpora (${corpusId}) -> ${created.status()}`).toBe(true);
+    // Creation sits inside the try so a half-failed setup is still cleaned up.
     try {
+      const created = await request.post(`${API_BASE}/corpora`, {
+        data: { corpus_id: corpusId, name: corpusId, path: corpusDir },
+      });
+      expect(created.ok(), `POST /api/corpora (${corpusId}) -> ${created.status()}`).toBe(true);
       const reset = await request.patch(`${API_BASE}/config/reranking?corpus_id=${encodeURIComponent(corpusId)}`, {
         data: { reranker_mode: 'none', reranker_cloud_provider: 'litellm', reranker_cloud_model: '' },
       });
@@ -221,9 +222,12 @@ test.describe('generation gateway catalog in the Chat picker', () => {
       expect(await shown()).toEqual({ value: RERANK_ALIAS, optionValue: RERANK_ALIAS, text: String(alias?.display_name) });
       await expect(picker).toHaveAttribute('aria-invalid', 'false');
     } finally {
-      const removed = await request.delete(`${API_BASE}/corpora/${encodeURIComponent(corpusId)}`);
-      expect([200, 204, 404]).toContain(removed.status());
-      rmSync(corpusDir, { recursive: true, force: true });
+      try {
+        const removed = await request.delete(`${API_BASE}/corpora/${encodeURIComponent(corpusId)}`);
+        expect([200, 204, 404]).toContain(removed.status());
+      } finally {
+        rmSync(corpusDir, { recursive: true, force: true });
+      }
     }
   });
 });

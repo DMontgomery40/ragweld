@@ -138,9 +138,22 @@ def test_a_request_creates_every_series_of_its_alias_at_zero_before_it_finishes(
     assert all(value is None for value in samples().values()), "the probe alias must be unused"
 
     telemetry = ChatRunTelemetry(model=UNRESOLVED_MODEL_LABEL)
+    # Before the alias is known the request can only fail as `unresolved`: that counter exists.
+    for outcome in get_args(RunOutcome):
+        assert (
+            REGISTRY.get_sample_value(
+                "tribrid_chat_requests_total", {"model": UNRESOLVED_MODEL_LABEL, "outcome": outcome}
+            )
+            is not None
+        ), outcome
     telemetry.bind_model(model)
     primed = samples()
-    assert primed and all(value == 0.0 for value in primed.values()), primed
+    # Every request counter (the error ratio and its alert read them) and the `ok` duration
+    # histogram are primed; error-outcome durations are left to appear with their first
+    # observation, which keeps an alias at dozens of series instead of a hundred and more.
+    unprimed = {("duration", outcome) for outcome in get_args(RunOutcome) if outcome != "ok"}
+    assert {key for key, value in primed.items() if value is None} == unprimed, primed
+    assert all(value == 0.0 for key, value in primed.items() if key not in unprimed), primed
 
     telemetry.mark_event()
     telemetry.mark_text()
