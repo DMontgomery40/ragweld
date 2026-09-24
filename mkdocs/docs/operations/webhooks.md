@@ -62,6 +62,17 @@ flowchart LR
   F --> G["Slack / PagerDuty / Custom"]
 ```
 
+## Where delivery lands today (Alertmanager → Discord)
+
+Delivery is configured, not hypothetical: `infra/alertmanager.yml` routes every alert except the always-firing **RagweldWatchdog** to a `discord` receiver. The watchdog — whose presence in `/api/v2/alerts` is what proves the pipe — is parked on a receiver with no integration, so it never pages.
+
+- **Webhook URLs are secrets.** The Discord incoming-webhook URL lives in `/etc/ragweld/alertmanager-discord-webhook` (0600, runtime-user owned) on the Proxmox host, mounted read-only into the `alertmanager` container by `deploy/proxmox/docker-compose.yml` and required by `deploy/proxmox/start-runtime.sh`. The local dev overlay mounts no webhook, so the Discord receiver fails at send time there — logged by Alertmanager, nothing leaves the machine.
+- **Every paging rule links a dashboard.** Each rule in `infra/prometheus-rules.yml` carries a `dashboard` annotation (`/d/<uid>`), and the Discord message template links it on the public Grafana root — never the Prometheus `generatorURL`, which is a container hostname no reader can open. Resolved notifications are sent (`send_resolved`), grouped for 5 minutes with a 4-hour repeat.
+- **A Slack receiver is ready but unrouted.** Put the incoming-webhook URL in `/etc/ragweld/alertmanager-slack-webhook` (0600, runtime user), add its read-only mount beside the Discord one in `deploy/proxmox/docker-compose.yml`, then point the route's `receiver` at `slack`.
+- **Alertmanager is pinned to v0.28.1** because Discord's `webhook_url_file` is rejected by v0.27, and the production container runs as root so the image's `nobody` user can read the owner-only secret file.
+
+New alert rules shipped with this delivery path: gateway failed-request ratio and time-to-first-token (both excluding the local lane), gateway key budget low, retrieval/search-stage/reranker errors, indexing-run failures, Laya down while in use, chat error ratio, chat time-to-first-text, and thumbs-down share. Each carries a `dashboard` annotation naming the Grafana board to open first; see the [generated runtime topology](../reference/architecture/runtime-topology.md) for the services behind them.
+
 ## Reading what Alertmanager is holding right now
 
 Delivery is one half of alerting; the other half is seeing what is currently firing. `GET /api/observability/alerts` reads Alertmanager's own `/api/v2/alerts` route on **every request**, so the answer is always what Alertmanager holds right now — not a webhook log that a restarted API would lose. The **Dashboard → Monitoring** alerts panel renders this response directly.

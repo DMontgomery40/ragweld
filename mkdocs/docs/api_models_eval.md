@@ -40,11 +40,15 @@
 
 | Model | Purpose |
 |-------|---------|
-| `EvalDatasetItem` | Single question + expected file paths |
-| `EvalMetrics` | Aggregated metrics (MRR, Recall@K, NDCG@10, latency percentiles) |
+| `EvalDatasetItem` | Single question + expected file paths, each optionally narrowed by an `EvalExpectedLocation` |
+| `EvalExpectedLocation` | Page or line span refining one expected path (`unit` `page`/`line`, 1-based inclusive `start`/`end`) |
+| `EvalMetrics` | Aggregated metrics (MRR, Recall@K, NDCG@10, MAP@5, latency percentiles) |
 | `EvalRun` | Complete run with config snapshot and results |
 | `EvalComparisonResult` | Delta between baseline and current runs |
 | `EvalAnalysisArtifact` | Persisted AI comparison analysis, keyed by (run_id, compare_run_id) |
+
+!!! note "Chunk-level scoring: locations, uninformative entries, MAP@5, and rated runs"
+    Retrieval is scored per chunk: a path with an `expected_locations` span is hit only by a chunk overlapping it, and an entry whose expectations cannot fail is `uninformative` — excluded from the headline metrics and counted in `EvalRun.uninformative_count`. `EvalMetrics.map_at_5` is `null` on runs scored before chunk-level scoring. `SearchResponse` now carries `event_id` (its run id), and `POST /api/feedback` accepts `surface` (`chat`/`search`) plus the `chunk_ids` the rated answer cited — it refuses (typed `409 feedback_event_not_answered`) events that failed or were aborted, since they produced no answer to rate. See [Evaluation Guide](eval_guide.md).
 
 ```mermaid
 flowchart TB

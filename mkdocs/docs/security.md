@@ -97,6 +97,7 @@ Gateway-owned upstream keys and app credentials are different boundaries; never 
 | `OPENROUTER_API_KEY` | Gateway only (`infra/litellm.env`) | Upstream key for OpenRouter-routed generation aliases |
 | `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY` | Gateway only (`infra/litellm.env`) | Reserved gateway-owned upstream keys — never exported into the app process |
 | `LITELLM_BASE_URL`, `LITELLM_API_KEY` | App | How the API authenticates to the local LiteLLM gateway; Compose maps `LITELLM_API_KEY` onto the gateway's `LITELLM_MASTER_KEY` |
+| `TYPESAFE_API_KEY` | App | Upstream key for TypeSafe Jev, read only when `system_one.provider=typesafe` (the synthetic judge's System One backend); a self-hosted Laya needs no credential |
 | `VOYAGE_API_KEY`, `COHERE_API_KEY`, `JINA_API_KEY` | App | Provider access for embedding/rerank lanes that do not route through the gateway |
 | `POSTGRES_*` | App | DB connection for chunk rows and generation manifests |
 | `MCP_API_KEY` | App | Bearer token enforced by the embedded MCP transport when `mcp.require_api_key=true` — environment only, never a config field |

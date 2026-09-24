@@ -14,7 +14,7 @@
 
     ---
 
-    An LLM judge curates rows, a verbatim evidence check rejects ungrounded ones, and a retrieval quality gate blocks publication before weak data reaches your evals.
+    System One typed judgments (Nouls) curate rows, a verbatim evidence check rejects ungrounded ones, and a retrieval quality gate blocks publication before weak data reaches your evals.
 
 -   :material-shield-lock:{ .lg .middle } **Gated promotion**
 
@@ -32,7 +32,7 @@
     Open **RAG → Synthetic Lab** with a corpus selected. Every run is scoped to that corpus, and each run ends with artifacts, a run report, and (for full-stack recipes) a lineage bundle you can publish or promote.
 
 !!! note "Generation costs money"
-    Generator and judge calls route through the LiteLLM gateway using the aliases you pick per run. A gated recipe that fails its quality gate has already spent the generation cost — the gate decides whether the output may be *used*, not whether it is free. Run small `max_pairs` first.
+    Generator calls route through the LiteLLM gateway using the alias you pick per run. Judging runs through System One (`system_one.provider`): TypeSafe Jev bills per input token, a self-hosted Laya is free but CPU-bound. A gated recipe that fails its quality gate has already spent the generation cost — the gate decides whether the output may be *used*, not whether it is free. Run small `max_pairs` first.
 
 ## What one run does
 
@@ -40,8 +40,11 @@ A run walks the corpus's indexed chunks in bounded batches:
 
 1. **Generate** — the generator prompt (`system_prompts.synthetic_generator`) asks for question / expected answer / verbatim evidence-quote rows grounded in one chunk's excerpt, with self-contained questions (no "this document").
 2. **Ground** — a row survives only when its `evidence_quote` appears **verbatim** in the source chunk; anything else is counted as ungrounded and dropped.
-3. **Judge** — the judge prompt (`system_prompts.synthetic_judge`) scores each row 0–10 for grounding and self-containedness and keeps only what clears the bar (score >= 7.0 by default).
-4. **Gate** — for retrieval-affecting recipes (`eval_dataset`, `triplets`), the gate retrieves the run's own generated questions against the corpus via `POST /api/search` and requires top-1 accuracy >= `synthetic.quality_gate.top1_min` over `synthetic.quality_gate.sample_size` samples.
+3. **Judge** — every grounded row is judged with typed System One Nouls: **reader_question** (would a real reader ask this about the document's subject — not cover-page trivia, and understandable without the source?) and **answer_supported** (does the located evidence quote — not the file name — support the expected answer?) must each reach their `synthetic.judge` minimum. A third **cue words copied** noul is reported but never gated.
+4. **Gate** — for retrieval-affecting recipes (`eval_dataset`, `triplets`), the gate retrieves the run's own generated questions against the corpus via `POST /api/search` and requires top-1 accuracy >= `synthetic.quality_gate.top1_min` over `synthetic.quality_gate.sample_size` samples. Entries whose expectations cannot discriminate (a whole file that is the whole corpus) are excluded from the gate's accuracy; a sample that is entirely uninformative fails the gate and says the rows need page/line locations.
+
+!!! note "The judge is System One, and every row is located"
+    Curation no longer runs a judge prompt through the gateway. Every grounded row is judged in one System One request (`server/system_one/client.py`), kept only when both gated nouls reach their minimums (`synthetic.judge.reader_question_min` and `synthetic.judge.answer_supported_min`, both 0.7 by default). Each kept row also carries a typed `expected_locations` span — the page range for paged documents, the chunk's line span otherwise — so the published eval dataset is scored against the located evidence instead of the whole document. See [System One decisions](../operations/system_one.md).
 
 !!! warning "The quality gate is a self-consistency check, not external validation"
     The gate retrieves the run's *own* generated questions against the corpus they came from. A perfect score proves the questions are self-consistent with the index — it is **not** evidence of retrieval quality on real operator questions. Validate published datasets with the [Evaluation guide](../eval_guide.md) workflows.
@@ -122,7 +125,7 @@ A failed run is a data point, not a dead end:
 
 === "Retry from the UI"
 
-    Open the failed run in **RAG → Synthetic Lab**, read the reason, fix the cause (an unindexed corpus, an unreachable gateway alias), then press **Retry**.
+    Open the failed run in **RAG → Synthetic Lab**, read the reason, fix the cause (an unindexed corpus, an unreachable gateway alias, an unreachable System One backend), then press **Retry**.
 
 === "Retry from the API"
 
@@ -133,7 +136,7 @@ A failed run is a data point, not a dead end:
     ```
 
 !!! tip "Read the numbers the way the run wrote them"
-    The Grounding & Curation panel reports `sources` used, `generated`, `ungrounded`, `malformed`, `judged`, `kept`, the average judge score (0–10, two decimals), and mined `triplets`. A run with many `ungrounded` rows is telling you the generator is reaching beyond its excerpt — narrow the per-run excerpt scope or lower `pairs_per_source` rather than loosening the judge.
+    The Grounding & Curation panel reports `sources` used, `generated`, `ungrounded`, `malformed`, `judged`, `kept`, the mean nouls (reader question, answer supported, cue words copied — probabilities, two decimals), and mined `triplets`. A run with many `ungrounded` rows is telling you the generator is reaching beyond its excerpt — narrow the per-run excerpt scope or lower `pairs_per_source` rather than lowering the System One thresholds.
 
 ## Knobs
 
@@ -144,7 +147,8 @@ All knobs are generated in the [synthetic config reference](../reference/config/
 | `synthetic.generator.max_tokens` | 1200 | Output budget per generator call; too low truncates JSON rows |
 | `synthetic.generator.temperature` | 0.0 | Keep at 0 for grounded, reproducible rows |
 | `synthetic.generator.concurrency` | 4 | Parallel gateway calls; forced to 1 for the single-stream local serving row |
-| `synthetic.judge.temperature` | 0.0 | A judge that samples is a judge that wobbles |
+| `synthetic.judge.reader_question_min` | 0.7 | Minimum probability that a real reader would ask the question about the document's subject (not cover-page trivia) |
+| `synthetic.judge.answer_supported_min` | 0.7 | Minimum probability that the located evidence quote — not the file name — supports the expected answer |
 | `synthetic.quality_gate.sample_size` | 50 | Questions sampled for the gate — raise for a stronger signal |
 | `synthetic.quality_gate.top1_min` | 0.4 | Minimum top-1 accuracy to pass; raise cautiously |
 

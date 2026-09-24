@@ -83,7 +83,8 @@ import type { TriBridConfig } from '../web/src/types/generated'; // (3)
 - [x] Start from repo root
 - [x] For each iteration: pick first unchecked TODO, implement end-to-end
 - [x] Verification sequence:
-  - `uv run scripts/check_banned.py`
+  - `python3 scripts/jev_lint.py` (semantic lint of changed source)
+  - `uv run scripts/check_contract_integrity.py`
   - `uv run scripts/validate_types.py`
   - `uv run pytest -q`
 - [ ] Only mark TODO complete when verification passes

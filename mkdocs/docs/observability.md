@@ -54,6 +54,8 @@ flowchart LR
     LOKI --> GRAF
 ```
 
+The provisioned dashboard family tracks the API's own metrics: a dedicated **Chat** dashboard (`ragweld-chat`) covers requests by outcome and error ratio (client disconnects excluded), time to first event and first text, duration, spend and cost per chat, tokens and reasoning share, feedback, and Recall gate decisions; the **TriBrid Overview**, **TriBridRAG Metrics** and **Reranker Training** boards were rebuilt around the same series; and the retired Codex Session Ingest board was removed. Index-size panels (`tribrid_corpus_chunks`, `tribrid_corpus_graph_entities`, `tribrid_corpus_graph_relationships`) are the one deliberate per-corpus exception to "no corpus labels": they are served from a cache that a `/metrics` scrape refreshes at most every 5 minutes and exclude runtime-managed corpora (Recall, Codex sessions). Every data panel names what an empty panel means, and every paging alert links the dashboard to open first.
+
 === "Python"
 ```python
 import httpx
@@ -89,6 +91,9 @@ The four "Latest" series behind the **Eval / Benchmark / Prompt Regressions** da
 - **Restarting the API cannot zero them.** A freshly started process reports the persisted truth immediately; there is no window where the dashboard shows a green 0% beside runs that are on disk.
 - **No persisted run means no series at all.** An absent series is the only honest encoding of "no data" Prometheus has, so the Grafana panels render "No data" instead of 0. A genuine 0% run is still exported as 0 — and the dashboard's thresholds render it red, never green.
 - **The benchmark directory follows config.** The reader resolves `chat.benchmark.results_path`, the same field the benchmark writer uses, so moving where benchmark runs land does not strand the latency gauge on a permanent "No data".
+
+!!! note "Latency is the mean of successful calls, and every 'latest' tile carries its age"
+    `tribrid_benchmark_last_avg_latency_ms` averages only the calls in the newest benchmark run that succeeded — a failed call's latency is how long it took to fail (a gateway timeout, a rejected key), not a model latency — and a run where every call failed exports no latency series at all. Each newest eval, Promptfoo and benchmark run also exports its own completion time (`tribrid_eval_last_run_timestamp_seconds`, `tribrid_promptfoo_last_run_timestamp_seconds`, `tribrid_benchmark_last_run_timestamp_seconds`), read from the run record rather than the file mtime, so a panel can show how old the headline number is instead of guessing.
 
 !!! note "Probe hysteresis on the observability status"
     Component readiness behind `/api/observability/status` and the in-app Operator Deck debounces flapping probes: an incident needs `tracing.probe_failure_threshold` (default `3`, env `PROBE_FAILURE_THRESHOLD`) **consecutive** failed probes, each component shows its last-8 probe history, and surfaces the API cannot probe at all (an auth-protected ingress that redirects off-host) never count as failures. See [Tracing](operations/tracing.md).

@@ -51,7 +51,8 @@ flowchart TB
 
 - [x] `uv run scripts/generate_types.py` (after ANY Pydantic change)
 - [x] `uv run scripts/validate_types.py` (CI/verify before commit)
-- [x] `uv run scripts/check_banned.py` (guardrails)
+- [x] `python3 scripts/jev_lint.py` (semantic lint of changed source; CI runs it with `--base`, pre-commit with `--staged`)
+- [x] `uv run scripts/check_contract_integrity.py` (catalog mirror + retrieval-surface contract checks)
 
 === "Python"
 ```python
