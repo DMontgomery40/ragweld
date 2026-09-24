@@ -433,6 +433,7 @@ async def test_index_status_prefers_persisted_run_over_stats_inference(client: A
 
     response = await client.get(f"/api/index/{corpus_id}/status")
     assert response.status_code == 404
+    await index_api._flush_run_events()
     retained = await client.get(f"/api/index/{corpus_id}/runs/{run_id}")
     assert retained.status_code == 200
     payload = retained.json()
@@ -479,15 +480,18 @@ async def test_latest_run_coerces_stale_indexing_run_to_error(client: AsyncClien
 
 
 @pytest.mark.asyncio
-async def test_index_status_coerces_stale_indexing_run_to_error(client: AsyncClient) -> None:
+@pytest.mark.parametrize("status", ["indexing", "error", "complete", "cancelled"])
+async def test_index_status_coerces_stale_indexing_run_to_error(client: AsyncClient, status: str) -> None:
+    """An absent corpus stays 404; all retained attempt states remain unchanged on disk."""
     corpus_id = "stale-status-corpus"
     run_id = "run_20260227_stale_status"
+    completed_at = None if status == "indexing" else datetime.now(UTC)
     summary = IndexRunSummary(
         run_id=run_id,
         repo_id=corpus_id,
-        status="indexing",
+        status=status,
         started_at=datetime.now(UTC),
-        completed_at=None,
+        completed_at=completed_at,
         progress=0.42,
         error=None,
         total_files=0,
@@ -498,13 +502,18 @@ async def test_index_status_coerces_stale_indexing_run_to_error(client: AsyncCli
         embedding_dimensions=None,
     )
     index_api._persist_run_summary(summary)
+    # Persistence is queued. Establish the saved-run precondition before either GET;
+    # neither a missing-corpus status read nor an exact-run read drains that queue.
+    await index_api._flush_run_events()
+    before = _runs_dir_fingerprint(index_api._INDEX_RUNS_DIR)
 
     response = await client.get(f"/api/index/{corpus_id}/status")
     assert response.status_code == 404
     retained = await client.get(f"/api/index/{corpus_id}/runs/{run_id}")
     assert retained.status_code == 200
-    assert retained.json()["status"] == "indexing"
-    assert retained.json()["completed_at"] is None
+    assert retained.json()["status"] == status
+    assert retained.json()["completed_at"] == summary.model_dump(mode="json")["completed_at"]
+    assert _runs_dir_fingerprint(index_api._INDEX_RUNS_DIR) == before
 
 
 def _runs_dir_fingerprint(runs_root: Path) -> set[tuple[str, int, int, str]]:

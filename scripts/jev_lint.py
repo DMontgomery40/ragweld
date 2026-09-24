@@ -106,48 +106,16 @@ def import_lines(source, limit=1500):
 
 
 FILE_SCOPE_MAX_CHARS = 120000
-TOP_LEVEL_DECLARATION = re.compile(
-    r"^(?:export\s+(?:default\s+)?)?(?:declare\s+)?(?:async\s+)?"
-    r"(?:function|class|const|let|var|interface|type|enum)\b|^export\s+default\b"
-)
 
 
-def declaration_regions(source):
-    """Top-level declarations as 1-based (start, end) line ranges that cover the whole file."""
-    lines = source.splitlines(keepends=True)
-    starts = [number for number, text in enumerate(lines, 1) if TOP_LEVEL_DECLARATION.match(text)]
-    if not starts or starts[0] != 1:
-        starts.insert(0, 1)
-    ends = [start - 1 for start in starts[1:]] + [len(lines)]
-    return lines, [(start, end) for start, end in zip(starts, ends) if start <= end]
-
-
-def file_scope_sections(name, source, touched, max_chars=FILE_SCOPE_MAX_CHARS):
-    """The whole file in one request when it fits; otherwise whole top-level declarations
-    (every one, or those holding a touched line), never split.
-
-    A file-scoped rule judges control flow across a component and the helpers it calls, so
-    the whole file travels together whenever it can. A declaration that cannot fit makes the
-    check incomplete, never partial.
-    """
-    if len(source) <= max_chars:
-        return [(1, source)] if source else []
-    lines, regions = declaration_regions(source)
-    if touched is not None:
-        regions = [(start, end) for start, end in regions if any(start <= n <= end for n in touched)]
-    sections = []
-    for start, end in regions:
-        text = "".join(lines[start - 1:end])
-        if len(text) > max_chars:
-            raise LintError(
-                f"{name}: lines {start}-{end} are one declaration of {len(text)} characters; file-scoped "
-                f"rules need it in one request (limit {max_chars}). Split it; nothing was sent."
-            )
-        if sections and sections[-1][2] == start - 1 and len(sections[-1][1]) + len(text) <= max_chars:
-            sections[-1] = (sections[-1][0], sections[-1][1] + text, end)
-        else:
-            sections.append((start, text, end))
-    return [(start, text) for start, text, _ in sections]
+def file_scope_sections(name, source, max_chars=FILE_SCOPE_MAX_CHARS):
+    """Keep the entire file together, including helpers outside changed declarations."""
+    if len(source) > max_chars:
+        raise LintError(
+            f"{name}: file-scoped rules need all {len(source)} characters in one request "
+            f"(limit {max_chars}). The check is incomplete; nothing was sent."
+        )
+    return [(1, source)] if source else []
 
 
 def changed_sections(root, base, name, context_lines=20):
@@ -220,7 +188,7 @@ def build_batches(
             except ValueError as exc:
                 raise LintError(f"{name}: invalid JSON ({exc.msg})") from exc
         # Scope is chosen per rule: ordinary rules judge the changed hunks (or the whole file
-        # outside --base); a file-scoped rule gets its own requests holding whole declarations.
+        # outside --base); a file-scoped rule gets a separate request holding the whole file.
         applicable = [rule for rule in policy["rules"] if matches(name, rule.get("include", ["*"]))]
         has_hunk_rules = any(rule.get("scope") != "file" for rule in applicable)
         has_file_rules = any(rule.get("scope") == "file" for rule in applicable)
@@ -257,12 +225,7 @@ def build_batches(
                 offset += size
                 line += content.count("\n")
         if has_file_rules:
-            touched = None
-            if hunks is not None:
-                touched = set()
-                for start, content, added in hunks:
-                    touched.update(added or range(start, start + max(content.count("\n"), 1)))
-            for start, text in file_scope_sections(name, source, touched):
+            for start, text in file_scope_sections(name, source):
                 if current["files"]:
                     batches.append(current)
                     current = {"context": current["context"], "files": []}
@@ -293,7 +256,7 @@ def build_questions(batch, policy):
             if source.get("imports"):
                 changed_scope += f"files[{index}].imports lists the whole file's import statements, as context. "
             if source.get("scope") == "file":
-                changed_scope += "It holds complete top-level declarations; judge control flow across all of them. "
+                changed_scope += "It holds the complete file; judge control flow across its declarations and helpers. "
             questions[key] = {"type": "noul", "instructions": (
                 f"Evaluate ONLY files[{index}] ({source['path']}, starting line {source['line']}). "
                 + changed_scope +

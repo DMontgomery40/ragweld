@@ -327,6 +327,12 @@ model_list:
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
+- model_name: fireworks.ember-1
+  litellm_params:
+    model: openrouter/fireworks/ember-1
+    num_retries: 0
+    max_retries: 0
+    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: google.gemini-2.5-flash
   litellm_params:
     model: openrouter/google/gemini-2.5-flash
@@ -1011,21 +1017,9 @@ model_list:
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
-- model_name: nex-agi.nex-n2.5-mini
-  litellm_params:
-    model: openrouter/nex-agi/nex-n2.5-mini
-    num_retries: 0
-    max_retries: 0
-    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: nex-agi.nex-n2.5-mini.free
   litellm_params:
     model: openrouter/nex-agi/nex-n2.5-mini:free
-    num_retries: 0
-    max_retries: 0
-    api_key: os.environ/OPENROUTER_API_KEY
-- model_name: nex-agi.nex-n2.5-pro
-  litellm_params:
-    model: openrouter/nex-agi/nex-n2.5-pro
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
@@ -1224,6 +1218,12 @@ model_list:
 - model_name: openai.gpt-oss-120b
   litellm_params:
     model: openrouter/openai/gpt-oss-120b
+    num_retries: 0
+    max_retries: 0
+    api_key: os.environ/OPENROUTER_API_KEY
+- model_name: openai.gpt-oss-120b.batch
+  litellm_params:
+    model: openrouter/openai/gpt-oss-120b:batch
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
@@ -2092,6 +2092,12 @@ model_list:
 - model_name: z-ai.glm-5.3-flashx
   litellm_params:
     model: openrouter/z-ai/glm-5.3-flashx
+    num_retries: 0
+    max_retries: 0
+    api_key: os.environ/OPENROUTER_API_KEY
+- model_name: z-ai.glm-5.3-prime
+  litellm_params:
+    model: openrouter/z-ai/glm-5.3-prime
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY

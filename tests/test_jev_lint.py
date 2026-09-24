@@ -232,16 +232,25 @@ class JevLintTests(unittest.TestCase):
         self.assertIn("LEGACY_LABEL", whole["content"])
 
     def test_file_scope_keeps_a_declaration_whole_or_fails_closed(self):
-        helper = "export function loadRows() {\n  fetch('/api/rows');\n}\n"
-        component = "export function Panel() {\n  if (!ready) return null;\n" + "  const padding = 'x';\n" * 400 + "  useEffect(() => {}, []);\n}\n"
-        source = helper + component
-        # A file that fits travels whole, so a called helper is judged with the component.
-        self.assertEqual(self.lint.file_scope_sections("src/App.tsx", source, touched={406}), [(1, source)])
-        # A larger file falls back to whole declarations holding a changed line, never split.
-        sections = self.lint.file_scope_sections("src/App.tsx", source, touched={406}, max_chars=len(component))
-        self.assertEqual(sections, [(4, component)])
-        with self.assertRaises(self.lint.LintError):
-            self.lint.file_scope_sections("src/App.tsx", source, touched={406}, max_chars=2000)
+        helper = "export function loadRows() { fetch('/api/rows'); }\n"
+        padding = "// context\n" * 12000
+        component = "export function Panel() { loadRows(); return null; }\n"
+        self.policy["rules"][0].update(include=["src/*.tsx"], scope="file")
+        # Helper-before, helper-after and one large declaration must all fail closed,
+        # both for explicit paths and for a committed diff touching only the component.
+        for source in (helper + padding + component, component + padding + helper,
+                       "export function Panel() {\n" + padding + "return null; }\n"):
+            with self.subTest(source_start=source[:60]):
+                self.write("src/App.tsx", source)
+                self.git("add", ".")
+                self.git("commit", "-qm", "before")
+                base = self.git("rev-parse", "HEAD").strip()
+                self.write("src/App.tsx", source.replace("return null", "return <main />"))
+                self.git("add", ".")
+                self.git("commit", "-qm", "after")
+                for scope in ({}, {"snapshot": "HEAD", "base": base, "context_lines": 0}):
+                    with self.subTest(scope=scope), self.assertRaises(self.lint.LintError):
+                        self.lint.build_batches(self.root, ["src/App.tsx"], self.policy, **scope)
 
     def test_unknown_rule_scope_is_rejected(self):
         self.lint.validate_policy(self.policy)
