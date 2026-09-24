@@ -43,6 +43,7 @@ Every catalog row carries `selection_*` metadata that separates the broad candid
 
 !!! tip "Check `/api/runtime-capabilities` before promising a model"
     `data/models.json` is the broad catalog for pricing and candidates; **runtime-selectable truth** comes from the catalog's `selection_*` metadata plus `server/runtime_capabilities.py`, served as `GET /api/runtime-capabilities`. A model appearing in `/api/models` with `selection_status: "catalog_only"` does not mean ragweld can route to it today. The daily refresh adds, re-prices, and drops rows — the 2026-09-01 refresh added IBM Granite 4.2 8B, a wave of OpenAI batch-priced variants, and price updates for DeepSeek V4 Flash/Pro, and the 2026-09-05 refresh added the OpenAI GPT-6 Astra family (with batch-priced variants) and inclusionAI Ling 3.0 Flash Sante, renamed the Qwen3.8 Max row to the dated `qwen.qwen3.8-max-0902` snapshot, dropped IBM Granite 4.1 8B, and re-priced the DeepSeek V4 and Qwen3 rows — so treat any specific row as volatile and read the runtime capabilities endpoint when a decision depends on what is selectable now.
+    The 2026-09-23 refresh went further: it pruned superseded family snapshots wholesale — the retired `openai.gpt-5.6-*` family, every older `gpt-5.x` and `gpt-3.5` generation id, and each Anthropic version superseded within its own family — and migrated the preserved LiteLLM listwise rerank row onto the newest retained OpenAI Luna route, `openai.gpt-6-luna`.
 
 !!! note "OpenAI embeddings now have native gateway routes — and capacity-truthful dimensions"
     The two supported OpenAI embedding rows (`text-embedding-3-small`, capacity 1536; `text-embedding-3-large`, capacity 3072) carry `gateway_alias` (`openai.text-embedding-3-small` / `openai.text-embedding-3-large`) and a native `openai/<model>` upstream rendered into `infra/litellm-config.yaml`, so cloud embeddings call the LiteLLM gateway like every other paid lane — the app process never holds the upstream key (`OPENAI_API_KEY` is gateway-only, in `infra/litellm.env`). Two rules are enforced wherever the route is read (`server/gateway_catalog.py`, `server/runtime_capabilities.py`):
@@ -51,7 +52,11 @@ Every catalog row carries `selection_*` metadata that separates the broad candid
     - **An OpenAI EMB row without the exact native route stays `catalog_only`.** `embedding_provider` is granted only when the row names the canonical alias (`openai.<model>`), the native upstream (`openai/<model>`), full-capacity dimensions, and no provider URL override; anything else reads "Catalog entry only: no supported native embedding route is configured for this OpenAI model."
 
 !!! note "GPT-4-class models are blocked at every paid lane"
-    New configuration, catalog publication and paid execution refuse GPT-4, GPT-4o, GPT-4.1 and their dated/size/batch variants (`server/model_policy.py`). The prohibition covers every place a model identity is configured — generation aliases, the chat default, the vision override, the semantic-KG and figure-description aliases, the cloud reranker, the Ragas/Promptfoo judges — plus the published catalog (the daily refresh drops the whole family), the generated gateway config, and the direct generation transports. Historical records keep their original model identities. The 2026-09-04 refresh removed the remaining family rows and the listwise-rerank row, so `reranking.reranker_cloud_model` now ships **empty**: select an allowed alias before enabling cloud reranking.
+    New configuration, catalog publication and paid execution refuse GPT-4, GPT-4o, GPT-4.1 and their dated/size/batch variants (`server/model_policy.py`). The prohibition covers every place a model identity is configured — generation aliases, the chat default, the vision override, the semantic-KG and figure-description aliases, the cloud reranker, the Ragas/Promptfoo judges — plus the published catalog, the generated gateway config, and the direct generation transports. Historical records keep their original model identities.
+
+    The daily refresh now refuses blocked ids at feed normalization (`skipped_blocked_model` in `scripts/refresh_models_catalog.py`), so a GPT-4-class row never enters the catalog at all, and it keeps only the newest OpenAI GPT generation and the newest Anthropic version per family, dropping superseded snapshots instead of letting retired catalog rows accumulate.
+
+    `reranking.reranker_cloud_model` still ships **empty** — select an allowed alias before enabling cloud reranking. The catalog carries a dedicated LiteLLM listwise-rerank row (`provider: litellm`, capability `RERANK`) that each refresh migrates onto the newest retained OpenAI Luna generation — today `openai.gpt-6-luna` — so that selection always has a current, routable target.
 
 !!! note "The local serving row names a lane, not a backend"
     The `ragweld-local` catalog row is titled **Ragweld local (self-hosted)** and claims no serving backend in its name or notes: which backend fronts that alias (vLLM today), whether the lane is switched on for this host (`chat.vllm.enabled`), and which model it serves are host truth, served as `generation.local_serving` on `GET /api/runtime-capabilities` — never a property of the catalog row. Operator surfaces that preselect or describe the local lane read the lane state from there plus the readiness probe, so a host that does not serve a local model never shows one as live or pre-checked (the Benchmark tab's default model selection, for example, skips it).
@@ -69,6 +74,7 @@ Use `POST /api/models/upsert` to add or update entries safely:
 - Request body is validated by Pydantic (`ModelCatalogUpsertRequest`).
 - Writes are atomic and update both `data/models.json` and `web/public/models.json`.
 - Provider `base_url` may be inferred from existing catalog entries/defaults if omitted, and remains editable in UI before submit.
+- The model policy applies here too: a GPT-4-class id is refused outright (`server/model_policy.py`), and a `GEN` row for an OpenRouter-routed id derives its `gateway_alias`/`gateway_upstream` pair and regenerates the gateway config.
 
 ## Automated Daily Refresh
 
@@ -85,6 +91,9 @@ Behavior:
   - `openai`, `anthropic`, `google`, `cohere`, `mistral`, `deepseek`, `xai`
 - Normalizes text-output models from the feed. Batch-priced variants (model ids ending in `:batch`) are added as catalog-only rows carrying the batch tier pricing; other `:` snapshot/alias variants are ignored to reduce churn.
 - Updates existing managed `GEN` rows in place (pricing, context, base URL, components, unit).
+- Refuses blocked model families at feed normalization (`server/model_policy.py`): GPT-4-class rows are counted as `skipped_blocked_model` and never enter the catalog.
+- Keeps only the newest OpenAI GPT generation and the newest Anthropic version per family; superseded snapshots within a family are dropped and counted as `skipped_superseded`.
+- Migrates the preserved LiteLLM listwise-rerank row onto the newest retained OpenAI Luna generation, refreshing its pricing, context and notes from the feed — and fails closed when no Luna route survives the refresh, instead of leaving a stale reranker alias behind.
 - Removes managed rows that the feed no longer lists.
 - Adds newly discovered models even if pricing is unavailable:
   - Missing price rows are added with null price fields and
@@ -106,7 +115,7 @@ curl -sS -X POST "$BASE/api/models/upsert" \
   -d '{
     "provider":"openai",
     "family":"gen",
-    "model":"gpt-4.1-mini",
+    "model":"openai/gpt-6-luna",
     "unit":"1k_tokens",
     "input_per_1k":0.0003,
     "output_per_1k":0.0012

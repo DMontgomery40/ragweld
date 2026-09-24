@@ -43,6 +43,9 @@ A run walks the corpus's indexed chunks in bounded batches:
 3. **Judge** — the judge prompt (`system_prompts.synthetic_judge`) scores each row 0–10 for grounding and self-containedness and keeps only what clears the bar (score >= 7.0 by default).
 4. **Gate** — for retrieval-affecting recipes (`eval_dataset`, `triplets`), the gate retrieves the run's own generated questions against the corpus via `POST /api/search` and requires top-1 accuracy >= `synthetic.quality_gate.top1_min` over `synthetic.quality_gate.sample_size` samples.
 
+!!! note "Every run names a generator and a judge alias"
+    `POST /api/synthetic/run/start` carries both `generator_model` and `judge_model`, and each must be a `litellm:<gateway_alias>` route — a direct provider id such as `openai/gpt-6-luna` is refused with a `422` rather than silently bypassing the gateway. The generator writes the rows; the judge applies the `system_prompts.synthetic_judge` template and the `synthetic.judge.*` thresholds below to decide what survives.
+
 !!! warning "The quality gate is a self-consistency check, not external validation"
     The gate retrieves the run's *own* generated questions against the corpus they came from. A perfect score proves the questions are self-consistent with the index — it is **not** evidence of retrieval quality on real operator questions. Validate published datasets with the [Evaluation guide](../eval_guide.md) workflows.
 
@@ -84,7 +87,7 @@ flowchart LR
     GEN["Generator LLM\\nsynthetic.generator.*\\nvia the LiteLLM gateway :54000"]
     GROUND["Grounding check\\nevidence_quote verbatim\\nin the source chunk"]
     REJ["Ungrounded + malformed rows rejected"]
-    JUDGE["Judge LLM\\nsynthetic.judge.*\\nLLM-as-a-judge curation"]
+    JUDGE["Judge LLM\\njudge_model (litellm alias)\\nsynthetic.judge.* curation"]
     GATE["Quality gate\\nsynthetic.quality_gate.*\\nPOST /api/search on the corpus"]
     ART["Artifacts + report\\neval dataset / triplets /\\nsemantic cards / keywords"]
   end
@@ -145,6 +148,8 @@ All knobs are generated in the [synthetic config reference](../reference/config/
 | `synthetic.generator.temperature` | 0.0 | Keep at 0 for grounded, reproducible rows |
 | `synthetic.generator.concurrency` | 4 | Parallel gateway calls; forced to 1 for the single-stream local serving row |
 | `synthetic.judge.temperature` | 0.0 | A judge that samples is a judge that wobbles |
+| `synthetic.judge.answer_supported_min` | 0.7 | Minimum probability that the evidence quote — not the file name or path — supports the expected answer |
+| `synthetic.judge.reader_question_min` | 0.7 | Minimum probability a real reader would ask this question about the document's subject, not cover or filename trivia |
 | `synthetic.quality_gate.sample_size` | 50 | Questions sampled for the gate — raise for a stronger signal |
 | `synthetic.quality_gate.top1_min` | 0.4 | Minimum top-1 accuracy to pass; raise cautiously |
 
