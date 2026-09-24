@@ -23,9 +23,9 @@ jobs:
           JEV_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           if [ -n "$JEV_BASE" ] && [ "$JEV_BASE" != "0000000000000000000000000000000000000000" ]; then
-            python scripts/jev_lint.py --base "$JEV_BASE" --max-requests 64 --max-seconds 240
+            python scripts/jev_lint.py --base "$JEV_BASE" --max-requests 96 --max-seconds 240
           else
-            python scripts/jev_lint.py --all --max-requests 64 --max-seconds 240
+            python scripts/jev_lint.py --all --max-requests 96 --max-seconds 240
           fi
 
   docs-ownership:

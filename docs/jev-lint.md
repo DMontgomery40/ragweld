@@ -22,7 +22,7 @@ rules, which need the enclosing component) is asked separately, about whole top-
 declarations: those holding a changed line under `--base`, every one otherwise. A
 declaration is never split; one over 120,000 characters stops the run as incomplete
 (split it). Any other `scope` value stops the run.
-CI runs `--base` with `--max-requests 64 --max-seconds 240` so a broad migration
+CI runs `--base` with `--max-requests 96 --max-seconds 240` so a broad migration
 fits the 5-minute job; a larger change returns an incomplete check, not a pass.
 Exit 0 means the selected scope passed (or had no applicable changes), 1 means a
 violation, and 2 means uncertainty or an unavailable/incomplete check. Findings
