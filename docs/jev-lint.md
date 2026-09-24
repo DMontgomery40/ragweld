@@ -18,10 +18,11 @@ Explicit paths, `--staged` and `--all` send whole files. `--base` sends each cha
 hunk with 20 lines of context, the line numbers it adds and the file's import
 statements; a slice of a long hunk that adds nothing is not sent. Scope is chosen per
 rule: a rule marked `"scope": "file"` in `.jev-lint.json` (the React hook and render
-rules, which need the enclosing component) is asked separately, about whole top-level
-declarations: those holding a changed line under `--base`, every one otherwise. A
-declaration is never split; one over 120,000 characters stops the run as incomplete
-(split it). Any other `scope` value stops the run.
+rules, which need the enclosing component and the helpers it calls) is asked separately,
+about the whole file when it fits in 120,000 characters. A larger file is sent as whole
+top-level declarations (those holding a changed line under `--base`, every one otherwise);
+a declaration is never split, and one over the limit stops the run as incomplete (split
+it). Any other `scope` value stops the run.
 CI runs `--base` with `--max-requests 96 --max-seconds 240` so a broad migration
 fits the 5-minute job; a larger change returns an incomplete check, not a pass.
 Exit 0 means the selected scope passed (or had no applicable changes), 1 means a

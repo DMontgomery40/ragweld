@@ -123,11 +123,15 @@ def declaration_regions(source):
 
 
 def file_scope_sections(name, source, touched, max_chars=FILE_SCOPE_MAX_CHARS):
-    """Whole top-level declarations (every one, or those holding a touched line), never split.
+    """The whole file in one request when it fits; otherwise whole top-level declarations
+    (every one, or those holding a touched line), never split.
 
-    A file-scoped rule judges control flow across a component, so each enclosing declaration
-    travels in one request. One that cannot fit makes the check incomplete, never partial.
+    A file-scoped rule judges control flow across a component and the helpers it calls, so
+    the whole file travels together whenever it can. A declaration that cannot fit makes the
+    check incomplete, never partial.
     """
+    if len(source) <= max_chars:
+        return [(1, source)] if source else []
     lines, regions = declaration_regions(source)
     if touched is not None:
         regions = [(start, end) for start, end in regions if any(start <= n <= end for n in touched)]

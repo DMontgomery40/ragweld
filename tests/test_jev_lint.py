@@ -224,21 +224,24 @@ class JevLintTests(unittest.TestCase):
         self.assertEqual(hunk_batches[0]["files"][0]["changed_lines"], [104])
         self.assertEqual({q.split("_", 1)[1] for q in self.lint.build_questions(hunk_batches[0], self.policy)[0]}, {"copy"})
         self.assertEqual({q.split("_", 1)[1] for q in self.lint.build_questions(file_batches[0], self.policy)[0]}, {"hooks"})
-        # The file-scoped request holds the whole enclosing component and nothing it did not touch.
+        # The file-scoped request holds the whole file, helpers the component calls included.
         whole = file_batches[0]["files"][0]
-        self.assertEqual(whole["line"], 62)
+        self.assertEqual(whole["line"], 1)
         self.assertIn("if (!ready) return null;", whole["content"])
         self.assertIn("useEffect(() => {}, []);", whole["content"])
-        self.assertNotIn("LEGACY_LABEL", whole["content"])
+        self.assertIn("LEGACY_LABEL", whole["content"])
 
     def test_file_scope_keeps_a_declaration_whole_or_fails_closed(self):
+        helper = "export function loadRows() {\n  fetch('/api/rows');\n}\n"
         component = "export function Panel() {\n  if (!ready) return null;\n" + "  const padding = 'x';\n" * 400 + "  useEffect(() => {}, []);\n}\n"
-        sections = self.lint.file_scope_sections("src/App.tsx", component, touched={403})
-        self.assertEqual(len(sections), 1)
-        self.assertIn("if (!ready) return null;", sections[0][1])
-        self.assertIn("useEffect(() => {}, []);", sections[0][1])
+        source = helper + component
+        # A file that fits travels whole, so a called helper is judged with the component.
+        self.assertEqual(self.lint.file_scope_sections("src/App.tsx", source, touched={406}), [(1, source)])
+        # A larger file falls back to whole declarations holding a changed line, never split.
+        sections = self.lint.file_scope_sections("src/App.tsx", source, touched={406}, max_chars=len(component))
+        self.assertEqual(sections, [(4, component)])
         with self.assertRaises(self.lint.LintError):
-            self.lint.file_scope_sections("src/App.tsx", component, touched={403}, max_chars=2000)
+            self.lint.file_scope_sections("src/App.tsx", source, touched={406}, max_chars=2000)
 
     def test_unknown_rule_scope_is_rejected(self):
         self.lint.validate_policy(self.policy)

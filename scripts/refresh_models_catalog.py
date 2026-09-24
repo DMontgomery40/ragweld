@@ -436,13 +436,30 @@ def _refresh_litellm_reranker_rows(
     return refreshed
 
 
+def production_aliases() -> tuple[str, ...]:
+    """The gateway aliases deploy/proxmox/render_config.py assigns to production."""
+    from deploy.proxmox.render_config import (
+        PRODUCTION_CHAT_MODEL_ALIAS,
+        PRODUCTION_MODEL_ALIAS,
+        PRODUCTION_VISION_MODEL_ALIAS,
+    )
+
+    return (PRODUCTION_MODEL_ALIAS, PRODUCTION_CHAT_MODEL_ALIAS, PRODUCTION_VISION_MODEL_ALIAS)
+
+
 def build_refreshed_catalog(
     catalog: dict[str, Any],
     feed_rows: list[dict[str, Any]],
     *,
     as_of_date: str,
+    required_aliases: tuple[str, ...] = (),
 ) -> tuple[dict[str, Any], RefreshStats, bool]:
-    """Replace every feed-owned GEN row with the current OpenRouter routes."""
+    """Replace every feed-owned GEN row with the current OpenRouter routes.
+
+    A refresh that would drop the route behind a ``required_aliases`` entry fails, as a
+    missing Luna reranker route does: a partial new generation (a GPT-7 Luna before a
+    GPT-7 Sol) must never publish a gateway config without the aliases production uses.
+    """
 
     stats = RefreshStats(total_feed_rows=len(feed_rows))
     feed_models = normalize_openrouter_rows(feed_rows, stats)
@@ -472,6 +489,13 @@ def build_refreshed_catalog(
     merged["models"] = result_rows
     merged = apply_selection_metadata_to_catalog(merged)
     gateway_rows(merged)  # fail closed on alias collisions or a missing local serving row
+    routed = {str(row.get("gateway_alias") or "") for row in merged["models"] if isinstance(row, dict)}
+    dropped = sorted(alias for alias in required_aliases if alias not in routed)
+    if dropped:
+        raise RuntimeError(
+            f"refresh would remove routes production still uses: {dropped} "
+            "(deploy/proxmox/render_config.py); move those defaults to a retained route in the same change"
+        )
 
     candidate = copy.deepcopy(merged)
     candidate["sources"] = copy.deepcopy(catalog.get("sources", []))
@@ -546,6 +570,7 @@ def main(argv: list[str] | None = None) -> int:
             current_catalog,
             feed_rows,
             as_of_date=as_of_date,
+            required_aliases=production_aliases(),
         )
     except Exception as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

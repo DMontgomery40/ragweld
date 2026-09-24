@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -9,11 +10,13 @@ import yaml
 from scripts.refresh_models_catalog import (
     AUTO_PRICING_TIERED,
     AUTO_PRICING_UNKNOWN,
+    CATALOG_PATH,
     OPENROUTER_SOURCE_PREFIX,
     RefreshStats,
     build_gateway_row,
     build_refreshed_catalog,
     normalize_openrouter_rows,
+    production_aliases,
     serialize_catalog,
     write_catalog_files,
 )
@@ -438,6 +441,37 @@ def test_refresh_fails_closed_when_latest_generation_has_no_luna_reranker_route(
             [_feed_row("openai/gpt-6-luna"), _feed_row("openai/gpt-7-astra")],
             as_of_date="2026-09-23",
         )
+
+
+def test_refresh_fails_closed_when_a_partial_generation_would_drop_a_production_alias() -> None:
+    catalog = {"currency": "USD", "sources": [], "models": [_local_row()]}
+    current = [_feed_row("openai/gpt-6-sol"), _feed_row("openai/gpt-6-luna")]
+
+    refreshed, _, _ = build_refreshed_catalog(
+        catalog, current, as_of_date="2026-09-24", required_aliases=("openai.gpt-6-sol",)
+    )
+    assert _find(refreshed, "openai/gpt-6-sol")["gateway_alias"] == "openai.gpt-6-sol"
+
+    # GPT-7 Luna lands before GPT-7 Sol: pruning keeps only GPT-7, so GPT-6 Sol would vanish.
+    with pytest.raises(RuntimeError, match=r"routes production still uses: \['openai.gpt-6-sol'\]"):
+        build_refreshed_catalog(
+            catalog,
+            [*current, _feed_row("openai/gpt-7-luna")],
+            as_of_date="2026-09-24",
+            required_aliases=("openai.gpt-6-sol",),
+        )
+
+
+def test_refresh_guards_the_production_aliases_and_the_committed_catalog_routes_them() -> None:
+    from deploy.proxmox import render_config
+
+    assert production_aliases() == (
+        render_config.PRODUCTION_MODEL_ALIAS,
+        render_config.PRODUCTION_CHAT_MODEL_ALIAS,
+        render_config.PRODUCTION_VISION_MODEL_ALIAS,
+    )
+    routed = {row.get("gateway_alias") for row in _rows(json.loads(CATALOG_PATH.read_text(encoding="utf-8")))}
+    assert set(production_aliases()) <= routed
 
 
 def test_refresh_removes_routes_that_left_the_feed_and_is_idempotent() -> None:
