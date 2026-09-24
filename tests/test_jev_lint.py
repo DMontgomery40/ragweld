@@ -119,6 +119,44 @@ class JevLintTests(unittest.TestCase):
         questions, _ = self.lint.build_questions(batches[0], self.policy)
         self.assertIn("newly added lines [100]", next(iter(questions.values()))["instructions"])
 
+    def test_changed_hunks_preserve_increment_statements_and_line_numbers(self):
+        self.write("src/App.tsx", "let renderCount = 0;\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "base")
+        base = self.git("rev-parse", "HEAD").strip()
+        self.write("src/App.tsx", "let renderCount = 0;\n++renderCount;\nconst done = true;\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "change")
+
+        batches = self.lint.build_batches(
+            self.root, ["src/App.tsx"], self.policy, snapshot="HEAD", base=base, context_lines=0,
+        )
+
+        chunk = batches[0]["files"][0]
+        self.assertEqual(chunk["content"], "++renderCount;\nconst done = true;\n")
+        self.assertEqual(chunk["changed_lines"], [2, 3])
+
+    def test_file_scoped_rule_keeps_enclosing_control_flow(self):
+        original = "if (!ready) return null;\n" + "\n" * 30
+        self.write("src/App.tsx", original)
+        self.git("add", ".")
+        self.git("commit", "-qm", "base")
+        base = self.git("rev-parse", "HEAD").strip()
+        self.write("src/App.tsx", original + "useEffect(() => {}, []);\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "change")
+        self.policy["rules"][0].update(include=["src/*.tsx"], scope="file")
+
+        batches = self.lint.build_batches(
+            self.root, ["src/App.tsx"], self.policy, snapshot="HEAD", base=base, context_lines=2,
+        )
+
+        chunk = batches[0]["files"][0]
+        self.assertEqual(chunk["line"], 1)
+        self.assertNotIn("changed_lines", chunk)
+        self.assertIn("if (!ready) return null;", chunk["content"])
+        self.assertIn("useEffect(() => {}, []);", chunk["content"])
+
     def test_cloud_key_is_never_selected_for_custom_endpoint(self):
         for url in ["http://127.0.0.1:8080", "https://other.example", "https://api.typesafe.ai:8443", "https://api.typesafe.ai.evil.example"]:
             with self.subTest(url=url):

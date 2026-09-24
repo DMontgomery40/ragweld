@@ -86,6 +86,7 @@
     },
     {
       "id": "conditional_hooks",
+      "scope": "file",
       "include": [
         "*/src/*.jsx",
         "*/src/*.tsx",
@@ -96,6 +97,7 @@
     },
     {
       "id": "render_side_effect",
+      "scope": "file",
       "include": [
         "*/src/*.jsx",
         "*/src/*.tsx",

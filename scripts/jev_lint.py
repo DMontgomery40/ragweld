@@ -119,7 +119,7 @@ def changed_sections(root, base, name, context_lines=20):
         elif start is not None and raw.startswith(" "):
             lines.append(raw[1:])
             new_line += 1
-        elif start is not None and raw.startswith("+") and not raw.startswith("+++"):
+        elif start is not None and raw.startswith("+"):
             lines.append(raw[1:])
             added_lines.append(new_line)
             new_line += 1
@@ -156,7 +156,11 @@ def build_batches(
                 json.loads(source)
             except ValueError as exc:
                 raise LintError(f"{name}: invalid JSON ({exc.msg})") from exc
-        sections = changed_sections(root, base, name, context_lines) if base else [(1, source, None)]
+        needs_full_file = any(
+            rule.get("scope") == "file" and matches(name, rule.get("include", ["*"]))
+            for rule in policy["rules"]
+        )
+        sections = changed_sections(root, base, name, context_lines) if base and not needs_full_file else [(1, source, None)]
         for section_line, section, added_lines in sections:
             offset, line = 0, section_line
             while offset < len(section):
