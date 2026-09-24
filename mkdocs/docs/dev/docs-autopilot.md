@@ -59,11 +59,7 @@ In GitHub:
 
 Optional variables:
 
-- `OPENAI_MODEL` (default: `gpt-6-sol`)
-- `OPENAI_FALLBACK_MODEL` (default: `gpt-6-luna`)
-
-!!! note "Model family guard"
-    Only the current GPT-6 family is accepted: both variables must start with `gpt-6`, or the generator refuses to start instead of silently routing to a retired model.
+- `OPENAI_MODEL` (default: `gpt-5`)
 
 ## Local testing
 

@@ -59,11 +59,10 @@ When the global config has `ui.runtime_mode=production`:
     `embedding.*` was once reconciled to the deployment globals here; it no longer is. A corpus's embedding settings are its own index contract — the generation records them and the mismatch guard enforces them, and the index job reads the corpus's saved value — so reconciling them made a corpus-scoped save answer `200` and read back the global, and the next non-forced run refused with `stored=..., config=...`. What you save on a corpus applies to that corpus; the deployment owns URLs and default models, not the embedding contract.
 
 !!! note "Concrete production aliases"
-    The Proxmox production render (`deploy/proxmox/render_config.py`) sets `chat.litellm.default_model` and `ui.chat_default_model` to `z-ai.glm-5.3-flash`, while pinning `chat.multimodal.vision_model_override` to `anthropic.claude-sonnet-5` — a multimodal-capable gateway alias chosen separately from the non-chat generation alias (`openai.gpt-6-sol`), which no longer doubles as the vision route. Two things follow from this split:
+    The Proxmox production render (`deploy/proxmox/render_config.py`) sets `chat.litellm.default_model` and `ui.chat_default_model` to `z-ai.glm-5.3-flash`, while keeping `chat.multimodal.vision_model_override` — and the non-chat generation alias `generation.gen_model`, plus the Ragas/Promptfoo judge aliases — on `openai.gpt-6-sol`. Two things follow from this split:
 
     - The **chat default** is a fast, lightweight gateway alias — it is what every conversation starts on unless a per-message override is picked.
-    - The **vision override** stays pinned to its own multimodal-capable alias, because image-capable requests route through `chat.multimodal.vision_model_override` rather than the chat default — so attaching an image to a chat no longer depends on which alias the non-chat answer pipeline uses.
-    - The vision override is also the lane with a published image-token bound: the current OpenAI GPT-6 rows carry no published finite image-token bound in the chat prompt budget (`server/chat/prompt_budget.py`), so attaching an image to a GPT-6 chat alias fails closed rather than being under-budgeted, while `anthropic.claude-sonnet-5` carries a documented bound.
+    - The **vision override** stays pinned to a multimodal-capable alias, because image-capable requests route through `chat.multimodal.vision_model_override` rather than the chat default.
 
     Both are deployment-owned values on the production-scoped list above: a stale per-corpus snapshot carrying an older alias is reconciled to the current global value on the next read, and a client PUT cannot reintroduce the drift (see the save-path behavior below).
 
