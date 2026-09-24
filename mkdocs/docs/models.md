@@ -93,6 +93,7 @@ Behavior:
 - Updates existing managed `GEN` rows in place (pricing, context, base URL, components, unit).
 - Refuses blocked model families at feed normalization (`server/model_policy.py`): GPT-4-class rows are counted as `skipped_blocked_model` and never enter the catalog.
 - Keeps only the newest OpenAI GPT generation and the newest Anthropic version per family; superseded snapshots within a family are dropped and counted as `skipped_superseded`.
+- Never prunes distinct product families alongside the numbered GPT generations: `openai/o3`, `openai/o4-mini`, `openai/gpt-audio-mini` and `openai/gpt-chat-latest` survive a refresh even when a newer `gpt-<number>` row is kept in the same pass (`tests/unit/test_refresh_models_catalog.py`).
 - Migrates the preserved LiteLLM listwise-rerank row onto the newest retained OpenAI Luna generation, refreshing its pricing, context and notes from the feed — and fails closed when no Luna route survives the refresh, instead of leaving a stale reranker alias behind.
 - Removes managed rows that the feed no longer lists.
 - Adds newly discovered models even if pricing is unavailable:
