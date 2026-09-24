@@ -63,6 +63,7 @@ When the global config has `ui.runtime_mode=production`:
 
     - The **chat default** is a fast, lightweight gateway alias — it is what every conversation starts on unless a per-message override is picked.
     - The **vision override** stays pinned to its own multimodal-capable alias, because image-capable requests route through `chat.multimodal.vision_model_override` rather than the chat default — so attaching an image to a chat no longer depends on which alias the non-chat answer pipeline uses.
+    - The vision override is also the lane with a published image-token bound: the current OpenAI GPT-6 rows carry no published finite image-token bound in the chat prompt budget (`server/chat/prompt_budget.py`), so attaching an image to a GPT-6 chat alias fails closed rather than being under-budgeted, while `anthropic.claude-sonnet-5` carries a documented bound.
 
     Both are deployment-owned values on the production-scoped list above: a stale per-corpus snapshot carrying an older alias is reconciled to the current global value on the next read, and a client PUT cannot reintroduce the drift (see the save-path behavior below).
 
