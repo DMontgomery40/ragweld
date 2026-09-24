@@ -35,7 +35,9 @@ SCORE_MAX = 10.0
 _FENCE_RE = re.compile(r"^\s*```[a-zA-Z0-9_-]*\s*|\s*```\s*$", re.MULTILINE)
 _DEFAULT_PROMPT = SystemPromptsConfig().gateway_rerank
 
-# The verdict is one ``{"id": "c07a1b2", "score": 7}`` object per candidate. Measured on
+# The verdict is one ``{"id": "c07a1b2", "score": 7}`` object per candidate. Historical
+# model ids in this measurement name what actually ran and must not be migrated to current aliases.
+# Measured on
 # 2026-09-02 with 50 real candidates and reasoning off: 12 completion tokens per candidate
 # on gpt-5.6-luna, 15 on gpt-4.1-nano, 20 on gemini-3.7-flash / gemini-3.5-flash-lite (the
 # most verbose formatting seen). The budget doubles the most verbose verdict and keeps room
