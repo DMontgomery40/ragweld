@@ -198,6 +198,48 @@ class JevLintTests(unittest.TestCase):
         questions, _ = self.lint.build_questions(batches[0], self.policy)
         self.assertIn("files[0].imports", next(iter(questions.values()))["instructions"])
 
+    def test_rules_choose_their_own_scope(self):
+        legacy = "export const LEGACY_LABEL = 'untouched';\n" + "".join(f"export const K{n} = {n};\n" for n in range(60))
+        component = "export function Panel() {\n  if (!ready) return null;\n" + "  const a = 1;\n" * 40 + "}\n"
+        self.write("src/App.tsx", legacy + component)
+        self.git("add", ".")
+        self.git("commit", "-qm", "base")
+        base = self.git("rev-parse", "HEAD").strip()
+        self.write("src/App.tsx", legacy + component.replace("}\n", "  useEffect(() => {}, []);\n}\n"))
+        self.git("add", ".")
+        self.git("commit", "-qm", "change")
+        self.policy["rules"] = [
+            {"id": "copy", "include": ["src/*.tsx"], "question": "Does displayed copy say ranker?"},
+            {"id": "hooks", "include": ["src/*.tsx"], "scope": "file", "question": "Is a hook called conditionally?"},
+        ]
+
+        batches = self.lint.build_batches(
+            self.root, ["src/App.tsx"], self.policy, snapshot="HEAD", base=base, context_lines=2,
+        )
+
+        hunk_batches = [b for b in batches if b["files"][0].get("scope") != "file"]
+        file_batches = [b for b in batches if b["files"][0].get("scope") == "file"]
+        self.assertEqual(len(hunk_batches), 1)
+        self.assertEqual(len(file_batches), 1)
+        self.assertEqual(hunk_batches[0]["files"][0]["changed_lines"], [104])
+        self.assertEqual({q.split("_", 1)[1] for q in self.lint.build_questions(hunk_batches[0], self.policy)[0]}, {"copy"})
+        self.assertEqual({q.split("_", 1)[1] for q in self.lint.build_questions(file_batches[0], self.policy)[0]}, {"hooks"})
+        # The file-scoped request holds the whole enclosing component and nothing it did not touch.
+        whole = file_batches[0]["files"][0]
+        self.assertEqual(whole["line"], 62)
+        self.assertIn("if (!ready) return null;", whole["content"])
+        self.assertIn("useEffect(() => {}, []);", whole["content"])
+        self.assertNotIn("LEGACY_LABEL", whole["content"])
+
+    def test_file_scope_keeps_a_declaration_whole_or_fails_closed(self):
+        component = "export function Panel() {\n  if (!ready) return null;\n" + "  const padding = 'x';\n" * 400 + "  useEffect(() => {}, []);\n}\n"
+        sections = self.lint.file_scope_sections("src/App.tsx", component, touched={403})
+        self.assertEqual(len(sections), 1)
+        self.assertIn("if (!ready) return null;", sections[0][1])
+        self.assertIn("useEffect(() => {}, []);", sections[0][1])
+        with self.assertRaises(self.lint.LintError):
+            self.lint.file_scope_sections("src/App.tsx", component, touched={403}, max_chars=2000)
+
     def test_unknown_rule_scope_is_rejected(self):
         self.lint.validate_policy(self.policy)
         self.policy["rules"][0]["scope"] = "file"
