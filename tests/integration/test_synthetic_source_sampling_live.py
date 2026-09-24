@@ -56,7 +56,7 @@ async def test_selection_draws_from_across_a_long_single_document() -> None:
                 repo_id=corpus_id,
                 max_source_chunks=10,
                 seed=seed,
-                generator_model="openai.gpt-5.6-luna",
+                generator_model="openai.gpt-6-luna",
             )
 
         picked = await select_source_chunks(repo_id=corpus_id, cfg=cfg, request=request(1337))

@@ -853,7 +853,7 @@ def test_alert_rules_fire_on_real_problems_and_never_on_the_disabled_local_lane(
             "input_series": up + [
                 {"series": f'{total}{{requested_model="ragweld-local"}}', "values": "0+2x40"},
                 {"series": f'{failed}{{requested_model="ragweld-local"}}', "values": "0+2x40"},
-                {"series": f'{total}{{requested_model="openai.gpt-5.6-luna"}}', "values": "0+1x40"},
+                {"series": f'{total}{{requested_model="openai.gpt-6-luna"}}', "values": "0+1x40"},
             ],
             "alert_rule_test": quiet("RagweldGatewayFailedRequestRatioHigh"),
         },

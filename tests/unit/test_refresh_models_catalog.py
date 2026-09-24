@@ -40,6 +40,11 @@ def test_refresh_keeps_only_the_latest_openai_gpt_generation() -> None:
         _feed_row("openai/gpt-6-luna:batch"),
         _feed_row("openai/gpt-5.4-image-2"),
         _feed_row("openai/gpt-oss-120b"),
+        # Distinct product families are never pruned with the numbered GPT generations.
+        _feed_row("openai/o3"),
+        _feed_row("openai/o4-mini:batch"),
+        _feed_row("openai/gpt-audio-mini"),
+        _feed_row("openai/gpt-chat-latest"),
     ]
 
     stats = RefreshStats()
@@ -51,58 +56,10 @@ def test_refresh_keeps_only_the_latest_openai_gpt_generation() -> None:
         "openai/gpt-6-luna:batch",
         "openai/gpt-5.4-image-2",
         "openai/gpt-oss-120b",
-    }
-    assert stats.skipped_superseded == 3
-
-
-def test_refresh_keeps_only_the_latest_anthropic_version_per_family() -> None:
-    feed = [
-        _feed_row("anthropic/claude-opus-4.8"),
-        _feed_row("anthropic/claude-opus-5"),
-        _feed_row("anthropic/claude-opus-5.5"),
-        _feed_row("anthropic/claude-opus-5.5:batch"),
-        _feed_row("anthropic/claude-fable-5"),
-        _feed_row("anthropic/claude-fable-5.1"),
-        _feed_row("anthropic/claude-sonnet-4.6"),
-        _feed_row("anthropic/claude-sonnet-5"),
-        _feed_row("anthropic/claude-3-haiku"),
-        _feed_row("anthropic/claude-haiku-4.5"),
-    ]
-
-    stats = RefreshStats()
-    normalized = normalize_openrouter_rows(feed, stats)
-
-    assert set(normalized) == {
-        "anthropic/claude-opus-5.5",
-        "anthropic/claude-opus-5.5:batch",
-        "anthropic/claude-fable-5.1",
-        "anthropic/claude-sonnet-5",
-        "anthropic/claude-haiku-4.5",
-    }
-    assert stats.skipped_superseded == 5
-
-
-def test_refresh_keeps_only_the_latest_openai_gpt_generation() -> None:
-    feed = [
-        _feed_row("openai/gpt-5.6-sol"),
-        _feed_row("openai/gpt-5.6-terra"),
-        _feed_row("openai/gpt-5.6-luna:batch"),
-        _feed_row("openai/gpt-6-astra"),
-        _feed_row("openai/gpt-6-sol"),
-        _feed_row("openai/gpt-6-luna:batch"),
-        _feed_row("openai/gpt-5.4-image-2"),
-        _feed_row("openai/gpt-oss-120b"),
-    ]
-
-    stats = RefreshStats()
-    normalized = normalize_openrouter_rows(feed, stats)
-
-    assert set(normalized) == {
-        "openai/gpt-6-astra",
-        "openai/gpt-6-sol",
-        "openai/gpt-6-luna:batch",
-        "openai/gpt-5.4-image-2",
-        "openai/gpt-oss-120b",
+        "openai/o3",
+        "openai/o4-mini:batch",
+        "openai/gpt-audio-mini",
+        "openai/gpt-chat-latest",
     }
     assert stats.skipped_superseded == 3
 

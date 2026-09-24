@@ -363,7 +363,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def main() -> None:
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 0
-    _State.models = [m for m in sys.argv[2:] if m] or ["openai.gpt-5.6-luna"]
+    _State.models = [m for m in sys.argv[2:] if m] or ["openai.gpt-6-luna"]
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     server.daemon_threads = True
     stopped = threading.Event()

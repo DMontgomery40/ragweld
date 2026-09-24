@@ -87,6 +87,24 @@ def select_files(root, policy, paths=None, base=None, staged=False, all_files=Fa
     return selected
 
 
+RULE_SCOPES = {None, "file"}
+IMPORT_LINE = re.compile(r"^\s*(?:import\s|from\s+\S+\s+import\b|\}?\s*from\s+['\"]|export\s.*\sfrom\s)")
+
+
+def validate_policy(policy):
+    rules = policy.get("rules", [])
+    if not policy.get("include") or not rules or len({r["id"] for r in rules}) != len(rules):
+        raise LintError("Policy needs source includes and uniquely named semantic rules")
+    for rule in rules:
+        if rule.get("scope") not in RULE_SCOPES:
+            raise LintError(f"Rule {rule['id']} has unknown scope {rule.get('scope')!r}; use \"file\" or omit it")
+
+
+def import_lines(source, limit=1500):
+    """The file's import statements: a changed hunk that uses a module is judged with its import."""
+    return "\n".join(line for line in source.splitlines() if IMPORT_LINE.match(line))[:limit]
+
+
 def changed_sections(root, base, name, context_lines=20):
     """Return new-side changed hunks with their newly added line numbers."""
     diff = git(
@@ -160,15 +178,23 @@ def build_batches(
             rule.get("scope") == "file" and matches(name, rule.get("include", ["*"]))
             for rule in policy["rules"]
         )
-        sections = changed_sections(root, base, name, context_lines) if base and not needs_full_file else [(1, source, None)]
+        hunk_mode = bool(base) and not needs_full_file
+        sections = changed_sections(root, base, name, context_lines) if hunk_mode else [(1, source, None)]
+        imports = import_lines(source) if hunk_mode else ""
         for section_line, section, added_lines in sections:
             offset, line = 0, section_line
             while offset < len(section):
                 size = min(len(section) - offset, max_chars // 2)
                 while True:
-                    chunk = {"path": name, "line": line, "offset": offset, "content": section[offset:offset + size]}
+                    content = section[offset:offset + size]
+                    chunk = {"path": name, "line": line, "offset": offset, "content": content}
                     if added_lines is not None:
-                        chunk["changed_lines"] = added_lines
+                        # Only this chunk's added lines: a long hunk split into chunks must
+                        # not repeat (and pay for) the whole hunk's line list in every chunk.
+                        last = line + content.count("\n") - (1 if content.endswith("\n") else 0)
+                        chunk["changed_lines"] = [number for number in added_lines if line <= number <= last]
+                        if imports:
+                            chunk["imports"] = imports
                     candidate = {"context": current["context"], "files": current["files"] + [chunk]}
                     if len(json.dumps(candidate, ensure_ascii=False)) <= max_chars:
                         break
@@ -179,9 +205,11 @@ def build_batches(
                         size //= 2
                         if not size:
                             raise LintError("Policy context exceeds the request budget")
-                current = candidate
+                # A context-only slice of a hunk that does add lines has nothing to judge.
+                if not (added_lines and not chunk["changed_lines"]):
+                    current = candidate
                 offset += size
-                line += chunk["content"].count("\n")
+                line += content.count("\n")
     if current["files"]:
         batches.append(current)
     if len(batches) > max_batches:
@@ -202,6 +230,8 @@ def build_questions(batch, policy):
                 if changed else
                 "No newly added lines are present; judge the resulting new-side hunk after deletions. "
             ) if "changed_lines" in source else ""
+            if source.get("imports"):
+                changed_scope += f"files[{index}].imports lists the whole file's import statements, as context. "
             questions[key] = {"type": "noul", "instructions": (
                 f"Evaluate ONLY files[{index}] ({source['path']}, starting line {source['line']}). "
                 + changed_scope +
@@ -303,9 +333,7 @@ def main(argv=None):
     try:
         root = args.root.resolve()
         policy = json.loads((root / ".jev-lint.json").read_text())
-        rules = policy.get("rules", [])
-        if not policy.get("include") or not rules or len({r["id"] for r in rules}) != len(rules):
-            raise LintError("Policy needs source includes and uniquely named semantic rules")
+        validate_policy(policy)
         review, violation = policy.get("review_threshold", .35), policy.get("violation_threshold", .8)
         if not 0 <= review < violation <= 1 or args.max_seconds <= 0:
             raise LintError("Invalid thresholds or time budget")

@@ -225,7 +225,7 @@ def _chat_config(cfg, base_url: str):  # noqa: ANN001, ANN202 - TriBridConfig in
     chat_cfg = cfg.model_copy(deep=True)
     chat_cfg.chat.litellm.enabled = True
     chat_cfg.chat.litellm.base_url = base_url
-    chat_cfg.chat.litellm.default_model = "openai.gpt-5.6-luna"
+    chat_cfg.chat.litellm.default_model = "openai.gpt-6-luna"
     chat_cfg.chat.recall.enabled = False
     chat_cfg.semantic_cache.enabled = False
     return chat_cfg

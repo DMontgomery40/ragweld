@@ -14,9 +14,16 @@ that secret cannot claim a semantic pass; run the check in an authorized environ
 
 No source is rewritten. Only allowlisted source is sent. Every selected file is
 covered without silent truncation; request/time limits return an incomplete check.
+Explicit paths, `--staged` and `--all` send whole files. `--base` sends each changed
+hunk with 20 lines of context, the line numbers it adds and the file's import
+statements; a slice of a long hunk that adds nothing is not sent. A rule marked
+`"scope": "file"` in `.jev-lint.json` always gets the whole file (the React hook and
+render rules need the enclosing component); any other `scope` value stops the run.
+CI runs `--base` with `--max-requests 64 --max-seconds 240` so a broad migration
+fits the 5-minute job; a larger change returns an incomplete check, not a pass.
 Exit 0 means the selected scope passed (or had no applicable changes), 1 means a
 violation, and 2 means uncertainty or an unavailable/incomplete check. Findings
-identify the file, chunk start line, rule and probability; they are not proofs.
+identify the file, chunk or hunk start line, rule and probability; they are not proofs.
 The configurable thresholds are operating choices, not measured error guarantees.
 
 Identical source, model, endpoint and questions reuse a private Git-directory

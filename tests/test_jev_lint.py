@@ -86,6 +86,8 @@ class JevLintTests(unittest.TestCase):
         names = self.lint.select_files(self.root, self.policy, base=base)
         batches = self.lint.build_batches(self.root, names, self.policy, snapshot="HEAD", base=base)
         self.assertEqual(batches[0]["files"][0]["content"], "import redis\n")
+        # The import context is read from the HEAD snapshot, never the unstaged repair.
+        self.assertEqual(batches[0]["files"][0]["imports"], "import redis")
 
     def test_committed_scope_sends_only_changed_hunks_with_bounded_context(self):
         original = "".join(f"line {number}\n" for number in range(1, 201))
@@ -156,6 +158,53 @@ class JevLintTests(unittest.TestCase):
         self.assertNotIn("changed_lines", chunk)
         self.assertIn("if (!ready) return null;", chunk["content"])
         self.assertIn("useEffect(() => {}, []);", chunk["content"])
+
+    def test_split_hunk_sends_only_chunks_with_their_own_added_lines(self):
+        original = "".join(f"context line {number:04d} padded to a realistic width\n" for number in range(1, 401))
+        self.write("src/a.py", original)
+        self.git("add", ".")
+        self.git("commit", "-qm", "base")
+        base = self.git("rev-parse", "HEAD").strip()
+        self.write("src/a.py", original.replace("context line 0300 ", "import redis  # changed 0300 "))
+        self.git("add", ".")
+        self.git("commit", "-qm", "change")
+
+        # 200 context lines make one hunk far larger than a 2,000-character chunk.
+        batches = self.lint.build_batches(
+            self.root, ["src/a.py"], self.policy, snapshot="HEAD", base=base, context_lines=200, max_chars=4000,
+        )
+
+        chunks = [source for batch in batches for source in batch["files"]]
+        self.assertEqual([chunk["changed_lines"] for chunk in chunks], [[300]])
+        self.assertIn("import redis  # changed 0300", chunks[0]["content"])
+
+    def test_hunk_carries_the_files_imports_for_a_use_far_from_its_import(self):
+        original = "import os\nfrom langchain_openai import ChatOpenAI\n" + "".join(f"x{n} = {n}\n" for n in range(80))
+        self.write("src/a.py", original)
+        self.git("add", ".")
+        self.git("commit", "-qm", "base")
+        base = self.git("rev-parse", "HEAD").strip()
+        self.write("src/a.py", original + "llm = ChatOpenAI(model='m')\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "change")
+
+        batches = self.lint.build_batches(
+            self.root, ["src/a.py"], self.policy, snapshot="HEAD", base=base, context_lines=2,
+        )
+
+        chunk = batches[0]["files"][0]
+        self.assertNotIn("langchain_openai", chunk["content"])
+        self.assertEqual(chunk["imports"], "import os\nfrom langchain_openai import ChatOpenAI")
+        questions, _ = self.lint.build_questions(batches[0], self.policy)
+        self.assertIn("files[0].imports", next(iter(questions.values()))["instructions"])
+
+    def test_unknown_rule_scope_is_rejected(self):
+        self.lint.validate_policy(self.policy)
+        self.policy["rules"][0]["scope"] = "file"
+        self.lint.validate_policy(self.policy)
+        self.policy["rules"][0]["scope"] = "files"
+        with self.assertRaises(self.lint.LintError):
+            self.lint.validate_policy(self.policy)
 
     def test_cloud_key_is_never_selected_for_custom_endpoint(self):
         for url in ["http://127.0.0.1:8080", "https://other.example", "https://api.typesafe.ai:8443", "https://api.typesafe.ai.evil.example"]:

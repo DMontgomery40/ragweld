@@ -200,7 +200,7 @@ function startTurn(h: Harness, base: string, turn: ReturnType<typeof seedTurn>, 
       includeGraph: false,
       includeSparse: true,
       includeVector: true,
-      modelOverride: 'openai.gpt-5.6-luna',
+      modelOverride: 'openai.gpt-6-luna',
       recallIntensityOverride: null,
       requestSources: { corpus_ids: ['pytest_acceptance'] },
       topK: null,
@@ -257,9 +257,9 @@ test('with no view mounted, the answer lands in the stored thread exactly once, 
     assert.deepEqual(
       h.journeys.map((j) => [j.name, j.model, j.outcome]),
       [
-        ['chat_send_to_status', 'openai.gpt-5.6-luna', 'ok'],
-        ['chat_send_to_first_text', 'openai.gpt-5.6-luna', 'ok'],
-        ['chat_send_to_done', 'openai.gpt-5.6-luna', 'ok'],
+        ['chat_send_to_status', 'openai.gpt-6-luna', 'ok'],
+        ['chat_send_to_first_text', 'openai.gpt-6-luna', 'ok'],
+        ['chat_send_to_done', 'openai.gpt-6-luna', 'ok'],
       ],
     );
     const [status, first, finished] = h.journeys.map((j) => j.durationMs);

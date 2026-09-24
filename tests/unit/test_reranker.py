@@ -117,7 +117,7 @@ async def _assert_litellm_fails_closed() -> None:
     config = RerankingConfig(
         reranker_mode="cloud",
         reranker_cloud_provider="litellm",
-        reranker_cloud_model="openai.gpt-5.4-nano",
+        reranker_cloud_model="openai.gpt-6-luna",
         reranker_cloud_top_n=10,
         reranker_timeout=5,
     )
