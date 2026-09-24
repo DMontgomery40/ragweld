@@ -79,3 +79,32 @@ at about 8 s, which hides the 60–120 s stalls seen live on 2026-09-23.
 - Batched deploy on LXC100 via bundle and fast-forward.
 - Grafana and Prometheus pick up provisioning on container restart; Caddy reloads.
 - Rollback: the previous commit plus a restart of the affected containers.
+
+## Adversarial review (2026-09-23, `codex exec` gpt-5.6-sol, high effort, over be3af022..9006ba85)
+
+Fixed in the follow-up commit:
+
+- Chat series priming: `unresolved` request counters are primed when telemetry is created,
+  so a config-load failure after a restart is counted. The duration histogram is primed for
+  `ok` only, which keeps a primed alias at dozens of series rather than more than a hundred.
+- Gateway reranker parse: a later JSON verdict that differs from the first now raises
+  instead of being ignored. Trailing prose and a verbatim repeat are still accepted.
+- Alertmanager URL test: it compares whole URLs, not just origins.
+- Reranker picker E2E: corpus creation sits inside `try`, and directory cleanup is unconditional.
+
+Recorded, not fixed:
+
+- An image-validation 400 after `bind_model` never calls `finish()`. There is no
+  invalid-request outcome in the contract yet.
+- Non-streaming `/api/chat` records `ok` before trace and persistence writes, so a later
+  failure there returns 500 but counts as `ok`.
+- Priming only helps a request that outlives one 10 s scrape. A cache hit or fast failure
+  still loses its first count.
+- The reranker page lets you Apply `mode=cloud` with an empty gateway alias. Search then
+  fails closed with a typed error. A cross-field config invariant plus a disabled Apply
+  would close it.
+- The System One client starts its timeout after waiting for a concurrency slot.
+- The System One client retries without an idempotency key. This is rejected as a defect:
+  judgments are stateless, so a retry costs input tokens only.
+- `_coerce_generation_result` accepts legacy tuple shapes. It predates this wave (2026-03-25).
+- System One error text keeps a truncated response body.

@@ -77,9 +77,17 @@ def test_parse_rerank_scores_maps_ids_back_to_candidate_order() -> None:
     # Seen live (openai.gpt-6-luna, 2026-09-23): a complete verdict followed by trailing text.
     assert parse_rerank_scores(wrapped + "\n" + wrapped, ids) == [10.0, 0.0, 5.0]
     assert parse_rerank_scores(text + "\nDone.", ids) == [9.0, 1.0, 2.0]
+    # Bracketed prose after the verdict is not a second verdict.
+    assert parse_rerank_scores(text + "\n[scores are 0-10]", ids) == [9.0, 1.0, 2.0]
     # A truncated first value is still malformed even if a later one would parse.
     with pytest.raises(GatewayRerankParseError):
         parse_rerank_scores('{"scores": [{"id": "k1a", "score": 9}' + "\n" + wrapped, ids)
+    # A second, different verdict (the model changed its answer) is never silently dropped,
+    # whether it is wrapped like the first or not.
+    corrected = [{"id": "k1a", "score": 1}, {"id": "k2b", "score": 9}, {"id": "k3c", "score": 5}]
+    for later in (json.dumps({"scores": corrected}), json.dumps(corrected)):
+        with pytest.raises(GatewayRerankParseError, match="second, different verdict"):
+            parse_rerank_scores(wrapped + "\n" + later, ids)
 
 
 @pytest.mark.parametrize(

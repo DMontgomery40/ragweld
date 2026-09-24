@@ -742,7 +742,8 @@ def test_alertmanager_routes_to_discord_from_a_secret_file_and_parks_the_watchdo
     grafana_root = _compose_config("docker-compose.yml", "infra/docker-compose.observability.yml", PROXMOX_PRODUCTION_COMPOSE)[
         "services"
     ]["grafana"]["environment"]["GF_SERVER_ROOT_URL"]
-    assert set(re.findall(r"https?://[^\s'\"/{]+", source)) == {grafana_root}
+    # Whole URLs up to the template brace, so a path or query on any host fails too.
+    assert set(re.findall(r"https?://[^\s'\"(){}]+", source)) == {grafana_root}
     payload = yaml.safe_load(source)
     route = payload["route"]
     assert route["receiver"] == "discord"

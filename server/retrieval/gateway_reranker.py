@@ -195,21 +195,38 @@ def parse_rerank_scores(text: str, ids: list[str]) -> list[float]:
     def _reject_constant(name: str) -> float:
         raise ValueError(f"non-finite JSON constant {name!r}")
 
-    # Decode the FIRST complete JSON value and ignore anything after it: on 2026-09-23 a
-    # schema-conforming verdict from openai.gpt-6-luna arrived followed by trailing text
-    # ("Extra data"), which slicing to the last bracket turned into a failed request. The
-    # bijection and finiteness checks below still reject every malformed verdict.
+    def _scores_of(value: Any) -> Any:
+        return value.get("scores") if isinstance(value, dict) else value
+
+    # Decode the FIRST complete JSON value: on 2026-09-23 a schema-conforming verdict from
+    # openai.gpt-6-luna arrived followed by trailing text ("Extra data"), which slicing to the
+    # last bracket turned into a failed request. Trailing prose is ignored, and so is a
+    # repeat of the same verdict; a later, DIFFERENT verdict means the model changed its
+    # answer, and keeping either one would be a guess, so it raises. The bijection and
+    # finiteness checks below still reject every malformed verdict.
     decoder = json.JSONDecoder(parse_constant=_reject_constant)
     try:
         if object_start >= 0 and (array_start < 0 or object_start < array_start):
-            payload, _end = decoder.raw_decode(stripped, object_start)
-            payload = payload.get("scores") if isinstance(payload, dict) else None
+            first, end = decoder.raw_decode(stripped, object_start)
+            payload = first.get("scores") if isinstance(first, dict) else None
         elif array_start >= 0:
-            payload, _end = decoder.raw_decode(stripped, array_start)
+            first, end = decoder.raw_decode(stripped, array_start)
+            payload = first
         else:
             raise GatewayRerankParseError("reranker output contained no JSON array")
     except (json.JSONDecodeError, ValueError) as exc:
         raise GatewayRerankParseError(f"reranker output is not valid JSON: {exc}") from exc
+    while True:
+        starts = [index for index in (stripped.find("{", end), stripped.find("[", end)) if index >= 0]
+        if not starts:
+            break
+        try:
+            later, end = decoder.raw_decode(stripped, min(starts))
+        except (json.JSONDecodeError, ValueError):
+            end = min(starts) + 1  # bracketed prose, not a JSON value
+            continue
+        if _scores_of(later) != payload:
+            raise GatewayRerankParseError("reranker output holds a second, different verdict")
     if not isinstance(payload, list):
         raise GatewayRerankParseError("reranker output is not a JSON array of {id, score} objects")
     by_id: dict[str, float] = {}
