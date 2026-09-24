@@ -58,6 +58,7 @@
 | `semantic_cache` | [`semantic_cache.md`](semantic_cache.md) |
 | `sparse_search` | [`sparse_search.md`](sparse_search.md) |
 | `synthetic` | [`synthetic.md`](synthetic.md) |
+| `system_one` | [`system_one.md`](system_one.md) |
 | `system_prompts` | [`system_prompts.md`](system_prompts.md) |
 | `tokenization` | [`tokenization.md`](tokenization.md) |
 | `tracing` | [`tracing.md`](tracing.md) |
