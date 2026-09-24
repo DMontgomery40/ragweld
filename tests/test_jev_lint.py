@@ -110,10 +110,14 @@ class JevLintTests(unittest.TestCase):
         chunks = [source for batch in batches for source in batch["files"]]
         self.assertEqual(len(chunks), 1)
         self.assertEqual(chunks[0]["line"], 98)
+        self.assertEqual(chunks[0]["changed_lines"], [100])
         self.assertIn("line 98\n", chunks[0]["content"])
         self.assertIn("import redis  # changed line\n", chunks[0]["content"])
         self.assertIn("line 102\n", chunks[0]["content"])
         self.assertNotIn("line 1\n", chunks[0]["content"])
+
+        questions, _ = self.lint.build_questions(batches[0], self.policy)
+        self.assertIn("newly added lines [100]", next(iter(questions.values()))["instructions"])
 
     def test_cloud_key_is_never_selected_for_custom_endpoint(self):
         for url in ["http://127.0.0.1:8080", "https://other.example", "https://api.typesafe.ai:8443", "https://api.typesafe.ai.evil.example"]:
