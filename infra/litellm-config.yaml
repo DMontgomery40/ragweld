@@ -1333,6 +1333,12 @@ model_list:
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
+- model_name: perceptron.perceptron-mk1.5
+  litellm_params:
+    model: openrouter/perceptron/perceptron-mk1.5
+    num_retries: 0
+    max_retries: 0
+    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: perplexity.sonar
   litellm_params:
     model: openrouter/perplexity/sonar
@@ -1885,6 +1891,12 @@ model_list:
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
+- model_name: typesafe.jev-router
+  litellm_params:
+    model: openrouter/typesafe/jev-router
+    num_retries: 0
+    max_retries: 0
+    api_key: os.environ/OPENROUTER_API_KEY
 - model_name: unbiased.pareto
   litellm_params:
     model: openrouter/unbiased/pareto
@@ -2062,12 +2074,6 @@ model_list:
 - model_name: z-ai.glm-5.2
   litellm_params:
     model: openrouter/z-ai/glm-5.2
-    num_retries: 0
-    max_retries: 0
-    api_key: os.environ/OPENROUTER_API_KEY
-- model_name: z-ai.glm-5.2.free
-  litellm_params:
-    model: openrouter/z-ai/glm-5.2:free
     num_retries: 0
     max_retries: 0
     api_key: os.environ/OPENROUTER_API_KEY
