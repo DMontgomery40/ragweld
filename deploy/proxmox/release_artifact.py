@@ -126,20 +126,34 @@ def require_clean_source(repo: Path) -> None:
         raise ValueError("Untracked source is present; commit or remove it before sealing")
 
 
-def config_file_hashes(paths: list[Path]) -> dict[str, str]:
-    """Capture target identity as well as content, including config symlink rotation."""
-    return {str(path): digest(path) for path in (source.resolve(strict=True) for source in paths)}
+def config_file_hashes(paths: list[Path]) -> dict[str, tuple[str, str]]:
+    """Preserve each input's target and content, including swaps between symlinks."""
+    result = {}
+    for source in paths:
+        target = source.resolve(strict=True)
+        result[str(source.absolute())] = (str(target), digest(target))
+    return result
+
+
+def image_identities(images: list[ReleaseImage]) -> dict[str, tuple[str, tuple[str, ...]]]:
+    """Compare service/image identity independently of Docker enumeration order."""
+    result = {image.service: (image.image_id, tuple(sorted(image.repository_digests))) for image in images}
+    if len(result) != len(images):
+        raise ValueError("Duplicate services in captured image inventory")
+    return result
 
 
 def seal_release(repo: Path, output: Path, images: list[ReleaseImage],
-                 config_paths: list[Path], backup_reference: str) -> ReleaseManifest:
+                 config_paths: list[Path], backup_reference: str, *,
+                 project: str = "ragweld") -> ReleaseManifest:
     repo = repo.resolve(strict=True)
     require_clean_source(repo)
     if not (repo / "web/dist/index.html").is_file():
         raise ValueError("Built frontend index.html is missing")
     locks = {name: digest(repo / name) for name in ("uv.lock", "web/package-lock.json")}
     web_files = file_hashes(repo / "web/dist")
-    config_hashes = config_file_hashes(config_paths)
+    config_snapshot = config_file_hashes(config_paths)
+    captured_images = image_identities(images)
     git_sha = run(["git", "rev-parse", "HEAD"], repo)
     git_tree = run(["git", "rev-parse", "HEAD^{tree}"], repo)
     output.mkdir(parents=True, mode=0o700, exist_ok=False)
@@ -153,15 +167,22 @@ def seal_release(repo: Path, output: Path, images: list[ReleaseImage],
     }}, indent=2) + "\n")
     manifest = ReleaseManifest(created_at=datetime.now(timezone.utc).isoformat(), git_sha=git_sha,
         git_tree=git_tree, artifacts={name: digest(output / name) for name in ("source.tar", "web-dist.tar", "images.compose.json")},
-        locks=locks, web_files=web_files, images=images, private_config_hashes=config_hashes,
+        locks=locks, web_files=web_files, images=images,
+        private_config_hashes={target: value for target, value in config_snapshot.values()},
         backup_reference=backup_reference)
     # Refuse a concurrent edit/build or config rotation instead of sealing mixed inputs.
     require_clean_source(repo)
     if (run(["git", "rev-parse", "HEAD"], repo) != git_sha
             or file_hashes(repo / "web/dist") != web_files
             or any(digest(repo / name) != value for name, value in locks.items())
-            or config_file_hashes(config_paths) != config_hashes):
+            or config_file_hashes(config_paths) != config_snapshot):
         raise ValueError("Source, assets or private configuration changed during capture; discard this incomplete release")
+    # The CLI validated this captured membership against the launcher. Requiring
+    # every captured service also detects optional-service removal; an addition
+    # is unexpected. Use the same validator for stopped containers and image IDs.
+    current_images = compose_images(project, set(captured_images), set())
+    if image_identities(current_images) != captured_images:
+        raise ValueError("Compose images changed during capture; discard this incomplete release")
     (output / "manifest.json").write_text(manifest.model_dump_json(indent=2) + "\n")
     (output / "manifest.sha256").write_text(digest(output / "manifest.json") + "\n")
     for path in output.iterdir():

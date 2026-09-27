@@ -52,7 +52,7 @@ def test_release_round_trip_and_refusal_to_overwrite(source_repo: Path, tmp_path
     output = tmp_path / "sealed"
     config = tmp_path / "private-config.json"
     config.write_text('{"credential":"only-the-hash-may-leave"}')
-    original = release.seal_release(source_repo, output, [], [config], "/backups/immutable")
+    original = release.seal_release(source_repo, output, [], [config], "/backups/immutable", project="ragweld-release-check-" + uuid.uuid4().hex)
     assert "only-the-hash-may-leave" not in (output / "manifest.json").read_text()
     assert original.private_config_hashes[str(config)] == release.digest(config)
     destination = tmp_path / "materialized"
@@ -63,16 +63,16 @@ def test_release_round_trip_and_refusal_to_overwrite(source_repo: Path, tmp_path
     with pytest.raises(FileExistsError):
         release.materialize_release(output, destination)
     with pytest.raises(FileExistsError):
-        release.seal_release(source_repo, output, [], [], "/backups/immutable")
+        release.seal_release(source_repo, output, [], [], "/backups/immutable", project="ragweld-release-check-" + uuid.uuid4().hex)
 
 
 def test_release_rejects_dirty_source_and_tampered_archive(source_repo: Path, tmp_path: Path) -> None:
     (source_repo / "uv.lock").write_text("version = 2\n")
     with pytest.raises(ValueError, match="dirty"):
-        release.seal_release(source_repo, tmp_path / "dirty", [], [], "/backups/immutable")
+        release.seal_release(source_repo, tmp_path / "dirty", [], [], "/backups/immutable", project="ragweld-release-check-" + uuid.uuid4().hex)
     subprocess.run(["git", "restore", "uv.lock"], cwd=source_repo, check=True)
     output = tmp_path / "sealed"
-    release.seal_release(source_repo, output, [], [], "/backups/immutable")
+    release.seal_release(source_repo, output, [], [], "/backups/immutable", project="ragweld-release-check-" + uuid.uuid4().hex)
     (output / "web-dist.tar").chmod(0o600)
     with (output / "web-dist.tar").open("ab") as stream:
         stream.write(b"corruption")
@@ -82,7 +82,7 @@ def test_release_rejects_dirty_source_and_tampered_archive(source_repo: Path, tm
 
 def test_materialize_rejects_archive_traversal_even_with_matching_digest(source_repo: Path, tmp_path: Path) -> None:
     output = tmp_path / "sealed"
-    release.seal_release(source_repo, output, [], [], "/backups/immutable")
+    release.seal_release(source_repo, output, [], [], "/backups/immutable", project="ragweld-release-check-" + uuid.uuid4().hex)
     archive = output / "source.tar"
     archive.chmod(0o600)
     with tarfile.open(archive, "w") as stream:
@@ -153,7 +153,7 @@ def test_release_rejects_untracked_source(source_repo: Path, tmp_path: Path, rel
     path.write_text("This source is absent from the committed archive.\n")
     output = tmp_path / "refused"
     with pytest.raises(ValueError, match="Untracked source"):
-        release.seal_release(source_repo, output, [], [], "/backups/immutable")
+        release.seal_release(source_repo, output, [], [], "/backups/immutable", project="ragweld-release-check-" + uuid.uuid4().hex)
     assert not output.exists()
 
 
@@ -174,7 +174,7 @@ def test_release_allows_only_recorded_operational_files(
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("Retained operational evidence.\n")
     output = tmp_path / "sealed"
-    release.seal_release(source_repo, output, [], [], "/backups/immutable")
+    release.seal_release(source_repo, output, [], [], "/backups/immutable", project="ragweld-release-check-" + uuid.uuid4().hex)
     with tarfile.open(output / "source.tar") as archive:
         assert relative not in archive.getnames()
 
@@ -240,7 +240,7 @@ def test_compose_inventory_includes_stopped_and_refuses_missing_required(tmp_pat
     assert not release.run(["docker", "ps", "--all", "-q", "--filter", f"label=com.docker.compose.project={project}"])
 
 
-@pytest.mark.parametrize("change", ["first", "second", "retarget"])
+@pytest.mark.parametrize("change", ["first", "second", "retarget", "swap"])
 def test_release_rejects_private_config_changes_during_capture(
     source_repo: Path, tmp_path: Path, change: str,
 ) -> None:
@@ -249,10 +249,14 @@ def test_release_rejects_private_config_changes_during_capture(
     original = '{"credential":"private-before-capture"}'
     first.write_text(original)
     second.write_text(original)
-    if change == "retarget":
+    if change in {"retarget", "swap"}:
         target = tmp_path / "initial-target.json"
         first.rename(target)
         first.symlink_to(target)
+    if change == "swap":
+        second_target = tmp_path / "second-target.json"
+        second.rename(second_target)
+        second.symlink_to(second_target)
 
     # The final input is a FIFO: opening its writer proves both earlier config
     # hashes completed. Keep the writer open until the mutation is finished.
@@ -262,6 +266,7 @@ def test_release_rejects_private_config_changes_during_capture(
     script = """
 import importlib.util
 import sys
+import uuid
 from pathlib import Path
 spec = importlib.util.spec_from_file_location("release_artifact", sys.argv[1])
 module = importlib.util.module_from_spec(spec)
@@ -269,7 +274,7 @@ sys.modules[spec.name] = module
 spec.loader.exec_module(module)
 try:
     module.seal_release(Path(sys.argv[2]), Path(sys.argv[3]), [],
-                        [Path(value) for value in sys.argv[4:]], "/backups/immutable")
+                        [Path(value) for value in sys.argv[4:]], "/backups/immutable", project="ragweld-release-check-" + uuid.uuid4().hex)
 except ValueError as exc:
     print(str(exc))
     raise SystemExit(17)
@@ -297,6 +302,11 @@ except ValueError as exc:
             replacement.write_text(original)
             first.unlink()
             first.symlink_to(replacement)
+        elif change == "swap":
+            first.unlink()
+            second.unlink()
+            first.symlink_to(second_target)
+            second.symlink_to(target)
         else:
             (first if change == "first" else second).write_text('{"credential":"private-after-capture"}')
         # The initial hash reads the open FIFO; final verification reads an
@@ -318,3 +328,113 @@ except ValueError as exc:
     assert "private-after-capture" not in stdout + stderr
     assert not (output / "manifest.json").exists()
     assert not (output / "manifest.sha256").exists()
+
+
+@pytest.mark.parametrize("change", ["image", "remove-required", "remove-optional", "add-optional"])
+def test_release_rejects_compose_changes_during_capture(
+    source_repo: Path, tmp_path: Path, change: str,
+) -> None:
+    project = "ragweld-release-check-" + uuid.uuid4().hex
+    image = release.run(["docker", "image", "inspect", "pgvector/pgvector:pg16", "--format", "{{.Id}}"])
+    containers: dict[str, str] = {}
+    replacement = None
+    process = None
+    writer = None
+
+    def create(service: str, image_id: str) -> None:
+        containers[service] = release.run([
+            "docker", "create", "--network", "none", "--entrypoint", "/bin/sh",
+            "--label", f"com.docker.compose.project={project}",
+            "--label", f"com.docker.compose.service={service}", image_id, "-c", "exit 0",
+        ])
+
+    try:
+        create("gateway", image)
+        if change != "add-optional":
+            create("optional", image)
+        captured = release.compose_images(project, {"gateway"}, {"optional"})
+        inventory = tmp_path / "captured-images.json"
+        inventory.write_text(json.dumps([item.model_dump() for item in captured]))
+        barrier = tmp_path / "capture-barrier"
+        os.mkfifo(barrier)
+        output = tmp_path / "refused"
+        script = """
+import importlib.util
+import json
+import sys
+from pathlib import Path
+spec = importlib.util.spec_from_file_location("release_artifact", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = module
+spec.loader.exec_module(module)
+images = [module.ReleaseImage.model_validate(item) for item in json.loads(Path(sys.argv[5]).read_text())]
+try:
+    module.seal_release(Path(sys.argv[2]), Path(sys.argv[3]), images,
+                        [Path(sys.argv[4])], "/backups/immutable", project=sys.argv[6])
+except ValueError as exc:
+    print(str(exc))
+    raise SystemExit(17)
+"""
+        process = subprocess.Popen(
+            [sys.executable, "-c", script, str(ROOT / "deploy/proxmox/release_artifact.py"),
+             str(source_repo), str(output), str(barrier), str(inventory), project],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        deadline = time.monotonic() + 10
+        while writer is None:
+            try:
+                writer = os.open(barrier, os.O_WRONLY | os.O_NONBLOCK)
+            except OSError as exc:
+                if exc.errno != errno.ENXIO:
+                    raise
+                assert process.poll() is None, "Sealer exited before reaching the capture barrier"
+                assert time.monotonic() < deadline, "Sealer did not reach the capture barrier"
+                time.sleep(0.01)
+        os.write(writer, b"capture-barrier")
+        if change == "image":
+            replacement = release.run(["docker", "commit", "--change", f"LABEL release-check={project}", containers["gateway"]])
+            assert replacement != image
+            release.run(["docker", "rm", "--volumes", containers.pop("gateway")])
+            create("gateway", replacement)
+        elif change.startswith("remove-"):
+            service = "gateway" if change == "remove-required" else "optional"
+            release.run(["docker", "rm", "--volumes", containers.pop(service)])
+        else:
+            create("optional", image)
+        barrier.unlink()
+        barrier.write_bytes(b"capture-barrier")
+        os.close(writer)
+        writer = None
+        stdout, stderr = process.communicate(timeout=15)
+        assert process.returncode == 17, (stdout, stderr)
+        expected = {
+            "image": "Compose images changed during capture",
+            "remove-required": "Missing required Compose services: gateway",
+            "remove-optional": "Missing required Compose services: optional",
+            "add-optional": "Unexpected Compose service: optional",
+        }
+        assert expected[change] in stdout
+        assert not (output / "manifest.json").exists()
+        assert not (output / "manifest.sha256").exists()
+    finally:
+        if writer is not None:
+            os.close(writer)
+        if process is not None and process.poll() is None:
+            process.kill()
+            process.communicate(timeout=10)
+        if containers:
+            release.run(["docker", "rm", "--force", "--volumes", *containers.values()])
+        if replacement is not None:
+            release.run(["docker", "image", "rm", replacement])
+    assert not release.run(["docker", "ps", "--all", "-q", "--filter", f"label=com.docker.compose.project={project}"])
+
+
+def test_image_identities_ignore_enumeration_order_and_reject_duplicate_services() -> None:
+    gateway = release.ReleaseImage(service="gateway", image_id="sha256:" + "a" * 64,
+        repository_digests=["registry/gateway@sha256:" + "b" * 64, "registry/alias@sha256:" + "b" * 64])
+    database = release.ReleaseImage(service="database", image_id="sha256:" + "c" * 64,
+        repository_digests=[])
+    reordered = gateway.model_copy(update={"repository_digests": list(reversed(gateway.repository_digests))})
+    assert release.image_identities([gateway, database]) == release.image_identities([database, reordered])
+    with pytest.raises(ValueError, match="Duplicate services"):
+        release.image_identities([gateway, gateway])
