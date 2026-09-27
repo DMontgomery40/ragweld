@@ -100,6 +100,8 @@ def running_images(repo: Path) -> list[ReleaseImage]:
 
 
 def file_hashes(root: Path) -> dict[str, str]:
+    if root.is_symlink():
+        raise ValueError("Artifact tree contains symlink at its root")
     result = {}
     for path in sorted(root.rglob("*")):
         if path.is_symlink():
@@ -107,6 +109,28 @@ def file_hashes(root: Path) -> dict[str, str]:
         if path.is_file():
             result[path.relative_to(root).as_posix()] = digest(path)
     return result
+
+
+def validate_archive(archive: tarfile.TarFile, expected_files: dict[str, str], *, exact_files: bool) -> None:
+    """Require safe extraction and the content promised by the release manifest."""
+    members = archive.getmembers()
+    for member in members:
+        if (not (member.isfile() or member.isdir()) or member.name.startswith("/")
+                or ".." in Path(member.name).parts):
+            raise ValueError(f"Unsafe release archive member: {member.name}")
+    files = {member.name: member for member in members if member.isfile()}
+    if not expected_files.keys() <= files.keys() or (exact_files and files.keys() != expected_files.keys()):
+        raise ValueError("Release archive contents differ from the captured file inventory")
+    for name, expected in expected_files.items():
+        stream = archive.extractfile(files[name])
+        if stream is None:
+            raise ValueError("Release archive contents differ from the captured file inventory")
+        checksum = hashlib.sha256()
+        with stream:
+            while block := stream.read(1024 * 1024):
+                checksum.update(block)
+        if checksum.hexdigest() != expected:
+            raise ValueError("Release archive contents differ from the captured file hashes")
 
 
 def require_clean_source(repo: Path) -> None:
@@ -161,6 +185,12 @@ def seal_release(repo: Path, output: Path, images: list[ReleaseImage],
     run(["git", "archive", "--format=tar", "--output", str(source), git_sha], repo)
     with tarfile.open(output / "web-dist.tar", "w") as archive:
         archive.add(repo / "web/dist", arcname="web/dist")
+    # Git export attributes and tar link/special-file handling can change the
+    # archive even while source hashes are stable. Prove it is restorable first.
+    with tarfile.open(source) as archive:
+        validate_archive(archive, locks, exact_files=False)
+    with tarfile.open(output / "web-dist.tar") as archive:
+        validate_archive(archive, {f"web/dist/{name}": value for name, value in web_files.items()}, exact_files=True)
     # Use only already-present image IDs during owner-controlled recovery; never pull mutable tags.
     (output / "images.compose.json").write_text(json.dumps({"services": {
         image.service: {"image": image.image_id, "pull_policy": "never"} for image in images
@@ -209,11 +239,9 @@ def materialize_release(output: Path, destination: Path) -> ReleaseManifest:
     destination.mkdir(parents=True, mode=0o700, exist_ok=False)
     for name in ("source.tar", "web-dist.tar"):
         with tarfile.open(output / name) as archive:
-            # Do not follow archive symlinks or permit special files/path traversal.
-            for member in archive.getmembers():
-                if (not (member.isfile() or member.isdir()) or member.name.startswith("/")
-                        or ".." in Path(member.name).parts):
-                    raise ValueError(f"Unsafe release archive member: {member.name}")
+            expected_files = (manifest.locks if name == "source.tar" else
+                              {f"web/dist/{path}": value for path, value in manifest.web_files.items()})
+            validate_archive(archive, expected_files, exact_files=name == "web-dist.tar")
             archive.extractall(destination, filter="data")
     if file_hashes(destination / "web/dist") != manifest.web_files:
         raise ValueError("Materialized web assets differ from manifest")

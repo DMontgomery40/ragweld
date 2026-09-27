@@ -66,6 +66,63 @@ def test_release_round_trip_and_refusal_to_overwrite(source_repo: Path, tmp_path
         release.seal_release(source_repo, output, [], [], "/backups/immutable", project="ragweld-release-check-" + uuid.uuid4().hex)
 
 
+def test_release_rejects_symlinked_frontend_root(source_repo: Path, tmp_path: Path) -> None:
+    # Ignore both the build directory and a link at that path, so the rejection
+    # exercises artifact validation rather than the clean-source gate.
+    (source_repo / ".gitignore").write_text("web/dist\n")
+    subprocess.run(["git", "add", ".gitignore"], cwd=source_repo, check=True, capture_output=True)
+    subprocess.run(["git", "-c", "user.name=Recovery acceptance", "-c",
+                    "user.email=recovery@example.invalid", "commit", "-m", "Ignore build root"],
+                   cwd=source_repo, check=True, capture_output=True)
+    root = source_repo / "web/dist"
+    assets = tmp_path / "served-assets"
+    root.rename(assets)
+    root.symlink_to(assets, target_is_directory=True)
+    output = tmp_path / "refused"
+    with pytest.raises(ValueError, match="Artifact tree contains symlink"):
+        release.seal_release(source_repo, output, [], [], "/backups/immutable",
+                             project="ragweld-release-check-" + uuid.uuid4().hex)
+    assert not output.exists()
+    assert (assets / "index.html").read_text() == "<main>Ragweld</main>\n"
+
+
+@pytest.mark.parametrize("entry", ["frontend-hardlink", "frontend-fifo", "source-symlink"])
+def test_release_rejects_unsupported_archive_members(source_repo: Path, tmp_path: Path, entry: str) -> None:
+    if entry == "frontend-hardlink":
+        os.link(source_repo / "web/dist/index.html", source_repo / "web/dist/copy.html")
+    elif entry == "frontend-fifo":
+        os.mkfifo(source_repo / "web/dist/leftover.pipe")
+    else:
+        (source_repo / "lock-link").symlink_to("uv.lock")
+        subprocess.run(["git", "add", "lock-link"], cwd=source_repo, check=True, capture_output=True)
+        subprocess.run(["git", "-c", "user.name=Recovery acceptance", "-c",
+                        "user.email=recovery@example.invalid", "commit", "-m", "Tracked source symlink"],
+                       cwd=source_repo, check=True, capture_output=True)
+    output = tmp_path / "refused"
+    with pytest.raises(ValueError, match="Unsafe release archive member"):
+        release.seal_release(source_repo, output, [], [], "/backups/immutable",
+                             project="ragweld-release-check-" + uuid.uuid4().hex)
+    assert not (output / "manifest.json").exists()
+    assert not (output / "manifest.sha256").exists()
+
+
+@pytest.mark.parametrize("attribute", ["export-ignore", "export-subst"])
+def test_release_rejects_archived_lock_content_drift(source_repo: Path, tmp_path: Path, attribute: str) -> None:
+    (source_repo / ".gitattributes").write_text(f"uv.lock {attribute}\n")
+    if attribute == "export-subst":
+        (source_repo / "uv.lock").write_text('revision = "$Format:%H$"\n')
+    subprocess.run(["git", "add", ".gitattributes", "uv.lock"], cwd=source_repo, check=True, capture_output=True)
+    subprocess.run(["git", "-c", "user.name=Recovery acceptance", "-c",
+                    "user.email=recovery@example.invalid", "commit", "-m", "Archive export attributes"],
+                   cwd=source_repo, check=True, capture_output=True)
+    output = tmp_path / "refused"
+    with pytest.raises(ValueError, match="Release archive contents differ"):
+        release.seal_release(source_repo, output, [], [], "/backups/immutable",
+                             project="ragweld-release-check-" + uuid.uuid4().hex)
+    assert not (output / "manifest.json").exists()
+    assert not (output / "manifest.sha256").exists()
+
+
 def test_release_rejects_dirty_source_and_tampered_archive(source_repo: Path, tmp_path: Path) -> None:
     (source_repo / "uv.lock").write_text("version = 2\n")
     with pytest.raises(ValueError, match="dirty"):
@@ -100,6 +157,36 @@ def test_materialize_rejects_archive_traversal_even_with_matching_digest(source_
     with pytest.raises(ValueError, match="Unsafe"):
         release.materialize_release(output, tmp_path / "restored")
     assert not (tmp_path / "escaped").exists()
+
+
+@pytest.mark.parametrize("change", ["missing", "extra", "changed"])
+def test_materialize_rejects_web_archive_content_drift(source_repo: Path, tmp_path: Path, change: str) -> None:
+    output = tmp_path / "sealed"
+    release.seal_release(source_repo, output, [], [], "/backups/immutable",
+                         project="ragweld-release-check-" + uuid.uuid4().hex)
+    archive = output / "web-dist.tar"
+    archive.chmod(0o600)
+    with tarfile.open(archive, "w") as stream:
+        if change != "missing":
+            body = (b"Changed frontend" if change == "changed" else
+                    (source_repo / "web/dist/index.html").read_bytes())
+            member = tarfile.TarInfo("web/dist/index.html")
+            member.size = len(body)
+            stream.addfile(member, io.BytesIO(body))
+        if change == "extra":
+            stream.addfile(tarfile.TarInfo("web/dist/unrecorded.js"), io.BytesIO())
+    manifest_file = output / "manifest.json"
+    manifest = json.loads(manifest_file.read_text())
+    manifest["artifacts"]["web-dist.tar"] = release.digest(archive)
+    manifest_file.chmod(0o600)
+    manifest_file.write_text(json.dumps(manifest))
+    checksum = output / "manifest.sha256"
+    checksum.chmod(0o600)
+    checksum.write_text(release.digest(manifest_file))
+    destination = tmp_path / "restored"
+    with pytest.raises(ValueError, match="Release archive contents differ"):
+        release.materialize_release(output, destination)
+    assert not (destination / "web/dist/index.html").exists()
 
 
 @pytest.fixture
