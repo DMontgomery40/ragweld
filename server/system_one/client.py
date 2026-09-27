@@ -154,18 +154,31 @@ class SystemOneClient:
             raise RuntimeError("SystemOneClient must be entered (async with) before use")
         body = SystemOneRequest(model=str(self.cfg.model), state=state, questions=dict(questions))
         payload = body.model_dump(mode="json", exclude_none=True)
-        async with self._slots:
-            started = time.perf_counter()
-            outcome = "ok"
-            try:
-                response = await self._post_with_retries(payload, started=started)
-                return self._validated(response, expected=list(questions))
-            except SystemOneError as exc:
-                outcome = exc.outcome
-                raise
-            finally:
-                SYSTEM_ONE_REQUESTS_TOTAL.labels(provider=self.provider, outcome=outcome).inc()
-                SYSTEM_ONE_LATENCY_SECONDS.labels(provider=self.provider).observe(time.perf_counter() - started)
+        started = time.perf_counter()
+        outcome = "ok"
+        try:
+            # httpx timeouts apply to individual I/O waits. Bound the entire call,
+            # including capacity waits, retries, backoff and a trickling response.
+            async with asyncio.timeout(float(self.cfg.timeout_s)):
+                async with self._slots:
+                    response = await self._post_with_retries(payload, started=started)
+                    return self._validated(response, expected=list(questions))
+        except TimeoutError as exc:
+            outcome = "timeout"
+            raise SystemOneTimeoutError(
+                f"System One ({self.provider}) exceeded system_one.timeout_s={self.cfg.timeout_s}",
+                provider=self.provider,
+                outcome=outcome,
+            ) from exc
+        except asyncio.CancelledError:
+            outcome = "cancelled"
+            raise
+        except SystemOneError as exc:
+            outcome = exc.outcome
+            raise
+        finally:
+            SYSTEM_ONE_REQUESTS_TOTAL.labels(provider=self.provider, outcome=outcome).inc()
+            SYSTEM_ONE_LATENCY_SECONDS.labels(provider=self.provider).observe(time.perf_counter() - started)
 
     async def nouls(self, state: Any, questions: Mapping[str, SystemOneNoul]) -> dict[str, float]:
         response = await self.ask(state, questions)

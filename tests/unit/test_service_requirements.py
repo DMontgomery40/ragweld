@@ -167,6 +167,9 @@ def test_service_plugin_skips_locally_and_fails_in_strict_mode(tmp_path: Path, s
             "RAGWELD_LOAD_DOTENV": "0",
             "LITELLM_BASE_URL": "http://127.0.0.1:1/v1",
             "LITELLM_API_KEY": "fixture-key",
+            # An inherited integration DSN takes precedence over host/port.
+            # Keep this subprocess's deliberately unavailable service isolated.
+            "POSTGRES_DSN": "postgresql://postgres:postgres@127.0.0.1:1/postgres",
         }
     )
     base_env.pop("RAGWELD_STRICT_INTEGRATION", None)

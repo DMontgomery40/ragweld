@@ -636,6 +636,8 @@ class TriBridFusion:
             # Reuse query embeddings across legs when possible (vector + graph chunk-mode).
             q_emb: list[float] | None = None
 
+            # Dense and sparse budgets are candidate floors; top_k limits the final
+            # response and must not shrink those pools before fusion and reranking.
             # Run legs (request toggles + config.*.enabled)
             if include_vector and cfg.vector_search.enabled and not vector_contract_mismatch:
                 with (
@@ -659,7 +661,7 @@ class TriBridFusion:
                             vector_results = await qdrant.vector_search(
                                 cid,
                                 q_emb,
-                                int(top_k or cfg.vector_search.top_k),
+                                max(int(top_k or 0), int(cfg.vector_search.top_k)),
                                 physical=corpus_collection,
                             )
                     except QdrantCollectionMissingError as e:
@@ -725,7 +727,7 @@ class TriBridFusion:
                             sparse_results = await qdrant.sparse_search(
                                 cid,
                                 query,
-                                int(top_k or cfg.sparse_search.top_k),
+                                max(int(top_k or 0), int(cfg.sparse_search.top_k)),
                                 physical=corpus_collection,
                             )
                     except QdrantCollectionMissingError as e:
@@ -768,6 +770,9 @@ class TriBridFusion:
                 debug["fusion_graph_skipped_reason"] = "no promoted graph generation"
             if include_graph and cfg.graph_search.enabled and corpus_graph_id:
                 debug["fusion_graph_attempted"] = True
+                # Graph top_k also selects roots, which traversal excludes from
+                # expansion hits. Enlarging it can make every corpus chunk a root
+                # and erase all graph results, so preserve the request's seed budget.
                 graph_k = int(top_k or cfg.graph_search.top_k)
                 try:
                     with (

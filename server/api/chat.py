@@ -4,10 +4,13 @@ import json
 import logging
 import time
 import uuid
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from typing import Any
 
+import anyio
 from fastapi import APIRouter, HTTPException, Query, Response
 from starlette.responses import StreamingResponse
+from starlette.types import Receive, Scope, Send
 
 from server.api.dependency_errors import (
     raise_postgres_unavailable_if_applicable,
@@ -48,12 +51,14 @@ from server.models.tribrid_config_model import (
     RecallIndexResponse,
     RecallStatusResponse,
     RunOutcome,
+    TraceEvent,
     TracesLatestResponse,
     TriBridConfig,
     WebGroundingMetadata,
 )
 from server.observability.run_census import RunIdentity
 from server.observability.runtime import (
+    StreamingObservation,
     apply_default_links,
     current_header_values,
     current_trace_payload_fields,
@@ -206,24 +211,39 @@ async def get_latest_trace(
 )
 async def chat(request: ChatRequest, response: Response) -> ChatResponse:
     """Process a chat message and return a response (Chat 2.0)."""
-    # Counted from here; the alias label is known once the config is.
     telemetry = ChatRunTelemetry(model=UNRESOLVED_MODEL_LABEL)
+    run_id = str(uuid.uuid4())
+    try:
+        result = await _chat_response(request, response, telemetry, run_id)
+    except BaseException as exc:
+        outcome = telemetry.classify(exc.__cause__ or exc)
+        telemetry.finish(outcome)
+        try:
+            await asyncio.shield(_record_failed_chat_outcome(run_id, outcome))
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.exception("Failed to close chat trace after request failure")
+        raise
+    telemetry.finish("ok")
+    return result
+
+
+async def _chat_response(
+    request: ChatRequest, response: Response, telemetry: ChatRunTelemetry, run_id: str
+) -> ChatResponse:
+    """Build and commit the response before the route records its final outcome."""
     store = get_conversation_store()
     conv = store.get_or_create(request.conversation_id)
 
     # Choose config scope from selected sources (best-effort).
     primary = _primary_corpus_id_from_request(request)
-    try:
-        config = await _load_chat_config(primary, boundary="Chat config load")
-    except BaseException as exc:
-        telemetry.finish(telemetry.classify(exc))
-        raise
+    config = await _load_chat_config(primary, boundary="Chat config load")
     telemetry.bind_model(chat_model_label(request=request, config=config))
 
     _validate_chat_images(list(request.images or []), config.chat.multimodal)
 
     fusion = get_fusion()
-    run_id = str(uuid.uuid4())
     started_at_ms = int(time.time() * 1000)
     trace_store = get_trace_store()
     trace_repo_id = primary or (resolve_sources(request.sources)[0] if resolve_sources(request.sources) else "")
@@ -264,27 +284,14 @@ async def chat(request: ChatRequest, response: Response) -> ChatResponse:
             )
 
         try:
-            try:
-                chat_result = await chat_once(
-                    request=request,
-                    config=config,
-                    fusion=fusion,
-                    conversation=conv,
-                    telemetry=telemetry,
-                    billing_session_id=run_id,
-                )
-            except BaseException as exc:
-                outcome = telemetry.classify(exc)
-                telemetry.finish(outcome)
-                if trace_enabled:
-                    try:
-                        await asyncio.shield(_record_trace_outcome(run_id, outcome))
-                    except asyncio.CancelledError:
-                        pass
-                raise
-            telemetry.finish("ok")
-            if trace_enabled:
-                await _record_trace_outcome(run_id, "ok")
+            chat_result = await chat_once(
+                request=request,
+                config=config,
+                fusion=fusion,
+                conversation=conv,
+                telemetry=telemetry,
+                billing_session_id=run_id,
+            )
             response_text = chat_result.text
             sources = chat_result.sources
             provider_id = chat_result.provider_response_id
@@ -387,7 +394,6 @@ async def chat(request: ChatRequest, response: Response) -> ChatResponse:
                     },
                 )
                 await trace_store.annotate(run_id, **current_trace_payload_fields())
-                await trace_store.end(run_id, ended_at_ms=ended_at_ms)
 
             try:
                 await append_chat_query_record(
@@ -447,7 +453,7 @@ async def chat(request: ChatRequest, response: Response) -> ChatResponse:
 
                 asyncio.create_task(_do_index())
 
-            return ChatResponse(
+            result = ChatResponse(
                 run_id=run_id,
                 started_at_ms=started_at_ms,
                 ended_at_ms=ended_at_ms,
@@ -458,6 +464,9 @@ async def chat(request: ChatRequest, response: Response) -> ChatResponse:
                 tokens_used=tokens_used,
                 web_grounding=web_grounding,
             )
+            if trace_enabled:
+                await _close_chat_trace(run_id, ended_at_ms, "ok")
+            return result
 
         except RetrievalContractMismatchError as e:
             if trace_enabled:
@@ -499,11 +508,74 @@ async def chat(request: ChatRequest, response: Response) -> ChatResponse:
 
 
 
+async def _record_failed_chat_outcome(run_id: str, outcome: RunOutcome) -> None:
+    """Close after the request scope has unwound without replacing its route metadata."""
+    await _record_trace_outcome(run_id, outcome)
+    await get_trace_store().end(run_id)
+
+
 async def _close_chat_trace(run_id: str, ended_at_ms: int | None, outcome: RunOutcome) -> None:
     trace_store = get_trace_store()
-    await _record_trace_outcome(run_id, outcome)
     await trace_store.annotate(run_id, **current_trace_payload_fields())
-    await trace_store.end(run_id, ended_at_ms=ended_at_ms)
+    await trace_store.end(
+        run_id, ended_at_ms=ended_at_ms,
+        terminal_event=TraceEvent(
+            kind="chat.outcome", ts=int(time.time() * 1000), data={"outcome": outcome},
+        ),
+    )
+
+
+class _ChatStreamingResponse(StreamingResponse):
+    """Own a primed chat until close, even when no response body is ever requested."""
+
+    def __init__(
+        self,
+        content: AsyncGenerator[str, None],
+        *,
+        finalize: Callable[[], Awaitable[None]],
+        observation: StreamingObservation,
+        headers: dict[str, str],
+    ) -> None:
+        self._stream = content
+        self._finalize = finalize
+        self._observation = observation
+        self._close_task: asyncio.Task[None] | None = None
+        super().__init__(self, media_type="text/event-stream", headers=headers)
+
+    def __aiter__(self) -> "_ChatStreamingResponse":
+        return self
+
+    async def __anext__(self) -> str:
+        if self._close_task is not None:
+            raise StopAsyncIteration
+        try:
+            # Attach/detach in this await's task, never across an async-generator yield.
+            with self._observation.scope():
+                return await anext(self._stream)
+        except BaseException:
+            await self.aclose()
+            raise
+
+    async def _close(self) -> None:
+        with self._observation.scope():
+            try:
+                await self._stream.aclose()
+            finally:
+                await self._finalize()
+
+    async def aclose(self) -> None:
+        if self._close_task is None:
+            self._close_task = asyncio.create_task(self._close())
+        # Starlette cancels its body task on http.disconnect. Cleanup must finish
+        # under that cancelled scope, and repeated close calls must join one owner.
+        with anyio.CancelScope(shield=True):
+            await asyncio.shield(self._close_task)
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            await self.aclose()
 
 
 @router.post(
@@ -523,17 +595,23 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
     - type: "error" - if something goes wrong
     and ": keepalive" SSE comments while the model is silent.
     """
-    # Counted from here; the alias label is known once the config is.
     telemetry = ChatRunTelemetry(model=UNRESOLVED_MODEL_LABEL)
+    try:
+        return await _prepare_chat_stream(request, telemetry)
+    except BaseException as exc:
+        telemetry.finish(telemetry.classify(exc.__cause__ or exc))
+        raise
+
+
+async def _prepare_chat_stream(
+    request: ChatRequest, telemetry: ChatRunTelemetry
+) -> StreamingResponse:
+    """Prepare the stream; its response owns cleanup after setup completes."""
     store = get_conversation_store()
     conv = store.get_or_create(request.conversation_id)
 
     primary = _primary_corpus_id_from_request(request)
-    try:
-        config = await _load_chat_config(primary, boundary="Chat stream config load")
-    except BaseException as exc:
-        telemetry.finish(telemetry.classify(exc))
-        raise
+    config = await _load_chat_config(primary, boundary="Chat stream config load")
     telemetry.bind_model(chat_model_label(request=request, config=config))
 
     _validate_chat_images(list(request.images or []), config.chat.multimodal)
@@ -558,82 +636,74 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
     )
     setup_scope = observation.scope()
     setup_scope.__enter__()
-    apply_default_links(config)
-    trace_enabled = await trace_store.start(
-        run_id=run_id,
-        repo_id=trace_repo_id,
-        started_at_ms=started_at_ms,
-        config=config,
-    )
-    if trace_enabled:
-        await trace_store.annotate(run_id, **current_trace_payload_fields())
-        await trace_store.add_event(
-            run_id,
-            kind="chat.request",
-            data={
-                "conversation_id": request.conversation_id,
-                "corpus_ids": resolve_sources(request.sources),
-                "include_vector": bool(request.include_vector),
-                "include_sparse": bool(request.include_sparse),
-                "include_graph": bool(request.include_graph),
-                "top_k_override": request.top_k,
-                "stream": True,
-                "images_count": len(list(request.images or [])),
-                "web_requested": bool(request.web_enabled),
-            },
-        )
-
-    # Nothing durable is written before the terminal `done` event is on the wire: the user
-    # message and the answer are persisted together after it, so an exchange that fails,
-    # is cancelled, or loses its client leaves no trace in the conversation history.
-    handler_stream = chat_stream_handler(
-        request=request,
-        config=config,
-        fusion=fusion,
-        conversation=conv,
-        run_id=run_id,
-        started_at_ms=started_at_ms,
-        telemetry=telemetry,
-    )
+    trace_enabled = False
     try:
+        apply_default_links(config)
+        trace_enabled = await trace_store.start(
+            run_id=run_id,
+            repo_id=trace_repo_id,
+            started_at_ms=started_at_ms,
+            config=config,
+        )
+        if trace_enabled:
+            await trace_store.annotate(run_id, **current_trace_payload_fields())
+            await trace_store.add_event(
+                run_id,
+                kind="chat.request",
+                data={
+                    "conversation_id": request.conversation_id,
+                    "corpus_ids": resolve_sources(request.sources),
+                    "include_vector": bool(request.include_vector),
+                    "include_sparse": bool(request.include_sparse),
+                    "include_graph": bool(request.include_graph),
+                    "top_k_override": request.top_k,
+                    "stream": True,
+                    "images_count": len(list(request.images or [])),
+                    "web_requested": bool(request.web_enabled),
+                },
+            )
+
+        # The handler commits the exchange before producing its terminal done event.
+        handler_stream = chat_stream_handler(
+            request=request,
+            config=config,
+            fusion=fusion,
+            conversation=conv,
+            run_id=run_id,
+            started_at_ms=started_at_ms,
+            telemetry=telemetry,
+        )
         first_sse = await anext(handler_stream)
         # The first event is what releases the response headers (`status`, or a cached answer).
         telemetry.mark_event()
     except StopAsyncIteration:
         first_sse = None
-    except asyncio.CancelledError:
-        # Cancelled while retrieval or the prompt guard was pending (the first event is the
-        # handler's `status`, or a cached answer): close the trace and the span here,
-        # because the wrapper that would has not started yet.
-        telemetry.finish("client_disconnect")
-        if trace_enabled:
-            try:
-                await asyncio.shield(_close_chat_trace(run_id, None, "client_disconnect"))
-            except asyncio.CancelledError:
-                pass
-        setup_scope.__exit__(None, None, None)
-        observation.finish((None, None, None))
-        raise
-    except Exception as e:
-        failed_outcome = telemetry.classify(e)
+    except BaseException as exc:
+        failed_outcome = telemetry.classify(exc)
         telemetry.finish(failed_outcome)
-        if trace_enabled:
-            await _record_trace_outcome(run_id, failed_outcome)
-            await trace_store.add_event(run_id, kind="chat.error", msg=str(e), data={})
-            await trace_store.annotate(run_id, **current_trace_payload_fields())
-            await trace_store.end(run_id)
-        setup_scope.__exit__(type(e), e, e.__traceback__)
-        observation.finish((type(e), e, e.__traceback__))
-        if isinstance(e, PromptBudgetError):
-            raise prompt_budget_http_exception(e, operation="Chat stream generation") from e
-        if isinstance(e, RetrievalContractMismatchError):
-            raise retrieval_contract_mismatch_http_exception(e) from e
-        if isinstance(e, RerankerFailedError):
-            raise reranker_failed_http_exception(e) from e
-        if isinstance(e, RequiredRetrievalLegError):
-            raise required_retrieval_leg_http_exception(e) from e
-        raise_required_dependency_unavailable_if_applicable(e, boundary="Chat stream retrieval")
-        raise HTTPException(status_code=500, detail="Chat stream initialization failed") from e
+        try:
+            if trace_enabled:
+                try:
+                    await asyncio.shield(_close_chat_trace(run_id, None, failed_outcome))
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    logger.exception("Failed to close chat trace after stream setup failure")
+        finally:
+            setup_scope.__exit__(type(exc), exc, exc.__traceback__)
+            observation.finish((type(exc), exc, exc.__traceback__))
+        if isinstance(exc, PromptBudgetError):
+            raise prompt_budget_http_exception(exc, operation="Chat stream generation") from exc
+        if isinstance(exc, RetrievalContractMismatchError):
+            raise retrieval_contract_mismatch_http_exception(exc) from exc
+        if isinstance(exc, RerankerFailedError):
+            raise reranker_failed_http_exception(exc) from exc
+        if isinstance(exc, RequiredRetrievalLegError):
+            raise required_retrieval_leg_http_exception(exc) from exc
+        if isinstance(exc, Exception):
+            raise_required_dependency_unavailable_if_applicable(exc, boundary="Chat stream retrieval")
+            raise HTTPException(status_code=500, detail="Chat stream initialization failed") from exc
+        raise
 
     async def primed_handler_stream() -> Any:
         if first_sse is not None:
@@ -641,14 +711,16 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
         async for sse in handler_stream:
             yield sse
 
+    caught_exc: tuple[type[BaseException] | None, BaseException | None, Any] = (None, None, None)
+    ended_at_ms: int | None = None
+    outcome: RunOutcome | None = None
+
     async def wrapped_stream() -> Any:
-        caught_exc: tuple[type[BaseException] | None, BaseException | None, Any] = (None, None, None)
-        ended_at_ms: int | None = None
+        nonlocal caught_exc, ended_at_ms, outcome
         accumulated = ""
         generation_failed = False
         # Set by the terminal event or the exception that ends the stream; a stream that ends
         # with neither produced no answer.
-        outcome: RunOutcome | None = None
         def _kick_off_recall() -> None:
             # Best-effort Recall indexing (only when recall_default is selected).
             corpus_ids = resolve_sources(request.sources)
@@ -693,10 +765,6 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                 asyncio.create_task(_do_index())
 
 
-        # This is the task that owns the rest of the request, so it attaches and detaches
-        # the span itself rather than inheriting a token from the endpoint coroutine.
-        stream_scope = observation.scope()
-        stream_scope.__enter__()
         try:
             async for sse in primed_handler_stream():
                 if not sse.startswith("data: "):
@@ -840,6 +908,8 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                     # The handler committed the exchange (messages, generation cache, query
                     # record) before it produced this event; Recall reads that committed history.
                     _kick_off_recall()
+                    if trace_enabled:
+                        await _close_chat_trace(run_id, ended_at_ms, "ok")
                     outcome = "ok"
                     telemetry.finish(outcome)
                     yield f"data: {json.dumps(payload)}\n\n"
@@ -856,11 +926,12 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
             if outcome is None:
                 # The handler ended without a terminal event: no answer was produced.
                 outcome = "gateway_error"
-        except (asyncio.CancelledError, GeneratorExit):
+        except (asyncio.CancelledError, GeneratorExit) as exc:
             # The client went away or the task was cancelled: whatever streamed so far is
             # not an answer and must not become one in the durable history.
             if outcome is None:
                 outcome = "client_disconnect"
+            caught_exc = (type(exc), exc, exc.__traceback__)
             raise
         except Exception as e:
             caught_exc = (type(e), e, e.__traceback__)
@@ -869,25 +940,27 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
             if trace_enabled:
                 await trace_store.add_event(run_id, kind="chat.error", msg=str(e), data={})
             raise
+
+    async def finalize_stream() -> None:
+        final_outcome: RunOutcome = outcome if outcome is not None else "client_disconnect"
+        telemetry.finish(final_outcome)
+        # The response owns this close even if wrapped_stream never started. The
+        # handler committed any successful exchange before its terminal done event.
+        try:
+            try:
+                await handler_stream.aclose()
+            finally:
+                if trace_enabled and final_outcome != "ok":
+                    await _close_chat_trace(run_id, ended_at_ms, final_outcome)
         finally:
-            final_outcome: RunOutcome = outcome if outcome is not None else "client_disconnect"
-            telemetry.finish(final_outcome)
-            # Nothing is persisted before the commit that precedes `done`, so an exchange that
-            # never got there has nothing to roll back. The trace close-out is shielded: a
-            # second cancellation must not leave the trace open or the span unfinished.
-            if trace_enabled:
-                try:
-                    await asyncio.shield(_close_chat_trace(run_id, ended_at_ms, final_outcome))
-                except asyncio.CancelledError:
-                    pass
             observation.finish(caught_exc)
-            stream_scope.__exit__(*caught_exc)
 
     # Built while the setup scope is still active: `current_header_values` reads the
     # observation off the contextvar this task set.
-    response = StreamingResponse(
+    response = _ChatStreamingResponse(
         wrapped_stream(),
-        media_type="text/event-stream",
+        finalize=finalize_stream,
+        observation=observation,
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",

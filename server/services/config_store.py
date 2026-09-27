@@ -290,7 +290,6 @@ class ConfigStore:
                 return cfg.model_copy(deep=True)
 
             # Per-corpus config lives in Postgres
-            base = (await self.get(repo_id=None, persist=persist)).model_copy(deep=True)
             await self._postgres.connect()
 
             # Ensure corpus row exists (do NOT auto-create on read)
@@ -299,9 +298,15 @@ class ConfigStore:
                 raise CorpusNotFoundError(f"Corpus not found: {repo_id}")
 
             if persist and repo_id in self._cache:
-                return self._cache[repo_id].model_copy(deep=True)
+                # A global save may have changed deployment-owned values since this
+                # scope was cached, including while the corpus lookup was awaiting IO.
+                base = await self.get(repo_id=None)
+                cfg, _, _ = _reconcile_production_scope(self._cache[repo_id], base)
+                self._cache[repo_id] = cfg.model_copy(deep=True)
+                return cfg.model_copy(deep=True)
 
             raw = await self._postgres.get_corpus_config_json(repo_id)
+            base = await self.get(repo_id=None, persist=persist)
             if raw is None:
                 # Seed new corpus config from the global template
                 if persist:
@@ -317,6 +322,10 @@ class ConfigStore:
                     if migrated:
                         logger.info("Auto-migrated corpus config keys repo_id=%s: %s", repo_id, ", ".join(migrated))
             if persist:
+                # Migration/seed writes can overlap a global save. Reconcile again
+                # after the last IO so an older load cannot repopulate stale cache.
+                base = await self.get(repo_id=None)
+                cfg, _, _ = _reconcile_production_scope(cfg, base)
                 self._cache[repo_id] = cfg.model_copy(deep=True)
             return cfg.model_copy(deep=True)
 
@@ -336,6 +345,10 @@ class ConfigStore:
             base = await self.get(repo_id=None)
             config, _, _ = _reconcile_production_scope(config, base)
             await self._postgres.upsert_corpus_config_json(repo_id, config.model_dump())
+            # The global scope has its own lock and may change during this write.
+            # Its current deployment values own the returned/cached effective config.
+            base = await self.get(repo_id=None)
+            config, _, _ = _reconcile_production_scope(config, base)
             self._cache[repo_id] = config.model_copy(deep=True)
             return self._cache[repo_id].model_copy(deep=True)
 

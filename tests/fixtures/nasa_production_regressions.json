@@ -1,0 +1,13 @@
+[
+  {
+    "entry_id": "prod-fuel-event-distinction-20260927",
+    "question": "How much usable descent propellant firing time remained when Eagle touched down, and why was more used than planned? Distinguish the touchdown estimate from what the low-level warning indicated.",
+    "expected_paths": ["A11_MissionReport.pdf"],
+    "expected_locations": [
+      {"path": "A11_MissionReport.pdf", "unit": "page", "start": 180, "end": 184}
+    ],
+    "expected_answer": "The touchdown indication was about 45 seconds to propellant depletion; postflight analysis calculated 50 seconds to oxidizer tank 2 depletion. Additional time spent redesignating the landing site used more descent propellant than predicted. Separately, the earlier low-level warning indicated approximately 116 seconds of total firing time remaining. Do not attribute 45 or 50 seconds to that earlier warning. Preserve the event distinction. The question does not require the warning timestamp; an answer may omit that OCR-damaged timestamp without guessing its digits.",
+    "evidence_quote": "The low level light came on at 102:44:30.4, indicating approximately 116 seconds of total firing time remaining, based on the sensor location.",
+    "tags": ["production-regression", "numeric-event-grounding"]
+  }
+]

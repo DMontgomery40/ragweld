@@ -2,6 +2,7 @@ from contextlib import suppress
 
 import httpx
 from fastapi import APIRouter, Depends
+from qdrant_client import AsyncQdrantClient
 from starlette.responses import JSONResponse
 
 from server.chat.gateway_runtime import (
@@ -106,7 +107,7 @@ async def health_check() -> HealthStatus:
 async def readiness_check(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> ReadinessStatus | JSONResponse:
     """Readiness probe.
 
-    Returns dependency status for Postgres, Neo4j, LiteLLM, and vLLM, plus Laya while
+    Returns dependency status for Postgres, Qdrant, Neo4j, LiteLLM, and vLLM, plus Laya while
     system_one.provider is laya.
     If a corpus is specified via query params (repo_id/corpus_id), checks the
     configured Neo4j database for that corpus as well.
@@ -131,6 +132,7 @@ async def readiness_check(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> ReadinessSt
         cfg = load_config()
 
     postgres = ReadinessDependencyStatus()
+    qdrant_status = ReadinessDependencyStatus()
     neo4j_status = ReadinessDependencyStatus(database=cfg.graph_storage.resolve_database(corpus_id))
     litellm_status = ReadinessDependencyStatus()
     vllm_status = ReadinessDependencyStatus()
@@ -171,6 +173,28 @@ async def readiness_check(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> ReadinessSt
         postgres.error = "PostgreSQL control store is unavailable."
         postgres.operator_hint = (
             "Verify the scoped Ragweld Postgres service and DSN, then retry readiness."
+        )
+
+    # Qdrant must answer a real vector-store operation on the configured URL.
+    # A startup manifest migration or a responding HTTP listener is not enough.
+    try:
+        qdrant_url = cfg.qdrant.url.strip().rstrip("/")
+        if not qdrant_url:
+            raise ValueError("Qdrant URL is not configured")
+        qdrant = AsyncQdrantClient(
+            url=qdrant_url, timeout=2, check_compatibility=False
+        )
+        try:
+            await qdrant.get_collections()
+        finally:
+            await qdrant.close()
+        qdrant_status.ok = True
+        qdrant_status.info = {"status": "collections readable"}
+    except Exception:
+        ready = False
+        qdrant_status.error = "Qdrant vector store is unavailable."
+        qdrant_status.operator_hint = (
+            "Verify the managed Qdrant service and configured qdrant.url, then retry readiness."
         )
 
     # Neo4j
@@ -259,6 +283,7 @@ async def readiness_check(scope: CorpusScope = _CORPUS_SCOPE_DEP) -> ReadinessSt
 
     dependencies: dict[ReadinessDependencyName, ReadinessDependencyStatus] = {
         "postgres": postgres,
+        "qdrant": qdrant_status,
         "neo4j": neo4j_status,
         "litellm": litellm_status,
         "vllm": vllm_status,

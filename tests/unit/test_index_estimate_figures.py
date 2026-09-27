@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -29,8 +30,14 @@ from tests.fixtures.pdf_builder import apollo_figure_pages, build_pdf
 def test_cost_uses_catalog_prices_for_the_alias() -> None:
     cost = _estimate_figure_description_cost_usd(alias="z-ai.glm-5.3-flash", figures=100, max_completion_tokens=600)
     assert cost is not None and cost > 0
-    # input 1200 tokens/figure at $0.00015/1k + output 600 at $0.0005/1k, for 100 figures
-    assert abs(cost - (100 * (1.2 * 0.00015 + 0.6 * 0.0005))) < 1e-9
+    # The daily catalog refresh owns prices. Read its row independently of the
+    # pricing helper and verify the token/unit arithmetic against that source.
+    catalog = json.loads((Path(__file__).resolve().parents[2] / "data/models.json").read_text())
+    rows = catalog if isinstance(catalog, list) else catalog["models"]
+    row = next(row for row in rows if row.get("gateway_alias") == "z-ai.glm-5.3-flash")
+    assert row["unit"] == "1k_tokens"
+    expected = 100 * (1.2 * row["input_per_1k"] + 0.6 * row["output_per_1k"])
+    assert cost == pytest.approx(expected, abs=1e-9)
 
 
 def test_cost_is_zero_for_no_figures_and_none_for_unknown_alias() -> None:

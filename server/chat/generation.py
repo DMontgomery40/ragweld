@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 import json
 import urllib.parse
-from collections.abc import AsyncGenerator, Callable, Mapping
+from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar
 
 import httpx
 from opentelemetry.trace import Span, set_span_in_context
@@ -358,6 +358,18 @@ def _raise_status(error: httpx.HTTPStatusError) -> None:
     raise RuntimeError(f"LiteLLM request failed (HTTP {status}){suffix}") from error
 
 
+_Result = TypeVar("_Result")
+
+
+async def _await_generation_deadline(work: Awaitable[_Result], *, deadline: float) -> _Result:
+    """Spend one shared budget without holding a task's timeout context across a yield."""
+    remaining = max(0.0, deadline - asyncio.get_running_loop().time())
+    try:
+        return await asyncio.wait_for(work, timeout=remaining)
+    except TimeoutError as error:
+        raise TimeoutError("LiteLLM generation exceeded its total timeout budget") from error
+
+
 async def generate_chat_text(
     *,
     route: ProviderRoute,
@@ -378,22 +390,27 @@ async def generate_chat_text(
 
     ``body_fields`` are extra top-level request keys in the upstream's own protocol (an
     OpenRouter ``reasoning`` object, an OpenAI ``reasoning_effort``); they never redefine
-    the keys the transport owns.
+    the keys the transport owns. ``timeout_s`` bounds prompt preparation and the whole
+    gateway response, including a body that keeps producing bytes.
     """
 
+    deadline = asyncio.get_running_loop().time() + float(timeout_s)
     ensure_model_allowed(route.model)
     prompt = _prompt_with_context(
         system_prompt=system_prompt, context_text=context_text, context_chunks=context_chunks
     )
     if web_config is not None:
         prompt += _WEB_PROMPT_SUFFIX
-    await asyncio.to_thread(
-        _guard_prompt_window,
-        alias=route.model,
-        system_prompt=prompt,
-        user_message=user_message,
-        max_tokens=int(max_tokens),
-        images=images,
+    await _await_generation_deadline(
+        asyncio.to_thread(
+            _guard_prompt_window,
+            alias=route.model,
+            system_prompt=prompt,
+            user_message=user_message,
+            max_tokens=int(max_tokens),
+            images=images,
+        ),
+        deadline=deadline,
     )
     payload = {
         "model": route.model,
@@ -415,8 +432,11 @@ async def generate_chat_text(
     ) as gateway_span:
         async with httpx.AsyncClient(timeout=timeout_s) as client:
             try:
-                body = await asyncio.to_thread(json.dumps, payload)
-                response = await client.post(_url(route), headers=_headers(route, span=gateway_span, observation_name=observation_name), content=body)
+                body = await _await_generation_deadline(asyncio.to_thread(json.dumps, payload), deadline=deadline)
+                response = await _await_generation_deadline(
+                    client.post(_url(route), headers=_headers(route, span=gateway_span, observation_name=observation_name), content=body),
+                    deadline=deadline,
+                )
                 response.raise_for_status()
                 data: Any = response.json()
             except httpx.HTTPStatusError as error:
@@ -504,21 +524,26 @@ async def stream_chat_text(
     Yields one ``request`` item once the prompt passed the window guard, then ``text``
     deltas, and ``reasoning`` deltas only when ``include_reasoning`` is set. Reasoning never
     counts as content: a stream that reasons and answers nothing is still a failed generation.
+    ``timeout_s`` is one budget across prompt preparation, task handoff and the entire stream.
     """
 
+    deadline = asyncio.get_running_loop().time() + float(timeout_s)
     ensure_model_allowed(route.model)
     prompt = _prompt_with_context(
         system_prompt=system_prompt, context_text=context_text, context_chunks=context_chunks
     )
     if web_config is not None:
         prompt += _WEB_PROMPT_SUFFIX
-    await asyncio.to_thread(
-        _guard_prompt_window,
-        alias=route.model,
-        system_prompt=prompt,
-        user_message=user_message,
-        max_tokens=int(max_tokens),
-        images=images,
+    await _await_generation_deadline(
+        asyncio.to_thread(
+            _guard_prompt_window,
+            alias=route.model,
+            system_prompt=prompt,
+            user_message=user_message,
+            max_tokens=int(max_tokens),
+            images=images,
+        ),
+        deadline=deadline,
     )
     payload = {
         "model": route.model,
@@ -550,10 +575,16 @@ async def stream_chat_text(
     ) as gateway_span:
         async with httpx.AsyncClient(timeout=timeout_s) as client:
             try:
-                body = await asyncio.to_thread(json.dumps, payload)
-                async with client.stream("POST", _url(route), headers=_headers(route, span=gateway_span, observation_name="chat.generation.stream"), content=body) as response:
+                body = await _await_generation_deadline(asyncio.to_thread(json.dumps, payload), deadline=deadline)
+                request = client.build_request(
+                    "POST", _url(route),
+                    headers=_headers(route, span=gateway_span, observation_name="chat.generation.stream"),
+                    content=body,
+                )
+                response = await _await_generation_deadline(client.send(request, stream=True), deadline=deadline)
+                try:
                     if response.is_error:
-                        await response.aread()
+                        await _await_generation_deadline(response.aread(), deadline=deadline)
                     response.raise_for_status()
                     # Streaming headers precede completion and may contain a
                     # provisional cost. Only terminal SSE metadata can report
@@ -561,7 +592,12 @@ async def stream_chat_text(
                     captured_trace_id = _debug_trace_id(response)
                     if captured_trace_id and on_debug_trace_id:
                         on_debug_trace_id(captured_trace_id)
-                    async for raw_line in response.aiter_lines():
+                    lines = response.aiter_lines()
+                    while True:
+                        try:
+                            raw_line = await _await_generation_deadline(anext(lines), deadline=deadline)
+                        except StopAsyncIteration:
+                            break
                         line = (raw_line or "").strip()
                         if not line.startswith("data:"):
                             continue
@@ -616,6 +652,8 @@ async def stream_chat_text(
                         if isinstance(content, str) and content:
                             streamed_text += content
                             yield ChatStreamDelta(kind="text", content=content)
+                finally:
+                    await response.aclose()
             except httpx.HTTPStatusError as error:
                 _raise_status(error)
                 raise AssertionError("unreachable") from error

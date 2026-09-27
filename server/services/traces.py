@@ -291,11 +291,17 @@ class TraceStore:
             if update:
                 self._traces[run_id] = trace.model_copy(update=update)
 
-    async def end(self, run_id: str, *, ended_at_ms: int | None = None) -> None:
+    async def end(
+        self, run_id: str, *, ended_at_ms: int | None = None,
+        terminal_event: TraceEvent | None = None,
+    ) -> None:
+        """Commit the terminal event and closed trace without a cancellation gap."""
         async with self._lock:
             trace = self._traces.get(run_id)
             if trace is None:
                 return
+            if terminal_event is not None:
+                trace.events.append(terminal_event)
             trace.ended_at_ms = int(ended_at_ms or _now_ms())
             self._persist_locked()
 

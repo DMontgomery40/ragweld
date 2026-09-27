@@ -27,8 +27,19 @@ _REMOVED_CHAT_PROMPT_KEYS = (
 # retired text. `semantic_kg_extraction`: the pre-official JSON prompt (no ``{schema}``/``{text}``
 # placeholders), replaced by the official extraction template with naming rules (D24),
 # and the two shipped pre-grounding templates (before/after the redaction-name repair).
+# The chat RAG defaults shipped before the source-grounding and quantity rules
+# likewise need exact-default migration in global files and persisted corpus configs.
 # Exact hashes preserve every operator-edited variant.
 _RETIRED_PROMPT_DEFAULTS: dict[tuple[str, str], frozenset[str]] = {
+    ("system_prompts", "gateway_rerank"): frozenset(
+        {"5c9c0aa41ccfbd17ddea9346036d1d2c3cbc7a49e2d9d1aa6a2e5f2c87a6f14e"}
+    ),
+    ("chat", "system_prompt_rag"): frozenset(
+        {"5720082d29c3dbd5ca261caa9b46bb81624820f04bc9d6705160d97b0ff728ab"}
+    ),
+    ("chat", "system_prompt_rag_and_recall"): frozenset(
+        {"02d9d4e27c0d04effe9cfd41e519b984eb18a6fe16fe83b7e21ca7bfc5684528"}
+    ),
     ("system_prompts", "semantic_kg_extraction"): frozenset(
         {
             "09403fdaed97ddfecf2574ae434da9669bdebe16e5522f61a5ae4f939f71b194",
