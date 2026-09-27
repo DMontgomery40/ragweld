@@ -197,3 +197,103 @@ async def test_generation_counts_success_only_after_conversation_commit(
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
         store.clear(conversation_id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_model_gateway
+@pytest.mark.parametrize("streaming", [False, True])
+@pytest.mark.parametrize("cancel_boundary", ["waiting_terminal_lock", "terminal_committed"])
+async def test_cancel_during_success_trace_close_keeps_committed_outcome(
+    client: AsyncClient, lifecycle_config: TriBridConfig, streaming: bool, cancel_boundary: str
+) -> None:
+    """Cancel between real trace writes after the real gateway commits an answer."""
+    trace_store = get_trace_store()
+    conversation_store = get_conversation_store()
+    conversation_id = f"pytest-lifecycle-{uuid.uuid4().hex}"
+    request = ChatRequest(
+        message=QUESTION, sources={"corpus_ids": []}, conversation_id=conversation_id
+    )
+    before_ok = _requests("ok")
+    before_disconnect = _requests("client_disconnect")
+    response = None
+
+    async def consume_request() -> None:
+        nonlocal response
+        if streaming:
+            response = await chat_stream(request)
+            async for _ in response.body_iterator:
+                pass
+        else:
+            await chat(request, Response())
+
+    await trace_store._lock.acquire()
+    task = asyncio.create_task(consume_request())
+    run_id = None
+    try:
+        async with asyncio.timeout(90):
+            while True:
+                # Hand the real FIFO lock to exactly one trace operation, then
+                # reacquire ahead of its next operation to inspect the boundary.
+                while not trace_store._lock._waiters:
+                    if task.done():
+                        await task
+                        pytest.fail("Chat completed before reaching success trace closure")
+                    await asyncio.sleep(0.001)
+                trace_store._lock.release()
+                await trace_store._lock.acquire()
+                for candidate in trace_store._traces.values():
+                    if any(
+                        event.kind == "chat.request"
+                        and event.data.get("conversation_id") == conversation_id
+                        for event in candidate.events
+                    ):
+                        pending = response._stream.ag_await if response is not None else task.get_coro()
+                        waiting_for_end = False
+                        while pending is not None:
+                            code = getattr(pending, "cr_code", None)
+                            if code is not None and code.co_name == "end":
+                                waiting_for_end = True
+                            pending = getattr(pending, "cr_await", None) or getattr(pending, "ag_await", None)
+                        at_boundary = (
+                            waiting_for_end if cancel_boundary == "waiting_terminal_lock"
+                            else any(event.kind == "chat.outcome" for event in candidate.events)
+                        )
+                        if at_boundary:
+                            run_id = candidate.run_id
+                            break
+                if run_id is not None:
+                    break
+            assert [message.role for message in conversation_store.get_messages(conversation_id)] == [
+                "user", "assistant"
+            ]
+            cancelled = task.cancel()
+            await asyncio.sleep(0)
+            trace_store._lock.release()
+            if cancelled:
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+            else:
+                await task
+        if response is not None:
+            await response.body_iterator.aclose()
+        closed = await trace_store.latest(run_id=run_id)
+        assert closed.trace is not None and closed.trace.ended_at_ms is not None
+        outcomes = [event.data["outcome"] for event in closed.trace.events if event.kind == "chat.outcome"]
+        if cancel_boundary == "waiting_terminal_lock":
+            assert cancelled
+            assert outcomes == ["client_disconnect"]
+            assert _requests("ok") - before_ok == 0
+            assert _requests("client_disconnect") - before_disconnect == 1
+        else:
+            assert outcomes == ["ok"]
+            assert _requests("ok") - before_ok == 1
+            assert _requests("client_disconnect") - before_disconnect == 0
+    finally:
+        if trace_store._lock.locked():
+            trace_store._lock.release()
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        if response is not None:
+            await response.body_iterator.aclose()
+        conversation_store.clear(conversation_id)

@@ -51,6 +51,7 @@ from server.models.tribrid_config_model import (
     RecallIndexResponse,
     RecallStatusResponse,
     RunOutcome,
+    TraceEvent,
     TracesLatestResponse,
     TriBridConfig,
     WebGroundingMetadata,
@@ -515,9 +516,13 @@ async def _record_failed_chat_outcome(run_id: str, outcome: RunOutcome) -> None:
 
 async def _close_chat_trace(run_id: str, ended_at_ms: int | None, outcome: RunOutcome) -> None:
     trace_store = get_trace_store()
-    await _record_trace_outcome(run_id, outcome)
     await trace_store.annotate(run_id, **current_trace_payload_fields())
-    await trace_store.end(run_id, ended_at_ms=ended_at_ms)
+    await trace_store.end(
+        run_id, ended_at_ms=ended_at_ms,
+        terminal_event=TraceEvent(
+            kind="chat.outcome", ts=int(time.time() * 1000), data={"outcome": outcome},
+        ),
+    )
 
 
 class _ChatStreamingResponse(StreamingResponse):
