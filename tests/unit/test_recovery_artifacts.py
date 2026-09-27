@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import errno
 import io
 import json
 import os
@@ -11,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import time
 import uuid
 
 import pytest
@@ -236,3 +238,83 @@ def test_compose_inventory_includes_stopped_and_refuses_missing_required(tmp_pat
         if containers:
             release.run(["docker", "rm", "--force", "--volumes", *containers])
     assert not release.run(["docker", "ps", "--all", "-q", "--filter", f"label=com.docker.compose.project={project}"])
+
+
+@pytest.mark.parametrize("change", ["first", "second", "retarget"])
+def test_release_rejects_private_config_changes_during_capture(
+    source_repo: Path, tmp_path: Path, change: str,
+) -> None:
+    first = tmp_path / "first-private.json"
+    second = tmp_path / "second-private.json"
+    original = '{"credential":"private-before-capture"}'
+    first.write_text(original)
+    second.write_text(original)
+    if change == "retarget":
+        target = tmp_path / "initial-target.json"
+        first.rename(target)
+        first.symlink_to(target)
+
+    # The final input is a FIFO: opening its writer proves both earlier config
+    # hashes completed. Keep the writer open until the mutation is finished.
+    barrier = tmp_path / "capture-barrier.json"
+    os.mkfifo(barrier)
+    output = tmp_path / "refused"
+    script = """
+import importlib.util
+import sys
+from pathlib import Path
+spec = importlib.util.spec_from_file_location("release_artifact", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = module
+spec.loader.exec_module(module)
+try:
+    module.seal_release(Path(sys.argv[2]), Path(sys.argv[3]), [],
+                        [Path(value) for value in sys.argv[4:]], "/backups/immutable")
+except ValueError as exc:
+    print(str(exc))
+    raise SystemExit(17)
+"""
+    process = subprocess.Popen(
+        [sys.executable, "-c", script, str(ROOT / "deploy/proxmox/release_artifact.py"),
+         str(source_repo), str(output), str(first), str(second), str(barrier)],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    writer = None
+    try:
+        deadline = time.monotonic() + 10
+        while writer is None:
+            try:
+                writer = os.open(barrier, os.O_WRONLY | os.O_NONBLOCK)
+            except OSError as exc:
+                if exc.errno != errno.ENXIO:
+                    raise
+                assert process.poll() is None, "Sealer exited before reaching the capture barrier"
+                assert time.monotonic() < deadline, "Sealer did not reach the capture barrier"
+                time.sleep(0.01)
+        os.write(writer, b"capture-barrier")
+        if change == "retarget":
+            replacement = tmp_path / "replacement-target.json"
+            replacement.write_text(original)
+            first.unlink()
+            first.symlink_to(replacement)
+        else:
+            (first if change == "first" else second).write_text('{"credential":"private-after-capture"}')
+        # The initial hash reads the open FIFO; final verification reads an
+        # ordinary file with identical bytes, so only the private config changed.
+        barrier.unlink()
+        barrier.write_bytes(b"capture-barrier")
+        os.close(writer)
+        writer = None
+        stdout, stderr = process.communicate(timeout=10)
+    finally:
+        if writer is not None:
+            os.close(writer)
+        if process.poll() is None:
+            process.kill()
+            process.communicate(timeout=10)
+    assert process.returncode == 17, (stdout, stderr)
+    assert "configuration changed during capture" in stdout
+    assert "private-before-capture" not in stdout + stderr
+    assert "private-after-capture" not in stdout + stderr
+    assert not (output / "manifest.json").exists()
+    assert not (output / "manifest.sha256").exists()

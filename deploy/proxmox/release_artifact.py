@@ -126,6 +126,11 @@ def require_clean_source(repo: Path) -> None:
         raise ValueError("Untracked source is present; commit or remove it before sealing")
 
 
+def config_file_hashes(paths: list[Path]) -> dict[str, str]:
+    """Capture target identity as well as content, including config symlink rotation."""
+    return {str(path): digest(path) for path in (source.resolve(strict=True) for source in paths)}
+
+
 def seal_release(repo: Path, output: Path, images: list[ReleaseImage],
                  config_paths: list[Path], backup_reference: str) -> ReleaseManifest:
     repo = repo.resolve(strict=True)
@@ -134,7 +139,7 @@ def seal_release(repo: Path, output: Path, images: list[ReleaseImage],
         raise ValueError("Built frontend index.html is missing")
     locks = {name: digest(repo / name) for name in ("uv.lock", "web/package-lock.json")}
     web_files = file_hashes(repo / "web/dist")
-    config_hashes = {str(path): digest(path) for path in config_paths}
+    config_hashes = config_file_hashes(config_paths)
     git_sha = run(["git", "rev-parse", "HEAD"], repo)
     git_tree = run(["git", "rev-parse", "HEAD^{tree}"], repo)
     output.mkdir(parents=True, mode=0o700, exist_ok=False)
@@ -150,12 +155,13 @@ def seal_release(repo: Path, output: Path, images: list[ReleaseImage],
         git_tree=git_tree, artifacts={name: digest(output / name) for name in ("source.tar", "web-dist.tar", "images.compose.json")},
         locks=locks, web_files=web_files, images=images, private_config_hashes=config_hashes,
         backup_reference=backup_reference)
-    # Refuse a concurrent edit/build instead of sealing mixed source and assets.
+    # Refuse a concurrent edit/build or config rotation instead of sealing mixed inputs.
     require_clean_source(repo)
     if (run(["git", "rev-parse", "HEAD"], repo) != git_sha
             or file_hashes(repo / "web/dist") != web_files
-            or any(digest(repo / name) != value for name, value in locks.items())):
-        raise ValueError("Source or assets changed during capture; discard this incomplete release")
+            or any(digest(repo / name) != value for name, value in locks.items())
+            or config_file_hashes(config_paths) != config_hashes):
+        raise ValueError("Source, assets or private configuration changed during capture; discard this incomplete release")
     (output / "manifest.json").write_text(manifest.model_dump_json(indent=2) + "\n")
     (output / "manifest.sha256").write_text(digest(output / "manifest.json") + "\n")
     for path in output.iterdir():
