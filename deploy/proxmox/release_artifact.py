@@ -133,6 +133,52 @@ def validate_archive(archive: tarfile.TarFile, expected_files: dict[str, str], *
             raise ValueError("Release archive contents differ from the captured file hashes")
 
 
+def validate_source_archive(archive: tarfile.TarFile, repo: Path, git_sha: str) -> None:
+    """Bind every archived source file and executable bit to the committed tree."""
+    validate_archive(archive, {}, exact_files=False)
+    listing = subprocess.run(
+        ["git", "ls-tree", "-r", "-z", "--full-tree", git_sha], cwd=repo,
+        capture_output=True, check=False,
+    )
+    if listing.returncode:
+        raise RuntimeError("git ls-tree failed while validating committed source")
+    expected: dict[str, tuple[str, bool]] = {}
+    for record in listing.stdout.split(b"\0"):
+        if not record:
+            continue
+        metadata, raw_path = record.split(b"\t", 1)
+        mode, kind, raw_object_id = metadata.split()
+        if kind != b"blob" or mode not in {b"100644", b"100755"}:
+            raise ValueError("Unsupported committed source entry; only regular files can be sealed")
+        path = os.fsdecode(raw_path)
+        if (path in {"web/dist", "RELEASE-MANIFEST.json"}
+                or path.startswith(("web/dist/", "RELEASE-MANIFEST.json/"))):
+            raise ValueError("Committed source overlaps materialization-owned paths")
+        expected[path] = (raw_object_id.decode("ascii"), mode == b"100755")
+    members = [member for member in archive.getmembers() if member.isfile()]
+    files = {member.name: member for member in members}
+    if len(files) != len(members) or files.keys() != expected.keys():
+        raise ValueError("Committed source archive inventory differs from the Git tree")
+    object_format = run(["git", "rev-parse", "--show-object-format"], repo)
+    if object_format not in {"sha1", "sha256"}:
+        raise ValueError("Unsupported Git object format")
+    for name, (object_id, executable) in expected.items():
+        member = files[name]
+        if bool(member.mode & 0o100) != executable:
+            raise ValueError("Committed source archive executable mode differs from the Git tree")
+        stream = archive.extractfile(member)
+        if stream is None:
+            raise ValueError("Committed source archive content is missing")
+        # Hash Git's blob header and raw bytes without spawning a process per file
+        # or decoding binary content. Git export attributes must not alter either.
+        checksum = hashlib.new(object_format, f"blob {member.size}\0".encode("ascii"))
+        with stream:
+            while block := stream.read(1024 * 1024):
+                checksum.update(block)
+        if checksum.hexdigest() != object_id:
+            raise ValueError("Committed source archive content differs from the Git tree")
+
+
 def require_clean_source(repo: Path) -> None:
     if run(["git", "status", "--porcelain", "--untracked-files=no"], repo):
         raise ValueError("Tracked source is dirty; commit and verify it before sealing")
@@ -189,6 +235,7 @@ def seal_release(repo: Path, output: Path, images: list[ReleaseImage],
     # archive even while source hashes are stable. Prove it is restorable first.
     with tarfile.open(source) as archive:
         validate_archive(archive, locks, exact_files=False)
+        validate_source_archive(archive, repo, git_sha)
     with tarfile.open(output / "web-dist.tar") as archive:
         validate_archive(archive, {f"web/dist/{name}": value for name, value in web_files.items()}, exact_files=True)
     # Use only already-present image IDs during owner-controlled recovery; never pull mutable tags.

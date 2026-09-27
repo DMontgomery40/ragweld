@@ -123,6 +123,97 @@ def test_release_rejects_archived_lock_content_drift(source_repo: Path, tmp_path
     assert not (output / "manifest.sha256").exists()
 
 
+def commit_source(repo: Path) -> None:
+    subprocess.run(["git", "add", "--all"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "-c", "user.name=Recovery acceptance", "-c",
+                    "user.email=recovery@example.invalid", "commit", "-m", "Committed source fixture"],
+                   cwd=repo, check=True, capture_output=True)
+
+
+@pytest.mark.parametrize("attribute", ["export-ignore", "export-subst"])
+def test_release_rejects_archived_runtime_source_drift(source_repo: Path, tmp_path: Path, attribute: str) -> None:
+    (source_repo / "server").mkdir()
+    (source_repo / "server/runtime.py").write_text('REVISION = "$Format:%H$"\n')
+    (source_repo / ".gitattributes").write_text(f"server/runtime.py {attribute}\n")
+    commit_source(source_repo)
+    output = tmp_path / "refused"
+    with pytest.raises(ValueError, match="Committed source archive"):
+        release.seal_release(source_repo, output, [], [], "/backups/immutable",
+                             project="ragweld-release-check-" + uuid.uuid4().hex)
+    assert not (output / "manifest.json").exists()
+    assert not (output / "manifest.sha256").exists()
+
+
+def test_release_rejects_committed_gitlinks(source_repo: Path, tmp_path: Path) -> None:
+    commit = release.run(["git", "rev-parse", "HEAD"], source_repo)
+    (source_repo / "vendor/module").mkdir(parents=True)
+    subprocess.run(["git", "update-index", "--add", "--cacheinfo", f"160000,{commit},vendor/module"],
+                   cwd=source_repo, check=True, capture_output=True)
+    subprocess.run(["git", "-c", "user.name=Recovery acceptance", "-c",
+                    "user.email=recovery@example.invalid", "commit", "-m", "Committed gitlink fixture"],
+                   cwd=source_repo, check=True, capture_output=True)
+    output = tmp_path / "refused"
+    with pytest.raises(ValueError, match="Unsupported committed source entry"):
+        release.seal_release(source_repo, output, [], [], "/backups/immutable",
+                             project="ragweld-release-check-" + uuid.uuid4().hex)
+    assert not (output / "manifest.json").exists()
+    assert not (output / "manifest.sha256").exists()
+
+
+def test_release_rejects_archive_executable_mode_drift(source_repo: Path, tmp_path: Path) -> None:
+    script = source_repo / "run-job.sh"
+    script.write_text("#!/bin/sh\nexit 0\n")
+    script.chmod(0o755)
+    commit_source(source_repo)
+    subprocess.run(["git", "config", "tar.umask", "0100"], cwd=source_repo, check=True, capture_output=True)
+    output = tmp_path / "refused"
+    with pytest.raises(ValueError, match="Committed source archive executable mode"):
+        release.seal_release(source_repo, output, [], [], "/backups/immutable",
+                             project="ragweld-release-check-" + uuid.uuid4().hex)
+    assert not (output / "manifest.json").exists()
+    assert not (output / "manifest.sha256").exists()
+
+
+def test_release_preserves_binary_executable_and_unusual_source_names(source_repo: Path, tmp_path: Path) -> None:
+    binary = source_repo / "binary with tab\tand newline\n.bin"
+    binary.write_bytes(bytes(range(256)) * 4097)
+    (source_repo / "empty.dat").touch()
+    script = source_repo / "run-job.sh"
+    script.write_text("#!/bin/sh\nexit 0\n")
+    script.chmod(0o755)
+    commit_source(source_repo)
+    output = tmp_path / "sealed"
+    manifest = release.seal_release(source_repo, output, [], [], "/backups/immutable",
+                                    project="ragweld-release-check-" + uuid.uuid4().hex)
+    destination = tmp_path / "restored"
+    release.materialize_release(output, destination)
+    assert manifest.git_tree == release.run(["git", "rev-parse", "HEAD^{tree}"], source_repo)
+    assert (destination / binary.name).read_bytes() == binary.read_bytes()
+    assert (destination / "empty.dat").read_bytes() == b""
+    assert (destination / script.name).read_bytes() == script.read_bytes()
+    assert (destination / script.name).stat().st_mode & 0o100
+    assert not (destination / binary.name).stat().st_mode & 0o100
+
+
+@pytest.mark.parametrize("reserved", [
+    "web/dist/index.html", "web/dist/unbuilt.txt",
+    "RELEASE-MANIFEST.json", "RELEASE-MANIFEST.json/nested.txt",
+])
+def test_release_rejects_source_in_materialization_owned_paths(source_repo: Path, tmp_path: Path, reserved: str) -> None:
+    path = source_repo / reserved
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        path.write_text("Committed content must survive materialization.\n")
+    subprocess.run(["git", "add", "--force", reserved], cwd=source_repo, check=True, capture_output=True)
+    commit_source(source_repo)
+    output = tmp_path / "refused"
+    with pytest.raises(ValueError, match="Committed source overlaps materialization-owned paths"):
+        release.seal_release(source_repo, output, [], [], "/backups/immutable",
+                             project="ragweld-release-check-" + uuid.uuid4().hex)
+    assert not (output / "manifest.json").exists()
+    assert not (output / "manifest.sha256").exists()
+
+
 def test_release_rejects_dirty_source_and_tampered_archive(source_repo: Path, tmp_path: Path) -> None:
     (source_repo / "uv.lock").write_text("version = 2\n")
     with pytest.raises(ValueError, match="dirty"):
