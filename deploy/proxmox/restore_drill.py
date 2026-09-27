@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -14,9 +15,12 @@ import subprocess
 import time
 import urllib.request
 import uuid
-from typing import Literal
+from typing import Any, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict
+
+
+_T = TypeVar("_T")
 
 
 class DrillEvidence(BaseModel):
@@ -114,7 +118,7 @@ class DisposableDrill:
             self.volumes.remove(name)
 
 
-def wait_for(probe, timeout: int = 120):
+def wait_for(probe: Callable[[], _T], timeout: int = 120) -> _T:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
@@ -122,6 +126,23 @@ def wait_for(probe, timeout: int = 120):
         except (RuntimeError, OSError, ValueError):
             time.sleep(2)
     raise TimeoutError("Disposable restore readiness timed out")
+
+
+def finalize_drill(drill: DisposableDrill, evidence: DrillEvidence, target: Path) -> None:
+    """Remove disposable resources and persist the verified cleanup outcome."""
+    evidence.cleanup_verified = False
+    try:
+        drill.cleanup()
+        containers = command(["docker", "ps", "-aq", "--filter", f"label=ragweld.restore-drill={drill.identifier}"])
+        volumes = command(["docker", "volume", "ls", "-q", "--filter", f"label=ragweld.restore-drill={drill.identifier}"])
+        if containers or volumes:
+            raise RuntimeError("Disposable resources remain; review private evidence")
+        evidence.cleanup_verified = True
+    except BaseException:
+        evidence.status = "failed"
+        raise
+    finally:
+        target.write_text(evidence.model_dump_json(indent=2) + "\n")
 
 
 def restore_drill(backup: Path, evidence_dir: Path) -> DrillEvidence:
@@ -169,7 +190,7 @@ def restore_drill(backup: Path, evidence_dir: Path) -> DrillEvidence:
             raise ValueError("Restore service escaped loopback")
         base = f"http://127.0.0.1:{binding['HostPort']}"
 
-        def request(path: str):
+        def request(path: str) -> Any:
             with urllib.request.urlopen(base + path, timeout=5) as response:
                 return json.load(response)["result"]
 
@@ -209,14 +230,7 @@ def restore_drill(backup: Path, evidence_dir: Path) -> DrillEvidence:
         evidence.status = "failed"
         raise
     finally:
-        try:
-            drill.cleanup()
-            evidence.cleanup_verified = not command(["docker", "ps", "-aq", "--filter", f"label=ragweld.restore-drill={identifier}"])
-            evidence.cleanup_verified &= not command(["docker", "volume", "ls", "-q", "--filter", f"label=ragweld.restore-drill={identifier}"])
-        finally:
-            target.write_text(evidence.model_dump_json(indent=2) + "\n")
-    if not evidence.cleanup_verified:
-        raise RuntimeError("Disposable resources remain; review private evidence")
+        finalize_drill(drill, evidence, target)
     return evidence
 
 
