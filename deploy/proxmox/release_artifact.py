@@ -38,6 +38,13 @@ class ReleaseManifest(BaseModel):
     frontend_provenance: Literal["captured-prebuilt-assets"] = "captured-prebuilt-assets"
 
 
+class ReleaseInventory(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    compose_files: list[str] = Field(min_length=1)
+    required_services: list[str] = Field(min_length=1)
+    optional_services: list[str]
+
+
 def digest(path: Path) -> str:
     with path.open("rb") as stream:
         return hashlib.file_digest(stream, "sha256").hexdigest()
@@ -51,18 +58,45 @@ def run(command: list[str], cwd: Path | None = None) -> str:
     return result.stdout.strip()
 
 
-def running_images() -> list[ReleaseImage]:
-    ids = run(["docker", "ps", "-q", "--filter", "label=com.docker.compose.project=ragweld"]).split()
-    if not ids:
-        raise ValueError("No running ragweld Compose containers")
-    containers = json.loads(run(["docker", "inspect", *ids]))
-    result = []
+def compose_images(project: str, required: set[str], optional: set[str]) -> list[ReleaseImage]:
+    ids = run(["docker", "ps", "--all", "-q", "--filter", f"label=com.docker.compose.project={project}"]).split()
+    containers = json.loads(run(["docker", "inspect", *ids])) if ids else []
+    service_images: dict[str, str] = {}
     for container in containers:
+        labels = container["Config"]["Labels"]
+        if str(labels.get("com.docker.compose.oneoff", "")).lower() == "true":
+            continue
+        service = labels["com.docker.compose.service"]
+        if service not in required | optional:
+            raise ValueError(f"Unexpected Compose service: {service}")
         image_id = container["Image"]
+        if service in service_images and service_images[service] != image_id:
+            raise ValueError(f"Compose service has conflicting image identities: {service}")
+        service_images[service] = image_id
+    missing = required - service_images.keys()
+    if missing:
+        raise ValueError("Missing required Compose services: " + ", ".join(sorted(missing)))
+    result = []
+    for service, image_id in sorted(service_images.items()):
         metadata = json.loads(run(["docker", "image", "inspect", image_id]))[0]
-        result.append(ReleaseImage(service=container["Config"]["Labels"]["com.docker.compose.service"],
+        result.append(ReleaseImage(service=service,
                                    image_id=image_id, repository_digests=metadata.get("RepoDigests") or []))
-    return sorted(result, key=lambda image: image.service)
+    return result
+
+
+def running_images(repo: Path) -> list[ReleaseImage]:
+    inventory = ReleaseInventory.model_validate_json(run(
+        ["bash", str(repo / "deploy/proxmox/start-runtime.sh"), "--print-release-inventory"], repo,
+    ))
+    compose = ["docker", "compose", "--env-file", os.devnull]
+    for name in inventory.compose_files:
+        compose.extend(["-f", name])
+    # Validate names without reading or expanding private env files.
+    configured = set(run(compose + ["config", "--no-interpolate", "--no-env-resolution", "--services"], repo).splitlines())
+    expected = set(inventory.required_services) | set(inventory.optional_services)
+    if not expected <= configured:
+        raise ValueError("Launcher inventory contains services absent from Compose")
+    return compose_images("ragweld", set(inventory.required_services), set(inventory.optional_services))
 
 
 def file_hashes(root: Path) -> dict[str, str]:
@@ -75,11 +109,27 @@ def file_hashes(root: Path) -> dict[str, str]:
     return result
 
 
+def require_clean_source(repo: Path) -> None:
+    if run(["git", "status", "--porcelain", "--untracked-files=no"], repo):
+        raise ValueError("Tracked source is dirty; commit and verify it before sealing")
+    # These exact operational files are deliberately absent from the source archive.
+    skill_files = {f".claude/skills/gitnexus-{name}/SKILL.md" for name in (
+        "cli", "debugging", "exploring", "guide", "impact-analysis", "refactoring",
+    )}
+    retained_builds = ("web/.dist-dev-copy-20260912/", "web/.dist-before-cb626e9b-20260927/")
+    # NUL delimiters preserve spaces and newlines in filenames without Git quoting.
+    untracked = subprocess.run(
+        ["git", "ls-files", "--others", "--exclude-standard", "-z"], cwd=repo,
+        capture_output=True, text=True, check=True,
+    ).stdout.split("\0")
+    if any(path and path not in skill_files and not path.startswith(retained_builds) for path in untracked):
+        raise ValueError("Untracked source is present; commit or remove it before sealing")
+
+
 def seal_release(repo: Path, output: Path, images: list[ReleaseImage],
                  config_paths: list[Path], backup_reference: str) -> ReleaseManifest:
     repo = repo.resolve(strict=True)
-    if run(["git", "status", "--porcelain", "--untracked-files=no"], repo):
-        raise ValueError("Tracked source is dirty; commit and verify it before sealing")
+    require_clean_source(repo)
     if not (repo / "web/dist/index.html").is_file():
         raise ValueError("Built frontend index.html is missing")
     locks = {name: digest(repo / name) for name in ("uv.lock", "web/package-lock.json")}
@@ -101,8 +151,8 @@ def seal_release(repo: Path, output: Path, images: list[ReleaseImage],
         locks=locks, web_files=web_files, images=images, private_config_hashes=config_hashes,
         backup_reference=backup_reference)
     # Refuse a concurrent edit/build instead of sealing mixed source and assets.
+    require_clean_source(repo)
     if (run(["git", "rev-parse", "HEAD"], repo) != git_sha
-            or run(["git", "status", "--porcelain", "--untracked-files=no"], repo)
             or file_hashes(repo / "web/dist") != web_files
             or any(digest(repo / name) != value for name, value in locks.items())):
         raise ValueError("Source or assets changed during capture; discard this incomplete release")
@@ -163,7 +213,8 @@ def main() -> None:
     args = parser.parse_args()
     os.umask(0o077)
     if args.action == "seal":
-        result = seal_release(args.repo, args.output.resolve(), running_images(), args.config, args.backup_reference)
+        repo = args.repo.resolve(strict=True)
+        result = seal_release(repo, args.output.resolve(), running_images(repo), args.config, args.backup_reference)
     elif args.action == "verify":
         result = verify_release(args.release)
     else:

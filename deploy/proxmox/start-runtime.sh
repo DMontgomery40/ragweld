@@ -265,4 +265,24 @@ main() {
   exec ./start.sh --no-docker --no-local-model --no-frontend
 }
 
-main "$@"
+print_release_inventory() {
+  local services=("${PRODUCTION_SERVICES[@]}")
+  if [[ "$RAGWELD_SKIP_TUNNEL" != "1" ]]; then
+    services+=("cloudflared")
+  fi
+  python3 - "${COMPOSE_FILES[*]}" "${services[*]}" "${BEST_EFFORT_SERVICES[*]}" <<'PY'
+import json
+import sys
+
+print(json.dumps(dict(zip(
+    ("compose_files", "required_services", "optional_services"),
+    (value.split() for value in sys.argv[1:]),
+))))
+PY
+}
+
+if [[ "${1:-}" == "--print-release-inventory" ]]; then
+  print_release_inventory
+else
+  main "$@"
+fi

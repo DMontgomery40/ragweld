@@ -19,6 +19,7 @@ from server.api.dataset import (  # shared file-backed persistence
 )
 from server.api.dependency_errors import dependency_unavailable_http_exception
 from server.api.generation_errors import generation_unavailable_http_exception
+from server.api.retrieval_errors import reranker_failed_http_exception
 from server.chat.context_formatter import format_context_for_llm
 from server.chat.generation import generate_chat_text
 from server.chat.handler import ChatGenerationError
@@ -65,15 +66,19 @@ from server.models.eval import (
 from server.models.tribrid_config_model import (
     ChunkMatch,
     CorpusScope,
+    DependencyUnavailableResponse,
     EvalAnalysisArtifact,
     EvalAnalyzeComparisonRequest,
     EvalObservabilitySummaryResponse,
+    GenerationUnavailableResponse,
     PromptfooRun,
     PromptfooRunsResponse,
+    RerankerFailureResponse,
     TriBridConfig,
 )
 from server.observability import metrics
 from server.observability.ml_quality import build_eval_observability_summary
+from server.retrieval.errors import RerankerFailedError
 from server.retrieval.fusion import TriBridFusion
 from server.services.config_store import get_config as load_scoped_config
 
@@ -536,7 +541,10 @@ async def evaluate_dataset_entries(
     return run
 
 
-@router.post("/eval/run", response_model=EvalRun)
+@router.post(
+    "/eval/run", response_model=EvalRun,
+    responses={503: {"model": DependencyUnavailableResponse | GenerationUnavailableResponse | RerankerFailureResponse}},
+)
 async def run_evaluation(request: EvalRequest) -> EvalRun:
     repo_id = request.repo_id
     dataset = _load_dataset(corpus_id=repo_id)
@@ -550,6 +558,8 @@ async def run_evaluation(request: EvalRequest) -> EvalRun:
         )
     except DependencyUnavailableError as e:
         raise dependency_unavailable_http_exception(e.dependency, boundary=e.operation, exc=e) from e
+    except RerankerFailedError as e:
+        raise reranker_failed_http_exception(e) from e
     except ChatGenerationError as e:
         raise generation_unavailable_http_exception(e, operation="Eval answer generation") from e
     except ValueError as e:

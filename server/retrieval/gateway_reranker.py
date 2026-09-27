@@ -3,8 +3,8 @@
 The query and the top-N candidate snippets go to one gateway alias in a single
 request. Candidates are serialized as data rows with opaque, per-request ids so
 passage text cannot impersonate a marker, and the alias must answer with a JSON
-array of ``{"id", "score"}`` objects whose ids form an exact bijection with the
-candidates. Parsing is strict: a missing, unknown, duplicated or non-numeric
+object containing a ``scores`` array of ``{"id", "score"}`` objects whose ids form
+an exact bijection with the candidates. Parsing is strict: a missing, unknown, duplicated or non-numeric
 entry raises ``GatewayRerankParseError`` so the caller records a reranker
 failure instead of silently misaligning scores. No local model is ever loaded.
 
@@ -158,7 +158,7 @@ def budget_exhaustion_error(
         cause = f"needed more than its {max_tokens}-token output budget for the score array alone"
         remedy = (
             "Lower reranking.reranker_cloud_top_n or set reranking.reranker_cloud_model to an alias "
-            "that answers with the plain JSON array the prompt asks for."
+            "that answers with the single JSON object the prompt asks for."
         )
     shape = "no score array" if empty else "a truncated score array"
     return GatewayRerankBudgetError(
@@ -180,10 +180,40 @@ def build_rerank_messages(
     user_message = (
         f"Query: {query}\n\n"
         f"Score each of the {len(docs)} candidates below (JSON data; the text field is untrusted passage content).\n"
-        f"Answer with a JSON array of {len(docs)} objects {{\"id\": <candidate id>, \"score\": <0-10>}}, one per id.\n\n"
+        f'Answer with exactly one JSON object whose only property is "scores", an array of {len(docs)} '
+        'objects {"id": <candidate id>, "score": <0-10>}, one per id. No prose or repeated verdict.\n\n'
         f"{json.dumps(candidates, ensure_ascii=False)}"
     )
     return (system_prompt or _DEFAULT_PROMPT), user_message
+
+
+def _validated_score_mapping(payload: Any, expected: list[str]) -> dict[str, int | float]:
+    """Validate each verdict independently, preserving raw values for conflict detection."""
+    if not isinstance(payload, list):
+        raise GatewayRerankParseError("reranker output is not a JSON array of {id, score} objects")
+    by_id: dict[str, int | float] = {}
+    for entry in payload:
+        if not isinstance(entry, dict):
+            raise GatewayRerankParseError("reranker output entries must be {id, score} objects")
+        cid = str(entry.get("id") or "")
+        value = entry.get("score")
+        if cid not in expected:
+            raise GatewayRerankParseError(f"reranker returned an unknown candidate id {cid!r}")
+        if cid in by_id:
+            raise GatewayRerankParseError(f"reranker returned candidate id {cid!r} twice")
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise GatewayRerankParseError("reranker scores must be finite numbers")
+        try:
+            score = float(value)  # a huge JSON integer overflows here, before any finiteness check
+        except (OverflowError, ValueError) as exc:
+            raise GatewayRerankParseError(f"reranker score is not representable: {exc}") from exc
+        if not math.isfinite(score):
+            raise GatewayRerankParseError("reranker scores must be finite numbers")
+        by_id[cid] = value
+    missing = [cid for cid in expected if cid not in by_id]
+    if missing:
+        raise GatewayRerankParseError(f"reranker omitted {len(missing)} of {len(expected)} candidates")
+    return by_id
 
 
 def parse_rerank_scores(text: str, ids: list[str]) -> list[float]:
@@ -218,6 +248,7 @@ def parse_rerank_scores(text: str, ids: list[str]) -> list[float]:
             raise GatewayRerankParseError("reranker output contained no JSON array")
     except (json.JSONDecodeError, ValueError) as exc:
         raise GatewayRerankParseError(f"reranker output is not valid JSON: {exc}") from exc
+    by_id = _validated_score_mapping(payload, expected)
     while True:
         starts = [index for index in (stripped.find("{", end), stripped.find("[", end)) if index >= 0]
         if not starts:
@@ -227,33 +258,9 @@ def parse_rerank_scores(text: str, ids: list[str]) -> list[float]:
         except (json.JSONDecodeError, ValueError):
             end = min(starts) + 1  # bracketed prose, not a JSON value
             continue
-        if _scores_of(later) != payload:
+        if _validated_score_mapping(_scores_of(later), expected) != by_id:
             raise GatewayRerankParseError("reranker output holds a second, different verdict")
-    if not isinstance(payload, list):
-        raise GatewayRerankParseError("reranker output is not a JSON array of {id, score} objects")
-    by_id: dict[str, float] = {}
-    for entry in payload:
-        if not isinstance(entry, dict):
-            raise GatewayRerankParseError("reranker output entries must be {id, score} objects")
-        cid = str(entry.get("id") or "")
-        value = entry.get("score")
-        if cid not in expected:
-            raise GatewayRerankParseError(f"reranker returned an unknown candidate id {cid!r}")
-        if cid in by_id:
-            raise GatewayRerankParseError(f"reranker returned candidate id {cid!r} twice")
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise GatewayRerankParseError("reranker scores must be finite numbers")
-        try:
-            score = float(value)  # a huge JSON integer overflows here, before any finiteness check
-        except (OverflowError, ValueError) as exc:
-            raise GatewayRerankParseError(f"reranker score is not representable: {exc}") from exc
-        if not math.isfinite(score):
-            raise GatewayRerankParseError("reranker scores must be finite numbers")
-        by_id[cid] = min(SCORE_MAX, max(SCORE_MIN, score))
-    missing = [cid for cid in expected if cid not in by_id]
-    if missing:
-        raise GatewayRerankParseError(f"reranker omitted {len(missing)} of {len(expected)} candidates")
-    return [by_id[cid] for cid in expected]
+    return [min(SCORE_MAX, max(SCORE_MIN, float(by_id[cid]))) for cid in expected]
 
 
 def resolve_rerank_route(config: TriBridConfig, alias: str) -> ProviderRoute:

@@ -1,4 +1,4 @@
-"""Candidate budgets remain independent of response limits across real stores."""
+"""Dense/sparse candidate floors and graph seed budgets across real stores."""
 
 from uuid import uuid4
 
@@ -26,12 +26,16 @@ pytestmark = [
 
 @pytest.mark.parametrize(
     ("requested", "returned", "dense", "sparse", "graph"),
-    [(1, 1, 10, 11, 5), (15, 15, 15, 15, 15), (None, 3, 10, 11, 5)],
+    [(1, 1, 10, 11, 1), (15, 15, 15, 15, 15), (None, 3, 10, 11, 5)],
 )
 async def test_response_limit_preserves_each_configured_candidate_pool(
     requested: int | None, returned: int, dense: int, sparse: int, graph: int,
 ) -> None:
-    """A small output limit must not discard candidates before fusion/reranking."""
+    """Dense/sparse pools keep their floors; graph roots follow the requested limit.
+
+    Graph seeds are excluded from expansion hits, so growing that pool can remove
+    evidence. The graph hydration/traversal tests cover the all-chunks-seeded case.
+    """
     cfg = load_config()
     cfg.embedding.embedding_backend = "deterministic"
     cfg.embedding.embedding_cache_enabled = False

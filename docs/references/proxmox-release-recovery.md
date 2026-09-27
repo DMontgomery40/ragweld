@@ -8,9 +8,16 @@ directories are private operational evidence, not files to publish or commit.
 ## Seal a release after the final build
 
 Finish the coordinated source commit and build on LXC100, then seal that clean
-Git commit and its prepared `web/dist`. A tracked source edit during capture
-fails the command. The tool checks for concurrent source, lockfile, and frontend
-changes and refuses to overwrite any existing output directory.
+Git commit and its prepared `web/dist`. Tracked edits and nonignored untracked
+source fail the command before capture and at the final consistency check.
+The only untracked exceptions are the six installed GitNexus `SKILL.md` files
+(`cli`, `debugging`, `exploring`, `guide`, `impact-analysis`, `refactoring`) under
+`.claude/skills/gitnexus-*/`, and the retained build trees
+`web/.dist-dev-copy-20260912/` and `web/.dist-before-cb626e9b-20260927/`.
+These operational files are omitted from the committed source archive; similarly
+named directories or additional files in the skill directories are not exempt.
+The tool checks for concurrent source, lockfile, and frontend changes and refuses
+to overwrite any existing output directory.
 
 ```bash
 cd /opt/ragweld
@@ -28,13 +35,26 @@ release_id="$(git rev-parse HEAD)"
 ```
 
 The bundle preserves the exact committed source archive, built frontend archive,
-source SHA/tree, lockfile hashes, every web asset hash, running Compose image IDs
+source SHA/tree, lockfile hashes, every web asset hash, Compose image IDs
 and repository digests, backup reference, and private configuration **hashes**.
 It does not copy secret values from `/etc/ragweld`. `images.compose.json` is a
 digest-pinned Compose override using locally present images and `pull_policy:
 never`. It is only applied explicitly by the owner; the ordinary launcher does
 not read it. Retain the matching images or export them separately before image
 garbage collection; recorded digests alone do not preserve image bytes.
+
+The sealer reads the production launcher's existing service arrays through
+`bash deploy/proxmox/start-runtime.sh --print-release-inventory`. That mode emits
+JSON and exits before secret preflight or any service mutation. Required and
+optional names are checked against the merged Compose configuration without
+expanding private environment files. Use the same `RAGWELD_SKIP_TUNNEL` value as
+the launcher when the tunnel is intentionally disabled; otherwise `cloudflared`
+is required. Every required service must have a container. Stopped containers
+contribute their exact image identity, while one-off containers cannot satisfy
+the inventory. Existing optional Laya containers are included; an absent Laya
+container is permitted. Missing required services, unexpected services, or
+replicas with conflicting image IDs fail sealing. This proves image coverage,
+not service health; the integration owner still verifies readiness separately.
 
 Frontend provenance is explicitly `captured-prebuilt-assets`: the artifact
 reproduces the captured deployed files byte for byte, but cannot retrospectively

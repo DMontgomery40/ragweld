@@ -158,6 +158,7 @@ def _build_config(cfg: TriBridConfig, tests: list[PromptfooTest], *, repo_id: st
                 "include_graph": bool(cfg.graph_search.enabled),
                 "cache_mode": "bypass",
             },
+            "validateStatus": "status >= 200 && status < 300",
             "transformResponse": "json.answer",
         },
     }
@@ -239,16 +240,22 @@ def run_regression(cfg: TriBridConfig, *, repo_id: str, tests: list[PromptfooTes
         vars_ = item.get("vars") or {}
         grade = item.get("gradingResult") or {}
         components = grade.get("componentResults") or []
-        reason = str(grade.get("reason") or (components[0].get("reason") if components else "") or "")
         response = item.get("response") or {}
+        execution_error = item.get("error") or response.get("error")
+        reason = str(
+            execution_error
+            or grade.get("reason")
+            or (components[0].get("reason") if components else "")
+            or ""
+        )
         parsed.append(
             PromptfooRunResult(
                 entry_id=str(vars_.get("entry_id") or item.get("description") or ""),
                 question=str(vars_.get("question") or ""),
                 expected_answer=str(vars_.get("expected_answer") or ""),
                 response=str(response.get("output") or ""),
-                passed=bool(item.get("success")),
-                score=max(0.0, min(1.0, float(item.get("score") or 0.0))),
+                passed=bool(item.get("success")) and not bool(execution_error),
+                score=0.0 if execution_error else max(0.0, min(1.0, float(item.get("score") or 0.0))),
                 reason=reason[:500],
                 latency_ms=float(item.get("latencyMs") or 0.0),
             )
