@@ -739,7 +739,7 @@ async def chat_stream(
     run_id: str,
     started_at_ms: int,
     telemetry: ChatRunTelemetry,
-) -> AsyncIterator[str]:
+) -> AsyncGenerator[str, None]:
     """Streaming chat handler that yields SSE events. Reports its generation phase, usage,
     cost and generation failure to `telemetry`; the endpoint marks events and finishes it.
 

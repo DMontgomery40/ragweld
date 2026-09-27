@@ -1060,8 +1060,7 @@ class TestChatMetrics:
 
     @pytest.mark.asyncio
     async def test_a_stalled_gateway_is_a_timeout_only_once_generation_began(self, chat_client: AsyncClient):
-        """The stream timeout (`ui.chat_stream_timeout` is the transport's httpx timeout) as the
-        transport really raises it, from a real stalled upstream."""
+        """The total transport deadline expires against a real stalled upstream."""
         from server.chat.generation import stream_chat_text
         from server.chat.provider_router import ProviderRoute
         from server.chat.telemetry import ChatRunTelemetry
@@ -1071,7 +1070,7 @@ class TestChatMetrics:
             route = ProviderRoute(
                 kind="litellm", provider_name="LiteLLM", base_url=base_url, model=_LUNA, api_key="pytest-fake-gateway-key"
             )
-            with pytest.raises(RuntimeError) as caught:
+            with pytest.raises(TimeoutError) as caught:
                 async for _ in stream_chat_text(
                     route=route,
                     system_prompt="Answer from the flight records.",
