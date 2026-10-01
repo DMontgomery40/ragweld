@@ -1,3 +1,4 @@
+import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 type ProjectionPoint = {
@@ -212,7 +213,7 @@ export function GradientDescentViz({ events }: { events: MetricEventLike[] }) {
               onChange={(e) => setLive(e.target.checked)}
               disabled={points.length === 0}
             />
-            live
+            live <TooltipIcon name="LEARNING_RERANKER_GRADIENT_LIVE" />
           </label>
           <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
             {points.length ? (

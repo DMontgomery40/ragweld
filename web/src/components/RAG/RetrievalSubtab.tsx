@@ -1218,7 +1218,7 @@ export function RetrievalSubtab() {
 
               <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 16 }}>
                 <div className="input-group" data-testid="retrieval-generation-answer-alias">
-                  <label>Generation Alias</label>
+                  <label>Generation Alias <TooltipIcon name="GEN_MODEL" /></label>
                   <ChatModelPicker
                     value={genModel}
                     onChange={setGenModel}
@@ -1234,7 +1234,7 @@ export function RetrievalSubtab() {
 
               <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
                 <div className="input-group">
-                  <label>HTTP Alias Override</label>
+                  <label>HTTP Alias Override <TooltipIcon name="GEN_MODEL_HTTP" /></label>
                   <ChatModelPicker
                     value={genModelHttp}
                     onChange={setGenModelHttp}
@@ -1244,7 +1244,7 @@ export function RetrievalSubtab() {
                   />
                 </div>
                 <div className="input-group">
-                  <label>MCP Alias Override</label>
+                  <label>MCP Alias Override <TooltipIcon name="GEN_MODEL_MCP" /></label>
                   <ChatModelPicker
                     value={genModelMcp}
                     onChange={setGenModelMcp}
@@ -1254,7 +1254,7 @@ export function RetrievalSubtab() {
                   />
                 </div>
                 <div className="input-group">
-                  <label>CLI Alias Override</label>
+                  <label>CLI Alias Override <TooltipIcon name="GEN_MODEL_CLI" /></label>
                   <ChatModelPicker
                     value={genModelCli}
                     onChange={setGenModelCli}
@@ -1274,7 +1274,7 @@ export function RetrievalSubtab() {
 
               <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 16 }}>
                 <div className="input-group">
-                  <label>Enrichment Alias</label>
+                  <label>Enrichment Alias <TooltipIcon name="ENRICH_MODEL" /></label>
                   <ChatModelPicker
                     value={enrichModel}
                     onChange={setEnrichModel}
@@ -1309,7 +1309,7 @@ export function RetrievalSubtab() {
               <div className="input-row">
                 <div className="input-group">
                   <label>
-                    LiteLLM Client Key
+                    LiteLLM Client Key <TooltipIcon name="LITELLM_API_KEY" />
                   </label>
                   <ApiKeyStatus keyName="LITELLM_API_KEY" label="LiteLLM Client Key" />
                 </div>
@@ -1905,7 +1905,7 @@ export function RetrievalSubtab() {
                           <span className="toggle-thumb"></span>
                         </span>
                         <span className="toggle-label">
-                          OTel Export
+                          OTel Export <TooltipIcon name="OTEL_EXPORT_ENABLED" />
                         </span>
                       </label>
                     </div>

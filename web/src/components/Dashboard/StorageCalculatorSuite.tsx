@@ -1,3 +1,4 @@
+import { TooltipIcon } from '@/components/ui/TooltipIcon';
 // TriBrid RAG Storage Calculator Suite v2.0 - TSX Component
 // Calculates storage for Qdrant dense vectors, Neo4j, and sparse indices
 // Connected to Pydantic config for default values
@@ -392,7 +393,7 @@ export function StorageCalculatorSuite() {
                 <label>
                   <div className="label-with-tooltip">
                     Corpus Size
-                    <span className="tooltip" title="Total size of your data/documents to index">?</span>
+                    <TooltipIcon name="STORAGE_PLANNER_CORPUS_SIZE" />
                   </div>
                 </label>
                 <div className="unit-input">
@@ -415,7 +416,7 @@ export function StorageCalculatorSuite() {
                 <label>
                   <div className="label-with-tooltip">
                     Chunk Size
-                    <span className="tooltip" title="Size of text chunks for embedding. Typically 1-8 KiB">?</span>
+                    <TooltipIcon name="STORAGE_PLANNER_CHUNK_BYTES" />
                   </div>
                 </label>
                 <div className="unit-input">
@@ -440,7 +441,7 @@ export function StorageCalculatorSuite() {
                 <label>
                   <div className="label-with-tooltip">
                     Embedding Dimension
-                    <span className="tooltip" title="Vector size: 512 (small), 768 (BERT), 1536 (OpenAI)">?</span>
+                    <TooltipIcon name="STORAGE_PLANNER_DIMENSIONS" />
                   </div>
                 </label>
                 <NumberField
@@ -453,7 +454,7 @@ export function StorageCalculatorSuite() {
                 <label>
                   <div className="label-with-tooltip">
                     Precision
-                    <span className="tooltip" title="float32: full precision, float16: half size, int8: quarter size">?</span>
+                    <TooltipIcon name="STORAGE_PLANNER_PRECISION" />
                   </div>
                 </label>
                 <select
@@ -472,7 +473,7 @@ export function StorageCalculatorSuite() {
                 <label>
                   <div className="label-with-tooltip">
                     Qdrant HNSW Overhead
-                    <span className="tooltip" title="HNSW index overhead over raw dense vectors. Typically 1.1-1.5x for Qdrant">?</span>
+                    <TooltipIcon name="STORAGE_PLANNER_HNSW_MULTIPLIER" />
                   </div>
                 </label>
                 <NumberField
@@ -485,7 +486,7 @@ export function StorageCalculatorSuite() {
                 <label>
                   <div className="label-with-tooltip">
                     Hydration %
-                    <span className="tooltip" title="% of raw data kept in RAM for instant retrieval">?</span>
+                    <TooltipIcon name="STORAGE_PLANNER_HYDRATION" />
                   </div>
                 </label>
                 <NumberField
@@ -503,7 +504,7 @@ export function StorageCalculatorSuite() {
                 <label>
                   <div className="label-with-tooltip">
                     Replication Factor
-                    <span className="tooltip" title="Number of copies for HA/scaling">?</span>
+                    <TooltipIcon name="STORAGE_PLANNER_REPLICATION" />
                   </div>
                 </label>
                 <NumberField
@@ -524,7 +525,7 @@ export function StorageCalculatorSuite() {
                   <label>
                     <div className="label-with-tooltip">
                       Entity Count
-                      <span className="tooltip" title="Estimated number of nodes (entities) in the knowledge graph">?</span>
+                      <TooltipIcon name="STORAGE_PLANNER_GRAPH_NODES" />
                     </div>
                   </label>
                   <NumberField
@@ -537,7 +538,7 @@ export function StorageCalculatorSuite() {
                   <label>
                     <div className="label-with-tooltip">
                       Relationship Count
-                      <span className="tooltip" title="Estimated number of relationships between entities">?</span>
+                      <TooltipIcon name="STORAGE_PLANNER_GRAPH_RELATIONSHIPS" />
                     </div>
                   </label>
                   <NumberField
@@ -552,7 +553,7 @@ export function StorageCalculatorSuite() {
                   <label>
                     <div className="label-with-tooltip">
                       Avg Node Size (B)
-                      <span className="tooltip" title="Average bytes per node including properties and labels">?</span>
+                      <TooltipIcon name="STORAGE_PLANNER_NODE_BYTES" />
                     </div>
                   </label>
                   <NumberField
@@ -565,7 +566,7 @@ export function StorageCalculatorSuite() {
                   <label>
                     <div className="label-with-tooltip">
                       Avg Rel Size (B)
-                      <span className="tooltip" title="Average bytes per relationship including properties">?</span>
+                      <TooltipIcon name="STORAGE_PLANNER_RELATIONSHIP_BYTES" />
                     </div>
                   </label>
                   <NumberField
@@ -675,7 +676,7 @@ export function StorageCalculatorSuite() {
                 <label>
                   <div className="label-with-tooltip">
                     Corpus Size
-                    <span className="tooltip" title="Same as left calculator - your total data">?</span>
+                    <TooltipIcon name="STORAGE_PLANNER_CORPUS_SIZE" />
                   </div>
                 </label>
                 <div className="unit-input">
@@ -698,7 +699,7 @@ export function StorageCalculatorSuite() {
                 <label>
                   <div className="label-with-tooltip">
                     Target Limit
-                    <span className="tooltip" title="Max storage you want to use">?</span>
+                    <TooltipIcon name="STORAGE_PLANNER_TARGET_SIZE" />
                   </div>
                 </label>
                 <div className="unit-input">
@@ -723,7 +724,7 @@ export function StorageCalculatorSuite() {
                 <label>
                   <div className="label-with-tooltip">
                     Chunk Size
-                    <span className="tooltip" title="Smaller chunks = more vectors = more storage">?</span>
+                    <TooltipIcon name="STORAGE_PLANNER_CHUNK_BYTES" />
                   </div>
                 </label>
                 <div className="unit-input">
@@ -745,7 +746,7 @@ export function StorageCalculatorSuite() {
                 <label>
                   <div className="label-with-tooltip">
                     Embedding Dims
-                    <span className="tooltip" title="Must match your model choice">?</span>
+                    <TooltipIcon name="STORAGE_PLANNER_DIMENSIONS" />
                   </div>
                 </label>
                 <NumberField
@@ -761,7 +762,7 @@ export function StorageCalculatorSuite() {
                 <label>
                   <div className="label-with-tooltip">
                     BM25 Overhead %
-                    <span className="tooltip" title="Text search index, typically 20% of data">?</span>
+                    <TooltipIcon name="STORAGE_PLANNER_SPARSE_PERCENT" />
                   </div>
                 </label>
                 <NumberField
@@ -775,7 +776,7 @@ export function StorageCalculatorSuite() {
                 <label>
                   <div className="label-with-tooltip">
                     Chunk Summaries %
-                    <span className="tooltip" title="Pre-computed chunk summaries, typically 10% of data">?</span>
+                    <TooltipIcon name="STORAGE_PLANNER_SUMMARIES_PERCENT" />
                   </div>
                 </label>
                 <NumberField
@@ -818,7 +819,7 @@ export function StorageCalculatorSuite() {
                 <div className="result-item">
                   <span className="result-label">
                     Product Quantization
-                    <span className="tooltip" title="Aggressive compression: 8× smaller but ~5% accuracy loss" style={{ marginLeft: '4px' }}>?</span>
+                    <TooltipIcon name="STORAGE_PLANNER_COMPRESSION_SCENARIOS" />
                   </span>
                   <span className="result-value">{formatBytes(results2.pq8)}</span>
                 </div>

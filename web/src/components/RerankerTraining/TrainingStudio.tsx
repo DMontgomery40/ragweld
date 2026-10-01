@@ -1333,14 +1333,14 @@ export function TrainingStudio() {
                 <strong>Synthetic Triplets</strong>
                 <div className="studio-form-grid two">
                   <div className="input-group">
-                    <label>Recipe</label>
+                    <label>Recipe <TooltipIcon name="TRAINING_RECIPE" /></label>
                     <select value={syntheticRecipe} onChange={(e) => setSyntheticRecipe(e.target.value as SyntheticRecipeKind)}>
                       <option value="triplets">Generate from current eval dataset</option>
                       <option value="full_stack">Generate fresh eval + triplets</option>
                     </select>
                   </div>
                   <div className="input-group">
-                    <label>Execution</label>
+                    <label>Execution <TooltipIcon name="TRAINING_EXECUTION" /></label>
                     <input type="text" value="Run from Synthetic Lab (model selection required)" readOnly />
                   </div>
                 </div>
@@ -1633,7 +1633,7 @@ export function TrainingStudio() {
 
               <div className="studio-form-grid one">
                 <div className="input-group">
-                  <label>Query</label>
+                  <label>Query <TooltipIcon name="RERANKER_PROBE_QUERY" /></label>
                   <textarea
                     value={probeQuery}
                     onChange={(e) => setProbeQuery(e.target.value)}
@@ -1643,7 +1643,7 @@ export function TrainingStudio() {
                 </div>
 
                 <div className="input-group">
-                  <label>Document</label>
+                  <label>Document <TooltipIcon name="RERANKER_PROBE_DOCUMENT" /></label>
                   <textarea
                     value={probeDocument}
                     onChange={(e) => setProbeDocument(e.target.value)}
@@ -1658,7 +1658,7 @@ export function TrainingStudio() {
                     checked={probeIncludeLogits}
                     onChange={(e) => setProbeIncludeLogits(e.target.checked)}
                   />
-                  Include raw logits
+                  Include raw logits <TooltipIcon name="RERANKER_PROBE_RAW_LOGITS" />
                 </label>
                 <p className="studio-panel-subtitle studio-note-tight">
                   Adds the model's pre-sigmoid output values to the result for debugging; leave off for the plain relevance score.

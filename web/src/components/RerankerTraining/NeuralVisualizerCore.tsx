@@ -492,7 +492,7 @@ export function NeuralVisualizerCore({
         </button>
 
         <label className="neural-zoom">
-          Zoom
+          Zoom <TooltipIcon name="LEARNING_RERANKER_VISUALIZER_ZOOM" />
           <input
             type="range"
             min={0.25}

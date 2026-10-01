@@ -1,3 +1,4 @@
+import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { useEffect, useMemo, useState } from 'react';
 import { agentTrainingService } from '@/services/AgentTrainingService';
 import type { AgentTrainDiffRequest, AgentTrainDiffResponse, AgentTrainRunMeta } from '@/types/generated';
@@ -84,7 +85,7 @@ export function RunDiff({ runs }: Props) {
         <>
           <div className="studio-form-grid two">
             <div className="input-group">
-              <label>Baseline</label>
+              <label>Baseline <TooltipIcon name="TRAINING_BASELINE_RUN" /></label>
               <select value={baselineRunId} onChange={(e) => setBaselineRunId(e.target.value)}>
                 <option value="">Select…</option>
                 {sorted.map((r) => (
@@ -95,7 +96,7 @@ export function RunDiff({ runs }: Props) {
               </select>
             </div>
             <div className="input-group">
-              <label>Current</label>
+              <label>Current <TooltipIcon name="TRAINING_CURRENT_RUN" /></label>
               <select value={currentRunId} onChange={(e) => setCurrentRunId(e.target.value)}>
                 <option value="">Select…</option>
                 {sorted.map((r) => (

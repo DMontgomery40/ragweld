@@ -3,6 +3,8 @@ import { type CSSProperties, useCallback, useEffect, useState } from 'react';
 import { configApi } from '@/api/config';
 import { useConfig } from '@/hooks';
 import { useActiveRepo } from '@/stores';
+import { TooltipIcon } from '@/components/ui/TooltipIcon';
+import configGlossaryKeys from './configGlossaryKeys.json';
 import type {
   ConfigFieldDescriptor,
   ConfigReadinessResponse,
@@ -279,6 +281,7 @@ export function ConfigFieldEditor({
   saving,
   showMetadata = true,
 }: ConfigFieldEditorProps) {
+  const glossaryKey = (configGlossaryKeys as Readonly<Record<string, string>>)[field.path];
   const currentValue = readConfigPath(config, field.path);
   const [draft, setDraft] = useState<string>(() => stringifyDraft(currentValue, field));
   const [fieldError, setFieldError] = useState<string | null>(null);
@@ -337,7 +340,9 @@ export function ConfigFieldEditor({
     <div data-config-path={field.path} style={{ ...CARD_STYLE, padding: 14, width: '100%', minWidth: 0 }}>
       <div style={FIELD_HEADER_STYLE}>
         <div style={{ ...WRAP_ANYWHERE_STYLE, flex: '1 1 240px' }}>
-          <div style={{ fontWeight: 700, color: 'var(--fg)' }}>{field.label}</div>
+          <div style={{ fontWeight: 700, color: 'var(--fg)' }}>
+            {field.label} {glossaryKey ? <TooltipIcon name={glossaryKey} /> : null}
+          </div>
           <div
             style={{
               ...WRAP_ANYWHERE_STYLE,

@@ -1810,7 +1810,7 @@ export function IndexingSubtab() {
               }}
             >
               <div style={{ fontWeight: 700, fontSize: '12px', marginBottom: '6px' }}>
-                Authenticated entity-sparse retry
+                Authenticated entity-sparse retry <TooltipIcon name="INDEX_GRAPH_ENTITY_SPARSE_OVERRIDE_REASON" />
               </div>
               <div style={{ fontSize: '11.5px', color: 'var(--fg-muted)', marginBottom: '8px' }}>
                 Available only because the full approved extraction succeeded and found no graph. The retry promotes chunks and vectors only; graph retrieval stays disabled. The proxy identity, reason, timestamp, and telemetry are persisted.
@@ -1907,7 +1907,7 @@ export function IndexingSubtab() {
             color: 'var(--fg)',
           }}
         >
-          Index contract is locked for this corpus. Enable <strong>Force reindex</strong> to edit fields that change dense or sparse index contents.
+          Index contract is locked for this corpus. Enable <strong>Force reindex</strong> <TooltipIcon name="FORCE_REINDEX" /> to edit fields that change dense or sparse index contents.
         </div>
       )}
 
@@ -3433,7 +3433,7 @@ export function IndexingSubtab() {
                 <div style={{ marginTop: '12px', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '14px' }}>
                   <div className="input-group">
                     <label style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '6px' }}>
-                      Max rows
+                      Max rows <TooltipIcon name="PARQUET_EXTRACT_MAX_ROWS" />
                     </label>
                     <NumberField
                       data-testid="parquet-extract-max-rows"
@@ -3448,7 +3448,7 @@ export function IndexingSubtab() {
                   </div>
                   <div className="input-group">
                     <label style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '6px' }}>
-                      Max chars
+                      Max chars <TooltipIcon name="PARQUET_EXTRACT_MAX_CHARS" />
                     </label>
                     <NumberField
                       data-testid="parquet-extract-max-chars"
@@ -3463,7 +3463,7 @@ export function IndexingSubtab() {
                   </div>
                   <div className="input-group">
                     <label style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '6px' }}>
-                      Max cell chars
+                      Max cell chars <TooltipIcon name="PARQUET_EXTRACT_MAX_CELL_CHARS" />
                     </label>
                     <NumberField
                       data-testid="parquet-extract-max-cell-chars"
@@ -3552,7 +3552,7 @@ export function IndexingSubtab() {
                     style={{ width: '18px', height: '18px' }}
                   />
                   <div>
-                    <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--fg)' }}>Build a real graph during indexing</div>
+                    <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--fg)' }}>Build a real graph during indexing <TooltipIcon name="GRAPH_INDEXING_ENABLED" /></div>
                     <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginTop: '2px' }}>
                       External documents use semantic extraction by default; code corpora can select the AST policy below.
                     </div>
@@ -3599,7 +3599,7 @@ export function IndexingSubtab() {
                     style={{ width: '18px', height: '18px' }}
                   />
                   <div>
-                    <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--fg)' }}>Build lexical chunk graph</div>
+                    <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--fg)' }}>Build lexical chunk graph <TooltipIcon name="LEXICAL_GRAPH_ENABLED" /></div>
                     <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginTop: '2px' }}>
                       Creates Document/Chunk nodes + NEXT_CHUNK edges for chunk-based GraphRAG.
                     </div>
@@ -3626,7 +3626,7 @@ export function IndexingSubtab() {
                     style={{ width: '18px', height: '18px' }}
                   />
                   <div>
-                    <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--fg)' }}>Use the code AST graph policy</div>
+                    <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--fg)' }}>Use the code AST graph policy <TooltipIcon name="BUILD_CODE_GRAPH" /></div>
                     <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginTop: '2px' }}>
                       Select this only for code corpora. Otherwise every enabled external corpus uses semantic entity extraction.
                     </div>
@@ -3636,13 +3636,13 @@ export function IndexingSubtab() {
                 {buildCodeGraph ? (
                   <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
                     {[
-                      ['Contains weight', astContainsWeight, setAstContainsWeight],
-                      ['Inherits weight', astInheritsWeight, setAstInheritsWeight],
-                      ['Imports weight', astImportsWeight, setAstImportsWeight],
-                      ['Calls weight', astCallsWeight, setAstCallsWeight],
-                    ].map(([label, value, onCommit]) => (
+                      ['Contains weight', astContainsWeight, setAstContainsWeight, 'AST_CONTAINS_WEIGHT'],
+                      ['Inherits weight', astInheritsWeight, setAstInheritsWeight, 'AST_INHERITS_WEIGHT'],
+                      ['Imports weight', astImportsWeight, setAstImportsWeight, 'AST_IMPORTS_WEIGHT'],
+                      ['Calls weight', astCallsWeight, setAstCallsWeight, 'AST_CALLS_WEIGHT'],
+                    ].map(([label, value, onCommit, tooltipKey]) => (
                       <div className="input-group" key={String(label)}>
-                        <label>{String(label)}</label>
+                        <label>{String(label)} <TooltipIcon name={String(tooltipKey)} /></label>
                         <NumberField
                           min={0}
                           max={1}
@@ -3672,7 +3672,7 @@ export function IndexingSubtab() {
                   </div>
                   <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
                     <div className="input-group">
-                      <label>KG LLM Alias</label>
+                      <label>KG LLM Alias <TooltipIcon name="SEMANTIC_KG_LLM_MODEL" /></label>
                       <ChatModelPicker
                         value={semanticKgLlmModel}
                         onChange={setSemanticKgLlmModel}
@@ -3682,7 +3682,7 @@ export function IndexingSubtab() {
                       />
                     </div>
                     <div className="input-group">
-                      <label>Reasoning effort</label>
+                      <label>Reasoning effort <TooltipIcon name="SEMANTIC_KG_REASONING_EFFORT" /></label>
                       <select
                         data-testid="semantic-kg-reasoning-effort"
                         value={semanticKgReasoningEffort}
@@ -3694,7 +3694,7 @@ export function IndexingSubtab() {
                       </select>
                     </div>
                     <div className="input-group">
-                      <label>Semantic chunk ceiling</label>
+                      <label>Semantic chunk ceiling <TooltipIcon name="SEMANTIC_KG_MAX_CHUNKS" /></label>
                       <NumberField
                         data-testid="semantic-kg-max-chunks"
                         min={1}
@@ -3705,7 +3705,7 @@ export function IndexingSubtab() {
                       />
                     </div>
                     <div className="input-group">
-                      <label>Per-chunk timeout (seconds)</label>
+                      <label>Per-chunk timeout (seconds) <TooltipIcon name="SEMANTIC_KG_LLM_TIMEOUT_S" /></label>
                       <NumberField
                         data-testid="semantic-kg-timeout"
                         min={5}
@@ -4291,7 +4291,7 @@ export function IndexingSubtab() {
                   style={{ marginTop: '2px' }}
                 />
                 <span>
-                  <strong style={{ color: 'var(--err)' }}>Force reindex</strong> — allows changes to embedding
+                  <strong style={{ color: 'var(--err)' }}>Force reindex</strong> <TooltipIcon name="FORCE_REINDEX" /> — allows changes to embedding
                   and sparse index settings. The replacement becomes active after validation. Changed settings
                   may make searches unavailable until the rebuild succeeds.
                 </span>

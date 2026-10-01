@@ -1,3 +1,4 @@
+import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { evalApi } from '@/api/eval';
 import { AssistantMarkdown } from '@/components/ui/AssistantMarkdown';
@@ -144,7 +145,7 @@ export function PromptfooRegressionPanel({ corpusId }: Props) {
             htmlFor="promptfoo-sample-size"
             style={{ fontSize: '12px', color: 'var(--fg-muted)' }}
           >
-            Sample size
+            Sample size <TooltipIcon name="PROMPTFOO_SAMPLE_SIZE" />
           </label>
           <select
             id="promptfoo-sample-size"

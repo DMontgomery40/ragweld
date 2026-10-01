@@ -1,3 +1,4 @@
+import { TooltipIcon } from '@/components/ui/TooltipIcon';
 /**
  * EvalDatasetManager (formerly QuestionManager)
  * Manages evaluation dataset entries for RAG testing
@@ -50,6 +51,7 @@ const LocationEditor: React.FC<LocationEditorProps> = ({ paths, drafts, onChange
   if (paths.length === 0) return null;
   return (
     <div data-testid={`${testIdPrefix}-locations`} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+      <div style={{ fontSize: 12 }}>Expected location <TooltipIcon name="EVAL_EXPECTED_LOCATION" /></div>
       {paths.map((path, index) => {
         const draft = drafts[path] ?? EMPTY_DRAFT;
         const unitLabel = draft.unit === 'page' ? 'page' : 'line';
@@ -285,6 +287,7 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ className = ''
         </h3>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div style={{ fontSize: 12 }}>Question <TooltipIcon name="EVAL_QUESTION" /></div>
           <input
             type="text"
             placeholder="Question (e.g., Where is X implemented?)"
@@ -300,6 +303,7 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ className = ''
             }}
           />
 
+          <div style={{ fontSize: 12 }}>Expected paths <TooltipIcon name="EVAL_EXPECTED_PATHS" /></div>
           <input
             type="text"
             placeholder="Expected paths (comma-separated)"
@@ -326,6 +330,7 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ className = ''
             {LOCATION_HINT}
           </div>
 
+          <div style={{ fontSize: 12 }}>Expected answer <TooltipIcon name="EVAL_EXPECTED_ANSWER" /></div>
           <textarea
             placeholder="Expected answer (optional — the rubric the Promptfoo grader scores against)"
             aria-label="Expected answer"
@@ -420,6 +425,7 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ className = ''
               >
                 {editingId === entry.entry_id ? (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div style={{ fontSize: 12 }}>Question <TooltipIcon name="EVAL_QUESTION" /></div>
                     <input
                       type="text"
                       value={editQuestion}
@@ -432,6 +438,7 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ className = ''
                         color: 'var(--fg)',
                       }}
                     />
+                    <div style={{ fontSize: 12 }}>Expected paths <TooltipIcon name="EVAL_EXPECTED_PATHS" /></div>
                     <input
                       type="text"
                       value={editPaths}
@@ -453,6 +460,7 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ className = ''
                       onChange={(path, draft) => setEditDrafts((prev) => ({ ...prev, [path]: draft }))}
                       testIdPrefix="eval-edit"
                     />
+                    <div style={{ fontSize: 12 }}>Expected answer <TooltipIcon name="EVAL_EXPECTED_ANSWER" /></div>
                     <textarea
                       value={editAnswer}
                       onChange={(e) => setEditAnswer(e.target.value)}

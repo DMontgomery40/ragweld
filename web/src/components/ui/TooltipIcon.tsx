@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTooltips } from '@/hooks/useTooltips';
 
@@ -26,6 +26,9 @@ export function TooltipIcon({ name }: TooltipIconProps) {
   const wrapRef = useRef<HTMLSpanElement>(null);
   const bubbleRef = useRef<HTMLDivElement>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pinnedRef = useRef(false);
+  const suppressFocusRef = useRef(false);
+  const tooltipId = useId();
 
   // Get tooltip HTML content
   const content = getTooltip(name) || `<span class="tt-title">${name}</span><div>No tooltip available.</div>`;
@@ -144,12 +147,18 @@ export function TooltipIcon({ name }: TooltipIconProps) {
       const clickedTrigger = !!wrapRef.current?.contains(target);
       const clickedBubble = !!bubbleRef.current?.contains(target);
       if (!clickedTrigger && !clickedBubble) {
+        pinnedRef.current = false;
         setVisible(false);
       }
     };
 
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        pinnedRef.current = false;
+        if (bubbleRef.current?.contains(document.activeElement)) {
+          suppressFocusRef.current = true;
+          wrapRef.current?.querySelector<HTMLElement>('.help-icon')?.focus();
+        }
         setVisible(false);
       }
     };
@@ -200,22 +209,44 @@ export function TooltipIcon({ name }: TooltipIconProps) {
 
   const hide = () => {
     clearHideTimeout();
-    timeoutRef.current = setTimeout(() => setVisible(false), 150);
+    timeoutRef.current = setTimeout(() => {
+      if (!pinnedRef.current && !bubbleRef.current?.contains(document.activeElement)
+          && !wrapRef.current?.contains(document.activeElement)) setVisible(false);
+    }, 150);
+  };
+
+  const handleBlur = (e: React.FocusEvent) => {
+    const next = e.relatedTarget as Node | null;
+    if (next && (wrapRef.current?.contains(next) || bubbleRef.current?.contains(next))) return;
+    pinnedRef.current = false;
+    hide();
   };
 
   const toggle = (e: React.MouseEvent) => {
+    // Help is often inside a setting label; opening it must not toggle that field.
+    e.preventDefault();
     e.stopPropagation();
     clearHideTimeout();
-    setVisible(v => !v);
+    pinnedRef.current = !pinnedRef.current;
+    setVisible(pinnedRef.current);
   };
 
   const tooltipBubble = visible && typeof document !== 'undefined'
     ? createPortal(
         <div
           ref={bubbleRef}
+          id={tooltipId}
           className={`tooltip-bubble tooltip-visible tooltip-bubble--floating tooltip-bubble--${placement}`}
           onMouseEnter={show}
           onMouseLeave={hide}
+          onFocusCapture={show}
+          onBlurCapture={handleBlur}
+          onKeyDown={e => {
+            if (e.key === 'Tab' && e.shiftKey && e.target === bubbleRef.current?.querySelector('a')) {
+              e.preventDefault();
+              wrapRef.current?.querySelector<HTMLElement>('.help-icon')?.focus();
+            }
+          }}
           role="tooltip"
           aria-label={`Tooltip for ${name}`}
           style={{
@@ -223,6 +254,8 @@ export function TooltipIcon({ name }: TooltipIconProps) {
             top: `${position.top}px`,
             left: `${position.left}px`,
             maxWidth: `min(${TOOLTIP_MAX_WIDTH_PX}px, calc(100vw - ${VIEWPORT_MARGIN_PX * 2}px))`,
+            minWidth: `min(260px, calc(100vw - ${VIEWPORT_MARGIN_PX * 2}px))`,
+            boxSizing: 'border-box',
             zIndex: 30000,
           }}
         >
@@ -242,12 +275,32 @@ export function TooltipIcon({ name }: TooltipIconProps) {
         <span
           className="help-icon"
           tabIndex={0}
+          role="button"
           aria-label={`Help: ${name}`}
+          aria-expanded={visible}
+          aria-controls={visible ? tooltipId : undefined}
           onClick={toggle}
           onMouseEnter={show}
           onMouseLeave={hide}
-          onFocus={show}
-          onBlur={hide}
+          onFocus={() => {
+            if (suppressFocusRef.current) suppressFocusRef.current = false;
+            else show();
+          }}
+          onBlur={handleBlur}
+          onKeyDown={e => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              e.stopPropagation();
+              pinnedRef.current = true;
+              show();
+            } else if (e.key === 'Tab' && !e.shiftKey && visible) {
+              const firstLink = bubbleRef.current?.querySelector<HTMLAnchorElement>('a');
+              if (firstLink) {
+                e.preventDefault();
+                firstLink.focus();
+              }
+            }
+          }}
           style={{ cursor: 'help' }}
         >
           ?

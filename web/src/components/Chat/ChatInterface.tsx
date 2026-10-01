@@ -1,3 +1,4 @@
+import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import type React from 'react';
 import {
   createContext,
@@ -2245,6 +2246,7 @@ export function ChatInterface({ workbenchId }: ChatInterfaceProps) {
           />
 
           <div style={{ flex: '1 1 220px', minWidth: '180px', maxWidth: '360px' }}>
+            <span style={{ fontSize: 12 }}>Model <TooltipIcon name="CHAT_MODEL_OVERRIDE" /></span>
             <ModelPicker value={modelOverride} onChange={setModelOverride} models={chatModels} />
           </div>
 
@@ -2572,7 +2574,7 @@ export function ChatInterface({ workbenchId }: ChatInterfaceProps) {
 
             <div style={{ marginBottom: '16px' }}>
               <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: 'var(--fg-muted)', marginBottom: '4px' }}>
-                Temperature: {temperature}
+                Temperature: {temperature} <TooltipIcon name="CHAT_TEMPERATURE" />
               </label>
               <input
                 type="range"
@@ -2587,7 +2589,7 @@ export function ChatInterface({ workbenchId }: ChatInterfaceProps) {
 
             <div style={{ marginBottom: '16px' }}>
               <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: 'var(--fg-muted)', marginBottom: '4px' }}>
-                Max Tokens
+                Max Tokens <TooltipIcon name="CHAT_MAX_TOKENS" />
               </label>
               <NumberField
                 configPath="chat.max_tokens"
@@ -2612,7 +2614,7 @@ export function ChatInterface({ workbenchId }: ChatInterfaceProps) {
                 htmlFor="chat-top-k"
                 style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--fg-muted)', marginBottom: '4px' }}
               >
-                Top-K (results) for this conversation
+                Top-K (results) for this conversation <TooltipIcon name="CHAT_TOP_K_OVERRIDE" />
               </label>
               {/*
                 Deliberately NOT a NumberField (T5/M-25): this control is a *nullable* override

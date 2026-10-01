@@ -1,3 +1,4 @@
+import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { SECRET_REDACTED } from '@/api/secrets';
 import { evalApi } from '@/api';
@@ -928,7 +929,6 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
             {/* Embedding difference badge - highlighted prominently */}
             {hasEmbeddingDiff(configDiffs) && (
               <span 
-                data-tooltip="EMBEDDING_MISMATCH"
                 style={{
                   fontSize: '12px',
                   fontWeight: 700,
@@ -943,7 +943,7 @@ export const EvalDrillDown: React.FC<EvalDrillDownProps> = ({ runId, compareWith
                 }}
               >
                 <span>⚠️</span>
-                EMBEDDING DIFFERS
+                EMBEDDING DIFFERS <TooltipIcon name="EMBEDDING_MISMATCH" />
               </span>
             )}
           </h2>

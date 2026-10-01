@@ -1236,14 +1236,14 @@ export function TrainingStudio() {
                   </select>
                 </div>
                 <div className="input-group">
-                  <label>Workflow backend</label>
+                  <label>Workflow backend <TooltipIcon name="RAGWELD_AGENT_WORKFLOW_BACKEND" /></label>
                   <select value={workflowBackend} onChange={(e) => setWorkflowBackend(e.target.value as 'local' | 'flyte')}>
                     <option value="local">local</option>
                     <option value="flyte">flyte</option>
                   </select>
                 </div>
                 <div className="input-group">
-                  <label>Tracking backend</label>
+                  <label>Tracking backend <TooltipIcon name="RAGWELD_AGENT_TRACKING_BACKEND" /></label>
                   <select value={trackingBackend} onChange={(e) => setTrackingBackend(e.target.value as 'local' | 'mlflow')}>
                     <option value="local">local</option>
                     <option value="mlflow">mlflow</option>
@@ -1277,14 +1277,14 @@ export function TrainingStudio() {
                   <div style={{ fontWeight: 700, marginBottom: 8 }}>Synthetic Dataset Builder</div>
                   <div className="studio-form-grid two">
                     <div className="input-group">
-                      <label>Recipe</label>
+                      <label>Recipe <TooltipIcon name="TRAINING_RECIPE" /></label>
                       <select value={syntheticRecipe} onChange={(e) => setSyntheticRecipe(e.target.value as SyntheticRecipeKind)}>
                         <option value="eval_dataset">Eval dataset (trainable)</option>
                         <option value="full_stack">Eval dataset + extras</option>
                       </select>
                     </div>
                     <div className="input-group">
-                      <label>Execution</label>
+                      <label>Execution <TooltipIcon name="TRAINING_EXECUTION" /></label>
                       <input type="text" value="Run from Synthetic Lab (model selection required)" readOnly />
                     </div>
                   </div>
@@ -1309,27 +1309,27 @@ export function TrainingStudio() {
                 </summary>
                 <div className="studio-form-grid two">
                   <div className="input-group">
-                    <label>Flyte admin base URL</label>
+                    <label>Flyte admin base URL <TooltipIcon name="RAGWELD_AGENT_FLYTE_ADMIN_BASE_URL" /></label>
                     <input type="text" value={flyteAdminBaseUrl} onChange={(e) => setFlyteAdminBaseUrl(e.target.value)} placeholder="http://localhost:30080" />
                   </div>
                   <div className="input-group">
-                    <label>Flyte console base URL</label>
+                    <label>Flyte console base URL <TooltipIcon name="RAGWELD_AGENT_FLYTE_CONSOLE_BASE_URL" /></label>
                     <input type="text" value={flyteConsoleBaseUrl} onChange={(e) => setFlyteConsoleBaseUrl(e.target.value)} placeholder="http://localhost:30080/console" />
                   </div>
                   <div className="input-group">
-                    <label>Flyte project</label>
+                    <label>Flyte project <TooltipIcon name="RAGWELD_AGENT_FLYTE_PROJECT" /></label>
                     <input type="text" value={flyteProject} onChange={(e) => setFlyteProject(e.target.value)} />
                   </div>
                   <div className="input-group">
-                    <label>Flyte domain</label>
+                    <label>Flyte domain <TooltipIcon name="RAGWELD_AGENT_FLYTE_DOMAIN" /></label>
                     <input type="text" value={flyteDomain} onChange={(e) => setFlyteDomain(e.target.value)} />
                   </div>
                   <div className="input-group">
-                    <label>Flyte launch plan</label>
+                    <label>Flyte launch plan <TooltipIcon name="RAGWELD_AGENT_FLYTE_LAUNCHPLAN" /></label>
                     <input type="text" value={flyteLaunchplan} onChange={(e) => setFlyteLaunchplan(e.target.value)} placeholder="learning-agent-train" />
                   </div>
                   <div className="input-group">
-                    <label>Flyte callback base URL (this API as seen from Flyte task pods)</label>
+                    <label>Flyte callback base URL (this API as seen from Flyte task pods) <TooltipIcon name="RAGWELD_AGENT_FLYTE_CALLBACK_BASE_URL" /></label>
                     <input
                       type="text"
                       value={flyteCallbackBaseUrl}
@@ -1338,11 +1338,11 @@ export function TrainingStudio() {
                     />
                   </div>
                   <div className="input-group">
-                    <label>MLflow tracking URL</label>
+                    <label>MLflow tracking URL <TooltipIcon name="RAGWELD_AGENT_MLFLOW_TRACKING_URL" /></label>
                     <input type="text" value={mlflowTrackingUrl} onChange={(e) => setMlflowTrackingUrl(e.target.value)} placeholder="http://localhost:5000" />
                   </div>
                   <div className="input-group">
-                    <label>MLflow Browser URL</label>
+                    <label>MLflow Browser URL <TooltipIcon name="RAGWELD_AGENT_MLFLOW_CONSOLE_BASE_URL" /></label>
                     <input
                       data-testid="learning-agent-mlflow-console-base-url"
                       type="text"
@@ -1358,11 +1358,11 @@ export function TrainingStudio() {
                     </div>
                   </div>
                   <div className="input-group">
-                    <label>MLflow experiment</label>
+                    <label>MLflow experiment <TooltipIcon name="RAGWELD_AGENT_MLFLOW_EXPERIMENT_NAME" /></label>
                     <input type="text" value={mlflowExperimentName} onChange={(e) => setMlflowExperimentName(e.target.value)} />
                   </div>
                   <div className="input-group">
-                    <label>Unsloth image</label>
+                    <label>Unsloth image <TooltipIcon name="RAGWELD_AGENT_UNSLOTH_IMAGE" /></label>
                     <input type="text" value={unslothImage} onChange={(e) => setUnslothImage(e.target.value)} placeholder="ghcr.io/your-org/unsloth:tag" />
                   </div>
                 </div>

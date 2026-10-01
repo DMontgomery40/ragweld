@@ -1,3 +1,4 @@
+import { TooltipIcon } from '@/components/ui/TooltipIcon';
 // TriBridRAG - Repository Configuration Component
 // Refactored to use Zustand stores per CLAUDE.md requirements
 // Uses useRepoStore for repo list/selection/updates
@@ -160,7 +161,7 @@ export function RepositoryConfig({ onExcludePathsChange }: RepositoryConfigProps
 
       {/* Path */}
       <div className="input-group" style={{ marginBottom: '12px' }}>
-        <label>Path</label>
+        <label>Path <TooltipIcon name="REPO_PATH" /></label>
         <div style={{ display: 'flex', gap: '8px' }}>
           <input
             type="text"
@@ -197,7 +198,7 @@ export function RepositoryConfig({ onExcludePathsChange }: RepositoryConfigProps
 
       {/* Exclude Paths */}
       <div className="input-group" style={{ marginBottom: '12px' }}>
-        <label>Exclude Paths (paths/patterns to skip during indexing)</label>
+        <label>Exclude Paths (paths/patterns to skip during indexing) <TooltipIcon name="EXCLUDE_PATHS" /></label>
         <div
           id={`exclude-paths-container-${domId}`}
           style={{
@@ -277,7 +278,7 @@ export function RepositoryConfig({ onExcludePathsChange }: RepositoryConfigProps
 
       {/* Keywords */}
       <div className="input-group" style={{ marginBottom: '12px' }}>
-        <label>Keywords (comma-separated)</label>
+        <label>Keywords (comma-separated) <TooltipIcon name="REPO_KEYWORDS" /></label>
         <input
           type="text"
           value={keywordsInput}
@@ -289,7 +290,7 @@ export function RepositoryConfig({ onExcludePathsChange }: RepositoryConfigProps
 
       {/* Path Boosts */}
       <div className="input-group" style={{ marginBottom: '12px' }}>
-        <label>Path Boosts (comma-separated)</label>
+        <label>Path Boosts (comma-separated) <TooltipIcon name="PATH_BOOSTS" /></label>
         <input
           type="text"
           value={pathBoostsInput}
@@ -299,7 +300,7 @@ export function RepositoryConfig({ onExcludePathsChange }: RepositoryConfigProps
 
       {/* Layer Bonuses */}
       <div className="input-group">
-        <label>Layer Bonuses (JSON)</label>
+        <label>Layer Bonuses (JSON) <TooltipIcon name="REPO_LAYER_BONUSES" /></label>
         <textarea
           value={layerBonusesInput}
           onChange={(e) => setLayerBonusesInput(e.target.value)}
