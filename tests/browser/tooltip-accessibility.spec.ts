@@ -4,11 +4,14 @@ import path from 'node:path';
 
 const fixturePath = path.resolve('web/.tooltip-acceptance.html');
 test.beforeAll(async () => {
-  await writeFile(fixturePath, `<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head><body><div id="root"></div><script type="module">
+  await writeFile(fixturePath, `<!doctype html><html data-theme="light"><head><meta name="viewport" content="width=device-width, initial-scale=1"></head><body><div id="root"></div><script type="module">
 import React from "react";
 import {createRoot} from "react-dom/client";
 import {TooltipIcon} from "/src/components/ui/TooltipIcon.tsx";
+import "/src/styles/tokens.css";
+import "/src/styles/main.css";
 import "/src/styles/style.css";
+import "/src/styles/global.css";
 createRoot(document.getElementById("root")).render(React.createElement("main",{style:{padding:20}},React.createElement("label",null,React.createElement("input",{type:"checkbox","aria-label":"Fixture setting"}),"Chunking strategy",React.createElement(TooltipIcon,{name:"CHUNKING_STRATEGY"})),React.createElement("button",null,"Outside help")));
 </script></body></html>`);
 });
@@ -63,6 +66,8 @@ test('long glossary references stay within a narrow viewport', async ({ page }) 
   await page.getByLabel('Help: CHUNKING_STRATEGY', { exact: true }).click();
   const bubble = page.getByRole('tooltip');
   await expect(bubble).toBeVisible();
+  await expect(bubble).toHaveCSS('background-color', /^(?:rgb\([^)]*\)|rgba\([^)]*, 1\))$/);
+  await expect(bubble).toHaveCSS('color', 'rgb(24, 24, 27)');
   const box = await bubble.boundingBox();
   expect(box).not.toBeNull();
   expect(box!.x).toBeGreaterThanOrEqual(7);

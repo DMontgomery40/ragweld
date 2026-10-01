@@ -63,3 +63,7 @@ Full `.venv/bin/python -m pytest -q --no-cov`: **3,446 passed, 984 skipped, 42 f
 Mandatory hosted Jev lint was **not executed**: this task has no approval to disclose its private source files to `api.typesafe.ai`; another task's four-file request does not authorize this scope. Local `--dry-run` additionally exposes an existing limit: `IndexingSubtab.tsx` needs 203,118 characters for file-scoped rules, exceeding the configured 120,000-character request limit. Nothing was sent. The browser test directory and public mirror are outside Jev's configured source scope. Do not claim the mandatory lint gate passed.
 
 Production visual acceptance of changed code remains pending a separately authorized deployment. No implementation gap is being hidden by that gate.
+
+## Screenshot fixture correction
+
+The first mobile fixture screenshot lacked the app's `tokens.css`, so `--card-bg` was unresolved and underlying fixture text showed through the bubble. The application already imports these tokens. The fixture now imports the app base styles in the same order, selects the light theme, and asserts both an opaque computed background and the expected foreground color before capturing the narrow viewport. Re-ran only `tooltip-accessibility.spec.ts`: **3 passed** in 2.6 seconds, including keyboard reference opening, overflow and touch. Replaced `tooltip-mobile.png` and `tooltip-keyboard-links.png`; see `browser-theme-fixture.log`. No application behavior changed in this follow-up.
