@@ -90,7 +90,7 @@ _REMOVED_FLAT_KEYS: tuple[str, ...] = (
 
 
 _PRODUCTION_SCOPED_GLOBAL_PATHS: tuple[str, ...] = (
-    "generation.gen_model",
+    # The primary generation alias is corpus-owned, seeded from the global template.
     "generation.enrich_model",
     "generation.gen_max_tokens",
     "chat.max_tokens",
@@ -313,7 +313,21 @@ class ConfigStore:
                     await self._postgres.upsert_corpus_config_json(repo_id, base.model_dump())
                 cfg = base
             else:
+                generation = raw.get("generation", {})
+                seed_generation_default = (
+                    base.ui.runtime_mode == "production"
+                    and isinstance(generation, dict)
+                    and "gen_model" not in generation
+                )
+                if seed_generation_default:
+                    # Inspect omission before validation fills the development default.
+                    # Present choices (including Sol) must survive every subsequent read.
+                    raw = copy.deepcopy(raw)
+                    raw.setdefault("generation", {})["gen_model"] = base.generation.gen_model
                 cfg, changed, migrated = _upgrade_raw_config(raw)
+                if seed_generation_default:
+                    changed = True
+                    migrated.append("generation.gen_model")
                 cfg, reconciled, reconciled_paths = _reconcile_production_scope(cfg, base)
                 changed = changed or reconciled
                 migrated.extend(reconciled_paths)
@@ -355,6 +369,10 @@ class ConfigStore:
     async def reset(self, repo_id: str | None = None) -> TriBridConfig:
         """Reset config to LAW defaults for the selected scope."""
         cfg = TriBridConfig()
+        if repo_id is not None:
+            base = await self.get(repo_id=None)
+            if base.ui.runtime_mode == "production":
+                cfg.generation.gen_model = base.generation.gen_model
         return await self.save(cfg, repo_id=repo_id)
 
     def clear_cache(self, repo_id: str | None = None) -> None:

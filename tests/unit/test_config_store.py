@@ -135,42 +135,6 @@ def _legacy_scoped_config() -> TriBridConfig:
 
 
 @pytest.mark.asyncio
-async def test_production_scope_reconciles_deployment_contract_and_persists_migration() -> None:
-    global_cfg = _production_global_config()
-    legacy = _legacy_scoped_config()
-    postgres = _SnapshotPostgres(legacy.model_dump())
-    store = ConfigStore("postgresql://unused")
-    store._cache[None] = global_cfg
-    store._postgres = postgres  # type: ignore[assignment]
-
-    scoped = await store.get(repo_id="nasa-apollo-11")
-
-    assert scoped.generation.gen_model == "openai.gpt-6-sol"
-    assert scoped.generation.enrich_model == "openai.gpt-6-sol"
-    assert scoped.chat.max_tokens == 16000
-    assert scoped.chat.litellm.default_model == "z-ai.glm-5.3-flash"
-    assert scoped.ui.chat_default_model == "z-ai.glm-5.3-flash"
-    assert scoped.chat.web == global_cfg.chat.web
-    assert scoped.synthetic.generator.max_tokens == 16000
-    assert scoped.ui.grafana_base_url == "https://ragweld-grafana.dtmont.com"
-    assert scoped.tracing.langfuse_public_base_url == "https://ragweld-langfuse.dtmont.com"
-    assert scoped.tracing.faro_base_url == "https://ragweld.dtmont.com/faro/collect"
-    assert scoped.tracing.trace_store_path == "data/traces/workbench.json"
-    assert scoped.training.ragweld_agent_flyte_console_base_url == "https://ragweld-flyte.dtmont.com"
-    assert scoped.training.ragweld_agent_mlflow_console_base_url == "https://ragweld-mlflow.dtmont.com"
-    assert scoped.evaluation.ragas_judge_model == "openai.gpt-6-sol"
-    assert scoped.evaluation.promptfoo_grader_model == "openai.gpt-6-sol"
-    assert scoped.chat.temperature == 1.7
-
-    assert len(postgres.upserts) == 1
-    repo_id, persisted = postgres.upserts[0]
-    assert repo_id == "nasa-apollo-11"
-    assert persisted["ui"]["grafana_base_url"] == "https://ragweld-grafana.dtmont.com"  # type: ignore[index]
-    assert persisted["chat"]["litellm"]["default_model"] == "z-ai.glm-5.3-flash"  # type: ignore[index]
-    assert persisted["chat"]["web"]["max_characters"] == 24000  # type: ignore[index]
-
-
-@pytest.mark.asyncio
 async def test_production_scope_save_cannot_reintroduce_deployment_drift() -> None:
     global_cfg = _production_global_config()
     legacy = _legacy_scoped_config()

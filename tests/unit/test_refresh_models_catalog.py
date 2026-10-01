@@ -466,6 +466,7 @@ def test_refresh_guards_the_production_aliases_and_the_committed_catalog_routes_
     from deploy.proxmox import render_config
 
     assert production_aliases() == (
+        render_config.PRODUCTION_GENERATION_MODEL_ALIAS,
         render_config.PRODUCTION_MODEL_ALIAS,
         render_config.PRODUCTION_CHAT_MODEL_ALIAS,
         render_config.PRODUCTION_VISION_MODEL_ALIAS,

@@ -12,6 +12,7 @@ from server.config import _strip_removed_keys
 from server.models.tribrid_config_model import TriBridConfig
 
 PRODUCTION_MODEL_ALIAS = "openai.gpt-6-sol"
+PRODUCTION_GENERATION_MODEL_ALIAS = "openai.gpt-6-luna"
 PRODUCTION_CHAT_MODEL_ALIAS = "z-ai.glm-5.3-flash"
 PRODUCTION_VISION_MODEL_ALIAS = "anthropic.claude-sonnet-5"
 PRODUCTION_LONG_FORM_MAX_TOKENS = 16000
@@ -75,7 +76,11 @@ def _with_entry(values: list[str], entry: str) -> list[str]:
 
 
 def _apply_production_defaults(config: TriBridConfig) -> TriBridConfig:
-    config.generation.gen_model = PRODUCTION_MODEL_ALIAS
+    generation_default = type(config.generation).model_fields["gen_model"].default
+    if "gen_model" not in config.generation.model_fields_set or (
+        config.ui.runtime_mode != "production" and config.generation.gen_model == generation_default
+    ):
+        config.generation.gen_model = PRODUCTION_GENERATION_MODEL_ALIAS
     config.generation.enrich_model = PRODUCTION_MODEL_ALIAS
     config.generation.gen_max_tokens = PRODUCTION_LONG_FORM_MAX_TOKENS
     config.chat.max_tokens = PRODUCTION_LONG_FORM_MAX_TOKENS
