@@ -1,3 +1,4 @@
+import { TooltipIcon } from '@/components/ui/TooltipIcon';
 // Get Started: a four-step onboarding that only promises what the app can do,
 // on the real APIs (corpus registry, index run stream, chat). The previous
 // wizard was a vanilla-JS-era mock whose folder/GitHub cards, sliders, eval and
@@ -373,7 +374,7 @@ export default function StartTab() {
               <p className="ob-subtitle">A corpus is any folder of documents or code that ragweld indexes and searches.</p>
 
               <div className="ob-input-group">
-                <label htmlFor="onboarding-existing-corpus">Use an existing corpus</label>
+                <label htmlFor="onboarding-existing-corpus">Use an existing corpus <TooltipIcon name="REPO" /></label>
                 <select
                   id="onboarding-existing-corpus"
                   className="ob-text-input"
@@ -392,7 +393,7 @@ export default function StartTab() {
 
               <p className="ob-hint">Or register a new folder on the machine running ragweld:</p>
               <div className="ob-input-group">
-                <label htmlFor="onboarding-corpus-name">Corpus name</label>
+                <label htmlFor="onboarding-corpus-name">Corpus name <TooltipIcon name="CORPUS_NAME" /></label>
                 <input
                   id="onboarding-corpus-name"
                   type="text"
@@ -404,7 +405,7 @@ export default function StartTab() {
                 />
               </div>
               <div className="ob-input-group">
-                <label htmlFor="onboarding-corpus-path">Folder path</label>
+                <label htmlFor="onboarding-corpus-path">Folder path <TooltipIcon name="REPO_PATH" /></label>
                 <input
                   id="onboarding-corpus-path"
                   type="text"

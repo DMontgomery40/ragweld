@@ -65,7 +65,7 @@ function SyntheticModelPicker({
 
   return (
     <div className="setting-row">
-      <label>{label}</label>
+      <label>{label} <TooltipIcon name="SYNTHETIC_GENERATOR_MODEL" /></label>
       {loading ? (
         <span style={{ color: 'var(--fg-muted)', fontSize: '13px' }}>Loading runnable models...</span>
       ) : error ? (
@@ -548,7 +548,7 @@ export function SyntheticLabSubtab() {
         <div style={{ fontWeight: 600, marginBottom: 10 }}>Recipe Builder</div>
         <div className="input-row">
           <div className="input-group">
-            <label>Provider</label>
+            <label>Provider <TooltipIcon name="GROUNDED_QA" /></label>
             <select value={provider} onChange={(e) => setProvider(e.target.value as SyntheticProvider)}>
               {PROVIDERS.map((p) => (
                 <option key={p} value={p}>
@@ -558,7 +558,7 @@ export function SyntheticLabSubtab() {
             </select>
           </div>
           <div className="input-group">
-            <label>Recipe</label>
+            <label>Recipe <TooltipIcon name="SYNTHETIC_RECIPE" /></label>
             <select value={recipe} onChange={(e) => setRecipe(e.target.value as SyntheticRecipeKind)}>
               {RECIPES.map((r) => (
                 <option key={r} value={r}>
@@ -592,7 +592,7 @@ export function SyntheticLabSubtab() {
 
         <div className="input-row">
           <div className="input-group">
-            <label>Max source chunks</label>
+            <label>Max source chunks <TooltipIcon name="SYNTHETIC_MAX_SOURCE_CHUNKS" /></label>
             <NumberField
               min={10}
               max={20000}
@@ -601,11 +601,11 @@ export function SyntheticLabSubtab() {
             />
           </div>
           <div className="input-group">
-            <label>Max pairs</label>
+            <label>Max pairs <TooltipIcon name="SYNTHETIC_MAX_PAIRS" /></label>
             <NumberField min={10} max={50000} value={maxPairs} onCommit={setMaxPairs} />
           </div>
           <div className="input-group">
-            <label>Pairs per source</label>
+            <label>Pairs per source <TooltipIcon name="SYNTHETIC_PAIRS_PER_SOURCE" /></label>
             <NumberField
               min={1}
               max={20}
@@ -708,7 +708,7 @@ export function SyntheticLabSubtab() {
       </section>
 
       <section style={{ border: '1px solid var(--line)', borderRadius: 10, padding: 14, background: 'var(--bg-elev1)' }}>
-        <div style={{ fontWeight: 600, marginBottom: 10 }}>Artifacts + Publish</div>
+        <div style={{ fontWeight: 600, marginBottom: 10 }}>Artifacts + Publish <TooltipIcon name="SYNTHETIC_PUBLISH" /></div>
         {!selectedRun ? (
           <div style={{ color: 'var(--fg-muted)' }}>Select a run to inspect artifacts.</div>
         ) : (
@@ -754,7 +754,7 @@ export function SyntheticLabSubtab() {
             </div>
 
             <div className="studio-callout" style={{ marginBottom: 10 }}>
-              <div style={{ fontWeight: 600, marginBottom: 6 }}>Quality Gate</div>
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>Quality Gate <TooltipIcon name="SYNTHETIC_QUALITY_GATE" /></div>
               <div className="studio-mono">
                 threshold={fmtScore(selectedRun.summary?.quality_gate_threshold)} top1={fmtScore(selectedRun.summary?.quality_top1_accuracy)} topk={fmtScore(selectedRun.summary?.quality_topk_accuracy)} mrr={fmtScore(selectedRun.summary?.quality_mrr)} n={selectedRun.summary?.quality_sample_size ?? 0}
               </div>
@@ -778,7 +778,7 @@ export function SyntheticLabSubtab() {
             </div>
 
             <div className="studio-callout" style={{ marginBottom: 10 }} data-testid="synthetic-grounding-summary">
-              <div style={{ fontWeight: 600, marginBottom: 6 }}>Grounding &amp; Curation</div>
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>Grounding &amp; Curation <TooltipIcon name="SYNTHETIC_GROUNDING" /></div>
               <div data-testid="synthetic-mean-nouls" style={{ marginBottom: 6 }}>
                 Mean nouls: reader question{' '}
                 <span style={{ fontWeight: 600 }}>{fmtScore(selectedRun.summary?.mean_reader_question_noul)}</span>
@@ -882,7 +882,7 @@ export function SyntheticLabSubtab() {
             ) : null}
             {patchPreview ? (
               <div style={{ marginTop: 12 }}>
-                <div style={{ fontWeight: 600, marginBottom: 6 }}>Config patch preview</div>
+                <div style={{ fontWeight: 600, marginBottom: 6 }}>Config patch preview <TooltipIcon name="SYNTHETIC_CONFIG_PATCH" /></div>
                 <pre style={{ maxHeight: 280, overflow: 'auto', background: 'var(--card-bg)', border: '1px solid var(--line)', borderRadius: 8, padding: 10 }}>
                   {JSON.stringify(patchPreview.patch || {}, null, 2)}
                 </pre>

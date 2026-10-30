@@ -1,3 +1,4 @@
+import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import React from 'react';
 import { useTrace } from '@/hooks/useTrace';
 import { TraceExternalLinks } from '@/components/Observability/TraceExternalLinks';
@@ -327,6 +328,7 @@ export const TraceViewer: React.FC<TraceViewerProps> = ({ className = '' }) => {
           </h3>
 
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <span>Corpus <TooltipIcon name="REPO" /></span>
             <select
               value={selectedRepo}
               onChange={(e) => setSelectedRepo(e.target.value)}

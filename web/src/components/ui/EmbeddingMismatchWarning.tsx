@@ -1,3 +1,4 @@
+import { TooltipIcon } from '@/components/ui/TooltipIcon';
 /**
  * EmbeddingMismatchWarning Component
  * 
@@ -149,23 +150,7 @@ const InlineWarning: React.FC<{ status: EmbeddingStatus; showActions: boolean }>
           gap: '8px',
         }}>
           Embedding Mismatch Detected
-          <span 
-            className="help-icon" 
-            data-tooltip="EMBEDDING_MISMATCH"
-            style={{ 
-              cursor: 'help',
-              fontSize: '11px',
-              background: 'var(--bg-elev2)',
-              borderRadius: '50%',
-              width: '16px',
-              height: '16px',
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            ?
-          </span>
+          <TooltipIcon name="EMBEDDING_MISMATCH" />
         </div>
         <div style={{ fontSize: '12px', color: 'var(--fg-muted)', lineHeight: 1.5 }}>
           Config:{' '}
@@ -262,25 +247,7 @@ const FullWarning: React.FC<{ status: EmbeddingStatus; showActions: boolean }> =
           gap: '8px',
         }}>
           Critical: Embedding Configuration Mismatch
-          <span 
-            className="help-icon" 
-            data-tooltip="EMBEDDING_MISMATCH"
-            style={{ 
-              cursor: 'help',
-              fontSize: '11px',
-              color: 'var(--fg-muted)',
-              background: 'var(--bg-elev2)',
-              borderRadius: '50%',
-              width: '18px',
-              height: '18px',
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontWeight: 400,
-            }}
-          >
-            ?
-          </span>
+          <TooltipIcon name="EMBEDDING_MISMATCH" />
         </h3>
         <p style={{ margin: '4px 0 0', color: 'var(--warn)', fontSize: '12px' }}>
           Search results will be completely wrong until this is fixed

@@ -1,76 +1,94 @@
 import { expect, test } from '@playwright/test';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import type { ChatModelsResponse, TriBridConfig } from '../../../src/types/generated';
 
-const productionConfig = JSON.parse(
-  readFileSync(resolve(process.cwd(), 'tribrid_config.json'), 'utf-8'),
-);
-productionConfig.ui.runtime_mode = 'production';
-productionConfig.generation.gen_model = 'openai.gpt-6-sol';
-productionConfig.chat.litellm.default_model = 'z-ai.glm-5.3-flash';
-productionConfig.ui.chat_default_model = 'z-ai.glm-5.3-flash';
+const API_BASE = process.env.GATEWAY_API_BASE_URL?.trim() ?? '';
+const LUNA = 'openai.gpt-6-luna';
+const SOL = 'openai.gpt-6-sol';
 
-const model = (id: string, displayName: string, catalogProvider: string) => ({
-  id,
-  override: `litellm:${id}`,
-  provider: 'LiteLLM',
-  provider_key: 'litellm',
-  catalog_model: id.replace('.', '/'),
-  components: ['GEN'],
-  source: 'litellm',
-  provider_type: 'litellm',
-  base_url: 'http://127.0.0.1:54000/v1',
-  supports_vision: false,
-  catalog_provider: catalogProvider,
-  display_name: displayName,
-  context: 131_072,
-  input_per_1k: 0.001,
-  output_per_1k: 0.001,
-});
-
-test('production retrieval identifies the non-chat generation alias as deployment locked', async ({ page }) => {
-  await page.route(/^https?:\/\/[^/]+\/api(?:\/|\?|$)/, async (route) => {
-    const url = new URL(route.request().url());
-    if (url.pathname === '/api/config') {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(productionConfig) });
-      return;
+test('production generation aliases survive Apply and reload on a disposable corpus', async ({ page }) => {
+  if (!API_BASE) {
+    throw new Error('Set GATEWAY_API_BASE_URL to the isolated settings-test API.');
+  }
+  const corpusId = `pytest_generation_picker_${Date.now().toString(36)}`;
+  const corpusDir = mkdtempSync(join(tmpdir(), 'ragweld-generation-picker-'));
+  const scope = `?corpus_id=${encodeURIComponent(corpusId)}`;
+  let created = false;
+  try {
+    const response = await page.request.post(`${API_BASE}/corpora`, {
+      data: { corpus_id: corpusId, name: 'Generation settings acceptance', path: corpusDir },
+    });
+    expect(response.ok(), await response.text()).toBeTruthy();
+    created = true;
+    const baseline = await page.request.get(`${API_BASE}/config${scope}`);
+    expect(baseline.ok(), await baseline.text()).toBeTruthy();
+    const initial = await baseline.json() as TriBridConfig;
+    expect(initial.ui.runtime_mode).toBe('production');
+    expect(initial.generation.gen_model).toBe(LUNA);
+    const catalogResponse = await page.request.get(`${API_BASE}/chat/models${scope}`);
+    expect(catalogResponse.ok(), await catalogResponse.text()).toBeTruthy();
+    const catalog = await catalogResponse.json() as ChatModelsResponse;
+    for (const alias of [LUNA, SOL]) {
+      expect(catalog.models?.some((model) => model.id === alias && model.source === 'litellm')).toBeTruthy();
     }
-    if (url.pathname === '/api/corpora') {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify([{ corpus_id: 'nasa-apollo-11', slug: 'nasa-apollo-11', name: 'NASA Apollo 11 Mission Repo' }]),
+    // Begin from a distinct supported choice so selecting Luna must stage a real edit.
+    const seed = await page.request.patch(`${API_BASE}/config/generation${scope}`, {
+      data: { gen_model: SOL, gen_model_http: '' },
+    });
+    expect(seed.ok(), await seed.text()).toBeTruthy();
+    expect((await seed.json() as TriBridConfig).generation.gen_model).toBe(SOL);
+
+    await page.goto(`rag?subtab=retrieval&corpus=${encodeURIComponent(corpusId)}`, { waitUntil: 'domcontentloaded' });
+    await page.getByTestId('retrieval-card-generation').click();
+    const primary = page.getByTestId('retrieval-generation-answer-alias').locator('select');
+    const http = page.locator('.input-group').filter({ has: page.getByText('HTTP Alias Override', { exact: true }) }).locator('select');
+    await expect(primary).toBeEnabled();
+    await expect(primary.locator('option[value=""]:not([disabled])')).toHaveCount(0);
+    await expect(primary).toHaveValue(SOL);
+    await expect(http).toBeEnabled();
+    for (const alias of [LUNA, SOL]) {
+      await primary.selectOption(alias);
+      await http.selectOption(LUNA);
+      await expect(page.getByTestId('apply-changes')).toBeEnabled();
+      const appliedResponse = page.waitForResponse((res) => {
+        const url = new URL(res.url());
+        return res.request().method() === 'PUT' && url.pathname === '/api/config'
+          && url.searchParams.get('corpus_id') === corpusId;
       });
-      return;
+      await page.getByTestId('apply-changes').click();
+      const applied = await appliedResponse;
+      expect(applied.ok(), await applied.text()).toBeTruthy();
+      const sent = applied.request().postDataJSON() as TriBridConfig;
+      expect(sent.generation.gen_model).toBe(alias);
+      expect(sent.generation.gen_model_http).toBe(LUNA);
+      const saved = await applied.json() as TriBridConfig;
+      expect(saved.generation).toEqual(sent.generation);
+      await expect(primary).toHaveValue(alias);
+      await expect(http).toHaveValue(LUNA);
+      await expect(page.getByTestId('apply-changes')).toBeDisabled();
+      const readback = await page.request.get(`${API_BASE}/config${scope}`);
+      expect(readback.ok(), await readback.text()).toBeTruthy();
+      expect((await readback.json() as TriBridConfig).generation).toEqual(saved.generation);
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.getByTestId('retrieval-card-generation').click();
+      await expect(primary).toHaveValue(alias);
+      await expect(http).toHaveValue(LUNA);
+      await expect(page.getByTestId('apply-changes')).toBeDisabled();
+      if (alias === LUNA) {
+        await primary.scrollIntoViewIfNeeded();
+        await page.screenshot({ path: test.info().outputPath('luna-reloaded.png'), fullPage: false });
+      }
     }
-    if (url.pathname === '/api/chat/models') {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          models: [
-            model('openai.gpt-6-sol', 'OpenAI: GPT-6 Sol', 'openai'),
-            model('z-ai.glm-5.3-flash', 'Z.ai: GLM 5.3 Flash', 'z-ai'),
-          ],
-        }),
-      });
-      return;
+  } finally {
+    try {
+      if (created) {
+        const removed = await page.request.delete(`${API_BASE}/corpora/${encodeURIComponent(corpusId)}`);
+        expect.soft(removed.ok(), await removed.text()).toBeTruthy();
+      }
+    } finally {
+      rmSync(corpusDir, { recursive: true, force: true });
     }
-    await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
-  });
-
-  await page.goto('rag?subtab=retrieval&corpus=nasa-apollo-11', { waitUntil: 'domcontentloaded' });
-  await page.getByTestId('retrieval-card-generation').click();
-
-  const control = page.getByTestId('retrieval-generation-answer-alias');
-  await expect(control).toBeVisible();
-  await expect(control.getByText('Non-chat generation alias')).toBeVisible();
-  await expect(control.locator('select')).toBeDisabled();
-  await expect(control.locator('select')).toHaveAttribute(
-    'aria-describedby',
-    'retrieval-generation-answer-alias-lock-note',
-  );
-  await expect(control.locator('select')).toHaveValue('openai.gpt-6-sol');
-  await expect(control).toContainText('Chat uses its own model picker');
-  await expect(control).toContainText('locked by the production deployment');
+  }
 });

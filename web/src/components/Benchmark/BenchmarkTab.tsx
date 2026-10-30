@@ -1,3 +1,4 @@
+import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAPI, useConfig, useRuntimeCapabilities } from '@/hooks';
 import { withCorpusScope } from '@/api/client';
@@ -290,7 +291,7 @@ export default function BenchmarkTab() {
           aria-label="Benchmark model selection"
         >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg)' }}>Models</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg)' }}>Models <TooltipIcon name="BENCHMARK_MODEL_SELECTION" /></div>
             <div style={{ fontSize: 12, color: selectionOk ? 'var(--fg-muted)' : 'var(--warn)' }}>
               Select 2–4 ({selectedCount}/4)
             </div>
@@ -442,7 +443,7 @@ export default function BenchmarkTab() {
           aria-label="Benchmark prompt and run"
         >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg)' }}>Prompt</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg)' }}>Prompt <TooltipIcon name="BENCHMARK_PROMPT" /></div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               {runLoading ? <LoadingSpinner size="sm" color="accent" /> : null}
               <Button

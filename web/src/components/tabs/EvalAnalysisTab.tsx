@@ -1,3 +1,4 @@
+import { TooltipIcon } from '@/components/ui/TooltipIcon';
 // TriBridRAG - Eval Analysis Tab
 // Top-level tab for evaluation drill-down and AI analysis
 // This is the keystone feature - comparing eval runs with LLM insights
@@ -350,7 +351,7 @@ export const EvalAnalysisTab: React.FC = () => {
             htmlFor="eval-run-settings-corpus"
             style={{ display: 'block', fontSize: '12px', color: 'var(--fg-muted)', marginBottom: '6px' }}
           >
-            Corpus
+            Corpus <TooltipIcon name="REPO" />
           </label>
           <select
             id="eval-run-settings-corpus"
@@ -382,7 +383,7 @@ export const EvalAnalysisTab: React.FC = () => {
             htmlFor="eval-run-settings-sample-size"
             style={{ display: 'block', fontSize: '12px', color: 'var(--fg-muted)', marginBottom: '6px' }}
           >
-            Sample Size (run only)
+            Sample Size (run only) <TooltipIcon name="EVAL_SAMPLE_SIZE" />
           </label>
           <select
             id="eval-run-settings-sample-size"
@@ -413,7 +414,7 @@ export const EvalAnalysisTab: React.FC = () => {
             htmlFor="eval-run-settings-final-k"
             style={{ display: 'block', fontSize: '12px', color: 'var(--fg-muted)', marginBottom: '6px' }}
           >
-            Final K (eval)
+            Final K (eval) <TooltipIcon name="EVAL_FINAL_K" />
           </label>
           <NumberField
             id="eval-run-settings-final-k"
@@ -454,7 +455,7 @@ export const EvalAnalysisTab: React.FC = () => {
             <span className="toggle-track" aria-hidden="true">
               <span className="toggle-thumb"></span>
             </span>
-            <span className="toggle-label">{evalUseMulti ? 'Enabled' : 'Disabled'}</span>
+            <span className="toggle-label">{evalUseMulti ? 'Enabled' : 'Disabled'} <TooltipIcon name="EVAL_MULTI" /></span>
           </label>
         </div>
 
@@ -463,7 +464,7 @@ export const EvalAnalysisTab: React.FC = () => {
             htmlFor="eval-run-settings-eval-multi-m"
             style={{ display: 'block', fontSize: '12px', color: 'var(--fg-muted)', marginBottom: '6px' }}
           >
-            Multi Q M (variants)
+            Multi Q M (variants) <TooltipIcon name="EVAL_MULTI_M" />
           </label>
           <NumberField
             id="eval-run-settings-eval-multi-m"
@@ -497,7 +498,7 @@ export const EvalAnalysisTab: React.FC = () => {
                 htmlFor="eval-run-settings-fusion-method"
                 style={{ display: 'block', fontSize: '12px', color: 'var(--fg-muted)', marginBottom: '6px' }}
               >
-                Method
+                Method <TooltipIcon name="FUSION_METHOD" />
               </label>
               <select
                 id="eval-run-settings-fusion-method"
@@ -524,7 +525,7 @@ export const EvalAnalysisTab: React.FC = () => {
                 htmlFor="eval-run-settings-fusion-rrf-k"
                 style={{ display: 'block', fontSize: '12px', color: 'var(--fg-muted)', marginBottom: '6px' }}
               >
-                RRF k
+                RRF k <TooltipIcon name="FUSION_RRF_K" />
               </label>
               <NumberField
                 id="eval-run-settings-fusion-rrf-k"
@@ -558,7 +559,7 @@ export const EvalAnalysisTab: React.FC = () => {
                 htmlFor="eval-run-settings-fusion-vector-weight"
                 style={{ display: 'block', fontSize: '12px', color: 'var(--fg-muted)', marginBottom: '6px' }}
               >
-                Vector
+                Vector <TooltipIcon name="FUSION_VECTOR_WEIGHT" />
               </label>
               <NumberField
                 id="eval-run-settings-fusion-vector-weight"
@@ -586,7 +587,7 @@ export const EvalAnalysisTab: React.FC = () => {
                 htmlFor="eval-run-settings-fusion-sparse-weight"
                 style={{ display: 'block', fontSize: '12px', color: 'var(--fg-muted)', marginBottom: '6px' }}
               >
-                Sparse
+                Sparse <TooltipIcon name="FUSION_SPARSE_WEIGHT" />
               </label>
               <NumberField
                 id="eval-run-settings-fusion-sparse-weight"
@@ -614,7 +615,7 @@ export const EvalAnalysisTab: React.FC = () => {
                 htmlFor="eval-run-settings-fusion-graph-weight"
                 style={{ display: 'block', fontSize: '12px', color: 'var(--fg-muted)', marginBottom: '6px' }}
               >
-                Graph
+                Graph <TooltipIcon name="FUSION_GRAPH_WEIGHT" />
               </label>
               <NumberField
                 id="eval-run-settings-fusion-graph-weight"
@@ -651,8 +652,9 @@ export const EvalAnalysisTab: React.FC = () => {
                   disabled={evalRunning}
                   onChange={(e) => stageSection('vector_search', { enabled: e.target.checked })}
                 />
-                Vector
+                Vector <TooltipIcon name="VECTOR_SEARCH_ENABLED" />
               </label>
+              <TooltipIcon name="VECTOR_SEARCH_TOP_K" />
               <NumberField
                 id="eval-run-settings-vector-topk"
                 configPath="vector_search.top_k"
@@ -682,8 +684,9 @@ export const EvalAnalysisTab: React.FC = () => {
                   disabled={evalRunning}
                   onChange={(e) => stageSection('sparse_search', { enabled: e.target.checked })}
                 />
-                Sparse
+                Sparse <TooltipIcon name="SPARSE_SEARCH_ENABLED" />
               </label>
+              <TooltipIcon name="SPARSE_SEARCH_TOP_K" />
               <NumberField
                 id="eval-run-settings-sparse-topk"
                 configPath="sparse_search.top_k"
@@ -713,8 +716,9 @@ export const EvalAnalysisTab: React.FC = () => {
                   disabled={evalRunning}
                   onChange={(e) => stageSection('graph_search', { enabled: e.target.checked })}
                 />
-                Graph
+                Graph <TooltipIcon name="GRAPH_SEARCH_ENABLED" />
               </label>
+              <TooltipIcon name="GRAPH_SEARCH_TOP_K" />
               <NumberField
                 id="eval-run-settings-graph-topk"
                 configPath="graph_search.top_k"
@@ -758,7 +762,6 @@ export const EvalAnalysisTab: React.FC = () => {
       }}>
         <button
           onClick={() => setSubtab('analysis')}
-          data-tooltip="EVAL_ANALYSIS_SUBTAB"
           style={{
             padding: '12px 20px',
             background: activeSubtab === 'analysis' ? 'var(--bg)' : 'transparent',
@@ -777,6 +780,7 @@ export const EvalAnalysisTab: React.FC = () => {
           <span style={{ fontSize: '14px' }}>&#x1F4CA;</span>
           Eval Analysis
         </button>
+        <TooltipIcon name="EVAL_ANALYSIS_SUBTAB" />
         <button
           onClick={() => setSubtab('dataset')}
           style={{
@@ -799,7 +803,6 @@ export const EvalAnalysisTab: React.FC = () => {
         </button>
         <button
           onClick={() => setSubtab('prompts')}
-          data-tooltip="SYSTEM_PROMPTS_SUBTAB"
           style={{
             padding: '12px 20px',
             background: activeSubtab === 'prompts' ? 'var(--bg)' : 'transparent',
@@ -818,9 +821,9 @@ export const EvalAnalysisTab: React.FC = () => {
           <span style={{ fontSize: '14px' }}>&#x1F4DD;</span>
           System Prompts
         </button>
+        <TooltipIcon name="SYSTEM_PROMPTS_SUBTAB" />
         <button
           onClick={() => setSubtab('trace')}
-          data-tooltip="TRACE_VIEWER_SUBTAB"
           style={{
             padding: '12px 20px',
             background: activeSubtab === 'trace' ? 'var(--bg)' : 'transparent',
@@ -839,6 +842,7 @@ export const EvalAnalysisTab: React.FC = () => {
           <span style={{ fontSize: '14px' }}>&#x1F50E;</span>
           Trace Viewer
         </button>
+        <TooltipIcon name="TRACE_VIEWER_SUBTAB" />
       </div>
 
       {/* Content Area - only the subtab nav stays pinned. The header (title,
@@ -919,7 +923,7 @@ export const EvalAnalysisTab: React.FC = () => {
                   }}
                 >
                   Primary Run (AFTER)
-                  <span className="help-icon" data-tooltip="EVAL_PRIMARY_RUN" style={{ marginLeft: '4px', cursor: 'help' }}>?</span>
+                  <TooltipIcon name="EVAL_PRIMARY_RUN" />
                 </label>
                 <select
                   value={selectedRunId || ''}
@@ -958,7 +962,7 @@ export const EvalAnalysisTab: React.FC = () => {
                   }}
                 >
                   Compare With (BEFORE)
-                  <span className="help-icon" data-tooltip="EVAL_COMPARE_RUN" style={{ marginLeft: '4px', cursor: 'help' }}>?</span>
+                  <TooltipIcon name="EVAL_COMPARE_RUN" />
                 </label>
                 <select
                   value={compareRunId || ''}
@@ -1016,7 +1020,6 @@ export const EvalAnalysisTab: React.FC = () => {
             <button
               onClick={runFullEvaluation}
               disabled={evalRunning}
-              data-tooltip="RUN_EVAL_ANALYSIS"
               style={{
                 padding: '10px 18px',
                 background: evalRunning ? 'var(--bg-elev2)' : 'var(--accent)',
@@ -1052,6 +1055,7 @@ export const EvalAnalysisTab: React.FC = () => {
                 </>
               )}
             </button>
+            <TooltipIcon name="RUN_EVAL_ANALYSIS" />
             {terminalVisible && (
               <button
                 onClick={() => setTerminalVisible(false)}

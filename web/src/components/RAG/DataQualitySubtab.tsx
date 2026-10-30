@@ -268,7 +268,7 @@ export function DataQualitySubtab() {
         <div style={{ fontWeight: 600, marginBottom: 10 }}>Corpus</div>
         <div className="input-row">
           <div className="input-group">
-            <label>Corpus</label>
+            <label>Corpus <TooltipIcon name="REPO" /></label>
             <RepoSelectorCompact />
             <div style={{ fontSize: 12, color: 'var(--fg-muted)', marginTop: 6 }}>
               Use the same ID you used for Indexing.

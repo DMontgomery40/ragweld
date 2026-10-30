@@ -333,7 +333,6 @@ export function RetrievalSubtab() {
     reload,
     clearError,
   } = useConfig();
-  const productionModelRoutingLocked = String(config?.ui?.runtime_mode || '').trim().toLowerCase() === 'production';
 
 
   useEffect(() => {
@@ -1219,31 +1218,23 @@ export function RetrievalSubtab() {
 
               <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 16 }}>
                 <div className="input-group" data-testid="retrieval-generation-answer-alias">
-                  <label>{productionModelRoutingLocked ? 'Non-chat generation alias' : 'Generation Alias'}</label>
+                  <label>Generation Alias <TooltipIcon name="GEN_MODEL" /></label>
                   <ChatModelPicker
                     value={genModel}
                     onChange={setGenModel}
                     models={generationModels}
                     valueMode="id"
-                    allowEmpty
-                    disabled={productionModelRoutingLocked}
-                    ariaDescribedBy={productionModelRoutingLocked ? 'retrieval-generation-answer-alias-lock-note' : undefined}
                   />
-                  {productionModelRoutingLocked ? (
-                    <div
-                      id="retrieval-generation-answer-alias-lock-note"
-                      style={{ color: 'var(--fg-muted)', fontSize: 11, marginTop: 5, lineHeight: 1.4 }}
-                    >
-                      Chat uses its own model picker. This non-chat answer pipeline is locked by the production deployment.
-                    </div>
-                  ) : null}
+                  <div style={{ color: 'var(--fg-muted)', fontSize: 11, marginTop: 5, lineHeight: 1.4 }}>
+                    Generation applies to non-chat workflows. Chat uses its own model picker.
+                  </div>
                   <PromptLink promptKey="main_rag_chat">Edit Chat Prompt</PromptLink>
                 </div>
               </div>
 
               <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
                 <div className="input-group">
-                  <label>HTTP Alias Override</label>
+                  <label>HTTP Alias Override <TooltipIcon name="GEN_MODEL_HTTP" /></label>
                   <ChatModelPicker
                     value={genModelHttp}
                     onChange={setGenModelHttp}
@@ -1253,7 +1244,7 @@ export function RetrievalSubtab() {
                   />
                 </div>
                 <div className="input-group">
-                  <label>MCP Alias Override</label>
+                  <label>MCP Alias Override <TooltipIcon name="GEN_MODEL_MCP" /></label>
                   <ChatModelPicker
                     value={genModelMcp}
                     onChange={setGenModelMcp}
@@ -1263,7 +1254,7 @@ export function RetrievalSubtab() {
                   />
                 </div>
                 <div className="input-group">
-                  <label>CLI Alias Override</label>
+                  <label>CLI Alias Override <TooltipIcon name="GEN_MODEL_CLI" /></label>
                   <ChatModelPicker
                     value={genModelCli}
                     onChange={setGenModelCli}
@@ -1283,7 +1274,7 @@ export function RetrievalSubtab() {
 
               <div className="input-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 16 }}>
                 <div className="input-group">
-                  <label>Enrichment Alias</label>
+                  <label>Enrichment Alias <TooltipIcon name="ENRICH_MODEL" /></label>
                   <ChatModelPicker
                     value={enrichModel}
                     onChange={setEnrichModel}
@@ -1318,7 +1309,7 @@ export function RetrievalSubtab() {
               <div className="input-row">
                 <div className="input-group">
                   <label>
-                    LiteLLM Client Key
+                    LiteLLM Client Key <TooltipIcon name="LITELLM_API_KEY" />
                   </label>
                   <ApiKeyStatus keyName="LITELLM_API_KEY" label="LiteLLM Client Key" />
                 </div>
@@ -1914,7 +1905,7 @@ export function RetrievalSubtab() {
                           <span className="toggle-thumb"></span>
                         </span>
                         <span className="toggle-label">
-                          OTel Export
+                          OTel Export <TooltipIcon name="OTEL_EXPORT_ENABLED" />
                         </span>
                       </label>
                     </div>

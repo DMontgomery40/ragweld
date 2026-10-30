@@ -199,7 +199,7 @@ export function SourceDropdown(props: SourceDropdownProps) {
             onChange={(event) => props.onWebEnabledChange(event.target.checked)}
           />
           <span style={{ flex: 1 }}>
-            <strong>Web</strong>
+            <strong>Web <TooltipIcon name="CHAT_WEB_ENABLED" /></strong>
             <span style={{ display: 'block', color: 'var(--fg-muted)', fontSize: '11px', marginTop: '2px' }}>
               Search current public information when the model needs it
             </span>
@@ -218,7 +218,7 @@ export function SourceDropdown(props: SourceDropdownProps) {
               checked={props.includeVector}
               onChange={(e) => props.onIncludeVectorChange(e.target.checked)}
             />
-            <span>Vector</span>
+            <span>Vector <TooltipIcon name="CHAT_RETRIEVAL_LEGS" /></span>
           </label>
 
           <label style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
@@ -228,7 +228,7 @@ export function SourceDropdown(props: SourceDropdownProps) {
               checked={props.includeSparse}
               onChange={(e) => props.onIncludeSparseChange(e.target.checked)}
             />
-            <span>Sparse</span>
+            <span>Sparse <TooltipIcon name="CHAT_RETRIEVAL_LEGS" /></span>
           </label>
 
           <label style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
@@ -238,12 +238,12 @@ export function SourceDropdown(props: SourceDropdownProps) {
               checked={props.includeGraph}
               onChange={(e) => props.onIncludeGraphChange(e.target.checked)}
             />
-            <span>Graph</span>
+            <span>Graph <TooltipIcon name="CHAT_RETRIEVAL_LEGS" /></span>
           </label>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', marginBottom: '8px' }}>
-          <div style={{ fontSize: '12px', color: 'var(--fg-muted)' }}>Corpora</div>
+          <div style={{ fontSize: '12px', color: 'var(--fg-muted)' }}>Corpora <TooltipIcon name="CHAT_CORPUS_SOURCE" /></div>
           {registryError && (
             <div role="alert" style={{ fontSize: '12px', color: 'var(--err)' }}>
               Corpus list refresh failed: {registryError}
@@ -287,7 +287,7 @@ export function SourceDropdown(props: SourceDropdownProps) {
                 checked={isChecked(RECALL_CORPUS_ID)}
                 onChange={() => handleCorpusToggle(RECALL_CORPUS_ID)}
               />
-              <span>🧠 Recall</span>
+              <span>🧠 Recall <TooltipIcon name="CHAT_RECALL_SOURCE" /></span>
             </label>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>

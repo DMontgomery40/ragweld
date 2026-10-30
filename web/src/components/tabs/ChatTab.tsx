@@ -1,3 +1,4 @@
+import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { TraceExternalLinks } from '@/components/Observability/TraceExternalLinks';
 import { ChatSubtabs } from '@/components/Chat/ChatSubtabs';
@@ -371,7 +372,7 @@ export default function ChatTab() {
                     : 'Loki: unknown'}
                 </div>
                 <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <label style={{ fontSize: '11px', color: 'var(--fg-muted)' }}>Filter</label>
+                  <label style={{ fontSize: '11px', color: 'var(--fg-muted)' }}>Filter <TooltipIcon name="CHAT_INSPECTOR_FILTER" /></label>
                   <select
                     value={logService}
                     onChange={(e) => setLogService(e.target.value as any)}

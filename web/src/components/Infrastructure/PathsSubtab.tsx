@@ -234,7 +234,7 @@ export function PathsSubtab() {
         </div>
         <div className="input-group">
           <label>
-            Neo4j Password (env-only)
+            Neo4j Password (env-only) <TooltipIcon name="neo4j_password" />
           </label>
           <ApiKeyStatus keyName="NEO4J_PASSWORD" label="Neo4j Password" />
           <p className="small" style={{ marginTop: 8 }}>
@@ -338,7 +338,7 @@ export function PathsSubtab() {
         <>
           <div className="input-row">
             <div className="input-group">
-              <label>Corpus Name</label>
+              <label>Corpus Name <TooltipIcon name="CORPUS_NAME" /></label>
               <input
                 data-testid="corpus-name"
                 type="text"
@@ -355,7 +355,7 @@ export function PathsSubtab() {
               />
             </div>
             <div className="input-group">
-              <label>Corpus Path</label>
+              <label>Corpus Path <TooltipIcon name="REPO_PATH" /></label>
               <input
                 data-testid="corpus-path"
                 type="text"
@@ -375,7 +375,7 @@ export function PathsSubtab() {
           </div>
           <div className="input-row">
             <div className="input-group">
-              <label>Description</label>
+              <label>Description <TooltipIcon name="CORPUS_DESCRIPTION" /></label>
               <input
                 data-testid="corpus-description"
                 type="text"

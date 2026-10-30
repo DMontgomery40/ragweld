@@ -1,3 +1,4 @@
+import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import type React from 'react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -1039,7 +1040,7 @@ export function GraphSubtab() {
         }}
       >
         <div style={{ background: 'var(--card-bg)', border: '1px solid var(--line)', borderRadius: '12px', padding: '16px' }}>
-          <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--fg)', marginBottom: '10px' }}>Corpus</div>
+          <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--fg)', marginBottom: '10px' }}>Corpus <TooltipIcon name="REPO" /></div>
           <select
             value={activeRepo}
             onChange={(e) => void setActiveRepo(e.target.value)}
@@ -1066,7 +1067,7 @@ export function GraphSubtab() {
           </select>
 
           <div style={{ marginTop: '12px', fontSize: '12px', color: 'var(--fg-muted)' }}>
-            Max hops
+            Max hops <TooltipIcon name="GRAPH_VIEWER_MAX_HOPS" />
           </div>
           <NumberField
             min={1}
@@ -1305,7 +1306,7 @@ export function GraphSubtab() {
               color: 'var(--fg-muted)',
             }}
           >
-            <label htmlFor="graph-entity-limit">Draw at most</label>
+            <label htmlFor="graph-entity-limit">Draw at most <TooltipIcon name="GRAPH_VIEWER_MAX_NODES" /></label>
             <select
               id="graph-entity-limit"
               value={entityLimit}
@@ -1391,7 +1392,7 @@ export function GraphSubtab() {
             </summary>
             <div style={{ marginTop: '10px', display: 'grid', gap: '12px' }}>
               <div>
-                <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '6px' }}>Entity types</div>
+                <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '6px' }}>Entity types <TooltipIcon name="GRAPH_VIEWER_ENTITY_TYPES" /></div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
                   {entityTypes.map((t) => {
                     const allVisible = visibleEntityTypes === null;
@@ -1417,7 +1418,7 @@ export function GraphSubtab() {
               </div>
 
               <div>
-                <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '6px' }}>Relationship types</div>
+                <div style={{ fontSize: '11px', color: 'var(--fg-muted)', marginBottom: '6px' }}>Relationship types <TooltipIcon name="GRAPH_VIEWER_RELATION_TYPES" /></div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
                   {relationTypes.map((t) => {
                     const allVisible = visibleRelationTypes === null;

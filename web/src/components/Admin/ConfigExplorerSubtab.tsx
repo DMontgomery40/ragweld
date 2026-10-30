@@ -1,3 +1,4 @@
+import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 
@@ -102,35 +103,47 @@ export function ConfigExplorerSubtab({ onOpenRaw }: ConfigExplorerSubtabProps) {
           }}
         />
 
-        <select value={integrationFilter} onChange={(event) => setIntegrationFilter(event.target.value)}>
-          {integrations.map((value) => (
-            <option key={value} value={value}>
-              {value === 'all' ? 'All integrations' : value}
-            </option>
-          ))}
-        </select>
+        <div style={{ display: 'grid', gap: 6 }}>
+          <span style={{ fontSize: 12 }}>Integration <TooltipIcon name="ADMIN_CONFIG_INTEGRATION_FILTER" /></span>
+          <select aria-label="Integration filter" value={integrationFilter} onChange={(event) => setIntegrationFilter(event.target.value)}>
+            {integrations.map((value) => (
+              <option key={value} value={value}>
+                {value === 'all' ? 'All integrations' : value}
+              </option>
+            ))}
+          </select>
+        </div>
 
-        <select value={scopeFilter} onChange={(event) => setScopeFilter(event.target.value)}>
-          <option value="all">All scopes</option>
-          <option value="global">Global</option>
-          <option value="corpus">Corpus</option>
-        </select>
+        <div style={{ display: 'grid', gap: 6 }}>
+          <span style={{ fontSize: 12 }}>Scope <TooltipIcon name="ADMIN_CONFIG_SCOPE_FILTER" /></span>
+          <select aria-label="Scope filter" value={scopeFilter} onChange={(event) => setScopeFilter(event.target.value)}>
+            <option value="all">All scopes</option>
+            <option value="global">Global</option>
+            <option value="corpus">Corpus</option>
+          </select>
+        </div>
 
-        <select value={impactFilter} onChange={(event) => setImpactFilter(event.target.value)}>
-          <option value="all">All impacts</option>
-          <option value="live">Live</option>
-          <option value="restart">Restart</option>
-          <option value="reindex">Reindex</option>
-          <option value="redeploy">Redeploy</option>
-        </select>
+        <div style={{ display: 'grid', gap: 6 }}>
+          <span style={{ fontSize: 12 }}>Impact <TooltipIcon name="ADMIN_CONFIG_IMPACT_FILTER" /></span>
+          <select aria-label="Impact filter" value={impactFilter} onChange={(event) => setImpactFilter(event.target.value)}>
+            <option value="all">All impacts</option>
+            <option value="live">Live</option>
+            <option value="restart">Restart</option>
+            <option value="reindex">Reindex</option>
+            <option value="redeploy">Redeploy</option>
+          </select>
+        </div>
 
-        <select value={surfaceFilter} onChange={(event) => setSurfaceFilter(event.target.value)}>
-          {surfaces.map((value) => (
-            <option key={value} value={value}>
-              {value === 'all' ? 'All surfaces' : value}
-            </option>
-          ))}
-        </select>
+        <div style={{ display: 'grid', gap: 6 }}>
+          <span style={{ fontSize: 12 }}>Surface <TooltipIcon name="ADMIN_CONFIG_SURFACE_FILTER" /></span>
+          <select aria-label="Surface filter" value={surfaceFilter} onChange={(event) => setSurfaceFilter(event.target.value)}>
+            {surfaces.map((value) => (
+              <option key={value} value={value}>
+                {value === 'all' ? 'All surfaces' : value}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       <div style={{ marginBottom: 16, fontSize: 13, color: 'var(--fg-muted)' }}>

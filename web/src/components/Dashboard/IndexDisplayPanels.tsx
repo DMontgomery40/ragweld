@@ -1,3 +1,4 @@
+import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as DashAPI from '@/api/dashboard';
 import { useRepoStore } from '@/stores/useRepoStore';
@@ -123,7 +124,6 @@ export function IndexDisplayPanels() {
 
   return (
     <div
-      data-tooltip="DASHBOARD_INDEX_PANEL"
       style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}
     >
       <div
@@ -147,7 +147,7 @@ export function IndexDisplayPanels() {
           />
           <div>
             <div style={{ fontSize: '20px', fontWeight: 700, color: 'var(--fg)', letterSpacing: '-0.5px' }}>
-              {metadata.current_repo}
+              {metadata.current_repo} <TooltipIcon name="DASHBOARD_INDEX_PANEL" />
             </div>
             <div
               style={{

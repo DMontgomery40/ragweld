@@ -1,3 +1,4 @@
+import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { useEffect, useMemo, useState } from 'react';
 import Editor from '@monaco-editor/react';
 
@@ -139,7 +140,9 @@ export function ConfigRawSubtab({ selectedSection }: ConfigRawSubtabProps) {
       </p>
 
       <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 12 }}>Section <TooltipIcon name="ADMIN_CONFIG_RAW_SECTION" /></span>
         <select
+          aria-label="Raw config section"
           value={section}
           onChange={(event) => setSection(event.target.value)}
           data-testid="raw-section-select"

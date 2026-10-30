@@ -1,3 +1,4 @@
+import { TooltipIcon } from '@/components/ui/TooltipIcon';
 /**
  * Corpus registry — the operator surface for listing, switching, creating and deleting corpora.
  *
@@ -348,6 +349,7 @@ export function CorpusRegistry({ isOpen, onClose }: CorpusRegistryProps) {
           <div style={{ fontWeight: 600, marginBottom: '10px', ...panelText }}>Create corpus</div>
           {createError && <ErrorBanner message={createError} testId="corpus-registry-create-error" />}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div style={{ fontSize: 12 }}>Corpus name <TooltipIcon name="CORPUS_NAME" /></div>
             <input
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
@@ -364,6 +366,7 @@ export function CorpusRegistry({ isOpen, onClose }: CorpusRegistryProps) {
                 ...panelText,
               }}
             />
+            <div style={{ fontSize: 12 }}>Corpus root path <TooltipIcon name="REPO_PATH" /></div>
             <input
               value={newPath}
               onChange={(e) => setNewPath(e.target.value)}
@@ -380,6 +383,7 @@ export function CorpusRegistry({ isOpen, onClose }: CorpusRegistryProps) {
                 ...panelText,
               }}
             />
+            <div style={{ fontSize: 12 }}>Corpus description <TooltipIcon name="CORPUS_DESCRIPTION" /></div>
             <input
               value={newDescription}
               onChange={(e) => setNewDescription(e.target.value)}

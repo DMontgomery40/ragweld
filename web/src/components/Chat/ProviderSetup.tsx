@@ -1,3 +1,4 @@
+import { TooltipIcon } from '@/components/ui/TooltipIcon';
 import { useEffect, useMemo, useState } from 'react';
 import { useAPI, useConfig, useConfigField } from '@/hooks';
 import { ApiKeyStatus } from '@/components/ui/ApiKeyStatus';
@@ -115,18 +116,18 @@ export function ProviderSetup() {
             <label className="toggle">
               <input type="checkbox" checked={litellm.enabled === true} onChange={(event) => setLitellm({ ...litellm, enabled: event.target.checked })} />
               <span className="toggle-track" aria-hidden="true"><span className="toggle-thumb" /></span>
-              <span className="toggle-label">Enable LiteLLM</span>
+              <span className="toggle-label">Enable LiteLLM <TooltipIcon name="LITELLM_ENABLED" /></span>
             </label>
           </div>
           <div className="input-group"><ApiKeyStatus keyName="LITELLM_API_KEY" label="LiteLLM client key" /></div>
         </div>
         <div className="input-row" style={{ marginTop: 10 }}>
           <div className="input-group">
-            <label>Base URL</label>
+            <label>Base URL <TooltipIcon name="LITELLM_BASE_URL" /></label>
             <input value={String(litellm.base_url || '')} onChange={(event) => setLitellm({ ...litellm, base_url: event.target.value })} placeholder="http://127.0.0.1:54000/v1" />
           </div>
           <div className="input-group">
-            <label>Default alias</label>
+            <label>Default alias <TooltipIcon name="LITELLM_DEFAULT_MODEL" /></label>
             <input value={String(litellm.default_model || '')} onChange={(event) => setLitellm({ ...litellm, default_model: event.target.value })} placeholder="ragweld-local" />
           </div>
         </div>
@@ -140,15 +141,15 @@ export function ProviderSetup() {
         <label className="toggle">
           <input type="checkbox" checked={vllm.enabled === true} onChange={(event) => setVllm({ ...vllm, enabled: event.target.checked })} />
           <span className="toggle-track" aria-hidden="true"><span className="toggle-thumb" /></span>
-          <span className="toggle-label">Enable managed vLLM</span>
+          <span className="toggle-label">Enable managed vLLM <TooltipIcon name="VLLM_ENABLED" /></span>
         </label>
         <div className="input-row" style={{ marginTop: 10 }}>
           <div className="input-group">
-            <label>Base URL</label>
+            <label>Base URL <TooltipIcon name="VLLM_BASE_URL" /></label>
             <input value={String(vllm.base_url || '')} onChange={(event) => setVllm({ ...vllm, base_url: event.target.value })} placeholder="http://127.0.0.1:58080/v1" />
           </div>
           <div className="input-group">
-            <label>Expected served model</label>
+            <label>Expected served model <TooltipIcon name="VLLM_DEFAULT_MODEL" /></label>
             <input value={String(vllm.default_model || '')} onChange={(event) => setVllm({ ...vllm, default_model: event.target.value })} placeholder="mlx-community/Qwen3.8-27B-4bit" />
           </div>
         </div>

@@ -109,7 +109,7 @@ PROXMOX_PRODUCTION_SERVICES = [
     "caddy",
 ]
 PRODUCTION_DEFAULTS = {
-    ("generation", "gen_model"): "openai.gpt-6-sol",
+    ("generation", "gen_model"): "openai.gpt-6-luna",
     ("generation", "enrich_model"): "openai.gpt-6-sol",
     ("generation", "gen_max_tokens"): 16000,
     ("synthetic", "generator", "max_tokens"): 16000,
@@ -932,6 +932,7 @@ def test_proxmox_production_model_defaults_are_current_and_routable() -> None:
     assert "openai.gpt-6-sol" in rollout_source
     assert model_defaults == {
         "anthropic.claude-sonnet-5",
+        "openai.gpt-6-luna",
         "openai.gpt-6-sol",
         "z-ai.glm-5.3-flash",
     }

@@ -1,3 +1,4 @@
+import { TooltipIcon } from '@/components/ui/TooltipIcon';
 // TriBridRAG - Grafana config (Pydantic-backed)
 //
 // IMPORTANT:
@@ -116,7 +117,7 @@ export function GrafanaConfig() {
       }}>
         <div style={{ gridColumn: '1 / 3' }}>
           <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: 'var(--fg)', marginBottom: '8px' }}>
-            Dashboard Preset
+            Dashboard Preset <TooltipIcon name="GRAFANA_DASHBOARD_PRESET" />
           </label>
           <select
             value={activePreset?.id || ''}
@@ -150,7 +151,7 @@ export function GrafanaConfig() {
               checked={embedEnabled}
               onChange={(e) => setEmbedEnabled(e.target.checked)}
             />
-            Enable embedded Grafana
+            Enable embedded Grafana <TooltipIcon name="GRAFANA_EMBED_ENABLED" />
           </label>
           <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--fg-muted)' }}>
             If disabled, the Grafana tab will show a simple message instead of an iframe.
@@ -159,7 +160,7 @@ export function GrafanaConfig() {
 
         <div>
           <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: 'var(--fg)', marginBottom: '8px' }}>
-            Grafana Base URL
+            Grafana Base URL <TooltipIcon name="GRAFANA_BASE_URL" />
           </label>
           <input
             type="text"
@@ -180,7 +181,7 @@ export function GrafanaConfig() {
 
         <div>
           <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: 'var(--fg)', marginBottom: '8px' }}>
-            Org ID
+            Org ID <TooltipIcon name="GRAFANA_ORG_ID" />
           </label>
           <NumberField
             configPath="ui.grafana_org_id"
@@ -201,7 +202,7 @@ export function GrafanaConfig() {
 
         <div>
           <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: 'var(--fg)', marginBottom: '8px' }}>
-            Dashboard UID
+            Dashboard UID <TooltipIcon name="GRAFANA_DASHBOARD_UID" />
           </label>
           <input
             type="text"
@@ -222,7 +223,7 @@ export function GrafanaConfig() {
 
         <div>
           <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: 'var(--fg)', marginBottom: '8px' }}>
-            Dashboard Slug
+            Dashboard Slug <TooltipIcon name="GRAFANA_DASHBOARD_SLUG" />
           </label>
           <input
             type="text"
@@ -243,7 +244,7 @@ export function GrafanaConfig() {
 
         <div>
           <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: 'var(--fg)', marginBottom: '8px' }}>
-            Refresh
+            Refresh <TooltipIcon name="GRAFANA_REFRESH" />
           </label>
           <input
             type="text"
@@ -267,7 +268,7 @@ export function GrafanaConfig() {
 
         <div>
           <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: 'var(--fg)', marginBottom: '8px' }}>
-            Kiosk mode
+            Kiosk mode <TooltipIcon name="GRAFANA_KIOSK" />
           </label>
           <select
             value={kiosk}
@@ -290,7 +291,7 @@ export function GrafanaConfig() {
 
         <div>
           <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: 'var(--fg)', marginBottom: '8px' }}>
-            Alertmanager URL
+            Alertmanager URL <TooltipIcon name="ALERTMANAGER_BASE_URL" />
           </label>
           <input
             type="text"
@@ -311,7 +312,7 @@ export function GrafanaConfig() {
 
         <div>
           <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: 'var(--fg)', marginBottom: '8px' }}>
-            Mimir URL
+            Mimir URL <TooltipIcon name="MIMIR_BASE_URL" />
           </label>
           <input
             type="text"
@@ -332,7 +333,7 @@ export function GrafanaConfig() {
 
         <div>
           <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: 'var(--fg)', marginBottom: '8px' }}>
-            Prometheus URL
+            Prometheus URL <TooltipIcon name="PROMETHEUS_BASE_URL" />
           </label>
           <input
             type="text"
@@ -353,7 +354,7 @@ export function GrafanaConfig() {
 
         <div>
           <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: 'var(--fg)', marginBottom: '8px' }}>
-            Pyroscope URL
+            Pyroscope URL <TooltipIcon name="PYROSCOPE_BASE_URL" />
           </label>
           <input
             type="text"
@@ -374,7 +375,7 @@ export function GrafanaConfig() {
 
         <div>
           <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: 'var(--fg)', marginBottom: '8px' }}>
-            Faro URL
+            Faro URL <TooltipIcon name="FARO_BASE_URL" />
           </label>
           <input
             type="text"
@@ -395,7 +396,7 @@ export function GrafanaConfig() {
 
         <div>
           <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: 'var(--fg)', marginBottom: '8px' }}>
-            OpenCost URL
+            OpenCost URL <TooltipIcon name="OPENCOST_BASE_URL" />
           </label>
           <input
             type="text"

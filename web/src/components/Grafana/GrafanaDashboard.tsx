@@ -1,3 +1,4 @@
+import { TooltipIcon } from '@/components/ui/TooltipIcon';
 // TriBridRAG - Grafana Dashboard (embedded)
 // Uses Pydantic-backed UI config fields plus the observability catalog.
 
@@ -249,7 +250,7 @@ export function GrafanaDashboard() {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <label style={{ fontSize: '12px', color: 'var(--fg-muted)', fontWeight: 600 }}>Dashboard</label>
+          <label style={{ fontSize: '12px', color: 'var(--fg-muted)', fontWeight: 600 }}>Dashboard <TooltipIcon name="GRAFANA_DASHBOARD_PRESET" /></label>
           <select
             value={activePreset?.id || ''}
             onChange={(e) => applyPreset(e.target.value)}
@@ -273,7 +274,7 @@ export function GrafanaDashboard() {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <label style={{ fontSize: '12px', color: 'var(--fg-muted)', fontWeight: 600 }}>Range</label>
+          <label style={{ fontSize: '12px', color: 'var(--fg-muted)', fontWeight: 600 }}>Range <TooltipIcon name="GRAFANA_TIME_RANGE" /></label>
           <select
             value={timeRange}
             onChange={(e) => setTimeRange(e.target.value)}

@@ -440,11 +440,17 @@ def production_aliases() -> tuple[str, ...]:
     """The gateway aliases deploy/proxmox/render_config.py assigns to production."""
     from deploy.proxmox.render_config import (
         PRODUCTION_CHAT_MODEL_ALIAS,
+        PRODUCTION_GENERATION_MODEL_ALIAS,
         PRODUCTION_MODEL_ALIAS,
         PRODUCTION_VISION_MODEL_ALIAS,
     )
 
-    return (PRODUCTION_MODEL_ALIAS, PRODUCTION_CHAT_MODEL_ALIAS, PRODUCTION_VISION_MODEL_ALIAS)
+    return (
+        PRODUCTION_GENERATION_MODEL_ALIAS,
+        PRODUCTION_MODEL_ALIAS,
+        PRODUCTION_CHAT_MODEL_ALIAS,
+        PRODUCTION_VISION_MODEL_ALIAS,
+    )
 
 
 def build_refreshed_catalog(
