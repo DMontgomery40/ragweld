@@ -186,6 +186,17 @@ uv run scripts/check_contract_integrity.py # Deterministic catalog/schema checks
 
 ---
 
+## DOCUMENTATION WRITING STYLE
+
+For internal documentation and MkDocs, use ASD-STE100 as a guide at about
+80% strictness. Write short sentences. Use active voice and keep terminology
+consistent. Relax the vocabulary rules when they make explanations awkward.
+Preserve technical precision and uncertainty. Keep exact code identifiers,
+API names, config keys, commands, and quoted errors.
+
+For MkDocs, apply this rule through `scripts/docs_ai/docs_prompt_base.md`.
+Docs Autopilot owns `mkdocs/**` and `mkdocs.yml`; update its inputs.
+
 ## BOUNDED CHECKS AND SHARED-CHECKOUT COORDINATION
 
 - Keep the one-worktree rule. Assign disjoint files and serialize overlapping
