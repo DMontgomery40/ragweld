@@ -25,6 +25,11 @@ Beyond fused tri-brid retrieval (vector + sparse + graph), ragweld includes broa
 
 ## Writing style (the *goal*)
 
+- Use ASD-STE100 as a guide at about 80% strictness.
+- Write short sentences. Use active voice and keep terminology consistent.
+- Relax the vocabulary rules when they make explanations awkward.
+- Preserve technical precision and uncertainty. Keep exact code identifiers,
+  API names, config keys, commands, and quoted errors.
 - Write like a helpful builder/operator, not like a dry spec sheet.
 - Make the docs usable by:
   1. **End users** (how to use the product; what knobs mean)
