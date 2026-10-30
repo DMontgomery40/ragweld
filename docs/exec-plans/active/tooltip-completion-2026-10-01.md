@@ -38,7 +38,7 @@ Exactly seven help nodes were added to RetrievalSubtab after incorporating 49da6
 
 All runtime, test, build and index commands ran on LXC100 in `/tmp/ragweld-tooltip-validation-20261001`, with an isolated Vite source server on port 55179. The real read-only API was used without fabricated responses. Production's authenticated Brave Work tab was observed safely through a separate tab to establish baseline UI access; changed-code acceptance is the isolated UI, not deployed production acceptance.
 
-Local review evidence is in `/Users/davidmontgomery/Documents/Codex/2026-10-01/task-3/evidence/` outside the Git checkout:
+Local review evidence is in `<local-evidence-directory>/` outside the Git checkout:
 
 - `tooltip-grafana-settings.png`, `tooltip-synthetic-settings.png`, `tooltip-admin-registry.png`, `tooltip-retrieval-generation.png`
 - `tooltip-keyboard-links.png`, `tooltip-mobile.png`
